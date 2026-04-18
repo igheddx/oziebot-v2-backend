@@ -3,6 +3,7 @@
 Uses raw psycopg (bypasses SQLAlchemy parameter parsing) so JSON strings with
 colon-number patterns are not misinterpreted as bind parameters.
 """
+
 from __future__ import annotations
 
 from oziebot_api.config import get_settings
@@ -13,12 +14,17 @@ from oziebot_api.db.session import make_engine
 STEPS = [
     # ---------------------------------------------------------------- users
     # Delete seed-created rows first (different UUIDs); restore SQLite originals.
-    ("users – clear seed rows", """
+    (
+        "users – clear seed rows",
+        """
         DELETE FROM users
         WHERE email IN ('dominic@oziebot.com', 'trader@example.com',
                         'dev@oziebot-example.com')
-    """),
-    ("users", """
+    """,
+    ),
+    (
+        "users",
+        """
         INSERT INTO users
           (id, email, password_hash, is_active, is_root_admin, created_at, updated_at)
         VALUES
@@ -33,10 +39,12 @@ STEPS = [
            true, true,
            '2026-04-13 01:46:05.552225', '2026-04-13 03:03:22.462462')
         ON CONFLICT (id) DO NOTHING
-    """),
-
+    """,
+    ),
     # -------------------------------------------------------------- tenants
-    ("tenants", """
+    (
+        "tenants",
+        """
         INSERT INTO tenants
           (id, name, created_at, default_trading_mode, trial_ends_at)
         VALUES
@@ -45,10 +53,12 @@ STEPS = [
           ('1cafada4-d71b-41ce-ab8f-e9146ed1c841', 'Oziebot Dev',
            '2026-04-13 01:46:05.552225', 'paper', '2026-05-13 01:46:06.029286')
         ON CONFLICT (id) DO NOTHING
-    """),
-
+    """,
+    ),
     # ---------------------------------------------------- tenant_memberships
-    ("tenant_memberships", """
+    (
+        "tenant_memberships",
+        """
         INSERT INTO tenant_memberships
           (id, user_id, tenant_id, role, created_at)
         VALUES
@@ -61,10 +71,12 @@ STEPS = [
            '1cafada4-d71b-41ce-ab8f-e9146ed1c841',
            'user', '2026-04-13 01:46:05.552225')
         ON CONFLICT (id) DO NOTHING
-    """),
-
+    """,
+    ),
     # ------------------------------------------ platform_token_allowlist
-    ("platform_token_allowlist", """
+    (
+        "platform_token_allowlist",
+        """
         INSERT INTO platform_token_allowlist
           (id, symbol, quote_currency, network, display_name, is_enabled, sort_order,
            created_at, updated_at)
@@ -79,10 +91,12 @@ STEPS = [
            'SOL-USD', 'USD', 'mainnet', 'SOL / USD - Volatility medium', true, 0,
            '2026-04-13 10:51:28.002289', '2026-04-13 10:51:28.002289')
         ON CONFLICT (id) DO NOTHING
-    """),
-
+    """,
+    ),
     # ------------------------------------------------- platform_strategies
-    ("platform_strategies", r"""
+    (
+        "platform_strategies",
+        r"""
         INSERT INTO platform_strategies
           (id, slug, display_name, description, is_enabled, entry_point,
            config_schema, sort_order, created_at, updated_at)
@@ -117,10 +131,12 @@ STEPS = [
            '{"strategy_params":{"entry_zscore":1.8,"exit_zscore":0.5,"rsi_buy_threshold":35,"rsi_sell_threshold":65,"position_size":0.06,"use_fear_index_filter":false,"fear_index_buy_max":35,"fear_index_sell_min":60},"risk_caps":{"max_position_usd":200,"max_daily_loss_pct":2.0,"max_open_positions":1},"signal_rules":{"min_confidence":0.7,"cooldown_seconds":180,"max_signals_per_day":10,"require_volume_confirmation":true}}',
            40, '2026-04-13 12:54:50+00', '2026-04-13 12:58:56.593107')
         ON CONFLICT (id) DO NOTHING
-    """),
-
+    """,
+    ),
     # -------------------------------------------------- user_strategies
-    ("user_strategies", """
+    (
+        "user_strategies",
+        """
         INSERT INTO user_strategies
           (id, user_id, strategy_id, is_enabled, config, metadata, created_at, updated_at)
         VALUES
@@ -133,10 +149,12 @@ STEPS = [
            'day_trading', true, '{}', NULL,
            '2026-04-16 12:52:35+00', '2026-04-16 12:52:35+00')
         ON CONFLICT (id) DO NOTHING
-    """),
-
+    """,
+    ),
     # ---------------------------------------------- user_token_permissions
-    ("user_token_permissions", """
+    (
+        "user_token_permissions",
+        """
         INSERT INTO user_token_permissions
           (id, user_id, platform_token_id, is_enabled, created_at, updated_at)
         VALUES
@@ -151,10 +169,12 @@ STEPS = [
            true,
            '2026-04-13 10:50:50.274139', '2026-04-13 10:50:50.274144')
         ON CONFLICT (id) DO NOTHING
-    """),
-
+    """,
+    ),
     # ----------------------------------------- strategy_allocation_plans
-    ("strategy_allocation_plans", """
+    (
+        "strategy_allocation_plans",
+        """
         INSERT INTO strategy_allocation_plans
           (id, user_id, trading_mode, allocation_mode, preset_name,
            total_capital_cents, created_at, updated_at)
@@ -164,10 +184,12 @@ STEPS = [
            'paper', 'manual', NULL, 10000000,
            '2026-04-13 12:19:19.339933', '2026-04-13 12:56:37.819213')
         ON CONFLICT (id) DO NOTHING
-    """),
-
+    """,
+    ),
     # ----------------------------------------- strategy_allocation_items
-    ("strategy_allocation_items", """
+    (
+        "strategy_allocation_items",
+        """
         INSERT INTO strategy_allocation_items
           (id, plan_id, strategy_id, allocation_bps, assigned_capital_cents,
            created_at, updated_at)
@@ -193,10 +215,12 @@ STEPS = [
            'reversion', 0, 0,
            '2026-04-13 12:56:37.819213', '2026-04-13 12:56:37.819213')
         ON CONFLICT (id) DO NOTHING
-    """),
-
+    """,
+    ),
     # ------------------------------------------------ tenant_integrations
-    ("tenant_integrations", """
+    (
+        "tenant_integrations",
+        """
         INSERT INTO tenant_integrations
           (tenant_id, coinbase_connected, updated_at,
            coinbase_last_check_at, coinbase_health_status, coinbase_last_error)
@@ -207,10 +231,12 @@ STEPS = [
            true, '2026-04-13 02:58:05.755812',
            '2026-04-13 02:58:05.755812', 'healthy', NULL)
         ON CONFLICT (tenant_id) DO NOTHING
-    """),
-
+    """,
+    ),
     # ----------------------------------------------- exchange_connections
-    ("exchange_connections", """
+    (
+        "exchange_connections",
+        """
         INSERT INTO exchange_connections
           (id, tenant_id, provider, api_key_name, encrypted_secret,
            secret_ciphertext_version,
@@ -231,7 +257,8 @@ STEPS = [
            true, true,
            '2026-04-13 02:58:05.755812', '2026-04-13 02:58:05.755812')
         ON CONFLICT (id) DO NOTHING
-    """),
+    """,
+    ),
 ]
 
 

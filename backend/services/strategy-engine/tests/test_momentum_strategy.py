@@ -7,7 +7,11 @@ from uuid import uuid4
 from oziebot_domain.strategy import SignalType
 from oziebot_domain.trading_mode import TradingMode
 from oziebot_strategy_engine.strategies.momentum import MomentumStrategy
-from oziebot_strategy_engine.strategy import MarketSnapshot, PositionState, StrategyContext
+from oziebot_strategy_engine.strategy import (
+    MarketSnapshot,
+    PositionState,
+    StrategyContext,
+)
 
 
 def _context(
@@ -94,7 +98,9 @@ def test_momentum_exits_on_trailing_stop():
         opened_at=datetime.now(UTC) - timedelta(minutes=10),
     )
 
-    signal = strategy.generate_signal(context, {"take_profit_pct": 0.10}, uuid4(), uuid4())
+    signal = strategy.generate_signal(
+        context, {"take_profit_pct": 0.10}, uuid4(), uuid4()
+    )
 
     assert signal.signal_type == SignalType.CLOSE
     assert "Trailing stop hit" in signal.reason

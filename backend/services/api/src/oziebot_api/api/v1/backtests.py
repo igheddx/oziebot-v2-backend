@@ -117,7 +117,9 @@ def list_performance_history(
     if scope:
         q = q.filter(BacktestPerformanceSnapshot.scope == scope)
 
-    rows = q.order_by(BacktestPerformanceSnapshot.created_at.desc()).offset(offset).limit(limit).all()
+    rows = (
+        q.order_by(BacktestPerformanceSnapshot.created_at.desc()).offset(offset).limit(limit).all()
+    )
     return HistoricalPerformanceOut(total=len(rows), snapshots=rows)
 
 
@@ -142,7 +144,9 @@ def export_performance_history_csv(
     if scope:
         q = q.filter(BacktestPerformanceSnapshot.scope == scope)
 
-    rows = q.order_by(BacktestPerformanceSnapshot.created_at.desc()).offset(offset).limit(limit).all()
+    rows = (
+        q.order_by(BacktestPerformanceSnapshot.created_at.desc()).offset(offset).limit(limit).all()
+    )
 
     buf = io.StringIO()
     writer = csv.writer(buf)
@@ -201,7 +205,9 @@ def list_analytics_history(
     limit: int = 100,
     offset: int = 0,
 ) -> StrategyAnalyticsListOut:
-    q = db.query(StrategyAnalyticsArtifactRecord).filter(StrategyAnalyticsArtifactRecord.user_id == user.id)
+    q = db.query(StrategyAnalyticsArtifactRecord).filter(
+        StrategyAnalyticsArtifactRecord.user_id == user.id
+    )
     if strategy_id:
         q = q.filter(StrategyAnalyticsArtifactRecord.strategy_id == strategy_id)
     if token_symbol:
@@ -209,7 +215,12 @@ def list_analytics_history(
     if trading_mode:
         q = q.filter(StrategyAnalyticsArtifactRecord.trading_mode == trading_mode)
 
-    rows = q.order_by(StrategyAnalyticsArtifactRecord.created_at.desc()).offset(offset).limit(limit).all()
+    rows = (
+        q.order_by(StrategyAnalyticsArtifactRecord.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     return StrategyAnalyticsListOut(total=len(rows), artifacts=rows)
 
 
@@ -223,7 +234,9 @@ def export_analytics_history_csv(
     limit: int = 1000,
     offset: int = 0,
 ) -> StreamingResponse:
-    q = db.query(StrategyAnalyticsArtifactRecord).filter(StrategyAnalyticsArtifactRecord.user_id == user.id)
+    q = db.query(StrategyAnalyticsArtifactRecord).filter(
+        StrategyAnalyticsArtifactRecord.user_id == user.id
+    )
     if strategy_id:
         q = q.filter(StrategyAnalyticsArtifactRecord.strategy_id == strategy_id)
     if token_symbol:
@@ -231,7 +244,12 @@ def export_analytics_history_csv(
     if trading_mode:
         q = q.filter(StrategyAnalyticsArtifactRecord.trading_mode == trading_mode)
 
-    rows = q.order_by(StrategyAnalyticsArtifactRecord.created_at.desc()).offset(offset).limit(limit).all()
+    rows = (
+        q.order_by(StrategyAnalyticsArtifactRecord.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
     buf = io.StringIO()
     writer = csv.writer(buf)

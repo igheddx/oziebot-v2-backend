@@ -214,7 +214,8 @@ class StrategyAllocationService:
 
         # integer split with deterministic remainder handling.
         raw_values = {
-            a.strategy_id: (total_capital_cents * a.allocation_bps) // BPS_TOTAL for a in allocations
+            a.strategy_id: (total_capital_cents * a.allocation_bps) // BPS_TOTAL
+            for a in allocations
         }
         assigned = sum(raw_values.values())
         remainder = total_capital_cents - assigned
@@ -319,7 +320,10 @@ class StrategyAllocationService:
         if bucket is None:
             raise StrategyAllocationError("Capital bucket not found")
 
-        if amount_cents > bucket.available_cash_cents or amount_cents > bucket.available_buying_power_cents:
+        if (
+            amount_cents > bucket.available_cash_cents
+            or amount_cents > bucket.available_buying_power_cents
+        ):
             raise InsufficientBuyingPowerError("Insufficient buying power for strategy bucket")
 
         before = _snapshot(bucket)
@@ -528,7 +532,9 @@ class StrategyAllocationService:
         return bucket
 
     @staticmethod
-    def list_buckets(db: Session, *, user_id: UUID, trading_mode: str) -> list[StrategyCapitalBucket]:
+    def list_buckets(
+        db: Session, *, user_id: UUID, trading_mode: str
+    ) -> list[StrategyCapitalBucket]:
         _validate_mode(trading_mode)
         return (
             db.query(StrategyCapitalBucket)

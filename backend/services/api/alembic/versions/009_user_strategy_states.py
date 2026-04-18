@@ -37,9 +37,7 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_user_strategy_states_user_id", "user_strategy_states", ["user_id"])
-    op.create_index(
-        "ix_user_strategy_states_strategy_id", "user_strategy_states", ["strategy_id"]
-    )
+    op.create_index("ix_user_strategy_states_strategy_id", "user_strategy_states", ["strategy_id"])
 
 
 def downgrade() -> None:

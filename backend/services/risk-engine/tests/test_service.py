@@ -34,7 +34,9 @@ class FakeRedis:
 def _setup_db(db_path: Path) -> None:
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     with eng.begin() as conn:
-        conn.execute(text("CREATE TABLE users (id TEXT PRIMARY KEY, is_active BOOLEAN NOT NULL)"))
+        conn.execute(
+            text("CREATE TABLE users (id TEXT PRIMARY KEY, is_active BOOLEAN NOT NULL)")
+        )
         conn.execute(
             text(
                 "CREATE TABLE tenant_memberships ("
@@ -55,13 +57,19 @@ def _setup_db(db_path: Path) -> None:
             )
         )
         conn.execute(
-            text("CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT, updated_by_user_id TEXT)")
+            text(
+                "CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT, updated_by_user_id TEXT)"
+            )
         )
         conn.execute(
-            text("CREATE TABLE user_strategies (id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, is_enabled BOOLEAN, config TEXT, created_at TEXT, updated_at TEXT)")
+            text(
+                "CREATE TABLE user_strategies (id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, is_enabled BOOLEAN, config TEXT, created_at TEXT, updated_at TEXT)"
+            )
         )
         conn.execute(
-            text("CREATE TABLE platform_token_allowlist (id TEXT PRIMARY KEY, symbol TEXT, quote_currency TEXT, is_enabled BOOLEAN)")
+            text(
+                "CREATE TABLE platform_token_allowlist (id TEXT PRIMARY KEY, symbol TEXT, quote_currency TEXT, is_enabled BOOLEAN)"
+            )
         )
         conn.execute(
             text(
@@ -73,7 +81,9 @@ def _setup_db(db_path: Path) -> None:
             )
         )
         conn.execute(
-            text("CREATE TABLE user_token_permissions (id TEXT PRIMARY KEY, user_id TEXT, platform_token_id TEXT, is_enabled BOOLEAN)")
+            text(
+                "CREATE TABLE user_token_permissions (id TEXT PRIMARY KEY, user_id TEXT, platform_token_id TEXT, is_enabled BOOLEAN)"
+            )
         )
         conn.execute(
             text(
@@ -112,13 +122,19 @@ def _setup_db(db_path: Path) -> None:
         )
 
 
-def _seed_common(db_path: Path, user_id: str, tenant_id: str, strategy_name: str = "momentum") -> None:
+def _seed_common(
+    db_path: Path, user_id: str, tenant_id: str, strategy_name: str = "momentum"
+) -> None:
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     now = datetime.now(UTC).isoformat()
     with eng.begin() as conn:
-        conn.execute(text("INSERT INTO users (id, is_active) VALUES (:id, 1)"), {"id": user_id})
         conn.execute(
-            text("INSERT INTO tenant_memberships (id, user_id, tenant_id, role, created_at) VALUES (:id,:u,:t,'user',:c)"),
+            text("INSERT INTO users (id, is_active) VALUES (:id, 1)"), {"id": user_id}
+        )
+        conn.execute(
+            text(
+                "INSERT INTO tenant_memberships (id, user_id, tenant_id, role, created_at) VALUES (:id,:u,:t,'user',:c)"
+            ),
             {"id": str(uuid4()), "u": user_id, "t": tenant_id, "c": now},
         )
         conn.execute(
@@ -144,7 +160,9 @@ def _seed_common(db_path: Path, user_id: str, tenant_id: str, strategy_name: str
         )
         token_id = str(uuid4())
         conn.execute(
-            text("INSERT INTO platform_token_allowlist (id, symbol, quote_currency, is_enabled) VALUES (:id,'BTC-USD','USD',1)"),
+            text(
+                "INSERT INTO platform_token_allowlist (id, symbol, quote_currency, is_enabled) VALUES (:id,'BTC-USD','USD',1)"
+            ),
             {"id": token_id},
         )
         conn.execute(
@@ -174,7 +192,9 @@ def _insert_token_policy(
     now = datetime.now(UTC).isoformat()
     with eng.begin() as conn:
         token_id = conn.execute(
-            text("SELECT id FROM platform_token_allowlist WHERE symbol = 'BTC-USD' LIMIT 1")
+            text(
+                "SELECT id FROM platform_token_allowlist WHERE symbol = 'BTC-USD' LIMIT 1"
+            )
         ).first()
         assert token_id is not None
         conn.execute(
@@ -199,7 +219,12 @@ def _insert_token_policy(
         )
 
 
-def _signal(user_id: str, strategy_name: str = "momentum", mode: TradingMode = TradingMode.LIVE, size: str = "0.5") -> StrategySignalEvent:
+def _signal(
+    user_id: str,
+    strategy_name: str = "momentum",
+    mode: TradingMode = TradingMode.LIVE,
+    size: str = "0.5",
+) -> StrategySignalEvent:
     return StrategySignalEvent(
         signal_id=uuid4(),
         run_id=uuid4(),
@@ -215,7 +240,9 @@ def _signal(user_id: str, strategy_name: str = "momentum", mode: TradingMode = T
     )
 
 
-def _hold_signal(user_id: str, strategy_name: str = "momentum", mode: TradingMode = TradingMode.LIVE) -> StrategySignalEvent:
+def _hold_signal(
+    user_id: str, strategy_name: str = "momentum", mode: TradingMode = TradingMode.LIVE
+) -> StrategySignalEvent:
     return StrategySignalEvent(
         signal_id=uuid4(),
         run_id=uuid4(),
@@ -270,7 +297,9 @@ def test_risk_rejects_when_platform_paused(tmp_path: Path):
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     with eng.begin() as conn:
         conn.execute(
-            text("INSERT INTO platform_settings (key, value, updated_at, updated_by_user_id) VALUES ('trading.global.pause', '{\"paused\": true}', :u, NULL)"),
+            text(
+                "INSERT INTO platform_settings (key, value, updated_at, updated_by_user_id) VALUES ('trading.global.pause', '{\"paused\": true}', :u, NULL)"
+            ),
             {"u": datetime.now(UTC).isoformat()},
         )
 
@@ -324,13 +353,20 @@ def test_paper_can_trade_without_entitlement_when_allowed(tmp_path: Path):
 
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     with eng.begin() as conn:
-        conn.execute(text("DELETE FROM tenant_entitlements WHERE tenant_id = :tenant_id"), {"tenant_id": tenant_id})
+        conn.execute(
+            text("DELETE FROM tenant_entitlements WHERE tenant_id = :tenant_id"),
+            {"tenant_id": tenant_id},
+        )
 
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
     svc = RiskEngineService(settings, _redis_with_fresh_market())
 
-    paper_decision, paper_intent = svc.evaluate(_signal(user_id, mode=TradingMode.PAPER), trace_id="t-paper-entitled")
-    live_decision, live_intent = svc.evaluate(_signal(user_id, mode=TradingMode.LIVE), trace_id="t-live-entitled")
+    paper_decision, paper_intent = svc.evaluate(
+        _signal(user_id, mode=TradingMode.PAPER), trace_id="t-paper-entitled"
+    )
+    live_decision, live_intent = svc.evaluate(
+        _signal(user_id, mode=TradingMode.LIVE), trace_id="t-live-entitled"
+    )
 
     assert paper_decision.outcome in (RiskOutcome.APPROVE, RiskOutcome.REDUCE_SIZE)
     assert paper_intent is not None
@@ -369,8 +405,12 @@ def test_paper_can_relax_daily_loss_but_live_rejects(tmp_path: Path):
     )
     svc = RiskEngineService(settings, _redis_with_fresh_market())
 
-    live_decision, _ = svc.evaluate(_signal(user_id, mode=TradingMode.LIVE), trace_id="t4-live")
-    paper_decision, _ = svc.evaluate(_signal(user_id, mode=TradingMode.PAPER), trace_id="t4-paper")
+    live_decision, _ = svc.evaluate(
+        _signal(user_id, mode=TradingMode.LIVE), trace_id="t4-live"
+    )
+    paper_decision, _ = svc.evaluate(
+        _signal(user_id, mode=TradingMode.PAPER), trace_id="t4-paper"
+    )
 
     assert live_decision.outcome == RiskOutcome.REJECT
     assert paper_decision.outcome in (RiskOutcome.APPROVE, RiskOutcome.REDUCE_SIZE)
@@ -427,7 +467,9 @@ def test_risk_rejects_after_consecutive_strategy_losses(tmp_path: Path):
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     with eng.begin() as conn:
         conn.execute(
-            text("UPDATE platform_strategies SET config_schema = :config WHERE slug = 'momentum'"),
+            text(
+                "UPDATE platform_strategies SET config_schema = :config WHERE slug = 'momentum'"
+            ),
             {
                 "config": json.dumps(
                     {
@@ -538,7 +580,9 @@ def test_risk_reduces_size_for_discouraged_token_policy(tmp_path: Path):
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
     svc = RiskEngineService(settings, _redis_with_fresh_market())
 
-    decision, intent = svc.evaluate(_signal(user_id, size="1"), trace_id="t-token-policy-discouraged")
+    decision, intent = svc.evaluate(
+        _signal(user_id, size="1"), trace_id="t-token-policy-discouraged"
+    )
 
     assert decision.outcome == RiskOutcome.REDUCE_SIZE
     assert intent is not None
@@ -561,7 +605,9 @@ def test_risk_applies_max_position_pct_override(tmp_path: Path):
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
     svc = RiskEngineService(settings, _redis_with_fresh_market())
 
-    decision, intent = svc.evaluate(_signal(user_id, size="1"), trace_id="t-token-policy-cap")
+    decision, intent = svc.evaluate(
+        _signal(user_id, size="1"), trace_id="t-token-policy-cap"
+    )
 
     assert decision.outcome == RiskOutcome.REDUCE_SIZE
     assert intent is not None

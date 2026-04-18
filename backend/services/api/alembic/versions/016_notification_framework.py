@@ -32,8 +32,12 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("user_id", "channel", name="uq_notification_channel_user_channel"),
     )
-    op.create_index("ix_notification_channel_configs_user_id", "notification_channel_configs", ["user_id"])
-    op.create_index("ix_notification_channel_configs_channel", "notification_channel_configs", ["channel"])
+    op.create_index(
+        "ix_notification_channel_configs_user_id", "notification_channel_configs", ["user_id"]
+    )
+    op.create_index(
+        "ix_notification_channel_configs_channel", "notification_channel_configs", ["channel"]
+    )
 
     op.create_table(
         "notification_preferences",
@@ -54,8 +58,12 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_notification_preferences_user_id", "notification_preferences", ["user_id"])
-    op.create_index("ix_notification_preferences_event_type", "notification_preferences", ["event_type"])
-    op.create_index("ix_notification_preferences_trading_mode", "notification_preferences", ["trading_mode"])
+    op.create_index(
+        "ix_notification_preferences_event_type", "notification_preferences", ["event_type"]
+    )
+    op.create_index(
+        "ix_notification_preferences_trading_mode", "notification_preferences", ["trading_mode"]
+    )
 
     op.create_table(
         "notification_delivery_attempts",
@@ -76,13 +84,33 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_notification_delivery_attempts_event_id", "notification_delivery_attempts", ["event_id"])
-    op.create_index("ix_notification_delivery_attempts_tenant_id", "notification_delivery_attempts", ["tenant_id"])
-    op.create_index("ix_notification_delivery_attempts_user_id", "notification_delivery_attempts", ["user_id"])
-    op.create_index("ix_notification_delivery_attempts_event_type", "notification_delivery_attempts", ["event_type"])
-    op.create_index("ix_notification_delivery_attempts_trading_mode", "notification_delivery_attempts", ["trading_mode"])
-    op.create_index("ix_notification_delivery_attempts_channel", "notification_delivery_attempts", ["channel"])
-    op.create_index("ix_notification_delivery_attempts_status", "notification_delivery_attempts", ["status"])
+    op.create_index(
+        "ix_notification_delivery_attempts_event_id", "notification_delivery_attempts", ["event_id"]
+    )
+    op.create_index(
+        "ix_notification_delivery_attempts_tenant_id",
+        "notification_delivery_attempts",
+        ["tenant_id"],
+    )
+    op.create_index(
+        "ix_notification_delivery_attempts_user_id", "notification_delivery_attempts", ["user_id"]
+    )
+    op.create_index(
+        "ix_notification_delivery_attempts_event_type",
+        "notification_delivery_attempts",
+        ["event_type"],
+    )
+    op.create_index(
+        "ix_notification_delivery_attempts_trading_mode",
+        "notification_delivery_attempts",
+        ["trading_mode"],
+    )
+    op.create_index(
+        "ix_notification_delivery_attempts_channel", "notification_delivery_attempts", ["channel"]
+    )
+    op.create_index(
+        "ix_notification_delivery_attempts_status", "notification_delivery_attempts", ["status"]
+    )
 
 
 def downgrade() -> None:

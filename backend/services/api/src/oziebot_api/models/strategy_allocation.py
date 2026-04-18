@@ -40,7 +40,9 @@ class StrategyAllocationItem(Base):
 
     __tablename__ = "strategy_allocation_items"
     __table_args__ = (
-        UniqueConstraint("plan_id", "strategy_id", name="uq_strategy_allocation_item_plan_strategy"),
+        UniqueConstraint(
+            "plan_id", "strategy_id", name="uq_strategy_allocation_item_plan_strategy"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -56,7 +58,9 @@ class StrategyAllocationItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    plan: Mapped[StrategyAllocationPlan] = relationship("StrategyAllocationPlan", back_populates="items")
+    plan: Mapped[StrategyAllocationPlan] = relationship(
+        "StrategyAllocationPlan", back_populates="items"
+    )
 
 
 class StrategyCapitalBucket(Base):
@@ -64,7 +68,9 @@ class StrategyCapitalBucket(Base):
 
     __tablename__ = "strategy_capital_buckets"
     __table_args__ = (
-        UniqueConstraint("user_id", "strategy_id", "trading_mode", name="uq_strategy_bucket_user_strategy_mode"),
+        UniqueConstraint(
+            "user_id", "strategy_id", "trading_mode", name="uq_strategy_bucket_user_strategy_mode"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -117,7 +123,9 @@ class StrategyCapitalLedger(Base):
 
     reference_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
 
     user: Mapped["User"] = relationship("User")
 

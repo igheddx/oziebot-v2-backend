@@ -26,13 +26,19 @@ def upgrade() -> None:
         sa.Column("is_enabled", sa.Boolean(), nullable=False, server_default="true"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["platform_token_id"], ["platform_token_allowlist.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["platform_token_id"], ["platform_token_allowlist.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("user_id", "platform_token_id", name="uq_user_token_permission"),
     )
     op.create_index("ix_user_token_permissions_user_id", "user_token_permissions", ["user_id"])
-    op.create_index("ix_user_token_permissions_platform_token_id", "user_token_permissions", ["platform_token_id"])
+    op.create_index(
+        "ix_user_token_permissions_platform_token_id",
+        "user_token_permissions",
+        ["platform_token_id"],
+    )
 
 
 def downgrade() -> None:

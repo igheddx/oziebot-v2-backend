@@ -59,8 +59,12 @@ def normalize_candle(msg: dict, granularity_sec: int) -> NormalizedCandle:
 
 
 def normalize_orderbook_top(msg: dict, depth: int) -> NormalizedOrderBookTop:
-    bids = [(Decimal(str(p)), Decimal(str(s))) for p, s in (msg.get("bids") or [])[:depth]]
-    asks = [(Decimal(str(p)), Decimal(str(s))) for p, s in (msg.get("asks") or [])[:depth]]
+    bids = [
+        (Decimal(str(p)), Decimal(str(s))) for p, s in (msg.get("bids") or [])[:depth]
+    ]
+    asks = [
+        (Decimal(str(p)), Decimal(str(s))) for p, s in (msg.get("asks") or [])[:depth]
+    ]
     return NormalizedOrderBookTop(
         product_id=msg["product_id"],
         depth=depth,

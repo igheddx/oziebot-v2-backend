@@ -6,7 +6,11 @@ from oziebot_market_data_ingestor.universe import SymbolUniverseProvider
 def test_universe_falls_back_to_platform_tokens_when_no_user_permissions():
     eng = create_engine("sqlite+pysqlite:///:memory:")
     with eng.begin() as conn:
-        conn.execute(text("CREATE TABLE platform_token_allowlist (id TEXT PRIMARY KEY, symbol TEXT, quote_currency TEXT, is_enabled BOOLEAN NOT NULL)"))
+        conn.execute(
+            text(
+                "CREATE TABLE platform_token_allowlist (id TEXT PRIMARY KEY, symbol TEXT, quote_currency TEXT, is_enabled BOOLEAN NOT NULL)"
+            )
+        )
         conn.execute(
             text(
                 "INSERT INTO platform_token_allowlist (id, symbol, quote_currency, is_enabled) VALUES "

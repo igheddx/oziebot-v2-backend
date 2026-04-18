@@ -168,9 +168,7 @@ class TestDayTradingStrategy:
             position_state=PositionState("SOL", Decimal(0)),
         )
 
-        signal = strategy.generate_signal(
-            context, config, uuid.uuid4(), uuid.uuid4()
-        )
+        signal = strategy.generate_signal(context, config, uuid.uuid4(), uuid.uuid4())
 
         assert signal.signal_type == SignalType.BUY
 
@@ -200,9 +198,7 @@ class TestDayTradingStrategy:
             position_state=PositionState("AVAX", Decimal(1), Decimal("100")),
         )
 
-        signal = strategy.generate_signal(
-            context, config, uuid.uuid4(), uuid.uuid4()
-        )
+        signal = strategy.generate_signal(context, config, uuid.uuid4(), uuid.uuid4())
 
         # Should close due to > 1% loss (stop_loss=0.01)
         assert signal.signal_type == SignalType.CLOSE
@@ -243,9 +239,7 @@ class TestDCAStrategy:
             position_state=PositionState("BNB", Decimal(5), Decimal("250")),
         )
 
-        signal = strategy.generate_signal(
-            context, config, uuid.uuid4(), uuid.uuid4()
-        )
+        signal = strategy.generate_signal(context, config, uuid.uuid4(), uuid.uuid4())
 
         assert signal.signal_type == SignalType.BUY
 
@@ -274,9 +268,7 @@ class TestDCAStrategy:
             position_state=PositionState("XRP", Decimal(0)),
         )
 
-        signal = strategy.generate_signal(
-            context, config, uuid.uuid4(), uuid.uuid4()
-        )
+        signal = strategy.generate_signal(context, config, uuid.uuid4(), uuid.uuid4())
 
         assert signal.signal_type == SignalType.HOLD
 
@@ -569,7 +561,7 @@ class CustomZigzagStrategy:
 def test_adding_new_strategy_to_registry():
     """
     Example: How to add a new strategy to the framework.
-    
+
     To add a new strategy:
     1. Create a class inheriting from TradingStrategy
     2. Implement validate_config() and generate_signal()

@@ -27,7 +27,9 @@ class StaleDataDetector:
     def mark_candle(self, product_id: str, at: datetime) -> None:
         self._last_candle[product_id] = at
 
-    def stale_products(self, now: datetime, products: list[str]) -> dict[str, list[str]]:
+    def stale_products(
+        self, now: datetime, products: list[str]
+    ) -> dict[str, list[str]]:
         out: dict[str, list[str]] = {"trade": [], "bbo": [], "candle": []}
         for p in products:
             if self._is_stale(now, self._last_trade.get(p), self.thresholds.trade):

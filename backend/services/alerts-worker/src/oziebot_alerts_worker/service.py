@@ -18,7 +18,9 @@ class NotificationService:
         self._settings = settings
         self._redis = redis_client
         self._adapters = adapters
-        self._engine = create_engine(settings.database_url) if settings.database_url else None
+        self._engine = (
+            create_engine(settings.database_url) if settings.database_url else None
+        )
 
     def route_event(self, event: NotificationEvent) -> None:
         if self._engine is None:
@@ -26,30 +28,53 @@ class NotificationService:
         channels = self._load_enabled_channels(event)
         message = render_message(event)
         for ch in channels:
-            self._attempt_delivery(event=event, channel_row=ch, message=message, attempt=1)
+            self._attempt_delivery(
+                event=event, channel_row=ch, message=message, attempt=1
+            )
 
     def retry_delivery(self, envelope: dict[str, Any]) -> None:
         event = NotificationEvent.model_validate(envelope["event"])
         channel_row = envelope["channel"]
         attempt = int(envelope.get("attempt", 1))
         message = str(envelope.get("message") or render_message(event))
-        self._attempt_delivery(event=event, channel_row=channel_row, message=message, attempt=attempt)
+        self._attempt_delivery(
+            event=event, channel_row=channel_row, message=message, attempt=attempt
+        )
 
-    def _attempt_delivery(self, *, event: NotificationEvent, channel_row: dict[str, Any], message: str, attempt: int) -> None:
+    def _attempt_delivery(
+        self,
+        *,
+        event: NotificationEvent,
+        channel_row: dict[str, Any],
+        message: str,
+        attempt: int,
+    ) -> None:
         now = datetime.now(UTC)
         adapter = self._adapters.get(str(channel_row["channel"]))
         destination = str(channel_row["destination"])
         if adapter is None:
-            self._record_delivery(event, channel_row, status="failed", attempt=attempt, error="adapter_not_found")
+            self._record_delivery(
+                event,
+                channel_row,
+                status="failed",
+                attempt=attempt,
+                error="adapter_not_found",
+            )
             return
         try:
             adapter.send(destination, message, event.payload)
-            self._record_delivery(event, channel_row, status="sent", attempt=attempt, error=None)
+            self._record_delivery(
+                event, channel_row, status="sent", attempt=attempt, error=None
+            )
         except Exception as exc:
             err = str(exc)[:512]
-            self._record_delivery(event, channel_row, status="retry_scheduled", attempt=attempt, error=err)
+            self._record_delivery(
+                event, channel_row, status="retry_scheduled", attempt=attempt, error=err
+            )
             if attempt >= self._settings.notify_max_retries:
-                self._record_delivery(event, channel_row, status="failed", attempt=attempt, error=err)
+                self._record_delivery(
+                    event, channel_row, status="failed", attempt=attempt, error=err
+                )
                 return
             push_json(
                 self._redis,
@@ -91,20 +116,32 @@ class NotificationService:
             ).first()
             if pref is None:
                 return []
-            rows = conn.execute(
-                text(
-                    """
+            rows = (
+                conn.execute(
+                    text(
+                        """
                     SELECT id, channel, destination
                     FROM notification_channel_configs
                     WHERE user_id = :user_id
                       AND is_enabled = true
                     """
-                ),
-                {"user_id": str(event.user_id)},
-            ).mappings().all()
+                    ),
+                    {"user_id": str(event.user_id)},
+                )
+                .mappings()
+                .all()
+            )
         return [dict(r) for r in rows]
 
-    def _record_delivery(self, event: NotificationEvent, channel_row: dict[str, Any], *, status: str, attempt: int, error: str | None) -> None:
+    def _record_delivery(
+        self,
+        event: NotificationEvent,
+        channel_row: dict[str, Any],
+        *,
+        status: str,
+        attempt: int,
+        error: str | None,
+    ) -> None:
         if self._engine is None:
             return
         now = datetime.now(UTC)

@@ -31,11 +31,11 @@ def iter_registered_strategies() -> list[str]:
 class StrategyRegistry:
     """
     Central registry for trading strategies.
-    
+
     Supports both:
     1. Entry point based loading (for plugins)
     2. Direct registration (for built-in strategies)
-    
+
     To add a new strategy:
     1. Create a class inheriting from TradingStrategy
     2. Call StrategyRegistry.register(MyStrategy)
@@ -47,7 +47,9 @@ class StrategyRegistry:
     @classmethod
     def _ensure_builtins_loaded(cls) -> None:
         """Load built-in strategies once, in an idempotent way."""
-        if {"momentum", "day_trading", "dca", "reversion"}.issubset(cls._strategies.keys()):
+        if {"momentum", "day_trading", "dca", "reversion"}.issubset(
+            cls._strategies.keys()
+        ):
             return
 
         from oziebot_strategy_engine.strategies.dca import DCAStrategy
@@ -55,7 +57,12 @@ class StrategyRegistry:
         from oziebot_strategy_engine.strategies.momentum import MomentumStrategy
         from oziebot_strategy_engine.strategies.reversion import ReversionStrategy
 
-        for strategy_class in (MomentumStrategy, DayTradingStrategy, DCAStrategy, ReversionStrategy):
+        for strategy_class in (
+            MomentumStrategy,
+            DayTradingStrategy,
+            DCAStrategy,
+            ReversionStrategy,
+        ):
             strategy_id = strategy_class().strategy_id
             if strategy_id not in cls._strategies:
                 cls._strategies[strategy_id] = strategy_class
@@ -64,10 +71,10 @@ class StrategyRegistry:
     def register(cls, strategy_class: type[TradingStrategy]) -> None:
         """
         Register a strategy class.
-        
+
         Args:
             strategy_class: Class with strategy_id attribute
-            
+
         Raises:
             ValueError: If duplicate registration
         """
@@ -100,13 +107,17 @@ class StrategyRegistry:
             config_schema = {}
             if hasattr(instance, "get_config_schema"):
                 config_schema = instance.get_config_schema()
-            result.append({
-                "strategy_id": instance.strategy_id,
-                "display_name": getattr(instance, "display_name", instance.strategy_id),
-                "description": getattr(instance, "description", ""),
-                "version": getattr(instance, "version", "1.0"),
-                "config_schema": config_schema,
-            })
+            result.append(
+                {
+                    "strategy_id": instance.strategy_id,
+                    "display_name": getattr(
+                        instance, "display_name", instance.strategy_id
+                    ),
+                    "description": getattr(instance, "description", ""),
+                    "version": getattr(instance, "version", "1.0"),
+                    "config_schema": config_schema,
+                }
+            )
         return sorted(result, key=lambda x: x["strategy_id"])
 
     @classmethod

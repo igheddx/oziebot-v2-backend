@@ -5,7 +5,9 @@ from cryptography.fernet import Fernet, InvalidToken
 
 class CredentialCrypto:
     def __init__(self, key_b64: str | None) -> None:
-        self._fernet = Fernet(key_b64.strip().encode()) if key_b64 and key_b64.strip() else None
+        self._fernet = (
+            Fernet(key_b64.strip().encode()) if key_b64 and key_b64.strip() else None
+        )
 
     @property
     def configured(self) -> bool:

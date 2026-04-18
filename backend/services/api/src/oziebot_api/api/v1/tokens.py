@@ -6,13 +6,11 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, HTTPException, Request
 
 from oziebot_api.deps import DbSession
 from oziebot_api.deps.auth import CurrentUser, RootAdminUser
 from oziebot_api.models.platform_token import PlatformTokenAllowlist
-from oziebot_api.models.user import User
 from oziebot_api.models.user_token_permission import UserTokenPermission
 from oziebot_api.schemas.tokens import (
     PlatformTokenAdminUpdate,
@@ -43,7 +41,7 @@ def admin_list_platform_tokens(
 ) -> dict[str, Any]:
     """
     List all platform tokens (admin only).
-    
+
     Shows all tokens including disabled ones. Used by admin to manage
     the allowlist.
     """
@@ -73,14 +71,12 @@ def admin_update_platform_token(
 ) -> PlatformTokenResponse:
     """
     Update a platform token (admin only).
-    
+
     Can enable/disable tokens, change display name, sort order, and metadata.
     When a token is disabled, users can no longer trade it even if they
     have individual permissions.
     """
-    token = db.query(PlatformTokenAllowlist).filter(
-        PlatformTokenAllowlist.id == token_id
-    ).first()
+    token = db.query(PlatformTokenAllowlist).filter(PlatformTokenAllowlist.id == token_id).first()
 
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
@@ -136,7 +132,7 @@ def list_my_tokens(
 ) -> UserTradableTokensList:
     """
     List all user's token permissions (mobile-friendly format).
-    
+
     Shows:
     - All platform tokens with user's enable/disable status
     - Count of enabled tokens
@@ -150,11 +146,7 @@ def list_my_tokens(
     )
 
     # Get user's permissions
-    user_perms = (
-        db.query(UserTokenPermission)
-        .filter(UserTokenPermission.user_id == user.id)
-        .all()
-    )
+    user_perms = db.query(UserTokenPermission).filter(UserTokenPermission.user_id == user.id).all()
 
     # Create a map for fast lookup
     perm_map = {p.platform_token_id: p for p in user_perms}
@@ -259,24 +251,22 @@ def check_token_tradable(
 ) -> UserTokenTradabilityCheck:
     """
     Check if a token is tradable for the current user.
-    
+
     Returns detailed breakdown of:
     - Is platform enabled? (admin control)
     - Is user enabled? (user control)
     - Is actually tradable? (both must be true)
     """
     # Get platform token
-    platform_token = db.query(PlatformTokenAllowlist).filter(
-        PlatformTokenAllowlist.id == token_id
-    ).first()
+    platform_token = (
+        db.query(PlatformTokenAllowlist).filter(PlatformTokenAllowlist.id == token_id).first()
+    )
 
     if not platform_token:
         raise HTTPException(status_code=404, detail="Token not found")
 
     # Get user permission
-    user_perm = TokenPermissionService.get_user_token_permission(
-        db, user.id, token_id
-    )
+    user_perm = TokenPermissionService.get_user_token_permission(db, user.id, token_id)
     is_user_enabled = user_perm.is_enabled if user_perm else False
 
     is_tradable = platform_token.is_enabled and is_user_enabled
@@ -297,7 +287,7 @@ def list_tradable_tokens(
 ) -> dict[str, Any]:
     """
     Get list of tokens user can actually trade right now.
-    
+
     Returns only tokens where BOTH conditions are true:
     - Platform token is_enabled=true
     - User permission is_enabled=true

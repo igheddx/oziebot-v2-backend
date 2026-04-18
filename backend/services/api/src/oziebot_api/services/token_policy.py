@@ -16,7 +16,11 @@ from oziebot_common.token_policy import (
     resolve_effective_token_policy,
     score_strategy_suitability,
 )
-from oziebot_api.models.market_data import MarketDataBboSnapshot, MarketDataCandle, MarketDataTradeSnapshot
+from oziebot_api.models.market_data import (
+    MarketDataBboSnapshot,
+    MarketDataCandle,
+    MarketDataTradeSnapshot,
+)
 from oziebot_api.models.platform_strategy import PlatformStrategy
 from oziebot_api.models.platform_token import PlatformTokenAllowlist
 from oziebot_api.models.token_market_profile import TokenMarketProfile
@@ -92,8 +96,7 @@ class TokenPolicyService:
             select(TokenMarketProfile).where(TokenMarketProfile.token_id == token.id)
         )
         strategy_map = {
-            row.slug: row.display_name
-            for row in self._db.scalars(select(PlatformStrategy)).all()
+            row.slug: row.display_name for row in self._db.scalars(select(PlatformStrategy)).all()
         }
         policies = self._db.scalars(
             select(TokenStrategyPolicy)

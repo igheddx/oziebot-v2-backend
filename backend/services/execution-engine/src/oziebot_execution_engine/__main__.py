@@ -12,7 +12,10 @@ from oziebot_common.queues import (
     trade_intent_from_json,
 )
 
-from oziebot_execution_engine.adapters import LiveCoinbaseExecutionAdapter, PaperExecutionAdapter
+from oziebot_execution_engine.adapters import (
+    LiveCoinbaseExecutionAdapter,
+    PaperExecutionAdapter,
+)
 from oziebot_execution_engine.coinbase_client import HttpCoinbaseExecutionClient
 from oziebot_execution_engine.config import get_settings
 from oziebot_execution_engine.reconciliation import ReconciliationService
@@ -36,7 +39,9 @@ def main() -> None:
         ),
         live_adapter=LiveCoinbaseExecutionAdapter(
             coinbase_client,
-            credential_loader=lambda tenant_id: service.load_live_credentials(tenant_id),
+            credential_loader=lambda tenant_id: service.load_live_credentials(
+                tenant_id
+            ),
         ),
     )
     reconciler = ReconciliationService(settings, service, coinbase_client)
@@ -50,7 +55,9 @@ def main() -> None:
         got = brpop_json_any(r, keys, timeout=30)
         now = datetime.now(UTC)
         health.touch()
-        if (now - last_reconcile).total_seconds() >= settings.reconciliation_interval_seconds:
+        if (
+            now - last_reconcile
+        ).total_seconds() >= settings.reconciliation_interval_seconds:
             enforced = service.enforce_runtime_controls()
             if enforced:
                 log.info("runtime_controls_enforced count=%s", enforced)

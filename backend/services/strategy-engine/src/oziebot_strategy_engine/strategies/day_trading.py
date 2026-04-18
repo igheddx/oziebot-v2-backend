@@ -12,7 +12,7 @@ from oziebot_strategy_engine.strategy import StrategyContext, TradingStrategy
 class DayTradingStrategy(TradingStrategy):
     """
     Day trading strategy - enters and exits positions within the same day.
-    
+
     Configuration:
     - entry_threshold: Price vs low to trigger entry (default: 0.01, i.e. 1% above day low)
     - exit_threshold: Profit target percentage (default: 0.02, i.e. 2% profit)
@@ -82,14 +82,20 @@ class DayTradingStrategy(TradingStrategy):
         required_candles = max(21, breakout_lookback_candles + 1, 5)
         if len(closes) < required_candles:
             return self._hold_signal(
-                context, signal_id, correlation_id,
-                f"Insufficient history: {len(closes)}/{required_candles} candles"
+                context,
+                signal_id,
+                correlation_id,
+                f"Insufficient history: {len(closes)}/{required_candles} candles",
             )
 
         # Use up to last 390 candles (~6.5 hours of 60s candles) for session range
         window = min(len(closes), 390)
-        session_high = max(candle_highs[-window:]) if candle_highs else float(market.high_price)
-        session_low = min(candle_lows[-window:]) if candle_lows else float(market.low_price)
+        session_high = (
+            max(candle_highs[-window:]) if candle_highs else float(market.high_price)
+        )
+        session_low = (
+            min(candle_lows[-window:]) if candle_lows else float(market.low_price)
+        )
         session_range = session_high - session_low
 
         current = float(market.current_price)
@@ -97,8 +103,13 @@ class DayTradingStrategy(TradingStrategy):
         # If we have a position, check exit conditions
         if position.quantity > 0:
             return self._check_exit(
-                context, signal_id, correlation_id,
-                position, market, exit_threshold, stop_loss,
+                context,
+                signal_id,
+                correlation_id,
+                position,
+                market,
+                exit_threshold,
+                stop_loss,
             )
 
         # Entry: price near session low (buy the dip)
@@ -109,10 +120,16 @@ class DayTradingStrategy(TradingStrategy):
 
         # Buy when price is in the lower entry_threshold of the session range
         if distance_from_low < entry_threshold:
-            previous_volumes = candle_volumes[-21:-1] if len(candle_volumes) >= 21 else candle_volumes[:-1]
+            previous_volumes = (
+                candle_volumes[-21:-1]
+                if len(candle_volumes) >= 21
+                else candle_volumes[:-1]
+            )
             avg_volume = mean(previous_volumes) if previous_volumes else 0.0
             latest_volume = candle_volumes[-1] if candle_volumes else 0.0
-            volume_spike = avg_volume > 0 and latest_volume >= avg_volume * min_volume_multiplier
+            volume_spike = (
+                avg_volume > 0 and latest_volume >= avg_volume * min_volume_multiplier
+            )
 
             ema_fast = self._ema(closes[-21:], 9)
             ema_slow = self._ema(closes[-21:], 21)
@@ -125,7 +142,7 @@ class DayTradingStrategy(TradingStrategy):
                     f"Trend alignment required: ema9={ema_fast:.4f} ema21={ema_slow:.4f}",
                 )
 
-            recent_highs = candle_highs[-(breakout_lookback_candles + 1):-1]
+            recent_highs = candle_highs[-(breakout_lookback_candles + 1) : -1]
             breakout = bool(recent_highs) and current >= max(recent_highs)
 
             volatility_window = closes[-10:]
@@ -166,8 +183,10 @@ class DayTradingStrategy(TradingStrategy):
             )
 
         return self._hold_signal(
-            context, signal_id, correlation_id,
-            f"Waiting for entry. dist_from_low={distance_from_low:.1%} threshold={entry_threshold:.1%}"
+            context,
+            signal_id,
+            correlation_id,
+            f"Waiting for entry. dist_from_low={distance_from_low:.1%} threshold={entry_threshold:.1%}",
         )
 
     def _check_exit(
@@ -323,10 +342,12 @@ class DayTradingStrategy(TradingStrategy):
         )
 
     def _close_signal(
-        self, context: StrategyContext, signal_id: UUID, correlation_id: UUID, reason: str
+        self,
+        context: StrategyContext,
+        signal_id: UUID,
+        correlation_id: UUID,
+        reason: str,
     ) -> StrategySignal:
-        market = context.market_snapshot
-
         return StrategySignal(
             signal_id=signal_id,
             correlation_id=correlation_id,
@@ -341,10 +362,12 @@ class DayTradingStrategy(TradingStrategy):
         )
 
     def _hold_signal(
-        self, context: StrategyContext, signal_id: UUID, correlation_id: UUID, reason: str
+        self,
+        context: StrategyContext,
+        signal_id: UUID,
+        correlation_id: UUID,
+        reason: str,
     ) -> StrategySignal:
-        market = context.market_snapshot
-
         return StrategySignal(
             signal_id=signal_id,
             correlation_id=correlation_id,

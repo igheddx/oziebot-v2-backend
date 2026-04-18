@@ -35,7 +35,9 @@ class RiskEvent(Base):
     trace_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     rules_evaluated: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     signal_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
 
     user: Mapped["User"] = relationship("User")
 

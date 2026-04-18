@@ -36,12 +36,32 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["order_id"], ["execution_orders.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_execution_reconciliation_events_tenant_id", "execution_reconciliation_events", ["tenant_id"])
-    op.create_index("ix_execution_reconciliation_events_order_id", "execution_reconciliation_events", ["order_id"])
-    op.create_index("ix_execution_reconciliation_events_trading_mode", "execution_reconciliation_events", ["trading_mode"])
-    op.create_index("ix_execution_reconciliation_events_scope", "execution_reconciliation_events", ["scope"])
-    op.create_index("ix_execution_reconciliation_events_status", "execution_reconciliation_events", ["status"])
-    op.create_index("ix_execution_reconciliation_events_created_at", "execution_reconciliation_events", ["created_at"])
+    op.create_index(
+        "ix_execution_reconciliation_events_tenant_id",
+        "execution_reconciliation_events",
+        ["tenant_id"],
+    )
+    op.create_index(
+        "ix_execution_reconciliation_events_order_id",
+        "execution_reconciliation_events",
+        ["order_id"],
+    )
+    op.create_index(
+        "ix_execution_reconciliation_events_trading_mode",
+        "execution_reconciliation_events",
+        ["trading_mode"],
+    )
+    op.create_index(
+        "ix_execution_reconciliation_events_scope", "execution_reconciliation_events", ["scope"]
+    )
+    op.create_index(
+        "ix_execution_reconciliation_events_status", "execution_reconciliation_events", ["status"]
+    )
+    op.create_index(
+        "ix_execution_reconciliation_events_created_at",
+        "execution_reconciliation_events",
+        ["created_at"],
+    )
 
 
 def downgrade() -> None:

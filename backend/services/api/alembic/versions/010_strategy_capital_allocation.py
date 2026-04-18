@@ -30,10 +30,16 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("user_id", "trading_mode", name="uq_strategy_allocation_plan_user_mode"),
+        sa.UniqueConstraint(
+            "user_id", "trading_mode", name="uq_strategy_allocation_plan_user_mode"
+        ),
     )
-    op.create_index("ix_strategy_allocation_plans_user_id", "strategy_allocation_plans", ["user_id"])
-    op.create_index("ix_strategy_allocation_plans_trading_mode", "strategy_allocation_plans", ["trading_mode"])
+    op.create_index(
+        "ix_strategy_allocation_plans_user_id", "strategy_allocation_plans", ["user_id"]
+    )
+    op.create_index(
+        "ix_strategy_allocation_plans_trading_mode", "strategy_allocation_plans", ["trading_mode"]
+    )
 
     op.create_table(
         "strategy_allocation_items",
@@ -46,10 +52,16 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["plan_id"], ["strategy_allocation_plans.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("plan_id", "strategy_id", name="uq_strategy_allocation_item_plan_strategy"),
+        sa.UniqueConstraint(
+            "plan_id", "strategy_id", name="uq_strategy_allocation_item_plan_strategy"
+        ),
     )
-    op.create_index("ix_strategy_allocation_items_plan_id", "strategy_allocation_items", ["plan_id"])
-    op.create_index("ix_strategy_allocation_items_strategy_id", "strategy_allocation_items", ["strategy_id"])
+    op.create_index(
+        "ix_strategy_allocation_items_plan_id", "strategy_allocation_items", ["plan_id"]
+    )
+    op.create_index(
+        "ix_strategy_allocation_items_strategy_id", "strategy_allocation_items", ["strategy_id"]
+    )
 
     op.create_table(
         "strategy_capital_buckets",
@@ -69,11 +81,17 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("user_id", "strategy_id", "trading_mode", name="uq_strategy_bucket_user_strategy_mode"),
+        sa.UniqueConstraint(
+            "user_id", "strategy_id", "trading_mode", name="uq_strategy_bucket_user_strategy_mode"
+        ),
     )
     op.create_index("ix_strategy_capital_buckets_user_id", "strategy_capital_buckets", ["user_id"])
-    op.create_index("ix_strategy_capital_buckets_strategy_id", "strategy_capital_buckets", ["strategy_id"])
-    op.create_index("ix_strategy_capital_buckets_trading_mode", "strategy_capital_buckets", ["trading_mode"])
+    op.create_index(
+        "ix_strategy_capital_buckets_strategy_id", "strategy_capital_buckets", ["strategy_id"]
+    )
+    op.create_index(
+        "ix_strategy_capital_buckets_trading_mode", "strategy_capital_buckets", ["trading_mode"]
+    )
 
     op.create_table(
         "strategy_capital_ledger",
@@ -100,11 +118,21 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_strategy_capital_ledger_user_id", "strategy_capital_ledger", ["user_id"])
-    op.create_index("ix_strategy_capital_ledger_strategy_id", "strategy_capital_ledger", ["strategy_id"])
-    op.create_index("ix_strategy_capital_ledger_trading_mode", "strategy_capital_ledger", ["trading_mode"])
-    op.create_index("ix_strategy_capital_ledger_event_type", "strategy_capital_ledger", ["event_type"])
-    op.create_index("ix_strategy_capital_ledger_reference_id", "strategy_capital_ledger", ["reference_id"])
-    op.create_index("ix_strategy_capital_ledger_created_at", "strategy_capital_ledger", ["created_at"])
+    op.create_index(
+        "ix_strategy_capital_ledger_strategy_id", "strategy_capital_ledger", ["strategy_id"]
+    )
+    op.create_index(
+        "ix_strategy_capital_ledger_trading_mode", "strategy_capital_ledger", ["trading_mode"]
+    )
+    op.create_index(
+        "ix_strategy_capital_ledger_event_type", "strategy_capital_ledger", ["event_type"]
+    )
+    op.create_index(
+        "ix_strategy_capital_ledger_reference_id", "strategy_capital_ledger", ["reference_id"]
+    )
+    op.create_index(
+        "ix_strategy_capital_ledger_created_at", "strategy_capital_ledger", ["created_at"]
+    )
 
 
 def downgrade() -> None:

@@ -44,7 +44,9 @@ class NotificationPreference(Base):
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    trading_mode: Mapped[str] = mapped_column(String(16), nullable=False, index=True)  # paper|live|all
+    trading_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, index=True
+    )  # paper|live|all
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

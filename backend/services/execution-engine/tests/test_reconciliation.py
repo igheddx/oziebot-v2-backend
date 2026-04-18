@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,19 +7,29 @@ from uuid import uuid4
 
 from sqlalchemy import create_engine, text
 
-from oziebot_domain.execution import ExecutionOrderStatus, ExecutionRequest, ExecutionSubmission
+from oziebot_domain.execution import ExecutionOrderStatus, ExecutionSubmission
 from oziebot_domain.trading_mode import TradingMode
-from oziebot_execution_engine.adapters import LiveCoinbaseExecutionAdapter, PaperExecutionAdapter
+from oziebot_execution_engine.adapters import (
+    LiveCoinbaseExecutionAdapter,
+    PaperExecutionAdapter,
+)
 from oziebot_execution_engine.config import Settings
 from oziebot_execution_engine.reconciliation import ReconciliationService
 from oziebot_execution_engine.service import ExecutionService
 
-from test_service import FakeLiveClient, FakeRedis, _request, _risk, _setup_db, _seed_bucket
+from test_service import FakeLiveClient, FakeRedis, _request, _setup_db, _seed_bucket
 
 
 class FakeReconClient(FakeLiveClient):
     def __init__(self, submission: ExecutionSubmission | None = None) -> None:
-        super().__init__(submission or ExecutionSubmission(status=ExecutionOrderStatus.PENDING, venue="coinbase", venue_order_id="venue-1"))
+        super().__init__(
+            submission
+            or ExecutionSubmission(
+                status=ExecutionOrderStatus.PENDING,
+                venue="coinbase",
+                venue_order_id="venue-1",
+            )
+        )
         self.balance_calls = 0
         self.order_calls = 0
         self.fill_calls = 0
@@ -35,29 +44,44 @@ class FakeReconClient(FakeLiveClient):
             raise RuntimeError(self.raise_error)
         return self.balances
 
-    def list_open_orders(self, *, api_key_name: str, private_key_pem: str) -> list[dict]:
+    def list_open_orders(
+        self, *, api_key_name: str, private_key_pem: str
+    ) -> list[dict]:
         self.order_calls += 1
         if self.raise_error:
             raise RuntimeError(self.raise_error)
         return self.orders
 
-    def list_fills(self, *, api_key_name: str, private_key_pem: str, product_id: str | None = None) -> list[dict]:
+    def list_fills(
+        self, *, api_key_name: str, private_key_pem: str, product_id: str | None = None
+    ) -> list[dict]:
         self.fill_calls += 1
         if self.raise_error:
             raise RuntimeError(self.raise_error)
         return self.fills
 
 
-def _service_with_reconciler(db_path: Path, redis: FakeRedis, client: FakeReconClient) -> tuple[ExecutionService, ReconciliationService]:
+def _service_with_reconciler(
+    db_path: Path, redis: FakeRedis, client: FakeReconClient
+) -> tuple[ExecutionService, ReconciliationService]:
     settings = Settings(
         database_url=f"sqlite+pysqlite:///{db_path}",
         reconciliation_health_failure_threshold=2,
         reconciliation_balance_drift_tolerance_cents=0,
     )
     paper = PaperExecutionAdapter(redis, fee_bps=10, slippage_bps=0)
-    live = LiveCoinbaseExecutionAdapter(client, credential_loader=lambda tenant_id: ("key", "secret"))
-    execution = ExecutionService(settings, redis, paper_adapter=paper, live_adapter=live)
-    return execution, ReconciliationService(settings, execution, client, credential_loader=lambda tenant_id: ("key", "secret"))
+    live = LiveCoinbaseExecutionAdapter(
+        client, credential_loader=lambda tenant_id: ("key", "secret")
+    )
+    execution = ExecutionService(
+        settings, redis, paper_adapter=paper, live_adapter=live
+    )
+    return execution, ReconciliationService(
+        settings,
+        execution,
+        client,
+        credential_loader=lambda tenant_id: ("key", "secret"),
+    )
 
 
 def _setup_recon_tables(db_path: Path, tenant_id: str) -> None:
@@ -135,7 +159,11 @@ def test_reconciliation_repairs_partial_fill_and_position(tmp_path: Path):
 
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     with eng.begin() as conn:
-        order = conn.execute(text("SELECT * FROM execution_orders LIMIT 1")).mappings().first()
+        order = (
+            conn.execute(text("SELECT * FROM execution_orders LIMIT 1"))
+            .mappings()
+            .first()
+        )
     venue_order_id = str(order["venue_order_id"])
     client.orders = [{"order_id": venue_order_id, "status": "OPEN"}]
     client.fills = [
@@ -148,15 +176,24 @@ def test_reconciliation_repairs_partial_fill_and_position(tmp_path: Path):
             "trade_time": datetime.now(UTC).isoformat(),
         }
     ]
-    client.balances = [{"available_balance": {"currency": "USD", "value": "30000.00"}, "hold": {"value": "20000.00"}}]
+    client.balances = [
+        {
+            "available_balance": {"currency": "USD", "value": "30000.00"},
+            "hold": {"value": "20000.00"},
+        }
+    ]
 
     summary = reconciler.reconcile_tenant(uuid.UUID(tenant_id), TradingMode.LIVE)
 
     assert summary.repaired_orders >= 1
     assert summary.repaired_fills == 1
     with eng.begin() as conn:
-        repaired_order = conn.execute(text("SELECT state, filled_quantity FROM execution_orders LIMIT 1")).first()
-        position = conn.execute(text("SELECT quantity FROM execution_positions LIMIT 1")).first()
+        repaired_order = conn.execute(
+            text("SELECT state, filled_quantity FROM execution_orders LIMIT 1")
+        ).first()
+        position = conn.execute(
+            text("SELECT quantity FROM execution_positions LIMIT 1")
+        ).first()
     assert repaired_order.state == ExecutionOrderStatus.PARTIALLY_FILLED.value
     assert repaired_order.filled_quantity == "0.2"
     assert position.quantity == "0.2"
@@ -164,7 +201,9 @@ def test_reconciliation_repairs_partial_fill_and_position(tmp_path: Path):
     assert _count(db_path, "execution_trades") == 1
 
 
-def test_reconciliation_marks_connection_unhealthy_after_repeated_failures(tmp_path: Path):
+def test_reconciliation_marks_connection_unhealthy_after_repeated_failures(
+    tmp_path: Path,
+):
     db_path = tmp_path / "recon3.sqlite"
     _setup_db(db_path)
     tenant_id = str(uuid4())
@@ -179,8 +218,18 @@ def test_reconciliation_marks_connection_unhealthy_after_repeated_failures(tmp_p
 
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     with eng.begin() as conn:
-        row = conn.execute(text("SELECT health_status, last_error FROM exchange_connections WHERE tenant_id = :tenant_id"), {"tenant_id": tenant_id}).first()
-        ti = conn.execute(text("SELECT coinbase_connected, coinbase_health_status FROM tenant_integrations WHERE tenant_id = :tenant_id"), {"tenant_id": tenant_id}).first()
+        row = conn.execute(
+            text(
+                "SELECT health_status, last_error FROM exchange_connections WHERE tenant_id = :tenant_id"
+            ),
+            {"tenant_id": tenant_id},
+        ).first()
+        ti = conn.execute(
+            text(
+                "SELECT coinbase_connected, coinbase_health_status FROM tenant_integrations WHERE tenant_id = :tenant_id"
+            ),
+            {"tenant_id": tenant_id},
+        ).first()
     assert row.health_status == "unhealthy"
     assert "coinbase timeout" in row.last_error
     assert ti.coinbase_connected == 0
@@ -203,7 +252,11 @@ def test_reconciliation_recovers_full_fill_after_interruption(tmp_path: Path):
     execution.process_request(request)
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     with eng.begin() as conn:
-        order = conn.execute(text("SELECT * FROM execution_orders LIMIT 1")).mappings().first()
+        order = (
+            conn.execute(text("SELECT * FROM execution_orders LIMIT 1"))
+            .mappings()
+            .first()
+        )
     venue_order_id = str(order["venue_order_id"])
     client.orders = []
     client.fills = [
@@ -216,11 +269,18 @@ def test_reconciliation_recovers_full_fill_after_interruption(tmp_path: Path):
             "trade_time": datetime.now(UTC).isoformat(),
         }
     ]
-    client.balances = [{"available_balance": {"currency": "USD", "value": "50000.00"}, "hold": {"value": "0"}}]
+    client.balances = [
+        {
+            "available_balance": {"currency": "USD", "value": "50000.00"},
+            "hold": {"value": "0"},
+        }
+    ]
 
     summary = reconciler.reconcile_tenant(uuid.UUID(tenant_id), TradingMode.LIVE)
 
     assert summary.repaired_fills == 1
     with eng.begin() as conn:
-        repaired_order = conn.execute(text("SELECT state FROM execution_orders LIMIT 1")).first()
+        repaired_order = conn.execute(
+            text("SELECT state FROM execution_orders LIMIT 1")
+        ).first()
     assert repaired_order.state == ExecutionOrderStatus.FILLED.value

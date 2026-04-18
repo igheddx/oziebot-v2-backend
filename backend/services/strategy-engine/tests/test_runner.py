@@ -161,8 +161,12 @@ def test_close_signal_event_uses_open_position_size():
 def test_runner_resolves_all_allowed_symbols_by_default():
     runner = StrategyRunner(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
 
-    assert runner._resolve_symbols(config={}, allowed_symbols=["AERO-USD", "BTC-USD"]) == ["AERO-USD", "BTC-USD"]
-    assert runner._resolve_symbols(config={"symbol": "BTC-USD"}, allowed_symbols=["AERO-USD", "BTC-USD"]) == ["BTC-USD"]
+    assert runner._resolve_symbols(
+        config={}, allowed_symbols=["AERO-USD", "BTC-USD"]
+    ) == ["AERO-USD", "BTC-USD"]
+    assert runner._resolve_symbols(
+        config={"symbol": "BTC-USD"}, allowed_symbols=["AERO-USD", "BTC-USD"]
+    ) == ["BTC-USD"]
     assert runner._resolve_symbols(
         config={"symbols": ["BTC-USD", "DOGE-USD"]},
         allowed_symbols=["AERO-USD", "BTC-USD", "ETH-USD"],
@@ -171,12 +175,19 @@ def test_runner_resolves_all_allowed_symbols_by_default():
 
 def test_runner_coerces_legacy_and_multi_symbol_runtime_state():
     assert StrategyRunner._coerce_symbol_runtime_states(
-        {"symbol": "AERO-USD", "peak_price": "0.50", "opened_at": "2026-04-17T16:00:00+00:00"}
-    ) == {
-        "AERO-USD": {"peak_price": "0.50", "opened_at": "2026-04-17T16:00:00+00:00"}
-    }
+        {
+            "symbol": "AERO-USD",
+            "peak_price": "0.50",
+            "opened_at": "2026-04-17T16:00:00+00:00",
+        }
+    ) == {"AERO-USD": {"peak_price": "0.50", "opened_at": "2026-04-17T16:00:00+00:00"}}
     assert StrategyRunner._coerce_symbol_runtime_states(
-        {"symbols": {"BTC-USD": {"peak_price": "51000"}, "ETH-USD": {"opened_at": "2026-04-17T16:01:00+00:00"}}}
+        {
+            "symbols": {
+                "BTC-USD": {"peak_price": "51000"},
+                "ETH-USD": {"opened_at": "2026-04-17T16:01:00+00:00"},
+            }
+        }
     ) == {
         "BTC-USD": {"peak_price": "51000"},
         "ETH-USD": {"opened_at": "2026-04-17T16:01:00+00:00"},
@@ -200,13 +211,17 @@ def test_merge_symbol_runtime_state_preserves_other_symbols():
 
     state = StrategyRunner._merge_symbol_runtime_states(
         {},
-        position_state=PositionState(symbol="BTC-USD", quantity=Decimal("1"), entry_price=Decimal("50000")),
+        position_state=PositionState(
+            symbol="BTC-USD", quantity=Decimal("1"), entry_price=Decimal("50000")
+        ),
         market=market,
         now=now,
     )
     state = StrategyRunner._merge_symbol_runtime_states(
         state,
-        position_state=PositionState(symbol="ETH-USD", quantity=Decimal("2"), entry_price=Decimal("2500")),
+        position_state=PositionState(
+            symbol="ETH-USD", quantity=Decimal("2"), entry_price=Decimal("2500")
+        ),
         market=market,
         now=now,
     )
@@ -257,7 +272,9 @@ def test_run_once_processes_all_allowed_symbols():
                 close_price=Decimal("1"),
             )
 
-        def _load_position_state(self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str) -> PositionState:
+        def _load_position_state(
+            self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str
+        ) -> PositionState:
             return PositionState(symbol=symbol, quantity=Decimal("0"))
 
         def _sync_position_runtime_state(
@@ -350,7 +367,9 @@ def test_dca_scheduler_enforces_buy_interval_from_runtime_state():
                 close_price=Decimal("50000"),
             )
 
-        def _load_position_state(self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str) -> PositionState:
+        def _load_position_state(
+            self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str
+        ) -> PositionState:
             return PositionState(symbol=symbol, quantity=Decimal("0"))
 
         def _sync_position_runtime_state(
@@ -365,7 +384,9 @@ def test_dca_scheduler_enforces_buy_interval_from_runtime_state():
         ) -> PositionState:
             return position_state
 
-        def _load_strategy_runtime_state(self, *, user_id: str, strategy_name: str, trading_mode: str) -> dict[str, object]:
+        def _load_strategy_runtime_state(
+            self, *, user_id: str, strategy_name: str, trading_mode: str
+        ) -> dict[str, object]:
             last_buy_at = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
             return {"symbols": {"BTC-USD": {"last_buy_at": last_buy_at}}}
 
@@ -441,7 +462,9 @@ def test_momentum_runner_skips_blocked_token_policy():
                 close_price=Decimal("50000"),
             )
 
-        def _load_position_state(self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str) -> PositionState:
+        def _load_position_state(
+            self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str
+        ) -> PositionState:
             return PositionState(symbol=symbol, quantity=Decimal("0"))
 
         def _sync_position_runtime_state(
@@ -456,7 +479,9 @@ def test_momentum_runner_skips_blocked_token_policy():
         ) -> PositionState:
             return position_state
 
-        def _load_token_strategy_policy(self, *, symbol: str, strategy_name: str) -> dict[str, object] | None:
+        def _load_token_strategy_policy(
+            self, *, symbol: str, strategy_name: str
+        ) -> dict[str, object] | None:
             return {
                 "admin_enabled": True,
                 "recommendation_status": "blocked",
@@ -514,7 +539,9 @@ def test_mean_reversion_runner_skips_admin_disabled_token_policy():
                 close_price=Decimal("3000"),
             )
 
-        def _load_position_state(self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str) -> PositionState:
+        def _load_position_state(
+            self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str
+        ) -> PositionState:
             return PositionState(symbol=symbol, quantity=Decimal("0"))
 
         def _sync_position_runtime_state(
@@ -529,7 +556,9 @@ def test_mean_reversion_runner_skips_admin_disabled_token_policy():
         ) -> PositionState:
             return position_state
 
-        def _load_token_strategy_policy(self, *, symbol: str, strategy_name: str) -> dict[str, object] | None:
+        def _load_token_strategy_policy(
+            self, *, symbol: str, strategy_name: str
+        ) -> dict[str, object] | None:
             return {
                 "admin_enabled": False,
                 "recommendation_status": "allowed",
@@ -538,7 +567,9 @@ def test_mean_reversion_runner_skips_admin_disabled_token_policy():
 
         def _generate_signal(self, **kwargs) -> StrategySignal:
             self.generated += 1
-            raise AssertionError("admin-disabled token should not reach strategy generation")
+            raise AssertionError(
+                "admin-disabled token should not reach strategy generation"
+            )
 
         def _persist_run(self, **kwargs) -> None:
             return None

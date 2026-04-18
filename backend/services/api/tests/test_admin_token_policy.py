@@ -5,7 +5,11 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.market_data import MarketDataBboSnapshot, MarketDataCandle, MarketDataTradeSnapshot
+from oziebot_api.models.market_data import (
+    MarketDataBboSnapshot,
+    MarketDataCandle,
+    MarketDataTradeSnapshot,
+)
 from oziebot_api.models.platform_strategy import PlatformStrategy
 
 
@@ -113,7 +117,9 @@ def _seed_market_data(db_session: Session, symbol: str) -> None:
     db_session.commit()
 
 
-def test_admin_token_policy_recalculated_on_create(client, root_user_and_token, db_session: Session):
+def test_admin_token_policy_recalculated_on_create(
+    client, root_user_and_token, db_session: Session
+):
     _, token = root_user_and_token
     symbol = "BTC-USD"
     _seed_market_data(db_session, symbol)
@@ -138,7 +144,9 @@ def test_admin_token_policy_recalculated_on_create(client, root_user_and_token, 
     assert dca_policy["computed_recommendation_status"] in {"discouraged", "blocked"}
 
 
-def test_admin_can_override_effective_token_policy(client, root_user_and_token, db_session: Session):
+def test_admin_can_override_effective_token_policy(
+    client, root_user_and_token, db_session: Session
+):
     _, token = root_user_and_token
     symbol = "ETH-USD"
     _seed_market_data(db_session, symbol)
@@ -163,7 +171,12 @@ def test_admin_can_override_effective_token_policy(client, root_user_and_token, 
     )
     assert update.status_code == 200, update.text
     data = update.json()
-    assert data["computed_recommendation_status"] in {"preferred", "allowed", "discouraged", "blocked"}
+    assert data["computed_recommendation_status"] in {
+        "preferred",
+        "allowed",
+        "discouraged",
+        "blocked",
+    }
     assert data["recommendation_status"] == "blocked"
     assert data["recommendation_reason"] == "manual review required"
     assert data["max_position_pct_override"] == 0.25

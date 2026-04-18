@@ -86,7 +86,9 @@ def dashboard_summary(
     db: DbSession,
     trading_mode: TradingMode | None = None,
 ) -> dict[str, Any]:
-    mode = trading_mode.value if trading_mode is not None else (user.current_trading_mode or "paper")
+    mode = (
+        trading_mode.value if trading_mode is not None else (user.current_trading_mode or "paper")
+    )
     tenant_id = primary_tenant_id(db, user)
     uses_tenant_scope = tenant_id is not None
 
@@ -138,11 +140,16 @@ def dashboard_summary(
     for item in enabled_strategies:
         b = bucket_by_strategy.get(item["id"])
         assigned = b.assigned_capital_cents if b else 0
-        item["allocationPct"] = int(round((assigned / total_assigned) * 100)) if total_assigned > 0 else 0
+        item["allocationPct"] = (
+            int(round((assigned / total_assigned) * 100)) if total_assigned > 0 else 0
+        )
 
     available_balance_cents = sum(max(0, b.available_cash_cents) for b in buckets)
     portfolio_cents = sum(
-        b.available_cash_cents + b.reserved_cash_cents + b.locked_capital_cents + b.unrealized_pnl_cents
+        b.available_cash_cents
+        + b.reserved_cash_cents
+        + b.locked_capital_cents
+        + b.unrealized_pnl_cents
         for b in buckets
     )
     pnl_cents = sum(b.realized_pnl_cents + b.unrealized_pnl_cents for b in buckets)
@@ -241,7 +248,10 @@ def dashboard_summary(
         growth = [portfolio_value]
     else:
         start = max(0.0, portfolio_value - pnl_value)
-        growth = [round(start + ((portfolio_value - start) * i / (growth_points - 1)), 2) for i in range(growth_points)]
+        growth = [
+            round(start + ((portfolio_value - start) * i / (growth_points - 1)), 2)
+            for i in range(growth_points)
+        ]
 
     return {
         "availableBalance": round(available_balance_cents / 100, 2),

@@ -98,11 +98,15 @@ def upsert_guided_allocations(
     user: CurrentUser,
     db: DbSession,
 ) -> dict:
-    enabled = [
-        s.strategy_id
-        for s in user.strategies  # type: ignore[attr-defined]
-        if s.is_enabled
-    ] if hasattr(user, "strategies") else []
+    enabled = (
+        [
+            s.strategy_id
+            for s in user.strategies  # type: ignore[attr-defined]
+            if s.is_enabled
+        ]
+        if hasattr(user, "strategies")
+        else []
+    )
 
     if not enabled:
         from oziebot_api.models.user_strategy import UserStrategy
@@ -182,7 +186,9 @@ def get_allocation_plan(trading_mode: str, user: CurrentUser, db: DbSession) -> 
 @router.get("/{trading_mode}/buckets", response_model=StrategyBucketsResponse)
 def list_buckets(trading_mode: str, user: CurrentUser, db: DbSession) -> StrategyBucketsResponse:
     try:
-        rows = StrategyAllocationService.list_buckets(db, user_id=user.id, trading_mode=trading_mode)
+        rows = StrategyAllocationService.list_buckets(
+            db, user_id=user.id, trading_mode=trading_mode
+        )
     except StrategyAllocationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

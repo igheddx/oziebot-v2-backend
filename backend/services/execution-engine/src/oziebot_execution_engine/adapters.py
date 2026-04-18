@@ -4,9 +4,13 @@ import json
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Protocol
 
-from oziebot_domain.execution import ExecutionFill, ExecutionOrderStatus, ExecutionRequest, ExecutionSubmission
+from oziebot_domain.execution import (
+    ExecutionFill,
+    ExecutionOrderStatus,
+    ExecutionRequest,
+    ExecutionSubmission,
+)
 from oziebot_domain.trading import Side, Venue
-from oziebot_domain.trading_mode import TradingMode
 
 from oziebot_execution_engine.coinbase_client import CoinbaseExecutionClient
 
@@ -29,10 +33,14 @@ class PaperExecutionAdapter:
         raw = self._redis.get(f"oziebot:md:bbo:{request.symbol}")
         payload = json.loads(raw) if raw else {}
         if request.side == Side.BUY:
-            base_price = Decimal(str(payload.get("best_ask_price", request.price_hint or "0")))
+            base_price = Decimal(
+                str(payload.get("best_ask_price", request.price_hint or "0"))
+            )
             slip_multiplier = Decimal("1") + self._slippage_bps
         else:
-            base_price = Decimal(str(payload.get("best_bid_price", request.price_hint or "0")))
+            base_price = Decimal(
+                str(payload.get("best_bid_price", request.price_hint or "0"))
+            )
             slip_multiplier = Decimal("1") - self._slippage_bps
         if base_price <= 0:
             return ExecutionSubmission(
@@ -68,4 +76,6 @@ class LiveCoinbaseExecutionAdapter:
 
     def submit(self, request: ExecutionRequest) -> ExecutionSubmission:
         api_key_name, private_key_pem = self._credential_loader(request.tenant_id)
-        return self._client.place_order(request, api_key_name=api_key_name, private_key_pem=private_key_pem)
+        return self._client.place_order(
+            request, api_key_name=api_key_name, private_key_pem=private_key_pem
+        )

@@ -7,7 +7,11 @@ from uuid import uuid4
 from oziebot_domain.strategy import SignalType
 from oziebot_domain.trading_mode import TradingMode
 from oziebot_strategy_engine.strategies.reversion import ReversionStrategy
-from oziebot_strategy_engine.strategy import MarketSnapshot, PositionState, StrategyContext
+from oziebot_strategy_engine.strategy import (
+    MarketSnapshot,
+    PositionState,
+    StrategyContext,
+)
 
 
 def _context(
@@ -55,7 +59,28 @@ def _context(
 
 def test_reversion_buys_oversold_stretch():
     strategy = ReversionStrategy()
-    closes = [100, 101, 100, 99, 100, 98, 97, 96, 95, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85, 83]
+    closes = [
+        100,
+        101,
+        100,
+        99,
+        100,
+        98,
+        97,
+        96,
+        95,
+        94,
+        93,
+        92,
+        91,
+        90,
+        89,
+        88,
+        87,
+        86,
+        85,
+        83,
+    ]
     context = _context(closes=closes, current_price="83")
 
     signal = strategy.generate_signal(context, {}, uuid4(), uuid4())
@@ -76,7 +101,28 @@ def test_reversion_holds_when_history_is_short():
 
 def test_reversion_closes_after_mean_snapback():
     strategy = ReversionStrategy()
-    closes = [100, 99, 98, 97, 96, 95, 94, 94, 95, 96, 97, 98, 99, 100, 101, 101, 100, 100, 100.5, 101]
+    closes = [
+        100,
+        99,
+        98,
+        97,
+        96,
+        95,
+        94,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        101,
+        100,
+        100,
+        100.5,
+        101,
+    ]
     context = _context(
         closes=closes,
         current_price="101",
@@ -93,10 +139,33 @@ def test_reversion_closes_after_mean_snapback():
 
 def test_reversion_honors_fear_filter_for_entries():
     strategy = ReversionStrategy()
-    closes = [100, 101, 100, 99, 100, 98, 97, 96, 95, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85, 83]
+    closes = [
+        100,
+        101,
+        100,
+        99,
+        100,
+        98,
+        97,
+        96,
+        95,
+        94,
+        93,
+        92,
+        91,
+        90,
+        89,
+        88,
+        87,
+        86,
+        85,
+        83,
+    ]
     context = _context(closes=closes, current_price="83", fear_index=60)
 
-    signal = strategy.generate_signal(context, {"use_fear_index_filter": True}, uuid4(), uuid4())
+    signal = strategy.generate_signal(
+        context, {"use_fear_index_filter": True}, uuid4(), uuid4()
+    )
 
     assert signal.signal_type == SignalType.HOLD
     assert "No entry" in signal.reason
@@ -104,7 +173,28 @@ def test_reversion_honors_fear_filter_for_entries():
 
 def test_reversion_exits_on_stop_loss():
     strategy = ReversionStrategy()
-    closes = [100, 99, 98, 97, 96, 95, 94, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85, 84, 83, 82]
+    closes = [
+        100,
+        99,
+        98,
+        97,
+        96,
+        95,
+        94,
+        94,
+        93,
+        92,
+        91,
+        90,
+        89,
+        88,
+        87,
+        86,
+        85,
+        84,
+        83,
+        82,
+    ]
     context = _context(
         closes=closes,
         current_price="82",
@@ -121,10 +211,33 @@ def test_reversion_exits_on_stop_loss():
 
 def test_reversion_trend_filter_blocks_bearish_entry():
     strategy = ReversionStrategy()
-    closes = [120 - (idx * 0.1) for idx in range(180)] + [95, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85, 84, 83, 82, 81, 80, 79, 78, 77, 76]
+    closes = [120 - (idx * 0.1) for idx in range(180)] + [
+        95,
+        94,
+        93,
+        92,
+        91,
+        90,
+        89,
+        88,
+        87,
+        86,
+        85,
+        84,
+        83,
+        82,
+        81,
+        80,
+        79,
+        78,
+        77,
+        76,
+    ]
     context = _context(closes=closes, current_price="76", market_regime="bearish")
 
-    signal = strategy.generate_signal(context, {"use_trend_filter": True, "ema_long_window": 50}, uuid4(), uuid4())
+    signal = strategy.generate_signal(
+        context, {"use_trend_filter": True, "ema_long_window": 50}, uuid4(), uuid4()
+    )
 
     assert signal.signal_type == SignalType.HOLD
     assert "Trend filter blocked entry" in signal.reason

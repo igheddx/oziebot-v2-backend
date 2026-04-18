@@ -1,6 +1,10 @@
 from decimal import Decimal
 
-from oziebot_market_data_ingestor.normalizer import normalize_bbo, normalize_orderbook_top, normalize_trade
+from oziebot_market_data_ingestor.normalizer import (
+    normalize_bbo,
+    normalize_orderbook_top,
+    normalize_trade,
+)
 
 
 def test_normalize_trade_basic_fields():

@@ -20,7 +20,9 @@ class ExecutionOrder(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     intent_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
-    correlation_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    correlation_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), nullable=False, index=True
+    )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -50,7 +52,9 @@ class ExecutionOrder(Base):
     intent_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     risk_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     adapter_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -67,11 +71,16 @@ class ExecutionOrder(Base):
 
 class ExecutionFillRecord(Base):
     __tablename__ = "execution_fills"
-    __table_args__ = (UniqueConstraint("order_id", "venue_fill_id", name="uq_execution_fill_order_venue_fill"),)
+    __table_args__ = (
+        UniqueConstraint("order_id", "venue_fill_id", name="uq_execution_fill_order_venue_fill"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     order_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("execution_orders.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("execution_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     venue_fill_id: Mapped[str] = mapped_column(String(128), nullable=False)
     fill_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -91,10 +100,16 @@ class ExecutionTradeRecord(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     order_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("execution_orders.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("execution_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     fill_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("execution_fills.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("execution_fills.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
@@ -113,7 +128,9 @@ class ExecutionTradeRecord(Base):
     realized_pnl_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     position_quantity_after: Mapped[str] = mapped_column(String(64), nullable=False)
     avg_entry_price_after: Mapped[str] = mapped_column(String(64), nullable=False)
-    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    executed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
     raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     order: Mapped[ExecutionOrder] = relationship("ExecutionOrder", back_populates="trades")

@@ -130,9 +130,15 @@ def _seed_user_config(db_url: str, *, user_id: uuid.UUID, mode: str) -> None:
 def _attempt_rows(db_url: str) -> list[dict]:
     engine = create_engine(db_url)
     with engine.begin() as conn:
-        rows = conn.execute(
-            text("SELECT channel, status, attempt FROM notification_delivery_attempts ORDER BY rowid ASC")
-        ).mappings().all()
+        rows = (
+            conn.execute(
+                text(
+                    "SELECT channel, status, attempt FROM notification_delivery_attempts ORDER BY rowid ASC"
+                )
+            )
+            .mappings()
+            .all()
+        )
     return [dict(r) for r in rows]
 
 
@@ -148,7 +154,11 @@ def test_route_event_honors_mode_and_isolates_channel_failures(tmp_path: Path):
     redis = FakeRedis()
     sms = CapturingAdapter(should_fail=False)
     slack = CapturingAdapter(should_fail=True)
-    service = NotificationService(_Settings(database_url=db_url, notify_max_retries=2), redis, {"sms": sms, "slack": slack})
+    service = NotificationService(
+        _Settings(database_url=db_url, notify_max_retries=2),
+        redis,
+        {"sms": sms, "slack": slack},
+    )
 
     event = NotificationEvent(
         event_id=uuid.uuid4(),
@@ -185,7 +195,9 @@ def test_route_event_skips_when_mode_preference_does_not_match(tmp_path: Path):
 
     redis = FakeRedis()
     sms = CapturingAdapter(should_fail=False)
-    service = NotificationService(_Settings(database_url=db_url, notify_max_retries=2), redis, {"sms": sms})
+    service = NotificationService(
+        _Settings(database_url=db_url, notify_max_retries=2), redis, {"sms": sms}
+    )
 
     event = NotificationEvent(
         event_id=uuid.uuid4(),
@@ -212,7 +224,9 @@ def test_retry_delivery_stops_at_max_retries(tmp_path: Path):
     tenant_id = uuid.uuid4()
     redis = FakeRedis()
     failing = CapturingAdapter(should_fail=True)
-    service = NotificationService(_Settings(database_url=db_url, notify_max_retries=2), redis, {"slack": failing})
+    service = NotificationService(
+        _Settings(database_url=db_url, notify_max_retries=2), redis, {"slack": failing}
+    )
 
     event = NotificationEvent(
         event_id=uuid.uuid4(),

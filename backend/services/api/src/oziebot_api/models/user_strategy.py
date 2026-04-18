@@ -16,37 +16,25 @@ class UserStrategy(Base):
     """User's strategy configuration."""
 
     __tablename__ = "user_strategies"
-    __table_args__ = (
-        UniqueConstraint("user_id", "strategy_id", name="uq_user_strategy"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "strategy_id", name="uq_user_strategy"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    strategy_id: Mapped[str] = mapped_column(
-        String(64), nullable=False, index=True
-    )
+    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     is_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
     config: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
     )
-    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(
-        "metadata", JSON, nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     user: Mapped["User"] = relationship("User")
 
@@ -56,18 +44,14 @@ class StrategySignalLog(Base):
 
     __tablename__ = "strategy_signal_logs"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    strategy_id: Mapped[str] = mapped_column(
-        String(64), nullable=False, index=True
-    )
+    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     signal_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), nullable=False, index=True, unique=True
     )
@@ -75,23 +59,17 @@ class StrategySignalLog(Base):
         Uuid(as_uuid=True), nullable=False, index=True
     )
     trading_mode: Mapped[str] = mapped_column(
-        String(16), nullable=False  # PAPER or LIVE
+        String(16),
+        nullable=False,  # PAPER or LIVE
     )
     signal_type: Mapped[str] = mapped_column(
-        String(16), nullable=False  # BUY, SELL, HOLD, CLOSE
+        String(16),
+        nullable=False,  # BUY, SELL, HOLD, CLOSE
     )
-    symbol: Mapped[str | None] = mapped_column(
-        String(64), nullable=True
-    )
-    confidence: Mapped[float] = mapped_column(
-        default=0.5
-    )
-    reason: Mapped[str] = mapped_column(
-        String(512), default=""
-    )
-    signal_data: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True
-    )
+    symbol: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    confidence: Mapped[float] = mapped_column(default=0.5)
+    reason: Mapped[str] = mapped_column(String(512), default="")
+    signal_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
@@ -107,20 +85,17 @@ class StrategyPerformance(Base):
         UniqueConstraint("user_id", "strategy_id", "trading_mode", name="uq_user_strategy_mode"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    strategy_id: Mapped[str] = mapped_column(
-        String(64), nullable=False, index=True
-    )
+    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     trading_mode: Mapped[str] = mapped_column(
-        String(16), nullable=False  # PAPER or LIVE
+        String(16),
+        nullable=False,  # PAPER or LIVE
     )
     total_signals: Mapped[int] = mapped_column(default=0)
     buy_signals: Mapped[int] = mapped_column(default=0)
@@ -128,15 +103,9 @@ class StrategyPerformance(Base):
     hold_signals: Mapped[int] = mapped_column(default=0)
     close_signals: Mapped[int] = mapped_column(default=0)
     avg_confidence: Mapped[float] = mapped_column(default=0.0)
-    last_signal_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    last_signal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     user: Mapped["User"] = relationship("User")
 
@@ -154,9 +123,7 @@ class UserStrategyState(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),

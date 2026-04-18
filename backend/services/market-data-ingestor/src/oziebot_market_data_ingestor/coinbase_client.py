@@ -21,7 +21,9 @@ class CoinbaseRestClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def get_candles(self, product_id: str, granularity_sec: int, limit: int = 50) -> list[dict]:
+    async def get_candles(
+        self, product_id: str, granularity_sec: int, limit: int = 50
+    ) -> list[dict]:
         resp = await self._client.get(
             f"{self._base}/products/{product_id}/candles",
             params={"granularity": granularity_sec, "limit": limit},
@@ -90,7 +92,9 @@ class CoinbaseWsClient:
         backoff = 1.0
         while True:
             try:
-                async with websockets.connect(self._url, ssl=ssl_ctx, ping_interval=20, ping_timeout=20) as ws:
+                async with websockets.connect(
+                    self._url, ssl=ssl_ctx, ping_interval=20, ping_timeout=20
+                ) as ws:
                     payload = {
                         "type": "subscribe",
                         "product_ids": product_ids,

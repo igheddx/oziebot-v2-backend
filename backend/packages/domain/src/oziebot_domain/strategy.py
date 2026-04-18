@@ -24,19 +24,17 @@ class SignalType(StrEnum):
 class StrategySignal(OziebotModel):
     """
     Signal emitted by a strategy.
-    
+
     Strategies evaluate market state and generate signals that recommend
     actions. Signals are then passed through risk/compliance checks before
     execution.
-    
+
     Key design: Strategies do NOT directly interact with trading or execution.
     They only analyze state and emit signals.
     """
 
     signal_id: UUID = Field(description="Unique signal identifier")
-    correlation_id: UUID = Field(
-        description="Correlation ID to link related signals/execution"
-    )
+    correlation_id: UUID = Field(description="Correlation ID to link related signals/execution")
     tenant_id: TenantId = Field(description="User's tenant ID")
     strategy_id: str = Field(
         min_length=1, max_length=128, description="Strategy identifier (e.g. 'momentum')"
@@ -44,11 +42,9 @@ class StrategySignal(OziebotModel):
     strategy_version: str = Field(
         default="1.0", description="Strategy version for tracking updates"
     )
-    trading_mode: TradingMode = Field(
-        description="PAPER (simulated) or LIVE (real money)"
-    )
+    trading_mode: TradingMode = Field(description="PAPER (simulated) or LIVE (real money)")
     signal_type: SignalType = Field(description="Type of signal: BUY, SELL, HOLD, CLOSE")
-    
+
     # Optional trading details (populated for BUY/SELL signals)
     instrument: Instrument | None = Field(default=None, description="Trading pair")
     side: Side | None = Field(default=None, description="BUY or SELL")
@@ -57,11 +53,9 @@ class StrategySignal(OziebotModel):
     limit_price: Decimal | None = Field(
         default=None, description="Optional limit price for LIMIT orders"
     )
-    
+
     # Strategy metadata
-    confidence: float = Field(
-        ge=0.0, le=1.0, default=0.5, description="Confidence in signal (0-1)"
-    )
+    confidence: float = Field(ge=0.0, le=1.0, default=0.5, description="Confidence in signal (0-1)")
     reason: str = Field(default="", description="Human-readable reason for signal")
     metadata: dict | None = Field(
         default=None, description="Strategy-specific metadata (e.g. indicators)"

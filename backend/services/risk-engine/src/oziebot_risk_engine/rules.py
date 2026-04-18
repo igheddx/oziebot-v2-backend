@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -71,7 +71,9 @@ class PlatformPauseRule(RiskRule):
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
         if ctx.platform_paused:
-            return RuleResult(self.name, "reject", RejectionReason.POLICY, "Platform trading paused")
+            return RuleResult(
+                self.name, "reject", RejectionReason.POLICY, "Platform trading paused"
+            )
         return None
 
 
@@ -80,7 +82,12 @@ class SubscriptionEntitlementRule(RiskRule):
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
         if not ctx.entitled:
-            return RuleResult(self.name, "reject", RejectionReason.POLICY, "No active strategy entitlement")
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.POLICY,
+                "No active strategy entitlement",
+            )
         return None
 
 
@@ -89,7 +96,12 @@ class TokenAllowlistRule(RiskRule):
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
         if not ctx.token_platform_enabled:
-            return RuleResult(self.name, "reject", RejectionReason.POLICY, "Token not platform-enabled")
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.POLICY,
+                "Token not platform-enabled",
+            )
         return None
 
 
@@ -98,7 +110,12 @@ class UserTokenRule(RiskRule):
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
         if not ctx.token_user_enabled:
-            return RuleResult(self.name, "reject", RejectionReason.POLICY, "Token not enabled for user")
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.POLICY,
+                "Token not enabled for user",
+            )
         return None
 
 
@@ -107,7 +124,9 @@ class StrategyEnabledRule(RiskRule):
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
         if not ctx.strategy_enabled:
-            return RuleResult(self.name, "reject", RejectionReason.POLICY, "Strategy is disabled")
+            return RuleResult(
+                self.name, "reject", RejectionReason.POLICY, "Strategy is disabled"
+            )
         return None
 
 
@@ -123,7 +142,9 @@ class TokenStrategyPolicyRule(RiskRule):
                 "Token strategy policy disabled by admin",
             )
         if ctx.token_policy_status == "blocked":
-            detail = ctx.token_policy_reason or "Token strategy policy blocked this trade"
+            detail = (
+                ctx.token_policy_reason or "Token strategy policy blocked this trade"
+            )
             return RuleResult(self.name, "reject", RejectionReason.POLICY, detail)
         return None
 
@@ -136,7 +157,10 @@ class DiscouragedTokenPolicySizingRule(RiskRule):
             return None
         if ctx.token_policy_status != "discouraged":
             return None
-        if ctx.token_policy_size_multiplier <= 0 or ctx.token_policy_size_multiplier >= Decimal("1"):
+        if (
+            ctx.token_policy_size_multiplier <= 0
+            or ctx.token_policy_size_multiplier >= Decimal("1")
+        ):
             return None
         reduced = (ctx.suggested_size * ctx.token_policy_size_multiplier).quantize(
             Decimal("0.00000001")
@@ -154,7 +178,11 @@ class TokenStrategyPositionOverrideRule(RiskRule):
     name = "token_strategy_position_override"
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
-        if ctx.action != "buy" or ctx.token_policy_max_position_cents <= 0 or ctx.mid_price <= 0:
+        if (
+            ctx.action != "buy"
+            or ctx.token_policy_max_position_cents <= 0
+            or ctx.mid_price <= 0
+        ):
             return None
         notional = ctx.suggested_size * ctx.mid_price
         projected = Decimal(str(ctx.current_strategy_token_exposure_cents)) + notional
@@ -187,13 +215,25 @@ class CapitalBucketRule(RiskRule):
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
         if ctx.bucket is None:
-            return RuleResult(self.name, "reject", RejectionReason.POLICY, "No strategy capital bucket")
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.POLICY,
+                "No strategy capital bucket",
+            )
         buying_power = int(ctx.bucket["available_buying_power_cents"])
         notional = int((ctx.suggested_size * ctx.mid_price).quantize(Decimal("1")))
         if notional > buying_power:
             if buying_power <= 0:
-                return RuleResult(self.name, "reject", RejectionReason.LIMIT_EXCEEDED, "No buying power")
-            reduced = (Decimal(buying_power) / ctx.mid_price).quantize(Decimal("0.00000001"))
+                return RuleResult(
+                    self.name,
+                    "reject",
+                    RejectionReason.LIMIT_EXCEEDED,
+                    "No buying power",
+                )
+            reduced = (Decimal(buying_power) / ctx.mid_price).quantize(
+                Decimal("0.00000001")
+            )
             return RuleResult(
                 self.name,
                 "reduce_size",
@@ -245,7 +285,12 @@ class MaxPositionSizeRule(RiskRule):
         if projected > self._max_cents:
             allowed = max(0, self._max_cents - locked)
             if allowed <= 0:
-                return RuleResult(self.name, "reject", RejectionReason.POSITION_CAP, "Max position size reached")
+                return RuleResult(
+                    self.name,
+                    "reject",
+                    RejectionReason.POSITION_CAP,
+                    "Max position size reached",
+                )
             reduced = (Decimal(allowed) / ctx.mid_price).quantize(Decimal("0.00000001"))
             return RuleResult(
                 self.name,
@@ -309,14 +354,20 @@ class MaxStrategyExposureRule(RiskRule):
     name = "max_strategy_exposure"
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
-        if ctx.action != "buy" or ctx.max_strategy_exposure_cents <= 0 or ctx.mid_price <= 0:
+        if (
+            ctx.action != "buy"
+            or ctx.max_strategy_exposure_cents <= 0
+            or ctx.mid_price <= 0
+        ):
             return None
         notional = ctx.suggested_size * ctx.mid_price
         projected = Decimal(str(ctx.current_strategy_exposure_cents)) + notional
         limit = Decimal(str(ctx.max_strategy_exposure_cents))
         if projected <= limit:
             return None
-        allowed_notional = max(Decimal("0"), limit - Decimal(str(ctx.current_strategy_exposure_cents)))
+        allowed_notional = max(
+            Decimal("0"), limit - Decimal(str(ctx.current_strategy_exposure_cents))
+        )
         if allowed_notional <= 0:
             return RuleResult(
                 self.name,
@@ -338,14 +389,20 @@ class MaxTokenExposureRule(RiskRule):
     name = "max_token_exposure"
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
-        if ctx.action != "buy" or ctx.max_token_exposure_cents <= 0 or ctx.mid_price <= 0:
+        if (
+            ctx.action != "buy"
+            or ctx.max_token_exposure_cents <= 0
+            or ctx.mid_price <= 0
+        ):
             return None
         notional = ctx.suggested_size * ctx.mid_price
         projected = Decimal(str(ctx.current_token_exposure_cents)) + notional
         limit = Decimal(str(ctx.max_token_exposure_cents))
         if projected <= limit:
             return None
-        allowed_notional = max(Decimal("0"), limit - Decimal(str(ctx.current_token_exposure_cents)))
+        allowed_notional = max(
+            Decimal("0"), limit - Decimal(str(ctx.current_token_exposure_cents))
+        )
         if allowed_notional <= 0:
             return RuleResult(
                 self.name,
@@ -386,7 +443,9 @@ class GlobalDailyLossGuardRule(RiskRule):
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
         if ctx.global_daily_loss_limit_pct <= 0 or ctx.total_capital_cents <= 0:
             return None
-        loss_pct = (Decimal(str(ctx.daily_loss_cents)) * Decimal("100")) / Decimal(str(ctx.total_capital_cents))
+        loss_pct = (Decimal(str(ctx.daily_loss_cents)) * Decimal("100")) / Decimal(
+            str(ctx.total_capital_cents)
+        )
         if loss_pct >= ctx.global_daily_loss_limit_pct:
             return RuleResult(
                 self.name,
@@ -404,7 +463,10 @@ class CooldownAfterLossesRule(RiskRule):
     name = "cooldown_after_losses"
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
-        if ctx.recent_loss_count >= ctx.cooldown_loss_threshold and ctx.cooldown_until is not None:
+        if (
+            ctx.recent_loss_count >= ctx.cooldown_loss_threshold
+            and ctx.cooldown_until is not None
+        ):
             if ctx.now < ctx.cooldown_until:
                 return RuleResult(
                     self.name,
@@ -420,7 +482,12 @@ class StaleDataRule(RiskRule):
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
         if any(ctx.stale_flags.values()):
-            return RuleResult(self.name, "reject", RejectionReason.POLICY, f"Stale market data: {ctx.stale_flags}")
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.POLICY,
+                f"Stale market data: {ctx.stale_flags}",
+            )
         return None
 
 
@@ -430,14 +497,20 @@ class ExecutionQualityRule(RiskRule):
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
         if ctx.action != "buy":
             return None
-        if ctx.max_spread_pct_allowed > 0 and ctx.spread_pct > ctx.max_spread_pct_allowed:
+        if (
+            ctx.max_spread_pct_allowed > 0
+            and ctx.spread_pct > ctx.max_spread_pct_allowed
+        ):
             return RuleResult(
                 self.name,
                 "reject",
                 RejectionReason.POLICY,
                 f"Spread too wide ({ctx.spread_pct:.6f} > {ctx.max_spread_pct_allowed:.6f})",
             )
-        if ctx.max_slippage_pct_allowed > 0 and ctx.est_slippage_pct > ctx.max_slippage_pct_allowed:
+        if (
+            ctx.max_slippage_pct_allowed > 0
+            and ctx.est_slippage_pct > ctx.max_slippage_pct_allowed
+        ):
             return RuleResult(
                 self.name,
                 "reject",

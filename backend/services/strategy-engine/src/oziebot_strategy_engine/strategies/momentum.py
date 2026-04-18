@@ -1,19 +1,18 @@
 """Momentum trading strategy - buy when price is rising, sell when falling."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from uuid import UUID
 
 from oziebot_domain.strategy import SignalType, StrategySignal
 from oziebot_domain.trading import Instrument, OrderType, Side
-from oziebot_domain.trading_mode import TradingMode
 from oziebot_strategy_engine.strategy import StrategyContext, TradingStrategy
 
 
 class MomentumStrategy(TradingStrategy):
     """
     Momentum strategy - trades based on price momentum.
-    
+
     Configuration:
     - short_window: Lookback period for short MA
     - long_window: Lookback period for long MA
@@ -46,17 +45,25 @@ class MomentumStrategy(TradingStrategy):
                 f"short_window ({short_window}) must be >= 1 and < long_window ({long_window})"
             )
         if not (0.0 <= strength_threshold <= 1.0):
-            raise ValueError(f"strength_threshold must be 0-1, got {strength_threshold}")
+            raise ValueError(
+                f"strength_threshold must be 0-1, got {strength_threshold}"
+            )
         if not (0.0 < position_size <= 1.0):
             raise ValueError(f"position_size must be 0-1, got {position_size}")
         if not (0.0 < stop_loss_pct <= 1.0):
             raise ValueError(f"stop_loss_pct must be >0 and <=1, got {stop_loss_pct}")
         if not (0.0 < take_profit_pct <= 1.0):
-            raise ValueError(f"take_profit_pct must be >0 and <=1, got {take_profit_pct}")
+            raise ValueError(
+                f"take_profit_pct must be >0 and <=1, got {take_profit_pct}"
+            )
         if not (0.0 < trailing_stop_pct <= 1.0):
-            raise ValueError(f"trailing_stop_pct must be >0 and <=1, got {trailing_stop_pct}")
+            raise ValueError(
+                f"trailing_stop_pct must be >0 and <=1, got {trailing_stop_pct}"
+            )
         if not (1 <= max_hold_minutes <= 10_080):
-            raise ValueError(f"max_hold_minutes must be between 1 and 10080, got {max_hold_minutes}")
+            raise ValueError(
+                f"max_hold_minutes must be between 1 and 10080, got {max_hold_minutes}"
+            )
 
         return True
 
@@ -84,8 +91,10 @@ class MomentumStrategy(TradingStrategy):
         # Need at least long_window candles for a valid signal
         if len(closes) < long_window:
             return self._hold_signal(
-                context, signal_id, correlation_id,
-                f"Insufficient history: {len(closes)}/{long_window} candles"
+                context,
+                signal_id,
+                correlation_id,
+                f"Insufficient history: {len(closes)}/{long_window} candles",
             )
 
         short_ma = sum(closes[-short_window:]) / short_window
@@ -114,26 +123,37 @@ class MomentumStrategy(TradingStrategy):
         if momentum > strength_threshold:
             if position.quantity <= 0:
                 return self._buy_signal(
-                    context, signal_id, correlation_id, config,
+                    context,
+                    signal_id,
+                    correlation_id,
+                    config,
                     f"MA crossover bullish: short_ma={short_ma:.2f} long_ma={long_ma:.2f} momentum={momentum:.3%}",
                 )
             return self._hold_signal(
-                context, signal_id, correlation_id,
-                f"Already long. momentum={momentum:.3%}"
+                context,
+                signal_id,
+                correlation_id,
+                f"Already long. momentum={momentum:.3%}",
             )
         elif momentum < -strength_threshold:
             if position.quantity > 0:
                 return self._close_signal(
-                    context, signal_id, correlation_id,
-                    f"MA crossover bearish: momentum={momentum:.3%}"
+                    context,
+                    signal_id,
+                    correlation_id,
+                    f"MA crossover bearish: momentum={momentum:.3%}",
                 )
             return self._hold_signal(
-                context, signal_id, correlation_id,
-                f"No position to close. momentum={momentum:.3%}"
+                context,
+                signal_id,
+                correlation_id,
+                f"No position to close. momentum={momentum:.3%}",
             )
         else:
             return self._hold_signal(
-                context, signal_id, correlation_id,
+                context,
+                signal_id,
+                correlation_id,
                 f"Neutral momentum={momentum:.3%} (threshold ±{strength_threshold:.3%})",
             )
 
@@ -290,7 +310,12 @@ class MomentumStrategy(TradingStrategy):
         return None
 
     def _buy_signal(
-        self, context: StrategyContext, signal_id: UUID, correlation_id: UUID, config: dict, reason: str
+        self,
+        context: StrategyContext,
+        signal_id: UUID,
+        correlation_id: UUID,
+        config: dict,
+        reason: str,
     ) -> StrategySignal:
         market = context.market_snapshot
         position_size = config.get("position_size", 0.1)
@@ -316,7 +341,11 @@ class MomentumStrategy(TradingStrategy):
         )
 
     def _sell_signal(
-        self, context: StrategyContext, signal_id: UUID, correlation_id: UUID, reason: str
+        self,
+        context: StrategyContext,
+        signal_id: UUID,
+        correlation_id: UUID,
+        reason: str,
     ) -> StrategySignal:
         market = context.market_snapshot
 
@@ -337,7 +366,11 @@ class MomentumStrategy(TradingStrategy):
         )
 
     def _hold_signal(
-        self, context: StrategyContext, signal_id: UUID, correlation_id: UUID, reason: str
+        self,
+        context: StrategyContext,
+        signal_id: UUID,
+        correlation_id: UUID,
+        reason: str,
     ) -> StrategySignal:
         market = context.market_snapshot
 
@@ -355,7 +388,11 @@ class MomentumStrategy(TradingStrategy):
         )
 
     def _close_signal(
-        self, context: StrategyContext, signal_id: UUID, correlation_id: UUID, reason: str
+        self,
+        context: StrategyContext,
+        signal_id: UUID,
+        correlation_id: UUID,
+        reason: str,
     ) -> StrategySignal:
         market = context.market_snapshot
 

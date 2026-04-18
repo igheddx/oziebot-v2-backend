@@ -7,11 +7,18 @@ from uuid import uuid4
 
 from sqlalchemy import create_engine, text
 
-from oziebot_domain.execution import ExecutionFill, ExecutionOrderStatus, ExecutionRequest, ExecutionSubmission
+from oziebot_domain.execution import (
+    ExecutionOrderStatus,
+    ExecutionRequest,
+    ExecutionSubmission,
+)
 from oziebot_domain.risk import RiskDecision, RiskOutcome
 from oziebot_domain.trading import OrderType, Side, Venue
 from oziebot_domain.trading_mode import TradingMode
-from oziebot_execution_engine.adapters import LiveCoinbaseExecutionAdapter, PaperExecutionAdapter
+from oziebot_execution_engine.adapters import (
+    LiveCoinbaseExecutionAdapter,
+    PaperExecutionAdapter,
+)
 from oziebot_execution_engine.config import Settings
 from oziebot_execution_engine.service import ExecutionService
 from oziebot_execution_engine.state_machine import ensure_transition
@@ -40,11 +47,15 @@ class FakeLiveClient:
         self._submission = submission
         self.place_calls = 0
 
-    def place_order(self, request: ExecutionRequest, *, api_key_name: str, private_key_pem: str) -> ExecutionSubmission:
+    def place_order(
+        self, request: ExecutionRequest, *, api_key_name: str, private_key_pem: str
+    ) -> ExecutionSubmission:
         self.place_calls += 1
         return self._submission
 
-    def cancel_order(self, venue_order_id: str, *, api_key_name: str, private_key_pem: str) -> dict:
+    def cancel_order(
+        self, venue_order_id: str, *, api_key_name: str, private_key_pem: str
+    ) -> dict:
         return {"cancelled": [venue_order_id]}
 
 
@@ -55,7 +66,9 @@ def _compact_id(value: str) -> str:
 def _setup_db(db_path: Path) -> None:
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     with eng.begin() as conn:
-        conn.execute(text("CREATE TABLE users (id TEXT PRIMARY KEY, is_active BOOLEAN NOT NULL)"))
+        conn.execute(
+            text("CREATE TABLE users (id TEXT PRIMARY KEY, is_active BOOLEAN NOT NULL)")
+        )
         conn.execute(text("CREATE TABLE tenants (id TEXT PRIMARY KEY, slug TEXT)"))
         conn.execute(
             text(
@@ -143,18 +156,38 @@ def _setup_db(db_path: Path) -> None:
         )
 
 
-def _seed_bucket(db_path: Path, user_id: str, tenant_id: str, strategy_id: str, trading_mode: str, available_cash_cents: int = 3_000_000) -> None:
+def _seed_bucket(
+    db_path: Path,
+    user_id: str,
+    tenant_id: str,
+    strategy_id: str,
+    trading_mode: str,
+    available_cash_cents: int = 3_000_000,
+) -> None:
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     now = datetime.now(UTC).isoformat()
     with eng.begin() as conn:
-        conn.execute(text("INSERT OR IGNORE INTO users (id, is_active) VALUES (:id, 1)"), {"id": _compact_id(user_id)})
-        conn.execute(text("INSERT OR IGNORE INTO tenants (id, slug) VALUES (:id, 'tenant')"), {"id": _compact_id(tenant_id)})
+        conn.execute(
+            text("INSERT OR IGNORE INTO users (id, is_active) VALUES (:id, 1)"),
+            {"id": _compact_id(user_id)},
+        )
+        conn.execute(
+            text("INSERT OR IGNORE INTO tenants (id, slug) VALUES (:id, 'tenant')"),
+            {"id": _compact_id(tenant_id)},
+        )
         conn.execute(
             text(
                 "INSERT INTO strategy_capital_buckets (id, user_id, strategy_id, trading_mode, assigned_capital_cents, available_cash_cents, reserved_cash_cents, locked_capital_cents, realized_pnl_cents, unrealized_pnl_cents, available_buying_power_cents, version, created_at, updated_at) "
                 "VALUES (:id, :user_id, :strategy_id, :trading_mode, :available_cash_cents, :available_cash_cents, 0, 0, 0, 0, :available_cash_cents, 1, :now, :now)"
             ),
-            {"id": str(uuid4()), "user_id": _compact_id(user_id), "strategy_id": strategy_id, "trading_mode": trading_mode, "available_cash_cents": available_cash_cents, "now": now},
+            {
+                "id": str(uuid4()),
+                "user_id": _compact_id(user_id),
+                "strategy_id": strategy_id,
+                "trading_mode": trading_mode,
+                "available_cash_cents": available_cash_cents,
+                "now": now,
+            },
         )
 
 
@@ -258,15 +291,25 @@ def _request(
     )
 
 
-def _service(db_path: Path, redis: FakeRedis, live_submission: ExecutionSubmission | None = None) -> tuple[ExecutionService, FakeLiveClient]:
+def _service(
+    db_path: Path, redis: FakeRedis, live_submission: ExecutionSubmission | None = None
+) -> tuple[ExecutionService, FakeLiveClient]:
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
     paper = PaperExecutionAdapter(redis, fee_bps=10, slippage_bps=0)
     live_client = FakeLiveClient(
         live_submission
-        or ExecutionSubmission(status=ExecutionOrderStatus.PENDING, venue=Venue.COINBASE, venue_order_id="venue-1")
+        or ExecutionSubmission(
+            status=ExecutionOrderStatus.PENDING,
+            venue=Venue.COINBASE,
+            venue_order_id="venue-1",
+        )
     )
-    live = LiveCoinbaseExecutionAdapter(live_client, credential_loader=lambda tenant_id: ("key", "secret"))
-    return ExecutionService(settings, redis, paper_adapter=paper, live_adapter=live), live_client
+    live = LiveCoinbaseExecutionAdapter(
+        live_client, credential_loader=lambda tenant_id: ("key", "secret")
+    )
+    return ExecutionService(
+        settings, redis, paper_adapter=paper, live_adapter=live
+    ), live_client
 
 
 def _count(db_path: Path, table: str) -> int:
@@ -278,29 +321,53 @@ def _count(db_path: Path, table: str) -> int:
 def _bucket(db_path: Path, user_id: str, strategy_id: str, trading_mode: str):
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     with eng.begin() as conn:
-        return conn.execute(
-            text("SELECT * FROM strategy_capital_buckets WHERE user_id = :user_id AND strategy_id = :strategy_id AND trading_mode = :trading_mode"),
-            {"user_id": _compact_id(user_id), "strategy_id": strategy_id, "trading_mode": trading_mode},
-        ).mappings().first()
+        return (
+            conn.execute(
+                text(
+                    "SELECT * FROM strategy_capital_buckets WHERE user_id = :user_id AND strategy_id = :strategy_id AND trading_mode = :trading_mode"
+                ),
+                {
+                    "user_id": _compact_id(user_id),
+                    "strategy_id": strategy_id,
+                    "trading_mode": trading_mode,
+                },
+            )
+            .mappings()
+            .first()
+        )
 
 
 def _order_state(db_path: Path) -> str:
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     with eng.begin() as conn:
-        return str(conn.execute(text("SELECT state FROM execution_orders LIMIT 1")).scalar_one())
+        return str(
+            conn.execute(
+                text("SELECT state FROM execution_orders LIMIT 1")
+            ).scalar_one()
+        )
 
 
 def _position(db_path: Path) -> dict | None:
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     with eng.begin() as conn:
-        row = conn.execute(text("SELECT * FROM execution_positions LIMIT 1")).mappings().first()
+        row = (
+            conn.execute(text("SELECT * FROM execution_positions LIMIT 1"))
+            .mappings()
+            .first()
+        )
     return dict(row) if row is not None else None
 
 
 def _last_order(db_path: Path) -> dict:
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
     with eng.begin() as conn:
-        row = conn.execute(text("SELECT * FROM execution_orders ORDER BY created_at DESC LIMIT 1")).mappings().one()
+        row = (
+            conn.execute(
+                text("SELECT * FROM execution_orders ORDER BY created_at DESC LIMIT 1")
+            )
+            .mappings()
+            .one()
+        )
     return dict(row)
 
 
@@ -308,7 +375,9 @@ def test_duplicate_intent_prevents_duplicate_order_and_fill(tmp_path: Path):
     db_path = tmp_path / "execution1.sqlite"
     _setup_db(db_path)
     redis = FakeRedis()
-    redis.set("oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}')
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
     user_id = str(uuid4())
     tenant_id = str(uuid4())
     strategy_id = "momentum"
@@ -332,7 +401,9 @@ def test_paper_fills_immediately_while_live_stays_pending(tmp_path: Path):
     db_path = tmp_path / "execution2.sqlite"
     _setup_db(db_path)
     redis = FakeRedis()
-    redis.set("oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}')
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
     user_id = str(uuid4())
     tenant_id = str(uuid4())
     strategy_id = "momentum"
@@ -341,8 +412,12 @@ def test_paper_fills_immediately_while_live_stays_pending(tmp_path: Path):
 
     service, live_client = _service(db_path, redis)
 
-    paper = service.process_request(_request(user_id, tenant_id, strategy_id, TradingMode.PAPER))
-    live = service.process_request(_request(user_id, tenant_id, strategy_id, TradingMode.LIVE))
+    paper = service.process_request(
+        _request(user_id, tenant_id, strategy_id, TradingMode.PAPER)
+    )
+    live = service.process_request(
+        _request(user_id, tenant_id, strategy_id, TradingMode.LIVE)
+    )
 
     assert paper.state == ExecutionOrderStatus.FILLED
     assert live.state == ExecutionOrderStatus.PENDING
@@ -370,7 +445,9 @@ def test_live_duplicate_does_not_resubmit_order(tmp_path: Path):
     db_path = tmp_path / "execution3.sqlite"
     _setup_db(db_path)
     redis = FakeRedis()
-    redis.set("oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}')
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
     user_id = str(uuid4())
     tenant_id = str(uuid4())
     strategy_id = "momentum"
@@ -397,12 +474,25 @@ def test_paper_sell_closes_position_and_records_trade(tmp_path: Path):
     _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
     service, _ = _service(db_path, redis)
 
-    redis.set("oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}')
-    buy = service.process_request(_request(user_id, tenant_id, strategy_id, TradingMode.PAPER))
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    buy = service.process_request(
+        _request(user_id, tenant_id, strategy_id, TradingMode.PAPER)
+    )
 
-    redis.set("oziebot:md:bbo:BTC-USD", '{"best_bid_price":"51000","best_ask_price":"51010"}')
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"51000","best_ask_price":"51010"}'
+    )
     sell = service.process_request(
-        _request(user_id, tenant_id, strategy_id, TradingMode.PAPER, side=Side.SELL, price_hint=Decimal("51000"))
+        _request(
+            user_id,
+            tenant_id,
+            strategy_id,
+            TradingMode.PAPER,
+            side=Side.SELL,
+            price_hint=Decimal("51000"),
+        )
     )
 
     assert buy.state == ExecutionOrderStatus.FILLED
@@ -422,14 +512,18 @@ def test_day_trading_max_position_age_auto_closes_in_paper(tmp_path: Path):
     db_path = tmp_path / "execution-age.sqlite"
     _setup_db(db_path)
     redis = FakeRedis()
-    redis.set("oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}')
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
     user_id = str(uuid4())
     tenant_id = str(uuid4())
     strategy_id = "day_trading"
     _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
     service, _ = _service(db_path, redis)
 
-    buy = service.process_request(_request(user_id, tenant_id, strategy_id, TradingMode.PAPER))
+    buy = service.process_request(
+        _request(user_id, tenant_id, strategy_id, TradingMode.PAPER)
+    )
     assert buy.state == ExecutionOrderStatus.FILLED
 
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
@@ -439,7 +533,11 @@ def test_day_trading_max_position_age_auto_closes_in_paper(tmp_path: Path):
             text(
                 "UPDATE execution_positions SET last_trade_at = :aged_at WHERE strategy_id = :strategy_id AND trading_mode = :trading_mode"
             ),
-            {"aged_at": aged_at, "strategy_id": strategy_id, "trading_mode": TradingMode.PAPER.value},
+            {
+                "aged_at": aged_at,
+                "strategy_id": strategy_id,
+                "trading_mode": TradingMode.PAPER.value,
+            },
         )
 
     enforced = service.enforce_runtime_controls()
@@ -457,7 +555,9 @@ def test_execution_rejects_blocked_token_strategy_policy(tmp_path: Path):
     db_path = tmp_path / "execution-token-policy-blocked.sqlite"
     _setup_db(db_path)
     redis = FakeRedis()
-    redis.set("oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}')
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
     user_id = str(uuid4())
     tenant_id = str(uuid4())
     strategy_id = "momentum"
@@ -470,7 +570,9 @@ def test_execution_rejects_blocked_token_strategy_policy(tmp_path: Path):
     )
     service, _ = _service(db_path, redis)
 
-    result = service.process_request(_request(user_id, tenant_id, strategy_id, TradingMode.PAPER))
+    result = service.process_request(
+        _request(user_id, tenant_id, strategy_id, TradingMode.PAPER)
+    )
 
     assert result.state == ExecutionOrderStatus.FAILED
     order = _last_order(db_path)
@@ -483,7 +585,9 @@ def test_execution_reduces_discouraged_token_strategy_size(tmp_path: Path):
     db_path = tmp_path / "execution-token-policy-discouraged.sqlite"
     _setup_db(db_path)
     redis = FakeRedis()
-    redis.set("oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}')
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
     user_id = str(uuid4())
     tenant_id = str(uuid4())
     strategy_id = "momentum"
@@ -497,7 +601,9 @@ def test_execution_reduces_discouraged_token_strategy_size(tmp_path: Path):
     service, _ = _service(db_path, redis)
 
     result = service.process_request(
-        _request(user_id, tenant_id, strategy_id, TradingMode.PAPER, quantity=Decimal("1"))
+        _request(
+            user_id, tenant_id, strategy_id, TradingMode.PAPER, quantity=Decimal("1")
+        )
     )
 
     assert result.state == ExecutionOrderStatus.FILLED
@@ -512,7 +618,9 @@ def test_execution_applies_token_strategy_position_cap(tmp_path: Path):
     db_path = tmp_path / "execution-token-policy-cap.sqlite"
     _setup_db(db_path)
     redis = FakeRedis()
-    redis.set("oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}')
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
     user_id = str(uuid4())
     tenant_id = str(uuid4())
     strategy_id = "momentum"
@@ -525,7 +633,9 @@ def test_execution_applies_token_strategy_position_cap(tmp_path: Path):
     service, _ = _service(db_path, redis)
 
     result = service.process_request(
-        _request(user_id, tenant_id, strategy_id, TradingMode.PAPER, quantity=Decimal("1"))
+        _request(
+            user_id, tenant_id, strategy_id, TradingMode.PAPER, quantity=Decimal("1")
+        )
     )
 
     assert result.state == ExecutionOrderStatus.FILLED

@@ -10,7 +10,12 @@ from uuid import UUID
 
 from oziebot_domain.strategy import SignalType, StrategySignal
 from oziebot_domain.trading import Instrument, OrderType, Side
-from oziebot_strategy_engine.strategy import MarketSnapshot, PositionState, StrategyContext, TradingStrategy
+from oziebot_strategy_engine.strategy import (
+    MarketSnapshot,
+    PositionState,
+    StrategyContext,
+    TradingStrategy,
+)
 
 
 class ReversionStrategy(TradingStrategy):
@@ -41,7 +46,6 @@ class ReversionStrategy(TradingStrategy):
         take_profit_pct = float(config.get("take_profit_pct", 0.045))
         min_bandwidth_pct = float(config.get("min_bandwidth_pct", 0.015))
         max_hold_minutes = int(config.get("max_hold_minutes", 180))
-        use_trend_filter = bool(config.get("use_trend_filter", False))
         ema_long_window = int(config.get("ema_long_window", 200))
 
         if not (5 <= band_window <= 200):
@@ -51,7 +55,9 @@ class ReversionStrategy(TradingStrategy):
         if not (0.1 <= entry_zscore <= 5.0):
             raise ValueError(f"entry_zscore must be 0.1-5.0, got {entry_zscore}")
         if not (0.0 <= exit_zscore < entry_zscore):
-            raise ValueError(f"exit_zscore must be >=0 and < entry_zscore ({entry_zscore}), got {exit_zscore}")
+            raise ValueError(
+                f"exit_zscore must be >=0 and < entry_zscore ({entry_zscore}), got {exit_zscore}"
+            )
         if not (1 <= rsi_buy_threshold < rsi_exit_threshold < rsi_sell_threshold <= 99):
             raise ValueError(
                 "RSI thresholds invalid: "
@@ -62,13 +68,21 @@ class ReversionStrategy(TradingStrategy):
         if not (0.001 <= stop_loss_pct <= 1.0):
             raise ValueError(f"stop_loss_pct must be 0.001-1.0, got {stop_loss_pct}")
         if not (0.001 <= take_profit_pct <= 1.0):
-            raise ValueError(f"take_profit_pct must be 0.001-1.0, got {take_profit_pct}")
+            raise ValueError(
+                f"take_profit_pct must be 0.001-1.0, got {take_profit_pct}"
+            )
         if not (0.0 <= min_bandwidth_pct <= 1.0):
-            raise ValueError(f"min_bandwidth_pct must be 0.0-1.0, got {min_bandwidth_pct}")
+            raise ValueError(
+                f"min_bandwidth_pct must be 0.0-1.0, got {min_bandwidth_pct}"
+            )
         if not (1 <= max_hold_minutes <= 10_080):
-            raise ValueError(f"max_hold_minutes must be between 1 and 10080, got {max_hold_minutes}")
+            raise ValueError(
+                f"max_hold_minutes must be between 1 and 10080, got {max_hold_minutes}"
+            )
         if not (5 <= ema_long_window <= 500):
-            raise ValueError(f"ema_long_window must be between 5 and 500, got {ema_long_window}")
+            raise ValueError(
+                f"ema_long_window must be between 5 and 500, got {ema_long_window}"
+            )
 
         return True
 
@@ -98,7 +112,9 @@ class ReversionStrategy(TradingStrategy):
         ema_long_window = int(config.get("ema_long_window", 200))
 
         closes = [float(value) for value in market.metadata.get("candle_closes", [])]
-        required = max(band_window, rsi_period + 1, ema_long_window if use_trend_filter else 0)
+        required = max(
+            band_window, rsi_period + 1, ema_long_window if use_trend_filter else 0
+        )
         if len(closes) < required:
             return self._hold_signal(
                 context,
@@ -192,7 +208,9 @@ class ReversionStrategy(TradingStrategy):
             )
 
         if zscore <= -entry_zscore and rsi_value <= rsi_buy_threshold and fear_buy_ok:
-            confidence = min(0.9, 0.65 + abs(zscore) * 0.05 + max(0.0, (50 - rsi_value) / 100))
+            confidence = min(
+                0.9, 0.65 + abs(zscore) * 0.05 + max(0.0, (50 - rsi_value) / 100)
+            )
             return self._buy_signal(
                 context,
                 signal_id,

@@ -25,7 +25,10 @@ class SmsAdapter:
             log.info("sms noop destination=%s message=%s", destination, message)
             return
         with httpx.Client(timeout=10) as client:
-            r = client.post(self._webhook_url, json={"to": destination, "message": message, "payload": payload})
+            r = client.post(
+                self._webhook_url,
+                json={"to": destination, "message": message, "payload": payload},
+            )
             r.raise_for_status()
 
 

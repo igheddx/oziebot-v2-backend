@@ -39,13 +39,17 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("user_id", "deterministic_fingerprint", name="uq_backtest_run_user_fingerprint"),
+        sa.UniqueConstraint(
+            "user_id", "deterministic_fingerprint", name="uq_backtest_run_user_fingerprint"
+        ),
     )
     op.create_index("ix_backtest_runs_user_id", "backtest_runs", ["user_id"])
     op.create_index("ix_backtest_runs_tenant_id", "backtest_runs", ["tenant_id"])
     op.create_index("ix_backtest_runs_strategy_id", "backtest_runs", ["strategy_id"])
     op.create_index("ix_backtest_runs_trading_mode", "backtest_runs", ["trading_mode"])
-    op.create_index("ix_backtest_runs_deterministic_fingerprint", "backtest_runs", ["deterministic_fingerprint"])
+    op.create_index(
+        "ix_backtest_runs_deterministic_fingerprint", "backtest_runs", ["deterministic_fingerprint"]
+    )
     op.create_index("ix_backtest_runs_started_at", "backtest_runs", ["started_at"])
 
     op.create_table(
@@ -97,21 +101,39 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_backtest_performance_snapshots_run_id", "backtest_performance_snapshots", ["run_id"])
-    op.create_index("ix_backtest_performance_snapshots_user_id", "backtest_performance_snapshots", ["user_id"])
     op.create_index(
-        "ix_backtest_performance_snapshots_strategy_id", "backtest_performance_snapshots", ["strategy_id"]
+        "ix_backtest_performance_snapshots_run_id", "backtest_performance_snapshots", ["run_id"]
     )
     op.create_index(
-        "ix_backtest_performance_snapshots_trading_mode", "backtest_performance_snapshots", ["trading_mode"]
+        "ix_backtest_performance_snapshots_user_id", "backtest_performance_snapshots", ["user_id"]
     )
     op.create_index(
-        "ix_backtest_performance_snapshots_token_symbol", "backtest_performance_snapshots", ["token_symbol"]
+        "ix_backtest_performance_snapshots_strategy_id",
+        "backtest_performance_snapshots",
+        ["strategy_id"],
     )
-    op.create_index("ix_backtest_performance_snapshots_scope", "backtest_performance_snapshots", ["scope"])
-    op.create_index("ix_backtest_performance_snapshots_scope_key", "backtest_performance_snapshots", ["scope_key"])
     op.create_index(
-        "ix_backtest_performance_snapshots_created_at", "backtest_performance_snapshots", ["created_at"]
+        "ix_backtest_performance_snapshots_trading_mode",
+        "backtest_performance_snapshots",
+        ["trading_mode"],
+    )
+    op.create_index(
+        "ix_backtest_performance_snapshots_token_symbol",
+        "backtest_performance_snapshots",
+        ["token_symbol"],
+    )
+    op.create_index(
+        "ix_backtest_performance_snapshots_scope", "backtest_performance_snapshots", ["scope"]
+    )
+    op.create_index(
+        "ix_backtest_performance_snapshots_scope_key",
+        "backtest_performance_snapshots",
+        ["scope_key"],
+    )
+    op.create_index(
+        "ix_backtest_performance_snapshots_created_at",
+        "backtest_performance_snapshots",
+        ["created_at"],
     )
 
     op.create_table(
@@ -130,12 +152,30 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_strategy_analytics_artifacts_run_id", "strategy_analytics_artifacts", ["run_id"])
-    op.create_index("ix_strategy_analytics_artifacts_user_id", "strategy_analytics_artifacts", ["user_id"])
-    op.create_index("ix_strategy_analytics_artifacts_strategy_id", "strategy_analytics_artifacts", ["strategy_id"])
-    op.create_index("ix_strategy_analytics_artifacts_trading_mode", "strategy_analytics_artifacts", ["trading_mode"])
-    op.create_index("ix_strategy_analytics_artifacts_token_symbol", "strategy_analytics_artifacts", ["token_symbol"])
-    op.create_index("ix_strategy_analytics_artifacts_created_at", "strategy_analytics_artifacts", ["created_at"])
+    op.create_index(
+        "ix_strategy_analytics_artifacts_run_id", "strategy_analytics_artifacts", ["run_id"]
+    )
+    op.create_index(
+        "ix_strategy_analytics_artifacts_user_id", "strategy_analytics_artifacts", ["user_id"]
+    )
+    op.create_index(
+        "ix_strategy_analytics_artifacts_strategy_id",
+        "strategy_analytics_artifacts",
+        ["strategy_id"],
+    )
+    op.create_index(
+        "ix_strategy_analytics_artifacts_trading_mode",
+        "strategy_analytics_artifacts",
+        ["trading_mode"],
+    )
+    op.create_index(
+        "ix_strategy_analytics_artifacts_token_symbol",
+        "strategy_analytics_artifacts",
+        ["token_symbol"],
+    )
+    op.create_index(
+        "ix_strategy_analytics_artifacts_created_at", "strategy_analytics_artifacts", ["created_at"]
+    )
 
 
 def downgrade() -> None:

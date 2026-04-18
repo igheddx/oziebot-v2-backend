@@ -61,7 +61,9 @@ def get_alert_config(user: CurrentUser, db: DbSession) -> AlertsConfigOut:
 
 
 @router.put("/channels/{channel}", response_model=AlertChannelConfigOut)
-def upsert_channel(channel: str, body: AlertChannelConfigUpsert, user: CurrentUser, db: DbSession) -> AlertChannelConfigOut:
+def upsert_channel(
+    channel: str, body: AlertChannelConfigUpsert, user: CurrentUser, db: DbSession
+) -> AlertChannelConfigOut:
     if channel not in {c.value for c in NotificationChannel}:
         raise HTTPException(status_code=400, detail="Unsupported channel")
     row = (

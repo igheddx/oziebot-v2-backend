@@ -18,7 +18,11 @@ from oziebot_domain.strategy import SignalType, StrategySignal
 from oziebot_domain.tenant import TenantId
 from oziebot_domain.trading_mode import TradingMode
 from oziebot_strategy_engine.registry import StrategyRegistry
-from oziebot_strategy_engine.strategy import MarketSnapshot, PositionState, StrategyContext
+from oziebot_strategy_engine.strategy import (
+    MarketSnapshot,
+    PositionState,
+    StrategyContext,
+)
 
 log = logging.getLogger("strategy-engine.runner")
 
@@ -52,7 +56,9 @@ class StrategyScheduleState:
 
 
 class StrategyRunner:
-    def __init__(self, *, engine: Engine, redis_client, candle_granularity_sec: int = 60):
+    def __init__(
+        self, *, engine: Engine, redis_client, candle_granularity_sec: int = 60
+    ):
         self._engine = engine
         self._redis = redis_client
         self._schedule = StrategyScheduleState()
@@ -69,15 +75,29 @@ class StrategyRunner:
             tenant_id_raw = row.get("tenant_id")
             if tenant_id_raw is None:
                 continue
-            tenant_id = tenant_id_raw if isinstance(tenant_id_raw, uuid.UUID) else TenantId(str(tenant_id_raw))
+            tenant_id = (
+                tenant_id_raw
+                if isinstance(tenant_id_raw, uuid.UUID)
+                else TenantId(str(tenant_id_raw))
+            )
             user_config = row.get("config") or {}
             if isinstance(user_config, str):
                 user_config = json.loads(user_config)
 
             platform_cfg = self._load_platform_strategy_config(strategy_name)
-            strategy_params = platform_cfg.get("strategy_params") if isinstance(platform_cfg, dict) else {}
-            signal_rules = platform_cfg.get("signal_rules") if isinstance(platform_cfg, dict) else {}
-            risk_caps = platform_cfg.get("risk_caps") if isinstance(platform_cfg, dict) else {}
+            strategy_params = (
+                platform_cfg.get("strategy_params")
+                if isinstance(platform_cfg, dict)
+                else {}
+            )
+            signal_rules = (
+                platform_cfg.get("signal_rules")
+                if isinstance(platform_cfg, dict)
+                else {}
+            )
+            risk_caps = (
+                platform_cfg.get("risk_caps") if isinstance(platform_cfg, dict) else {}
+            )
             if not isinstance(strategy_params, dict):
                 strategy_params = {}
             if not isinstance(signal_rules, dict):
@@ -93,7 +113,9 @@ class StrategyRunner:
             if not allowed_symbols:
                 continue
 
-            symbols = self._resolve_symbols(config=config, allowed_symbols=allowed_symbols)
+            symbols = self._resolve_symbols(
+                config=config, allowed_symbols=allowed_symbols
+            )
             if not symbols:
                 continue
 
@@ -142,7 +164,9 @@ class StrategyRunner:
                     run_id = uuid.uuid4()
                     trace_id = str(run_id)
                     try:
-                        policy_reason = self._token_policy_suppression_reason(token_policy)
+                        policy_reason = self._token_policy_suppression_reason(
+                            token_policy
+                        )
                         if policy_reason is not None:
                             self._persist_run(
                                 run_id=run_id,
@@ -205,7 +229,9 @@ class StrategyRunner:
                             position_state=position_state,
                             config=config,
                         )
-                        signal = self._apply_token_policy_to_signal(signal=signal, token_policy=token_policy)
+                        signal = self._apply_token_policy_to_signal(
+                            signal=signal, token_policy=token_policy
+                        )
                         suppress_reason = self._suppression_reason(
                             user_id=user_id,
                             strategy_name=strategy_name,
@@ -229,7 +255,9 @@ class StrategyRunner:
                                     "suppressed": True,
                                     "suppression_reason": suppress_reason,
                                     "confidence": float(signal.confidence),
-                                    "token_policy": (signal.metadata or {}).get("token_policy"),
+                                    "token_policy": (signal.metadata or {}).get(
+                                        "token_policy"
+                                    ),
                                 },
                                 started_at=now,
                                 completed_at=datetime.now(UTC),
@@ -267,7 +295,9 @@ class StrategyRunner:
                             trace_id=trace_id,
                             metadata={
                                 "confidence": float(signal.confidence),
-                                "token_policy": (signal.metadata or {}).get("token_policy"),
+                                "token_policy": (signal.metadata or {}).get(
+                                    "token_policy"
+                                ),
                             },
                             started_at=now,
                             completed_at=datetime.now(UTC),
@@ -277,7 +307,10 @@ class StrategyRunner:
                         push_json(
                             self._redis,
                             q,
-                            {"signal": strategy_signal_to_json(event), "trace_id": trace_id},
+                            {
+                                "signal": strategy_signal_to_json(event),
+                                "trace_id": trace_id,
+                            },
                         )
                         processed += 1
                         log.info(
@@ -367,14 +400,18 @@ class StrategyRunner:
             """
         )
         with self._engine.begin() as conn:
-            row = conn.execute(
-                stmt,
-                {
-                    "user_id": user_id,
-                    "strategy_name": strategy_name,
-                    "trading_mode": trading_mode,
-                },
-            ).mappings().first()
+            row = (
+                conn.execute(
+                    stmt,
+                    {
+                        "user_id": user_id,
+                        "strategy_name": strategy_name,
+                        "trading_mode": trading_mode,
+                    },
+                )
+                .mappings()
+                .first()
+            )
         if not row:
             return None
         ts = row.get("last_ts")
@@ -408,15 +445,19 @@ class StrategyRunner:
             """
         )
         with self._engine.begin() as conn:
-            row = conn.execute(
-                stmt,
-                {
-                    "user_id": user_id,
-                    "strategy_name": strategy_name,
-                    "trading_mode": trading_mode,
-                    "day_start": day_start,
-                },
-            ).mappings().first()
+            row = (
+                conn.execute(
+                    stmt,
+                    {
+                        "user_id": user_id,
+                        "strategy_name": strategy_name,
+                        "trading_mode": trading_mode,
+                        "day_start": day_start,
+                    },
+                )
+                .mappings()
+                .first()
+            )
         return int(row["c"]) if row and row.get("c") is not None else 0
 
     def _open_positions_count(
@@ -437,14 +478,18 @@ class StrategyRunner:
             """
         )
         with self._engine.begin() as conn:
-            row = conn.execute(
-                stmt,
-                {
-                    "user_id": user_id,
-                    "strategy_name": strategy_name,
-                    "trading_mode": trading_mode,
-                },
-            ).mappings().first()
+            row = (
+                conn.execute(
+                    stmt,
+                    {
+                        "user_id": user_id,
+                        "strategy_name": strategy_name,
+                        "trading_mode": trading_mode,
+                    },
+                )
+                .mappings()
+                .first()
+            )
         return int(row["c"]) if row and row.get("c") is not None else 0
 
     def _bucket_snapshot(
@@ -465,17 +510,23 @@ class StrategyRunner:
             """
         )
         with self._engine.begin() as conn:
-            row = conn.execute(
-                stmt,
-                {
-                    "user_id": user_id,
-                    "strategy_name": strategy_name,
-                    "trading_mode": trading_mode,
-                },
-            ).mappings().first()
+            row = (
+                conn.execute(
+                    stmt,
+                    {
+                        "user_id": user_id,
+                        "strategy_name": strategy_name,
+                        "trading_mode": trading_mode,
+                    },
+                )
+                .mappings()
+                .first()
+            )
         if not row:
             return None
-        return int(row.get("assigned_capital_cents") or 0), int(row.get("realized_pnl_cents") or 0)
+        return int(row.get("assigned_capital_cents") or 0), int(
+            row.get("realized_pnl_cents") or 0
+        )
 
     def _estimate_signal_notional_usd(
         self,
@@ -516,14 +567,20 @@ class StrategyRunner:
         if action == "hold":
             return None
 
-        if bool(signal_rules.get("paper_only", False)) and trading_mode != TradingMode.PAPER:
+        if (
+            bool(signal_rules.get("paper_only", False))
+            and trading_mode != TradingMode.PAPER
+        ):
             return "paper_only strategy"
 
         min_confidence = self._to_decimal(signal_rules.get("min_confidence"))
         if min_confidence > 0 and Decimal(str(signal.confidence)) < min_confidence:
             return "below min_confidence"
 
-        if bool(signal_rules.get("require_volume_confirmation", False)) and market.volume_24h <= 0:
+        if (
+            bool(signal_rules.get("require_volume_confirmation", False))
+            and market.volume_24h <= 0
+        ):
             return "volume confirmation failed"
 
         if bool(signal_rules.get("only_during_liquid_hours", False)):
@@ -586,7 +643,9 @@ class StrategyRunner:
                 if snap is not None:
                     assigned_cents, realized_pnl_cents = snap
                     if assigned_cents > 0 and realized_pnl_cents < 0:
-                        loss_pct = (Decimal(abs(realized_pnl_cents)) * Decimal("100")) / Decimal(assigned_cents)
+                        loss_pct = (
+                            Decimal(abs(realized_pnl_cents)) * Decimal("100")
+                        ) / Decimal(assigned_cents)
                         if loss_pct >= max_daily_loss_pct:
                             return "max_daily_loss_pct reached"
 
@@ -647,18 +706,27 @@ class StrategyRunner:
             """
         )
         with self._engine.begin() as conn:
-            row = conn.execute(
-                stmt,
-                {"symbol": symbol, "strategy_name": strategy_name},
-            ).mappings().first()
+            row = (
+                conn.execute(
+                    stmt,
+                    {"symbol": symbol, "strategy_name": strategy_name},
+                )
+                .mappings()
+                .first()
+            )
         return dict(row) if row else None
 
-    def _token_policy_suppression_reason(self, token_policy: dict[str, Any] | None) -> str | None:
+    def _token_policy_suppression_reason(
+        self, token_policy: dict[str, Any] | None
+    ) -> str | None:
         effective = resolve_effective_token_policy(token_policy)
         if not effective["admin_enabled"]:
             return "token strategy disabled by admin"
         if effective["effective_recommendation_status"] == "blocked":
-            reason = effective["effective_recommendation_reason"] or "blocked by token strategy policy"
+            reason = (
+                effective["effective_recommendation_reason"]
+                or "blocked by token strategy policy"
+            )
             return f"token strategy blocked: {reason}"
         return None
 
@@ -674,7 +742,9 @@ class StrategyRunner:
         metadata = dict(signal.metadata or {})
         metadata["token_policy"] = {
             "admin_enabled": effective["admin_enabled"],
-            "computed_recommendation_status": effective["computed_recommendation_status"],
+            "computed_recommendation_status": effective[
+                "computed_recommendation_status"
+            ],
             "recommendation_status": effective["effective_recommendation_status"],
             "recommendation_reason": effective["effective_recommendation_reason"],
             "size_multiplier": str(effective["size_multiplier"]),
@@ -724,7 +794,9 @@ class StrategyRunner:
             rows = conn.execute(stmt, {"user_id": user_id}).all()
         return [r.symbol for r in rows]
 
-    def _resolve_symbols(self, *, config: dict[str, Any], allowed_symbols: list[str]) -> list[str]:
+    def _resolve_symbols(
+        self, *, config: dict[str, Any], allowed_symbols: list[str]
+    ) -> list[str]:
         requested = config.get("symbols")
         if isinstance(requested, (list, tuple, set)):
             requested_symbols = {str(symbol) for symbol in requested if str(symbol)}
@@ -818,14 +890,18 @@ class StrategyRunner:
             """
         )
         with self._engine.begin() as conn:
-            row = conn.execute(
-                stmt,
-                {
-                    "user_id": user_id,
-                    "strategy_name": strategy_name,
-                    "trading_mode": trading_mode,
-                },
-            ).mappings().first()
+            row = (
+                conn.execute(
+                    stmt,
+                    {
+                        "user_id": user_id,
+                        "strategy_name": strategy_name,
+                        "trading_mode": trading_mode,
+                    },
+                )
+                .mappings()
+                .first()
+            )
         state = row["state"] if row else {}
         if isinstance(state, str):
             try:
@@ -864,25 +940,35 @@ class StrategyRunner:
             """
         )
         with self._engine.begin() as conn:
-            runtime_row = conn.execute(
-                runtime_stmt,
-                {
-                    "user_id": user_id,
-                    "strategy_name": strategy_name,
-                    "trading_mode": trading_mode,
-                },
-            ).mappings().first()
-            position_row = conn.execute(
-                position_stmt,
-                {
-                    "user_id": user_id,
-                    "strategy_name": strategy_name,
-                    "trading_mode": trading_mode,
-                    "symbol": symbol,
-                },
-            ).mappings().first()
+            runtime_row = (
+                conn.execute(
+                    runtime_stmt,
+                    {
+                        "user_id": user_id,
+                        "strategy_name": strategy_name,
+                        "trading_mode": trading_mode,
+                    },
+                )
+                .mappings()
+                .first()
+            )
+            position_row = (
+                conn.execute(
+                    position_stmt,
+                    {
+                        "user_id": user_id,
+                        "strategy_name": strategy_name,
+                        "trading_mode": trading_mode,
+                        "symbol": symbol,
+                    },
+                )
+                .mappings()
+                .first()
+            )
 
-        symbol_state = self._coerce_symbol_runtime_states(runtime_row["state"] if runtime_row else {}).get(symbol, {})
+        symbol_state = self._coerce_symbol_runtime_states(
+            runtime_row["state"] if runtime_row else {}
+        ).get(symbol, {})
 
         qty = Decimal(str(position_row["quantity"])) if position_row else Decimal("0")
         entry_price = None
@@ -942,15 +1028,21 @@ class StrategyRunner:
             """
         )
         with self._engine.begin() as conn:
-            runtime_row = conn.execute(
-                runtime_stmt,
-                {
-                    "user_id": user_id,
-                    "strategy_name": strategy_name,
-                    "trading_mode": trading_mode,
-                },
-            ).mappings().first()
-        symbol_states = self._coerce_symbol_runtime_states(runtime_row["state"] if runtime_row else {})
+            runtime_row = (
+                conn.execute(
+                    runtime_stmt,
+                    {
+                        "user_id": user_id,
+                        "strategy_name": strategy_name,
+                        "trading_mode": trading_mode,
+                    },
+                )
+                .mappings()
+                .first()
+            )
+        symbol_states = self._coerce_symbol_runtime_states(
+            runtime_row["state"] if runtime_row else {}
+        )
 
         symbol_states = self._merge_symbol_runtime_states(
             symbol_states,
@@ -1075,7 +1167,10 @@ class StrategyRunner:
         suggested_size = Decimal("0")
         if signal.quantity is not None:
             suggested_size = Decimal(str(signal.quantity.amount))
-        elif signal.signal_type in {SignalType.CLOSE, SignalType.SELL} and position_state is not None:
+        elif (
+            signal.signal_type in {SignalType.CLOSE, SignalType.SELL}
+            and position_state is not None
+        ):
             suggested_size = abs(position_state.quantity)
         elif signal.metadata and "buy_amount_usd" in signal.metadata:
             price = market.current_price if market is not None else Decimal("0")
@@ -1182,7 +1277,9 @@ class StrategyRunner:
                     "action": event.action.value,
                     "confidence": event.confidence,
                     "suggested_size": str(event.suggested_size),
-                    "reasoning_metadata": json.dumps(event.reasoning_metadata) if event.reasoning_metadata else None,
+                    "reasoning_metadata": json.dumps(event.reasoning_metadata)
+                    if event.reasoning_metadata
+                    else None,
                     "trading_mode": event.trading_mode.value,
                     "timestamp": event.timestamp,
                 },

@@ -5,7 +5,11 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from oziebot_domain.market_data import NormalizedBestBidAsk, NormalizedCandle, NormalizedTrade
+from oziebot_domain.market_data import (
+    NormalizedBestBidAsk,
+    NormalizedCandle,
+    NormalizedTrade,
+)
 
 
 def _uid() -> str:

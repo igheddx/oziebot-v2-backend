@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from oziebot_domain.strategy import SignalType, StrategySignal
+from oziebot_domain.strategy import StrategySignal
 from oziebot_domain.tenant import TenantId
 from oziebot_domain.trading_mode import TradingMode
 
@@ -79,10 +79,10 @@ class StrategyContext:
 class TradingStrategy(ABC):
     """
     Base class for all trading strategies.
-    
+
     Strategies are stateless signal generators. They evaluate market conditions
     and generate signals (BUY, SELL, HOLD, CLOSE) but do NOT execute trades.
-    
+
     Execution, risk management, and compliance are handled by separate services.
     """
 
@@ -100,10 +100,10 @@ class TradingStrategy(ABC):
     def validate_config(self, config: dict) -> bool:
         """
         Validate strategy configuration.
-        
+
         Args:
             config: Strategy-specific configuration
-            
+
         Returns:
             True if config is valid, raises ValueError otherwise
         """
@@ -119,16 +119,16 @@ class TradingStrategy(ABC):
     ) -> StrategySignal:
         """
         Generate trading signal based on current market state.
-        
+
         Args:
             context: Market and position data
             config: Strategy configuration
             signal_id: Unique ID for this signal
             correlation_id: Correlation ID to track signal chain
-            
+
         Returns:
             StrategySignal with recommendation (BUY/SELL/HOLD/CLOSE)
-            
+
         Must work identically in both PAPER and LIVE modes - only execution differs.
         """
         pass
@@ -140,9 +140,9 @@ class TradingStrategy(ABC):
     def get_config_schema(self) -> dict:
         """
         Return JSON schema describing config parameters.
-        
+
         Used by frontend to generate dynamic UI for strategy settings.
-        
+
         Returns:
             Dict with schema for strategy parameters
         """

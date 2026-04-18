@@ -8,7 +8,10 @@ import redis
 from sqlalchemy import create_engine
 
 from oziebot_common.health import start_health_server
-from oziebot_market_data_ingestor.coinbase_client import CoinbaseRestClient, CoinbaseWsClient
+from oziebot_market_data_ingestor.coinbase_client import (
+    CoinbaseRestClient,
+    CoinbaseWsClient,
+)
 from oziebot_market_data_ingestor.config import get_settings
 from oziebot_market_data_ingestor.normalizer import (
     normalize_bbo,
@@ -126,7 +129,9 @@ async def main() -> None:
     health.touch()
     await _reconcile_bbo(rest, store, cache, stale, products)
     health.touch()
-    await _reconcile_candles(rest, store, cache, stale, products, s.candles_granularity_sec)
+    await _reconcile_candles(
+        rest, store, cache, stale, products, s.candles_granularity_sec
+    )
     refresher.refresh_active_tokens()
     health.mark_ready()
 
@@ -159,7 +164,9 @@ async def main() -> None:
             now = datetime.now(UTC)
             stale_map = stale.stale_products(now, products)
             if any(stale_map.values()):
-                cache.publish_stale("oziebot:md:stale", {"at": now.isoformat(), "stale": stale_map})
+                cache.publish_stale(
+                    "oziebot:md:stale", {"at": now.isoformat(), "stale": stale_map}
+                )
                 await _reconcile_trades(
                     rest,
                     store,
@@ -169,14 +176,27 @@ async def main() -> None:
                     s.trade_recovery_limit,
                 )
                 await _reconcile_bbo(rest, store, cache, stale, stale_map["bbo"])
-                await _reconcile_candles(rest, store, cache, stale, stale_map["candle"], s.candles_granularity_sec)
+                await _reconcile_candles(
+                    rest,
+                    store,
+                    cache,
+                    stale,
+                    stale_map["candle"],
+                    s.candles_granularity_sec,
+                )
                 health.touch()
 
-            if (now - last_candle_reconcile).total_seconds() >= s.candles_granularity_sec:
-                await _reconcile_candles(rest, store, cache, stale, products, s.candles_granularity_sec)
+            if (
+                now - last_candle_reconcile
+            ).total_seconds() >= s.candles_granularity_sec:
+                await _reconcile_candles(
+                    rest, store, cache, stale, products, s.candles_granularity_sec
+                )
                 last_candle_reconcile = now
                 health.touch()
-            if (now - last_policy_refresh).total_seconds() >= s.token_policy_recalc_interval_seconds:
+            if (
+                now - last_policy_refresh
+            ).total_seconds() >= s.token_policy_recalc_interval_seconds:
                 refresher.refresh_active_tokens()
                 last_policy_refresh = now
                 health.touch()

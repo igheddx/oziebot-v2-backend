@@ -117,11 +117,16 @@ def compute_market_profile(
     ]
     avg_intraday_volatility_pct = _avg(intraday_ranges)
 
-    avg_close = _avg(closes)
     avg_candle_notional = _avg(
-        [float(item.close) * float(item.volume) for item in candles if float(item.close) > 0]
+        [
+            float(item.close) * float(item.volume)
+            for item in candles
+            if float(item.close) > 0
+        ]
     )
-    avg_daily_volume_usd = avg_candle_notional * 1440.0 if avg_candle_notional > 0 else 0.0
+    avg_daily_volume_usd = (
+        avg_candle_notional * 1440.0 if avg_candle_notional > 0 else 0.0
+    )
 
     spreads: list[float] = []
     depth_usd: list[float] = []
@@ -134,15 +139,25 @@ def compute_market_profile(
         if mid <= 0:
             continue
         spreads.append(max(0.0, (ask - bid) / mid))
-        depth_usd.append(mid * max(0.0, min(float(item.bid_size), float(item.ask_size))))
+        depth_usd.append(
+            mid * max(0.0, min(float(item.bid_size), float(item.ask_size)))
+        )
     avg_spread_pct = _avg(spreads)
     avg_depth_usd = _avg(depth_usd)
 
     trade_notional = _avg(
-        [float(item.price) * float(item.size) for item in trades if float(item.price) > 0]
+        [
+            float(item.price) * float(item.size)
+            for item in trades
+            if float(item.price) > 0
+        ]
     )
-    volume_score = _score_increasing(avg_daily_volume_usd, floor=25_000, ceiling=5_000_000)
-    depth_score = _score_increasing(max(avg_depth_usd, trade_notional), floor=500, ceiling=50_000)
+    volume_score = _score_increasing(
+        avg_daily_volume_usd, floor=25_000, ceiling=5_000_000
+    )
+    depth_score = _score_increasing(
+        max(avg_depth_usd, trade_notional), floor=500, ceiling=50_000
+    )
     liquidity_score = _clamp((volume_score * 0.65) + (depth_score * 0.35))
     spread_score = _score_decreasing(avg_spread_pct, floor=0.001, ceiling=0.02)
 
@@ -173,7 +188,9 @@ def compute_market_profile(
         if (previous > 0) != (current > 0):
             sign_flips += 1
     mean_cross_rate = (sign_flips / max(1, len(returns) - 1)) if returns else 0.0
-    stability_score = _score_decreasing(avg_intraday_volatility_pct, floor=0.005, ceiling=0.08)
+    stability_score = _score_decreasing(
+        avg_intraday_volatility_pct, floor=0.005, ceiling=0.08
+    )
     reversion_score = _clamp(
         (_score_increasing(mean_cross_rate, floor=0.15, ceiling=0.7) * 0.6)
         + (stability_score * 0.4)
@@ -232,7 +249,9 @@ def score_strategy_suitability(
         )
 
     avg_daily_volume_usd = float(profile.avg_daily_volume_usd)
-    relative_volume_score = _score_increasing(avg_daily_volume_usd, floor=100_000, ceiling=8_000_000)
+    relative_volume_score = _score_increasing(
+        avg_daily_volume_usd, floor=100_000, ceiling=8_000_000
+    )
     stability_score = float(raw.get("stability_score") or 0.0)
     trend_bias = float(raw.get("trend_bias") or 0.0)
     bearish_regime = bool(raw.get("bearish_regime"))
@@ -282,7 +301,9 @@ def score_strategy_suitability(
             + (stability_score * 0.25)
             + (profile.slippage_score * 0.20)
         )
-        requires_admin = not bool(token_extra.get("core_token") or token_extra.get("dca_approved"))
+        requires_admin = not bool(
+            token_extra.get("core_token") or token_extra.get("dca_approved")
+        )
         if severe_downtrend:
             score -= 10.0
         if requires_admin:
@@ -292,7 +313,9 @@ def score_strategy_suitability(
                 recommendation_status="discouraged" if score >= 40 else "blocked",
                 recommendation_reason="DCA requires admin core-token approval for this token",
             )
-        reason = "Favors liquid, lower-instability core tokens for scheduled accumulation"
+        reason = (
+            "Favors liquid, lower-instability core tokens for scheduled accumulation"
+        )
     else:
         raise ValueError(f"Unsupported strategy_id: {strategy_id}")
 

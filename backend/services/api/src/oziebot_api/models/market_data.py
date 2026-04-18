@@ -25,7 +25,9 @@ class MarketDataCandle(Base):
     source: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     product_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     granularity_sec: Mapped[int] = mapped_column(Integer, nullable=False)
-    bucket_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    bucket_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
 
     open: Mapped[float] = mapped_column(Numeric(28, 10), nullable=False)
     high: Mapped[float] = mapped_column(Numeric(28, 10), nullable=False)
@@ -40,9 +42,7 @@ class MarketDataCandle(Base):
 class MarketDataTradeSnapshot(Base):
     __tablename__ = "market_data_trade_snapshots"
     __table_args__ = (
-        UniqueConstraint(
-            "source", "product_id", "trade_id", name="uq_market_data_trade_snapshot"
-        ),
+        UniqueConstraint("source", "product_id", "trade_id", name="uq_market_data_trade_snapshot"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -52,7 +52,9 @@ class MarketDataTradeSnapshot(Base):
     side: Mapped[str] = mapped_column(String(8), nullable=False)
     price: Mapped[float] = mapped_column(Numeric(28, 10), nullable=False)
     size: Mapped[float] = mapped_column(Numeric(28, 10), nullable=False)
-    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    event_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
     ingest_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -66,5 +68,7 @@ class MarketDataBboSnapshot(Base):
     best_bid_size: Mapped[float] = mapped_column(Numeric(28, 10), nullable=False)
     best_ask_price: Mapped[float] = mapped_column(Numeric(28, 10), nullable=False)
     best_ask_size: Mapped[float] = mapped_column(Numeric(28, 10), nullable=False)
-    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    event_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
     ingest_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

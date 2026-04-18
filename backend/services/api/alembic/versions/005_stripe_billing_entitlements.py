@@ -66,7 +66,9 @@ def upgrade() -> None:
         sa.Column("metadata_json", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["subscription_plan_id"], ["subscription_plans.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["subscription_plan_id"], ["subscription_plans.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("stripe_subscription_id", name="uq_stripe_subscriptions_stripe_id"),

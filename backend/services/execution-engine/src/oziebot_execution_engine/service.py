@@ -22,7 +22,12 @@ from oziebot_common.queues import (
 )
 from oziebot_common.token_policy import resolve_effective_token_policy
 from oziebot_domain.events import NotificationEvent, NotificationEventType
-from oziebot_domain.execution import ExecutionEvent, ExecutionOrderStatus, ExecutionRequest, ExecutionSubmission
+from oziebot_domain.execution import (
+    ExecutionEvent,
+    ExecutionOrderStatus,
+    ExecutionRequest,
+    ExecutionSubmission,
+)
 from oziebot_domain.risk import RiskDecision, RiskOutcome
 from oziebot_domain.trading import OrderType, Side, Venue
 from oziebot_domain.trading_mode import TradingMode
@@ -57,10 +62,19 @@ class ProcessResult:
 
 
 class ExecutionService:
-    def __init__(self, settings, redis_client, *, paper_adapter: ExecutionAdapter, live_adapter: ExecutionAdapter) -> None:
+    def __init__(
+        self,
+        settings,
+        redis_client,
+        *,
+        paper_adapter: ExecutionAdapter,
+        live_adapter: ExecutionAdapter,
+    ) -> None:
         self._settings = settings
         self._redis = redis_client
-        self._engine = create_engine(settings.database_url) if settings.database_url else None
+        self._engine = (
+            create_engine(settings.database_url) if settings.database_url else None
+        )
         self._paper_adapter = paper_adapter
         self._live_adapter = live_adapter
         self._crypto = CredentialCrypto(settings.exchange_credentials_encryption_key)
@@ -94,12 +108,18 @@ class ExecutionService:
             raise ValueError("Coinbase connection not found")
         if row["validation_status"] != "valid" or not row["can_trade"]:
             raise ValueError("Coinbase connection is not trade-enabled")
-        return str(row["api_key_name"]), self._crypto.decrypt(row["encrypted_secret"]).decode("utf-8")
+        return str(row["api_key_name"]), self._crypto.decrypt(
+            row["encrypted_secret"]
+        ).decode("utf-8")
 
     def process_queue_message(self, raw: dict[str, Any]) -> ProcessResult:
         intent = trade_intent_from_json(raw["intent"])
         risk = risk_decision_from_json(raw["risk"])
-        request = self._build_request(intent=intent.model_dump(mode="json"), risk=risk, trace_id=str(raw.get("trace_id") or risk.trace_id))
+        request = self._build_request(
+            intent=intent.model_dump(mode="json"),
+            risk=risk,
+            trace_id=str(raw.get("trace_id") or risk.trace_id),
+        )
         return self.process_request(request)
 
     def process_request(self, request: ExecutionRequest) -> ProcessResult:
@@ -108,7 +128,11 @@ class ExecutionService:
 
         existing = self._get_existing_order(request.intent_id, request.trading_mode)
         if existing is not None:
-            return ProcessResult(order_id=str(existing["id"]), state=ExecutionOrderStatus(existing["state"]), duplicated=True)
+            return ProcessResult(
+                order_id=str(existing["id"]),
+                state=ExecutionOrderStatus(existing["state"]),
+                duplicated=True,
+            )
 
         request, policy_failure = self._apply_token_strategy_policy(request)
         reserve_cents = self._estimate_reserve_cents(request)
@@ -163,11 +187,17 @@ class ExecutionService:
                         "fees_cents": 0,
                         "idempotency_key": request.idempotency_key,
                         "client_order_id": request.client_order_id,
-                        "failure_code": "token_strategy_policy" if policy_failure is not None else None,
+                        "failure_code": "token_strategy_policy"
+                        if policy_failure is not None
+                        else None,
                         "failure_detail": policy_failure,
                         "trace_id": request.trace_id,
-                        "intent_payload": json.dumps(request.intent_payload, default=str),
-                        "risk_payload": json.dumps(request.risk.model_dump(mode="json"), default=str),
+                        "intent_payload": json.dumps(
+                            request.intent_payload, default=str
+                        ),
+                        "risk_payload": json.dumps(
+                            request.risk.model_dump(mode="json"), default=str
+                        ),
                         "adapter_payload": json.dumps({}, default=str),
                         "created_at": now,
                         "updated_at": now,
@@ -178,7 +208,11 @@ class ExecutionService:
             existing = self._get_existing_order(request.intent_id, request.trading_mode)
             if existing is None:
                 raise
-            return ProcessResult(order_id=str(existing["id"]), state=ExecutionOrderStatus(existing["state"]), duplicated=True)
+            return ProcessResult(
+                order_id=str(existing["id"]),
+                state=ExecutionOrderStatus(existing["state"]),
+                duplicated=True,
+            )
 
         if policy_failure is not None:
             self._emit_event(
@@ -194,14 +228,29 @@ class ExecutionService:
                 duplicated=False,
             )
 
-        self._emit_event(order_id, request, ExecutionOrderStatus.CREATED, detail="Order created")
+        self._emit_event(
+            order_id, request, ExecutionOrderStatus.CREATED, detail="Order created"
+        )
 
         if reserve_cents > 0:
             self._reserve_capital(request, reserve_cents, order_id)
-            self._set_order_state(order_id, ExecutionOrderStatus.CAPITAL_RESERVED, reserved_cash_cents=reserve_cents)
-            self._emit_event(order_id, request, ExecutionOrderStatus.CAPITAL_RESERVED, detail="Capital reserved")
+            self._set_order_state(
+                order_id,
+                ExecutionOrderStatus.CAPITAL_RESERVED,
+                reserved_cash_cents=reserve_cents,
+            )
+            self._emit_event(
+                order_id,
+                request,
+                ExecutionOrderStatus.CAPITAL_RESERVED,
+                detail="Capital reserved",
+            )
 
-        adapter = self._paper_adapter if request.trading_mode == TradingMode.PAPER else self._live_adapter
+        adapter = (
+            self._paper_adapter
+            if request.trading_mode == TradingMode.PAPER
+            else self._live_adapter
+        )
         submission = adapter.submit(request)
         return self._apply_submission(request, order_id, reserve_cents, submission)
 
@@ -234,28 +283,41 @@ class ExecutionService:
         if not effective["admin_enabled"]:
             return request, "Execution rejected: token strategy disabled by admin"
         if effective["effective_recommendation_status"] == "blocked":
-            reason = effective["effective_recommendation_reason"] or "blocked by token strategy policy"
+            reason = (
+                effective["effective_recommendation_reason"]
+                or "blocked by token strategy policy"
+            )
             return request, f"Execution rejected: token strategy blocked ({reason})"
 
         adjusted_quantity = request.quantity
         if effective["effective_recommendation_status"] == "discouraged":
-            adjusted_quantity = (adjusted_quantity * effective["size_multiplier"]).quantize(
+            adjusted_quantity = (
+                adjusted_quantity * effective["size_multiplier"]
+            ).quantize(
                 Decimal("0.00000001"),
                 rounding=ROUND_DOWN,
             )
             if adjusted_quantity <= 0:
-                return request, "Execution rejected: token strategy policy reduced size to zero"
+                return (
+                    request,
+                    "Execution rejected: token strategy policy reduced size to zero",
+                )
 
         max_position_pct_override = effective["max_position_pct_override"]
         if max_position_pct_override is not None:
             if request.price_hint is None or request.price_hint <= 0:
-                return request, "Execution rejected: missing price hint for token strategy position cap"
+                return (
+                    request,
+                    "Execution rejected: missing price hint for token strategy position cap",
+                )
             total_capital_cents = self._load_total_capital_cents(
                 user_id=request.user_id,
                 trading_mode=request.trading_mode,
             )
             max_position_cents = int(
-                (Decimal(str(total_capital_cents)) * max_position_pct_override).quantize(
+                (
+                    Decimal(str(total_capital_cents)) * max_position_pct_override
+                ).quantize(
                     Decimal("1"),
                     rounding=ROUND_DOWN,
                 )
@@ -263,13 +325,19 @@ class ExecutionService:
             current_exposure_cents = self._load_strategy_token_exposure_cents(request)
             remaining_cents = max_position_cents - current_exposure_cents
             if remaining_cents <= 0:
-                return request, "Execution rejected: token strategy position override cap reached"
+                return (
+                    request,
+                    "Execution rejected: token strategy position override cap reached",
+                )
             max_quantity = (
                 (Decimal(str(remaining_cents)) / Decimal("100")) / request.price_hint
             ).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
             adjusted_quantity = min(adjusted_quantity, max_quantity)
             if adjusted_quantity <= 0:
-                return request, "Execution rejected: token strategy position override cap reached"
+                return (
+                    request,
+                    "Execution rejected: token strategy position override cap reached",
+                )
 
         if adjusted_quantity == request.quantity:
             return request, None
@@ -314,10 +382,14 @@ class ExecutionService:
             """
         )
         with self._engine.begin() as conn:
-            row = conn.execute(
-                stmt,
-                {"symbol": symbol, "strategy_id": strategy_id},
-            ).mappings().first()
+            row = (
+                conn.execute(
+                    stmt,
+                    {"symbol": symbol, "strategy_id": strategy_id},
+                )
+                .mappings()
+                .first()
+            )
         return dict(row) if row else None
 
     def _load_total_capital_cents(
@@ -375,22 +447,28 @@ class ExecutionService:
             raise RuntimeError("DATABASE_URL is required")
         enforced = 0
         with self._engine.begin() as conn:
-            positions = conn.execute(
-                text(
-                    """
+            positions = (
+                conn.execute(
+                    text(
+                        """
                     SELECT *
                     FROM execution_positions
                     WHERE strategy_id = 'day_trading'
                       AND CAST(quantity AS NUMERIC) > 0
                     """
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
         for row in positions:
             if self._enforce_day_trading_position_age(dict(row)):
                 enforced += 1
         return enforced
 
-    def _build_request(self, *, intent: dict[str, Any], risk: RiskDecision, trace_id: str) -> ExecutionRequest:
+    def _build_request(
+        self, *, intent: dict[str, Any], risk: RiskDecision, trace_id: str
+    ) -> ExecutionRequest:
         trading_mode = TradingMode(intent["trading_mode"])
         intent_id = str(intent["intent_id"])
         return ExecutionRequest(
@@ -405,7 +483,9 @@ class ExecutionService:
             side=intent["side"],
             order_type=intent["order_type"],
             quantity=intent["quantity"]["amount"],
-            price_hint=self._market_price_hint(intent["instrument"]["symbol"], intent["side"]),
+            price_hint=self._market_price_hint(
+                intent["instrument"]["symbol"], intent["side"]
+            ),
             idempotency_key=self.build_idempotency_key(intent_id, trading_mode),
             client_order_id=self.build_client_order_id(intent_id, trading_mode),
             intent_payload=intent,
@@ -430,14 +510,26 @@ class ExecutionService:
             return 0
         return _money_to_cents(request.quantity * price)
 
-    def _apply_submission(self, request: ExecutionRequest, order_id: str, reserve_cents: int, submission: ExecutionSubmission) -> ProcessResult:
+    def _apply_submission(
+        self,
+        request: ExecutionRequest,
+        order_id: str,
+        reserve_cents: int,
+        submission: ExecutionSubmission,
+    ) -> ProcessResult:
         current_state = self._get_order(order_id)["state"]
         target = submission.status
         base_state = ExecutionOrderStatus(current_state)
-        if target in {ExecutionOrderStatus.PENDING, ExecutionOrderStatus.PARTIALLY_FILLED, ExecutionOrderStatus.FILLED}:
+        if target in {
+            ExecutionOrderStatus.PENDING,
+            ExecutionOrderStatus.PARTIALLY_FILLED,
+            ExecutionOrderStatus.FILLED,
+        }:
             if base_state == ExecutionOrderStatus.CAPITAL_RESERVED:
                 self._lock_reserved_capital(request, reserve_cents, order_id)
-                self._set_order_reserved_locked(order_id, reserved_cash_cents=0, locked_cash_cents=reserve_cents)
+                self._set_order_reserved_locked(
+                    order_id, reserved_cash_cents=0, locked_cash_cents=reserve_cents
+                )
                 base_state = ExecutionOrderStatus.CAPITAL_RESERVED
             self._set_order_state(
                 order_id,
@@ -446,24 +538,50 @@ class ExecutionService:
                 adapter_payload=submission.raw_payload,
                 submitted_at=_utcnow(),
             )
-            self._emit_event(order_id, request, ExecutionOrderStatus.SUBMITTED, detail="Order submitted")
+            self._emit_event(
+                order_id,
+                request,
+                ExecutionOrderStatus.SUBMITTED,
+                detail="Order submitted",
+            )
 
         if target == ExecutionOrderStatus.FAILED:
             self._handle_failure(order_id, request, reserve_cents, submission)
-            return ProcessResult(order_id=order_id, state=ExecutionOrderStatus.FAILED, duplicated=False)
+            return ProcessResult(
+                order_id=order_id, state=ExecutionOrderStatus.FAILED, duplicated=False
+            )
 
-        self._set_order_state(order_id, target, venue_order_id=submission.venue_order_id, adapter_payload=submission.raw_payload)
-        self._emit_event(order_id, request, target, detail="Order state updated", payload=submission.raw_payload)
+        self._set_order_state(
+            order_id,
+            target,
+            venue_order_id=submission.venue_order_id,
+            adapter_payload=submission.raw_payload,
+        )
+        self._emit_event(
+            order_id,
+            request,
+            target,
+            detail="Order state updated",
+            payload=submission.raw_payload,
+        )
 
         if submission.fills:
             self._persist_fills_and_positions(order_id, request, submission)
 
         return ProcessResult(order_id=order_id, state=target, duplicated=False)
 
-    def _handle_failure(self, order_id: str, request: ExecutionRequest, reserve_cents: int, submission: ExecutionSubmission) -> None:
+    def _handle_failure(
+        self,
+        order_id: str,
+        request: ExecutionRequest,
+        reserve_cents: int,
+        submission: ExecutionSubmission,
+    ) -> None:
         order = self._get_order(order_id)
         if int(order["reserved_cash_cents"] or 0) > 0:
-            self._release_reserved_capital(request, int(order["reserved_cash_cents"]), order_id)
+            self._release_reserved_capital(
+                request, int(order["reserved_cash_cents"]), order_id
+            )
         self._set_order_state(
             order_id,
             ExecutionOrderStatus.FAILED,
@@ -473,9 +591,16 @@ class ExecutionService:
             failed_at=_utcnow(),
             reserved_cash_cents=0,
         )
-        self._emit_event(order_id, request, ExecutionOrderStatus.FAILED, detail=submission.failure_detail or "Execution failed")
+        self._emit_event(
+            order_id,
+            request,
+            ExecutionOrderStatus.FAILED,
+            detail=submission.failure_detail or "Execution failed",
+        )
 
-    def _persist_fills_and_positions(self, order_id: str, request: ExecutionRequest, submission: ExecutionSubmission) -> None:
+    def _persist_fills_and_positions(
+        self, order_id: str, request: ExecutionRequest, submission: ExecutionSubmission
+    ) -> None:
         order = self._get_order(order_id)
         total_qty = Decimal(str(order["filled_quantity"]))
         weighted_notional = Decimal("0")
@@ -516,10 +641,23 @@ class ExecutionService:
                         "filled_at": fill.occurred_at,
                     },
                 )
-            self._apply_fill_to_position(order_id, fill_row_id, request, fill, fill_notional_cents, fill_fee_cents)
+            self._apply_fill_to_position(
+                order_id,
+                fill_row_id,
+                request,
+                fill,
+                fill_notional_cents,
+                fill_fee_cents,
+            )
 
-        avg_price = (weighted_notional / total_qty).quantize(Decimal("0.00000001")) if total_qty > 0 else None
-        completed_at = _utcnow() if submission.status == ExecutionOrderStatus.FILLED else None
+        avg_price = (
+            (weighted_notional / total_qty).quantize(Decimal("0.00000001"))
+            if total_qty > 0
+            else None
+        )
+        completed_at = (
+            _utcnow() if submission.status == ExecutionOrderStatus.FILLED else None
+        )
         self._set_order_state(
             order_id,
             submission.status,
@@ -540,21 +678,35 @@ class ExecutionService:
     ) -> None:
         position = self._get_position(request)
         qty_before = Decimal(str(position["quantity"])) if position else Decimal("0")
-        avg_before = Decimal(str(position["avg_entry_price"])) if position and position["avg_entry_price"] else Decimal("0")
+        avg_before = (
+            Decimal(str(position["avg_entry_price"]))
+            if position and position["avg_entry_price"]
+            else Decimal("0")
+        )
         realized_pnl_cents = 0
         qty_after = qty_before
         avg_after = avg_before
         if request.side == Side.BUY:
             qty_after = qty_before + fill.quantity
             total_cost = (qty_before * avg_before) + (fill.quantity * fill.price)
-            avg_after = (total_cost / qty_after).quantize(Decimal("0.00000001")) if qty_after > 0 else Decimal("0")
+            avg_after = (
+                (total_cost / qty_after).quantize(Decimal("0.00000001"))
+                if qty_after > 0
+                else Decimal("0")
+            )
             order = self._get_order(order_id)
             locked_cash_cents = int(order["locked_cash_cents"] or 0)
             actual_locked = fill_notional_cents + fill_fee_cents
             excess = max(0, locked_cash_cents - actual_locked)
-            if excess > 0 and self._is_terminal_state(ExecutionOrderStatus(order["state"])):
+            if excess > 0 and self._is_terminal_state(
+                ExecutionOrderStatus(order["state"])
+            ):
                 self._settle_capital(request, excess, 0, order_id)
-                self._set_order_reserved_locked(order_id, reserved_cash_cents=0, locked_cash_cents=locked_cash_cents - excess)
+                self._set_order_reserved_locked(
+                    order_id,
+                    reserved_cash_cents=0,
+                    locked_cash_cents=locked_cash_cents - excess,
+                )
         else:
             close_qty = min(qty_before, fill.quantity)
             qty_after = max(Decimal("0"), qty_before - close_qty)
@@ -566,10 +718,26 @@ class ExecutionService:
             if qty_after == 0:
                 avg_after = Decimal("0")
         self._upsert_position(request, qty_after, avg_after, realized_pnl_cents)
-        self._insert_trade(order_id, fill_row_id, request, fill, qty_after, avg_after, realized_pnl_cents, fill_notional_cents, fill_fee_cents)
+        self._insert_trade(
+            order_id,
+            fill_row_id,
+            request,
+            fill,
+            qty_after,
+            avg_after,
+            realized_pnl_cents,
+            fill_notional_cents,
+            fill_fee_cents,
+        )
         self._record_strategy_runtime_activity(request, fill.occurred_at)
 
-    def _upsert_position(self, request: ExecutionRequest, quantity: Decimal, avg_entry_price: Decimal, realized_pnl_delta_cents: int) -> None:
+    def _upsert_position(
+        self,
+        request: ExecutionRequest,
+        quantity: Decimal,
+        avg_entry_price: Decimal,
+        realized_pnl_delta_cents: int,
+    ) -> None:
         existing = self._get_position(request)
         now = _utcnow()
         if existing is None:
@@ -619,13 +787,25 @@ class ExecutionService:
                     "id": str(existing["id"]),
                     "quantity": str(quantity),
                     "avg_entry_price": str(avg_entry_price),
-                    "realized_pnl_cents": int(existing["realized_pnl_cents"] or 0) + realized_pnl_delta_cents,
+                    "realized_pnl_cents": int(existing["realized_pnl_cents"] or 0)
+                    + realized_pnl_delta_cents,
                     "updated_at": now,
                     "last_trade_at": now,
                 },
             )
 
-    def _insert_trade(self, order_id: str, fill_row_id: str, request: ExecutionRequest, fill, qty_after: Decimal, avg_after: Decimal, realized_pnl_cents: int, fill_notional_cents: int, fill_fee_cents: int) -> None:
+    def _insert_trade(
+        self,
+        order_id: str,
+        fill_row_id: str,
+        request: ExecutionRequest,
+        fill,
+        qty_after: Decimal,
+        avg_after: Decimal,
+        realized_pnl_cents: int,
+        fill_notional_cents: int,
+        fill_fee_cents: int,
+    ) -> None:
         with self._engine.begin() as conn:
             conn.execute(
                 text(
@@ -663,28 +843,48 @@ class ExecutionService:
                 },
             )
 
-    def _reserve_capital(self, request: ExecutionRequest, amount_cents: int, order_id: str) -> None:
+    def _reserve_capital(
+        self, request: ExecutionRequest, amount_cents: int, order_id: str
+    ) -> None:
         if amount_cents <= 0:
             return
         with self._engine.begin() as conn:
-            bucket = conn.execute(
-                text(
-                    "SELECT available_cash_cents, reserved_cash_cents, available_buying_power_cents FROM strategy_capital_buckets WHERE user_id = :user_id AND strategy_id = :strategy_id AND trading_mode = :trading_mode LIMIT 1"
-                ),
-                {"user_id": _to_hex(request.user_id), "strategy_id": request.strategy_id, "trading_mode": request.trading_mode.value},
-            ).mappings().first()
+            bucket = (
+                conn.execute(
+                    text(
+                        "SELECT available_cash_cents, reserved_cash_cents, available_buying_power_cents FROM strategy_capital_buckets WHERE user_id = :user_id AND strategy_id = :strategy_id AND trading_mode = :trading_mode LIMIT 1"
+                    ),
+                    {
+                        "user_id": _to_hex(request.user_id),
+                        "strategy_id": request.strategy_id,
+                        "trading_mode": request.trading_mode.value,
+                    },
+                )
+                .mappings()
+                .first()
+            )
             if bucket is None:
                 raise ValueError("Capital bucket not found")
-            if amount_cents > int(bucket["available_cash_cents"]) or amount_cents > int(bucket["available_buying_power_cents"]):
+            if amount_cents > int(bucket["available_cash_cents"]) or amount_cents > int(
+                bucket["available_buying_power_cents"]
+            ):
                 raise ValueError("Insufficient buying power for execution")
             conn.execute(
                 text(
                     "UPDATE strategy_capital_buckets SET available_cash_cents = available_cash_cents - :amount, reserved_cash_cents = reserved_cash_cents + :amount, available_buying_power_cents = available_buying_power_cents - :amount, version = version + 1, updated_at = :updated_at WHERE user_id = :user_id AND strategy_id = :strategy_id AND trading_mode = :trading_mode"
                 ),
-                {"amount": amount_cents, "updated_at": _utcnow(), "user_id": _to_hex(request.user_id), "strategy_id": request.strategy_id, "trading_mode": request.trading_mode.value},
+                {
+                    "amount": amount_cents,
+                    "updated_at": _utcnow(),
+                    "user_id": _to_hex(request.user_id),
+                    "strategy_id": request.strategy_id,
+                    "trading_mode": request.trading_mode.value,
+                },
             )
 
-    def _release_reserved_capital(self, request: ExecutionRequest, amount_cents: int, order_id: str) -> None:
+    def _release_reserved_capital(
+        self, request: ExecutionRequest, amount_cents: int, order_id: str
+    ) -> None:
         if amount_cents <= 0:
             return
         with self._engine.begin() as conn:
@@ -692,10 +892,18 @@ class ExecutionService:
                 text(
                     "UPDATE strategy_capital_buckets SET available_cash_cents = available_cash_cents + :amount, reserved_cash_cents = reserved_cash_cents - :amount, available_buying_power_cents = available_buying_power_cents + :amount, version = version + 1, updated_at = :updated_at WHERE user_id = :user_id AND strategy_id = :strategy_id AND trading_mode = :trading_mode"
                 ),
-                {"amount": amount_cents, "updated_at": _utcnow(), "user_id": _to_hex(request.user_id), "strategy_id": request.strategy_id, "trading_mode": request.trading_mode.value},
+                {
+                    "amount": amount_cents,
+                    "updated_at": _utcnow(),
+                    "user_id": _to_hex(request.user_id),
+                    "strategy_id": request.strategy_id,
+                    "trading_mode": request.trading_mode.value,
+                },
             )
 
-    def _lock_reserved_capital(self, request: ExecutionRequest, amount_cents: int, order_id: str) -> None:
+    def _lock_reserved_capital(
+        self, request: ExecutionRequest, amount_cents: int, order_id: str
+    ) -> None:
         if amount_cents <= 0:
             return
         with self._engine.begin() as conn:
@@ -703,19 +911,46 @@ class ExecutionService:
                 text(
                     "UPDATE strategy_capital_buckets SET reserved_cash_cents = reserved_cash_cents - :amount, locked_capital_cents = locked_capital_cents + :amount, version = version + 1, updated_at = :updated_at WHERE user_id = :user_id AND strategy_id = :strategy_id AND trading_mode = :trading_mode"
                 ),
-                {"amount": amount_cents, "updated_at": _utcnow(), "user_id": _to_hex(request.user_id), "strategy_id": request.strategy_id, "trading_mode": request.trading_mode.value},
+                {
+                    "amount": amount_cents,
+                    "updated_at": _utcnow(),
+                    "user_id": _to_hex(request.user_id),
+                    "strategy_id": request.strategy_id,
+                    "trading_mode": request.trading_mode.value,
+                },
             )
 
-    def _settle_capital(self, request: ExecutionRequest, released_locked_cents: int, realized_pnl_delta_cents: int, order_id: str) -> None:
+    def _settle_capital(
+        self,
+        request: ExecutionRequest,
+        released_locked_cents: int,
+        realized_pnl_delta_cents: int,
+        order_id: str,
+    ) -> None:
         with self._engine.begin() as conn:
             conn.execute(
                 text(
                     "UPDATE strategy_capital_buckets SET locked_capital_cents = locked_capital_cents - :released, realized_pnl_cents = realized_pnl_cents + :pnl, available_cash_cents = CASE WHEN available_cash_cents + :released + :pnl < 0 THEN 0 ELSE available_cash_cents + :released + :pnl END, available_buying_power_cents = CASE WHEN available_buying_power_cents + :released + :pnl < 0 THEN 0 ELSE available_buying_power_cents + :released + :pnl END, version = version + 1, updated_at = :updated_at WHERE user_id = :user_id AND strategy_id = :strategy_id AND trading_mode = :trading_mode"
                 ),
-                {"released": released_locked_cents, "pnl": realized_pnl_delta_cents, "updated_at": _utcnow(), "user_id": _to_hex(request.user_id), "strategy_id": request.strategy_id, "trading_mode": request.trading_mode.value},
+                {
+                    "released": released_locked_cents,
+                    "pnl": realized_pnl_delta_cents,
+                    "updated_at": _utcnow(),
+                    "user_id": _to_hex(request.user_id),
+                    "strategy_id": request.strategy_id,
+                    "trading_mode": request.trading_mode.value,
+                },
             )
 
-    def _emit_event(self, order_id: str, request: ExecutionRequest, state: ExecutionOrderStatus, *, detail: str | None = None, payload: dict[str, Any] | None = None) -> None:
+    def _emit_event(
+        self,
+        order_id: str,
+        request: ExecutionRequest,
+        state: ExecutionOrderStatus,
+        *,
+        detail: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
         if self._redis is None:
             return
         event = ExecutionEvent(
@@ -732,14 +967,25 @@ class ExecutionService:
             detail=detail,
             payload=payload or {},
         )
-        push_json(self._redis, QueueNames.execution_events(request.trading_mode), execution_event_to_json(event))
-        push_json(self._redis, QueueNames.execution_reconciliation(request.trading_mode), execution_event_to_json(event))
+        push_json(
+            self._redis,
+            QueueNames.execution_events(request.trading_mode),
+            execution_event_to_json(event),
+        )
+        push_json(
+            self._redis,
+            QueueNames.execution_reconciliation(request.trading_mode),
+            execution_event_to_json(event),
+        )
         alert_type: NotificationEventType | None = None
         if state == ExecutionOrderStatus.SUBMITTED:
             alert_type = NotificationEventType.TRADE_OPENED
         elif state == ExecutionOrderStatus.FILLED:
             alert_type = NotificationEventType.TRADE_CLOSED
-        elif state == ExecutionOrderStatus.FAILED and (detail or "").lower().find("insufficient") >= 0:
+        elif (
+            state == ExecutionOrderStatus.FAILED
+            and (detail or "").lower().find("insufficient") >= 0
+        ):
             alert_type = NotificationEventType.INSUFFICIENT_BALANCE
 
         if alert_type is not None:
@@ -762,16 +1008,31 @@ class ExecutionService:
                     "state": state.value,
                 },
             )
-            push_json(self._redis, QueueNames.alerts(request.trading_mode), notification_event_to_json(notif))
-
-    def _set_order_reserved_locked(self, order_id: str, *, reserved_cash_cents: int, locked_cash_cents: int) -> None:
-        with self._engine.begin() as conn:
-            conn.execute(
-                text("UPDATE execution_orders SET reserved_cash_cents = :reserved_cash_cents, locked_cash_cents = :locked_cash_cents, updated_at = :updated_at WHERE id = :id"),
-                {"id": order_id, "reserved_cash_cents": reserved_cash_cents, "locked_cash_cents": locked_cash_cents, "updated_at": _utcnow()},
+            push_json(
+                self._redis,
+                QueueNames.alerts(request.trading_mode),
+                notification_event_to_json(notif),
             )
 
-    def _set_order_state(self, order_id: str, state: ExecutionOrderStatus, **updates: Any) -> None:
+    def _set_order_reserved_locked(
+        self, order_id: str, *, reserved_cash_cents: int, locked_cash_cents: int
+    ) -> None:
+        with self._engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE execution_orders SET reserved_cash_cents = :reserved_cash_cents, locked_cash_cents = :locked_cash_cents, updated_at = :updated_at WHERE id = :id"
+                ),
+                {
+                    "id": order_id,
+                    "reserved_cash_cents": reserved_cash_cents,
+                    "locked_cash_cents": locked_cash_cents,
+                    "updated_at": _utcnow(),
+                },
+            )
+
+    def _set_order_state(
+        self, order_id: str, state: ExecutionOrderStatus, **updates: Any
+    ) -> None:
         order = self._get_order(order_id)
         ensure_transition(ExecutionOrderStatus(order["state"]), state)
         fields = {"state": state.value, "updated_at": _utcnow(), **updates}
@@ -781,34 +1042,64 @@ class ExecutionService:
         assignments = ", ".join(f"{key} = :{key}" for key in fields)
         fields["id"] = order_id
         with self._engine.begin() as conn:
-            conn.execute(text(f"UPDATE execution_orders SET {assignments} WHERE id = :id"), fields)
+            conn.execute(
+                text(f"UPDATE execution_orders SET {assignments} WHERE id = :id"),
+                fields,
+            )
 
     def _get_existing_order(self, intent_id: uuid.UUID, trading_mode: TradingMode):
         with self._engine.begin() as conn:
-            return conn.execute(
-                text("SELECT * FROM execution_orders WHERE intent_id = :intent_id AND trading_mode = :trading_mode LIMIT 1"),
-                {"intent_id": str(intent_id), "trading_mode": trading_mode.value},
-            ).mappings().first()
+            return (
+                conn.execute(
+                    text(
+                        "SELECT * FROM execution_orders WHERE intent_id = :intent_id AND trading_mode = :trading_mode LIMIT 1"
+                    ),
+                    {"intent_id": str(intent_id), "trading_mode": trading_mode.value},
+                )
+                .mappings()
+                .first()
+            )
 
     def _get_order(self, order_id: str):
         with self._engine.begin() as conn:
-            row = conn.execute(text("SELECT * FROM execution_orders WHERE id = :id LIMIT 1"), {"id": order_id}).mappings().first()
+            row = (
+                conn.execute(
+                    text("SELECT * FROM execution_orders WHERE id = :id LIMIT 1"),
+                    {"id": order_id},
+                )
+                .mappings()
+                .first()
+            )
         if row is None:
             raise ValueError("Order not found")
         return row
 
     def _get_position(self, request: ExecutionRequest):
         with self._engine.begin() as conn:
-            return conn.execute(
-                text(
-                    "SELECT * FROM execution_positions WHERE tenant_id = :tenant_id AND user_id = :user_id AND strategy_id = :strategy_id AND symbol = :symbol AND trading_mode = :trading_mode LIMIT 1"
-                ),
-                {"tenant_id": _to_hex(request.tenant_id), "user_id": _to_hex(request.user_id), "strategy_id": request.strategy_id, "symbol": request.symbol, "trading_mode": request.trading_mode.value},
-            ).mappings().first()
+            return (
+                conn.execute(
+                    text(
+                        "SELECT * FROM execution_positions WHERE tenant_id = :tenant_id AND user_id = :user_id AND strategy_id = :strategy_id AND symbol = :symbol AND trading_mode = :trading_mode LIMIT 1"
+                    ),
+                    {
+                        "tenant_id": _to_hex(request.tenant_id),
+                        "user_id": _to_hex(request.user_id),
+                        "strategy_id": request.strategy_id,
+                        "symbol": request.symbol,
+                        "trading_mode": request.trading_mode.value,
+                    },
+                )
+                .mappings()
+                .first()
+            )
 
     @staticmethod
     def _is_terminal_state(state: ExecutionOrderStatus) -> bool:
-        return state in {ExecutionOrderStatus.FILLED, ExecutionOrderStatus.CANCELLED, ExecutionOrderStatus.FAILED}
+        return state in {
+            ExecutionOrderStatus.FILLED,
+            ExecutionOrderStatus.CANCELLED,
+            ExecutionOrderStatus.FAILED,
+        }
 
     @staticmethod
     def _parse_db_timestamp(value: Any) -> datetime | None:
@@ -823,7 +1114,9 @@ class ExecutionService:
         raw = str(value)
         return uuid.UUID(hex=raw) if "-" not in raw else uuid.UUID(raw)
 
-    def _load_strategy_state(self, user_id: str, strategy_id: str, trading_mode: str) -> dict[str, Any]:
+    def _load_strategy_state(
+        self, user_id: str, strategy_id: str, trading_mode: str
+    ) -> dict[str, Any]:
         stmt = text(
             """
             SELECT state
@@ -835,14 +1128,18 @@ class ExecutionService:
             """
         )
         with self._engine.begin() as conn:
-            row = conn.execute(
-                stmt,
-                {
-                    "user_id": user_id,
-                    "strategy_id": strategy_id,
-                    "trading_mode": trading_mode,
-                },
-            ).mappings().first()
+            row = (
+                conn.execute(
+                    stmt,
+                    {
+                        "user_id": user_id,
+                        "strategy_id": strategy_id,
+                        "trading_mode": trading_mode,
+                    },
+                )
+                .mappings()
+                .first()
+            )
         if row is None:
             return {}
         state = row["state"]
@@ -884,7 +1181,9 @@ class ExecutionService:
                 },
             )
 
-    def _record_strategy_runtime_activity(self, request: ExecutionRequest, occurred_at: datetime) -> None:
+    def _record_strategy_runtime_activity(
+        self, request: ExecutionRequest, occurred_at: datetime
+    ) -> None:
         if request.strategy_id != "dca" or request.side != Side.BUY:
             return
         user_id = _to_hex(request.user_id)
@@ -991,9 +1290,9 @@ class ExecutionService:
         config = self._load_day_trading_config(user_id)
         max_age_hours = int(config.get("max_position_age_hours", 4) or 4)
         symbol_state = self._load_day_trading_runtime_symbol_state(position)
-        opened_at = self._parse_db_timestamp(symbol_state.get("opened_at")) or self._parse_db_timestamp(
-            position.get("last_trade_at")
-        )
+        opened_at = self._parse_db_timestamp(
+            symbol_state.get("opened_at")
+        ) or self._parse_db_timestamp(position.get("last_trade_at"))
         if opened_at is None:
             return False
         now = _utcnow()
@@ -1006,7 +1305,9 @@ class ExecutionService:
             trading_mode=str(position["trading_mode"]),
         ):
             return False
-        request = self._build_day_trading_guard_close_request(position, opened_at, max_age_hours)
+        request = self._build_day_trading_guard_close_request(
+            position, opened_at, max_age_hours
+        )
         result = self.process_request(request)
         log.info(
             "position_age_guard order_id=%s mode=%s symbol=%s duplicated=%s",
@@ -1017,7 +1318,9 @@ class ExecutionService:
         )
         return True
 
-    def _load_day_trading_runtime_symbol_state(self, position: dict[str, Any]) -> dict[str, Any]:
+    def _load_day_trading_runtime_symbol_state(
+        self, position: dict[str, Any]
+    ) -> dict[str, Any]:
         return self._load_strategy_runtime_symbol_state(
             user_id=str(position["user_id"]),
             strategy_id=str(position["strategy_id"]),
@@ -1067,7 +1370,9 @@ class ExecutionService:
             side=Side.SELL,
             order_type=OrderType.MARKET,
             quantity=quantity,
-            price_hint=self._market_price_hint(str(position["symbol"]), Side.SELL.value),
+            price_hint=self._market_price_hint(
+                str(position["symbol"]), Side.SELL.value
+            ),
             idempotency_key=self.build_idempotency_key(str(intent_id), trading_mode),
             client_order_id=self.build_client_order_id(str(intent_id), trading_mode),
             intent_payload={

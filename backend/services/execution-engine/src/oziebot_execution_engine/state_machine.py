@@ -39,8 +39,12 @@ _ALLOWED_TRANSITIONS: dict[ExecutionOrderStatus, set[ExecutionOrderStatus]] = {
 }
 
 
-def ensure_transition(current: ExecutionOrderStatus, target: ExecutionOrderStatus) -> None:
+def ensure_transition(
+    current: ExecutionOrderStatus, target: ExecutionOrderStatus
+) -> None:
     if target == current:
         return
     if target not in _ALLOWED_TRANSITIONS[current]:
-        raise ValueError(f"Invalid execution state transition: {current.value} -> {target.value}")
+        raise ValueError(
+            f"Invalid execution state transition: {current.value} -> {target.value}"
+        )

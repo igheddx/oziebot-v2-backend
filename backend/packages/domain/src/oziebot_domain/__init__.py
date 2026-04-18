@@ -38,7 +38,7 @@ from oziebot_domain.market_data import (
 )
 from oziebot_domain.risk import RejectionReason, RiskDecision
 from oziebot_domain.signal_pipeline import StrategySignalEvent
-from oziebot_domain.strategy import SignalType, StrategySignal, StrategyPerformanceMetrics
+from oziebot_domain.strategy import SignalType, StrategyPerformanceMetrics, StrategySignal
 from oziebot_domain.tenant import TenantId
 from oziebot_domain.trading_mode import TradingMode
 

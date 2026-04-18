@@ -56,9 +56,7 @@ class UserTokenPermissionCreate(BaseModel):
 class UserTokenPermissionUpdate(BaseModel):
     """Toggle a user's access to a specific token."""
 
-    is_enabled: bool = Field(
-        description="Enable or disable this token for the user's trading"
-    )
+    is_enabled: bool = Field(description="Enable or disable this token for the user's trading")
 
 
 class UserTokenPermissionResponse(BaseModel):
@@ -95,9 +93,7 @@ class UserTokenTradabilityCheck(BaseModel):
     symbol: str
     is_platform_enabled: bool
     is_user_enabled: bool
-    is_tradable: bool = Field(
-        description="true if both platform_enabled AND user_enabled"
-    )
+    is_tradable: bool = Field(description="true if both platform_enabled AND user_enabled")
 
 
 class UserTradableTokensList(BaseModel):

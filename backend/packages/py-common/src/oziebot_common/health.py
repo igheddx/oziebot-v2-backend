@@ -52,15 +52,25 @@ def start_health_server(service_name: str) -> HealthState:
     stale_after_seconds = int(os.environ.get("OZIEBOT_HEALTH_STALE_SECONDS", "90"))
     auto_touch_seconds = int(os.environ.get("OZIEBOT_HEALTH_AUTO_TOUCH_SECONDS", "0"))
 
-    state = HealthState(service_name=service_name, stale_after_seconds=stale_after_seconds)
+    state = HealthState(
+        service_name=service_name, stale_after_seconds=stale_after_seconds
+    )
 
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
             snapshot = state.snapshot()
             if self.path == "/health":
-                status_code = HTTPStatus.OK if snapshot["status"] == "ok" else HTTPStatus.SERVICE_UNAVAILABLE
+                status_code = (
+                    HTTPStatus.OK
+                    if snapshot["status"] == "ok"
+                    else HTTPStatus.SERVICE_UNAVAILABLE
+                )
             elif self.path == "/ready":
-                status_code = HTTPStatus.OK if snapshot["ready"] else HTTPStatus.SERVICE_UNAVAILABLE
+                status_code = (
+                    HTTPStatus.OK
+                    if snapshot["ready"]
+                    else HTTPStatus.SERVICE_UNAVAILABLE
+                )
             else:
                 status_code = HTTPStatus.NOT_FOUND
                 snapshot = {"detail": "not found"}
@@ -76,15 +86,20 @@ def start_health_server(service_name: str) -> HealthState:
             return
 
     server = ThreadingHTTPServer((host, port), _Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True, name=f"{service_name}-health")
+    thread = threading.Thread(
+        target=server.serve_forever, daemon=True, name=f"{service_name}-health"
+    )
     thread.start()
     if auto_touch_seconds > 0:
+
         def _auto_touch() -> None:
             while True:
                 state.touch()
                 threading.Event().wait(auto_touch_seconds)
 
-        ticker = threading.Thread(target=_auto_touch, daemon=True, name=f"{service_name}-health-ticker")
+        ticker = threading.Thread(
+            target=_auto_touch, daemon=True, name=f"{service_name}-health-ticker"
+        )
         ticker.start()
     log.info(
         "health server started service=%s host=%s port=%s stale_after_seconds=%s auto_touch_seconds=%s",

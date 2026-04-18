@@ -116,9 +116,7 @@ def test_admin_list_platform_tokens_requires_root(client, platform_tokens):
     assert r.status_code == 401
 
 
-def test_admin_list_platform_tokens_success(
-    client, admin_user_and_token, platform_tokens
-):
+def test_admin_list_platform_tokens_success(client, admin_user_and_token, platform_tokens):
     """Root admin can list all platform tokens (including disabled ones)."""
     _, token = admin_user_and_token
     r = client.get(
@@ -139,7 +137,7 @@ def test_admin_update_token_enable_disable(client, admin_user_and_token, platfor
     """Root admin can enable/disable tokens."""
     _, token = admin_user_and_token
     usdc_token = platform_tokens[2]  # Disabled token
-    
+
     # Enable the disabled token
     r = client.patch(
         f"/v1/admin/tokens/{usdc_token.id}",
@@ -154,7 +152,7 @@ def test_admin_update_token_metadata(client, admin_user_and_token, platform_toke
     """Root admin can update token metadata."""
     _, token = admin_user_and_token
     btc_token = platform_tokens[0]
-    
+
     r = client.patch(
         f"/v1/admin/tokens/{btc_token.id}",
         headers={"Authorization": f"Bearer {token}"},
@@ -172,7 +170,7 @@ def test_admin_update_token_metadata(client, admin_user_and_token, platform_toke
 def test_admin_update_nonexistent_token(client, admin_user_and_token):
     """Admin cannot update a token that doesn't exist."""
     _, token = admin_user_and_token
-    
+
     r = client.patch(
         f"/v1/admin/tokens/{uuid.uuid4()}",
         headers={"Authorization": f"Bearer {token}"},
@@ -211,7 +209,7 @@ def test_user_enable_token(client, regular_user_and_token, platform_tokens):
     """User can enable a platform token for trading."""
     _, token = regular_user_and_token
     btc_token = platform_tokens[0]
-    
+
     r = client.post(
         f"/v1/me/tokens/{btc_token.id}/enable",
         headers={"Authorization": f"Bearer {token}"},
@@ -222,13 +220,11 @@ def test_user_enable_token(client, regular_user_and_token, platform_tokens):
     assert data["is_enabled"] is True
 
 
-def test_user_enable_disabled_platform_token_fails(
-    client, regular_user_and_token, platform_tokens
-):
+def test_user_enable_disabled_platform_token_fails(client, regular_user_and_token, platform_tokens):
     """User cannot enable a platform token that admin has disabled."""
     _, token = regular_user_and_token
     usdc_token = platform_tokens[2]  # Disabled token
-    
+
     r = client.post(
         f"/v1/me/tokens/{usdc_token.id}/enable",
         headers={"Authorization": f"Bearer {token}"},
@@ -241,14 +237,14 @@ def test_user_disable_token(client, regular_user_and_token, platform_tokens):
     """User can disable a token they previously enabled."""
     _, token = regular_user_and_token
     btc_token = platform_tokens[0]
-    
+
     # First enable
     r = client.post(
         f"/v1/me/tokens/{btc_token.id}/enable",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r.status_code == 200
-    
+
     # Then disable
     r = client.post(
         f"/v1/me/tokens/{btc_token.id}/disable",
@@ -263,13 +259,13 @@ def test_user_patch_permission(client, regular_user_and_token, platform_tokens):
     """User can update token permission with PATCH."""
     _, token = regular_user_and_token
     btc_token = platform_tokens[0]
-    
+
     # Enable first
     client.post(
         f"/v1/me/tokens/{btc_token.id}/enable",
         headers={"Authorization": f"Bearer {token}"},
     )
-    
+
     # Disable via PATCH
     r = client.patch(
         f"/v1/me/tokens/{btc_token.id}",
@@ -292,7 +288,7 @@ def test_token_tradable_requires_both_conditions(
     _, user_token = regular_user_and_token
     _, admin_token = admin_user_and_token
     btc_token = platform_tokens[0]  # Enabled
-    
+
     # Case 1: Platform enabled, user not enabled -> not tradable
     r = client.get(
         f"/v1/me/tokens/{btc_token.id}/tradable",
@@ -303,13 +299,13 @@ def test_token_tradable_requires_both_conditions(
     assert data["is_platform_enabled"] is True
     assert data["is_user_enabled"] is False
     assert data["is_tradable"] is False
-    
+
     # Case 2: User enables it -> now tradable
     client.post(
         f"/v1/me/tokens/{btc_token.id}/enable",
         headers={"Authorization": f"Bearer {user_token}"},
     )
-    
+
     r = client.get(
         f"/v1/me/tokens/{btc_token.id}/tradable",
         headers={"Authorization": f"Bearer {user_token}"},
@@ -317,7 +313,7 @@ def test_token_tradable_requires_both_conditions(
     assert r.status_code == 200
     data = r.json()
     assert data["is_tradable"] is True
-    
+
     # Case 3: Platform token is disabled by admin -> not tradable
     # First, have admin disable it
     client.patch(
@@ -325,7 +321,7 @@ def test_token_tradable_requires_both_conditions(
         headers={"Authorization": f"Bearer {admin_token}"},
         json={"is_enabled": False},
     )
-    
+
     r = client.get(
         f"/v1/me/tokens/{btc_token.id}/tradable",
         headers={"Authorization": f"Bearer {user_token}"},
@@ -342,7 +338,7 @@ def test_list_tradable_tokens(client, regular_user_and_token, platform_tokens):
     _, token = regular_user_and_token
     btc_token = platform_tokens[0]
     eth_token = platform_tokens[1]
-    
+
     # Enable BTC and ETH
     client.post(
         f"/v1/me/tokens/{btc_token.id}/enable",
@@ -352,7 +348,7 @@ def test_list_tradable_tokens(client, regular_user_and_token, platform_tokens):
         f"/v1/me/tokens/{eth_token.id}/enable",
         headers={"Authorization": f"Bearer {token}"},
     )
-    
+
     # Get tradable tokens
     r = client.get(
         "/v1/me/tokens/tradable",
@@ -377,7 +373,7 @@ def test_service_is_token_tradable_for_user(platform_tokens, db_session):
     """Service correctly determines if token is tradable."""
     user_id = uuid.uuid4()
     btc_token = platform_tokens[0]
-    
+
     # Add user permission for BTC
     now = datetime.now(UTC)
     perm = UserTokenPermission(
@@ -390,29 +386,23 @@ def test_service_is_token_tradable_for_user(platform_tokens, db_session):
     )
     db_session.add(perm)
     db_session.commit()
-    
+
     # Should be tradable
-    assert TokenPermissionService.is_token_tradable_for_user(
-        db_session, user_id, btc_token.id
-    )
-    
+    assert TokenPermissionService.is_token_tradable_for_user(db_session, user_id, btc_token.id)
+
     # If admin disables it, not tradable anymore
     btc_token.is_enabled = False
     db_session.commit()
-    
-    assert not TokenPermissionService.is_token_tradable_for_user(
-        db_session, user_id, btc_token.id
-    )
+
+    assert not TokenPermissionService.is_token_tradable_for_user(db_session, user_id, btc_token.id)
 
 
 def test_service_initialize_user_tokens(platform_tokens, db_session):
     """Service initializes new user with all enabled platform tokens."""
     user_id = uuid.uuid4()
-    
-    perms = TokenPermissionService.initialize_user_tokens(
-        db_session, user_id, enabled=True
-    )
-    
+
+    perms = TokenPermissionService.initialize_user_tokens(db_session, user_id, enabled=True)
+
     # Should have created permissions for BTC and ETH (not USDC, which is disabled)
     assert len(perms) == 2
     symbols = {p.platform_token.symbol for p in perms}
@@ -426,7 +416,7 @@ def test_service_get_tradable_tokens(platform_tokens, db_session):
     user_id = uuid.uuid4()
     btc_token = platform_tokens[0]
     eth_token = platform_tokens[1]
-    
+
     # Set up permissions: enable BTC, disable ETH
     now = datetime.now(UTC)
     perms = [
@@ -449,10 +439,10 @@ def test_service_get_tradable_tokens(platform_tokens, db_session):
     ]
     db_session.add_all(perms)
     db_session.commit()
-    
+
     # Get tradable
     tradable = TokenPermissionService.get_user_tradable_tokens(db_session, user_id)
-    
+
     # Only BTC should be tradable
     assert len(tradable) == 1
     assert tradable[0].symbol == "BTC"
@@ -469,7 +459,7 @@ def test_regular_user_cannot_update_platform_tokens(
     """Regular users cannot call admin endpoints."""
     _, token = regular_user_and_token
     btc_token = platform_tokens[0]
-    
+
     r = client.patch(
         f"/v1/admin/tokens/{btc_token.id}",
         headers={"Authorization": f"Bearer {token}"},
@@ -481,7 +471,7 @@ def test_regular_user_cannot_update_platform_tokens(
 def test_unauthenticated_cannot_access_admin_endpoints(client, platform_tokens):
     """No auth -> 401 on admin endpoints."""
     btc_token = platform_tokens[0]
-    
+
     r = client.patch(
         f"/v1/admin/tokens/{btc_token.id}",
         json={"is_enabled": False},

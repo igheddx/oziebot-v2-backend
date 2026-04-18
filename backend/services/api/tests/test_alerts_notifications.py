@@ -33,7 +33,10 @@ def test_alert_channel_and_preference_crud(client, regular_user_and_token):
     assert "slack" in payload["supported_channels"]
     assert "trade_opened" in payload["supported_event_types"]
     assert any(ch["channel"] == "slack" for ch in payload["channels"])
-    assert any(p["event_type"] == "trade_opened" and p["trading_mode"] == "paper" for p in payload["preferences"])
+    assert any(
+        p["event_type"] == "trade_opened" and p["trading_mode"] == "paper"
+        for p in payload["preferences"]
+    )
 
 
 def test_alert_rejects_unsupported_channel_or_event(client, regular_user_and_token):

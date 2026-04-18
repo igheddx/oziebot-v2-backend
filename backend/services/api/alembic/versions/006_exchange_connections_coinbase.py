@@ -25,8 +25,15 @@ def upgrade() -> None:
         sa.Column("provider", sa.String(length=32), nullable=False, server_default="coinbase"),
         sa.Column("api_key_name", sa.String(length=512), nullable=False),
         sa.Column("encrypted_secret", sa.LargeBinary(), nullable=False),
-        sa.Column("secret_ciphertext_version", sa.SmallInteger(), nullable=False, server_default="1"),
-        sa.Column("validation_status", sa.String(length=32), nullable=False, server_default="never_validated"),
+        sa.Column(
+            "secret_ciphertext_version", sa.SmallInteger(), nullable=False, server_default="1"
+        ),
+        sa.Column(
+            "validation_status",
+            sa.String(length=32),
+            nullable=False,
+            server_default="never_validated",
+        ),
         sa.Column("last_validated_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("health_status", sa.String(length=32), nullable=True),
         sa.Column("last_health_check_at", sa.DateTime(timezone=True), nullable=True),
@@ -37,7 +44,9 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("tenant_id", "provider", name="uq_exchange_connections_tenant_provider"),
+        sa.UniqueConstraint(
+            "tenant_id", "provider", name="uq_exchange_connections_tenant_provider"
+        ),
     )
     op.create_index("ix_exchange_connections_tenant", "exchange_connections", ["tenant_id"])
 

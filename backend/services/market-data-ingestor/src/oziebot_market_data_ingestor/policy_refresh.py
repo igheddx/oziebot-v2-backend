@@ -26,16 +26,20 @@ class TokenPolicyRefresher:
 
     def refresh_active_tokens(self) -> int:
         with self._engine.begin() as conn:
-            tokens = conn.execute(
-                text(
-                    """
+            tokens = (
+                conn.execute(
+                    text(
+                        """
                     SELECT id, symbol, extra
                     FROM platform_token_allowlist
                     WHERE is_enabled = true
                     ORDER BY sort_order, symbol
                     """
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
 
         refreshed = 0
         for token in tokens:
@@ -47,10 +51,14 @@ class TokenPolicyRefresher:
                 )
                 refreshed += 1
             except Exception as exc:
-                log.warning("token policy refresh failed symbol=%s err=%s", token["symbol"], exc)
+                log.warning(
+                    "token policy refresh failed symbol=%s err=%s", token["symbol"], exc
+                )
         return refreshed
 
-    def _refresh_one(self, *, token_id: str, symbol: str, extra: dict[str, object]) -> None:
+    def _refresh_one(
+        self, *, token_id: str, symbol: str, extra: dict[str, object]
+    ) -> None:
         candles = self._load_candles(symbol)
         bbos = self._load_bbos(symbol)
         trades = self._load_trades(symbol)
@@ -146,18 +154,22 @@ class TokenPolicyRefresher:
 
     def _load_candles(self, symbol: str) -> list[CandleSample]:
         with self._engine.begin() as conn:
-            rows = conn.execute(
-                text(
-                    """
+            rows = (
+                conn.execute(
+                    text(
+                        """
                     SELECT close, high, low, volume
                     FROM market_data_candles
                     WHERE product_id = :symbol
                     ORDER BY bucket_start DESC
                     LIMIT 240
                     """
-                ),
-                {"symbol": symbol},
-            ).mappings().all()
+                    ),
+                    {"symbol": symbol},
+                )
+                .mappings()
+                .all()
+            )
         ordered = list(reversed(rows))
         return [
             CandleSample(
@@ -171,18 +183,22 @@ class TokenPolicyRefresher:
 
     def _load_bbos(self, symbol: str) -> list[BboSample]:
         with self._engine.begin() as conn:
-            rows = conn.execute(
-                text(
-                    """
+            rows = (
+                conn.execute(
+                    text(
+                        """
                     SELECT best_bid_price, best_ask_price, best_bid_size, best_ask_size
                     FROM market_data_bbo_snapshots
                     WHERE product_id = :symbol
                     ORDER BY event_time DESC
                     LIMIT 240
                     """
-                ),
-                {"symbol": symbol},
-            ).mappings().all()
+                    ),
+                    {"symbol": symbol},
+                )
+                .mappings()
+                .all()
+            )
         return [
             BboSample(
                 bid_price=float(row["best_bid_price"]),
@@ -195,19 +211,26 @@ class TokenPolicyRefresher:
 
     def _load_trades(self, symbol: str) -> list[TradeSample]:
         with self._engine.begin() as conn:
-            rows = conn.execute(
-                text(
-                    """
+            rows = (
+                conn.execute(
+                    text(
+                        """
                     SELECT price, size
                     FROM market_data_trade_snapshots
                     WHERE product_id = :symbol
                     ORDER BY event_time DESC
                     LIMIT 240
                     """
-                ),
-                {"symbol": symbol},
-            ).mappings().all()
-        return [TradeSample(price=float(row["price"]), size=float(row["size"])) for row in rows]
+                    ),
+                    {"symbol": symbol},
+                )
+                .mappings()
+                .all()
+            )
+        return [
+            TradeSample(price=float(row["price"]), size=float(row["size"]))
+            for row in rows
+        ]
 
     @staticmethod
     def _json_dict(value) -> dict[str, object]:

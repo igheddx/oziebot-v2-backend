@@ -301,7 +301,9 @@ def _simulate_trades_via_strategy(
                 continue
 
             bars_held = idx - open_pos.entry_idx
-            move_from_entry_bps = ((cur.close - open_pos.entry_price) / open_pos.entry_price) * 10_000
+            move_from_entry_bps = (
+                (cur.close - open_pos.entry_price) / open_pos.entry_price
+            ) * 10_000
             should_exit = (
                 move_from_entry_bps >= cfg.take_profit_bps
                 or move_from_entry_bps <= -cfg.stop_loss_bps
@@ -319,7 +321,9 @@ def _simulate_trades_via_strategy(
     return out
 
 
-def _simulate_trades_heuristic(candles: list[BacktestCandle], cfg: BacktestConfig) -> list[BacktestTrade]:
+def _simulate_trades_heuristic(
+    candles: list[BacktestCandle], cfg: BacktestConfig
+) -> list[BacktestTrade]:
     by_symbol: dict[str, list[BacktestCandle]] = {}
     for c in candles:
         by_symbol.setdefault(c.symbol, []).append(c)
@@ -347,7 +351,9 @@ def _simulate_trades_heuristic(candles: list[BacktestCandle], cfg: BacktestConfi
                 continue
 
             bars_held = idx - open_pos.entry_idx
-            move_from_entry_bps = ((cur.close - open_pos.entry_price) / open_pos.entry_price) * 10_000
+            move_from_entry_bps = (
+                (cur.close - open_pos.entry_price) / open_pos.entry_price
+            ) * 10_000
             should_exit = (
                 move_from_entry_bps >= cfg.take_profit_bps
                 or move_from_entry_bps <= -cfg.stop_loss_bps
@@ -365,7 +371,9 @@ def _simulate_trades_heuristic(candles: list[BacktestCandle], cfg: BacktestConfi
     return out
 
 
-def _close_trade(open_pos: _OpenPosition, candle: BacktestCandle, cfg: BacktestConfig) -> BacktestTrade:
+def _close_trade(
+    open_pos: _OpenPosition, candle: BacktestCandle, cfg: BacktestConfig
+) -> BacktestTrade:
     exit_price = candle.close * (1 - cfg.slippage_bps / 10_000)
     gross_return_bps = ((exit_price - open_pos.entry_price) / open_pos.entry_price) * 10_000
     fee_bps_total = cfg.fee_bps * 2
@@ -560,7 +568,9 @@ def _build_analytics_artifacts(
                 "trade_count": float(len(trades)),
                 "avg_return_bps": avg_return,
                 "win_rate": win_rate,
-                "avg_holding_seconds": float(sum(t.holding_seconds for t in trades) / len(trades)) if trades else 0.0,
+                "avg_holding_seconds": float(sum(t.holding_seconds for t in trades) / len(trades))
+                if trades
+                else 0.0,
             },
             "labels": {
                 "target_next_run_return_bps": avg_return,
@@ -585,7 +595,9 @@ def _build_analytics_artifacts(
         token_returns = [t.net_return_bps for t in token_trades]
         token_avg_return = float(sum(token_returns) / len(token_returns)) if token_returns else 0.0
         token_win_rate = (
-            float(len([r for r in token_returns if r > 0]) / len(token_returns)) if token_returns else 0.0
+            float(len([r for r in token_returns if r > 0]) / len(token_returns))
+            if token_returns
+            else 0.0
         )
         out.append(
             {

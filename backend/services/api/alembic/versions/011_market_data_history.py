@@ -57,12 +57,22 @@ def upgrade() -> None:
         sa.Column("event_time", sa.DateTime(timezone=True), nullable=False),
         sa.Column("ingest_time", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("source", "product_id", "trade_id", name="uq_market_data_trade_snapshot"),
+        sa.UniqueConstraint(
+            "source", "product_id", "trade_id", name="uq_market_data_trade_snapshot"
+        ),
     )
-    op.create_index("ix_market_data_trade_snapshots_source", "market_data_trade_snapshots", ["source"])
-    op.create_index("ix_market_data_trade_snapshots_product_id", "market_data_trade_snapshots", ["product_id"])
-    op.create_index("ix_market_data_trade_snapshots_trade_id", "market_data_trade_snapshots", ["trade_id"])
-    op.create_index("ix_market_data_trade_snapshots_event_time", "market_data_trade_snapshots", ["event_time"])
+    op.create_index(
+        "ix_market_data_trade_snapshots_source", "market_data_trade_snapshots", ["source"]
+    )
+    op.create_index(
+        "ix_market_data_trade_snapshots_product_id", "market_data_trade_snapshots", ["product_id"]
+    )
+    op.create_index(
+        "ix_market_data_trade_snapshots_trade_id", "market_data_trade_snapshots", ["trade_id"]
+    )
+    op.create_index(
+        "ix_market_data_trade_snapshots_event_time", "market_data_trade_snapshots", ["event_time"]
+    )
 
     op.create_table(
         "market_data_bbo_snapshots",
@@ -78,8 +88,12 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_market_data_bbo_snapshots_source", "market_data_bbo_snapshots", ["source"])
-    op.create_index("ix_market_data_bbo_snapshots_product_id", "market_data_bbo_snapshots", ["product_id"])
-    op.create_index("ix_market_data_bbo_snapshots_event_time", "market_data_bbo_snapshots", ["event_time"])
+    op.create_index(
+        "ix_market_data_bbo_snapshots_product_id", "market_data_bbo_snapshots", ["product_id"]
+    )
+    op.create_index(
+        "ix_market_data_bbo_snapshots_event_time", "market_data_bbo_snapshots", ["event_time"]
+    )
 
 
 def downgrade() -> None:

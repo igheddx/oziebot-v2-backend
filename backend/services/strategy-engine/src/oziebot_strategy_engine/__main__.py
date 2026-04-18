@@ -11,6 +11,7 @@ from oziebot_strategy_engine.runner import build_runner
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("strategy-engine")
 
+
 def main() -> None:
     redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
     database_url = os.environ.get(

@@ -1,6 +1,5 @@
 """DCA (Dollar Cost Averaging) strategy - regular fixed purchases."""
 
-from decimal import Decimal
 from uuid import UUID
 
 from oziebot_domain.strategy import SignalType, StrategySignal
@@ -11,10 +10,10 @@ from oziebot_strategy_engine.strategy import StrategyContext, TradingStrategy
 class DCAStrategy(TradingStrategy):
     """
     DCA (Dollar Cost Averaging) Strategy - buys fixed amounts at intervals.
-    
+
     Long-term accumulation strategy that reduces timing risk by purchasing
     regularly regardless of price.
-    
+
     Configuration:
     - buy_amount_usd: Fixed USD amount to buy each cycle (default: 100)
     - buy_interval_hours: Hours between buys (default: 24 = daily)
@@ -137,10 +136,12 @@ class DCAStrategy(TradingStrategy):
         )
 
     def _hold_signal(
-        self, context: StrategyContext, signal_id: UUID, correlation_id: UUID, reason: str
+        self,
+        context: StrategyContext,
+        signal_id: UUID,
+        correlation_id: UUID,
+        reason: str,
     ) -> StrategySignal:
-        market = context.market_snapshot
-
         return StrategySignal(
             signal_id=signal_id,
             correlation_id=correlation_id,

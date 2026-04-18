@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from oziebot_api.deps import DbSession
 from oziebot_api.deps.auth import CurrentUser
@@ -47,15 +45,15 @@ router = APIRouter(prefix="/me/strategies", tags=["strategies"])
 def list_available_strategies(db: DbSession) -> AvailableStrategiesResponse:
     """
     List all available strategies on the platform.
-    
+
     Returns metadata about each strategy including configuration schema
     for frontend to build dynamic UI.
     """
     # Import registry here to avoid circular imports
     from oziebot_strategy_engine.registry import StrategyRegistry
-    
+
     strategies_list = StrategyRegistry.list_strategies()
-    
+
     return AvailableStrategiesResponse(
         total=len(strategies_list),
         strategies=[StrategyMetadata(**s) for s in strategies_list],
@@ -138,7 +136,7 @@ def create_strategy(
 ) -> UserStrategyResponse:
     """
     Add a new strategy for the user.
-    
+
     Configuration will be validated against strategy schema.
     """
     tenant_id = primary_tenant_id(db, user)
@@ -154,26 +152,26 @@ def create_strategy(
 
     # Import registry here
     from oziebot_strategy_engine.registry import StrategyRegistry
-    
+
     # Verify strategy exists
     if not StrategyRegistry.strategy_exists(body.strategy_id):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Strategy '{body.strategy_id}' not found"
-        )
-    
+        raise HTTPException(status_code=404, detail=f"Strategy '{body.strategy_id}' not found")
+
     # Verify not already configured
-    existing = db.query(UserStrategy).filter(
-        UserStrategy.user_id == user.id,
-        UserStrategy.strategy_id == body.strategy_id,
-    ).first()
-    
+    existing = (
+        db.query(UserStrategy)
+        .filter(
+            UserStrategy.user_id == user.id,
+            UserStrategy.strategy_id == body.strategy_id,
+        )
+        .first()
+    )
+
     if existing:
         raise HTTPException(
-            status_code=409,
-            detail=f"Strategy '{body.strategy_id}' already configured for user"
+            status_code=409, detail=f"Strategy '{body.strategy_id}' already configured for user"
         )
-    
+
     # Validate config if provided
     if body.config:
         try:
@@ -181,7 +179,7 @@ def create_strategy(
             strategy.validate_config(body.config)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-    
+
     # Create strategy record
     now = datetime.now(UTC)
     db_strategy = UserStrategy(
@@ -195,7 +193,7 @@ def create_strategy(
     db.add(db_strategy)
     db.commit()
     db.refresh(db_strategy)
-    
+
     return UserStrategyResponse.model_validate(db_strategy)
 
 
@@ -206,14 +204,18 @@ def get_strategy(
     db: DbSession,
 ) -> UserStrategyResponse:
     """Get a user's specific strategy configuration."""
-    strategy = db.query(UserStrategy).filter(
-        UserStrategy.user_id == user.id,
-        UserStrategy.strategy_id == strategy_id,
-    ).first()
-    
+    strategy = (
+        db.query(UserStrategy)
+        .filter(
+            UserStrategy.user_id == user.id,
+            UserStrategy.strategy_id == strategy_id,
+        )
+        .first()
+    )
+
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not configured")
-    
+
     return UserStrategyResponse.model_validate(strategy)
 
 
@@ -225,16 +227,22 @@ def update_strategy(
     db: DbSession,
 ) -> UserStrategyResponse:
     """Update strategy configuration."""
-    strategy = db.query(UserStrategy).filter(
-        UserStrategy.user_id == user.id,
-        UserStrategy.strategy_id == strategy_id,
-    ).first()
+    strategy = (
+        db.query(UserStrategy)
+        .filter(
+            UserStrategy.user_id == user.id,
+            UserStrategy.strategy_id == strategy_id,
+        )
+        .first()
+    )
 
     if not strategy:
         tenant_id = primary_tenant_id(db, user)
         if tenant_id is not None:
             if not has_strategy_entitlement(db, tenant_id, strategy_id):
-                raise HTTPException(status_code=403, detail="Strategy is not assigned to this tenant")
+                raise HTTPException(
+                    status_code=403, detail="Strategy is not assigned to this tenant"
+                )
         elif user.is_root_admin:
             # Root admin: just verify the strategy exists in the platform catalog
             platform_strat = db.scalars(
@@ -253,27 +261,28 @@ def update_strategy(
             created_at=now,
             updated_at=now,
         )
-    
+
     # Validate new config if provided
     if body.config is not None:
         from oziebot_strategy_engine.registry import StrategyRegistry
+
         try:
             strategy_impl = StrategyRegistry.get_strategy(strategy_id)
             strategy_impl.validate_config(body.config)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-    
+
     # Update fields
     if body.is_enabled is not None:
         strategy.is_enabled = body.is_enabled
     if body.config is not None:
         strategy.config = body.config
-    
+
     strategy.updated_at = datetime.now(UTC)
     db.add(strategy)
     db.commit()
     db.refresh(strategy)
-    
+
     return UserStrategyResponse.model_validate(strategy)
 
 
@@ -284,17 +293,21 @@ def delete_strategy(
     db: DbSession,
 ) -> dict[str, str]:
     """Remove a strategy from user's configuration."""
-    strategy = db.query(UserStrategy).filter(
-        UserStrategy.user_id == user.id,
-        UserStrategy.strategy_id == strategy_id,
-    ).first()
-    
+    strategy = (
+        db.query(UserStrategy)
+        .filter(
+            UserStrategy.user_id == user.id,
+            UserStrategy.strategy_id == strategy_id,
+        )
+        .first()
+    )
+
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not configured")
-    
+
     db.delete(strategy)
     db.commit()
-    
+
     return {"status": "deleted", "strategy_id": strategy_id}
 
 
@@ -315,17 +328,14 @@ def get_strategy_performance(
         StrategyPerformance.user_id == user.id,
         StrategyPerformance.strategy_id == strategy_id,
     )
-    
+
     if trading_mode:
         query = query.filter(StrategyPerformance.trading_mode == trading_mode)
-    
+
     performance_records = query.all()
-    
+
     return StrategyPerformanceListResponse(
-        strategies=[
-            StrategyPerformanceResponse.model_validate(p)
-            for p in performance_records
-        ]
+        strategies=[StrategyPerformanceResponse.model_validate(p) for p in performance_records]
     )
 
 
@@ -349,7 +359,7 @@ def get_strategy_signals(
         .limit(limit)
         .all()
     )
-    
+
     return {
         "strategy_id": strategy_id,
         "total_fetched": len(signals),
