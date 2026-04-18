@@ -147,14 +147,20 @@ class ExecutionService:
             INSERT INTO execution_orders (
               id, intent_id, correlation_id, tenant_id, user_id, strategy_id, symbol, side, order_type,
               trading_mode, venue, state, quantity, requested_notional_cents, reserved_cash_cents,
-              locked_cash_cents, filled_quantity, avg_fill_price, fees_cents, idempotency_key,
+              locked_cash_cents, filled_quantity, avg_fill_price, fees_cents, expected_gross_edge_bps,
+              estimated_fee_bps, estimated_slippage_bps, estimated_total_cost_bps, expected_net_edge_bps,
+              execution_preference, fallback_behavior, maker_timeout_seconds, limit_price_offset_bps,
+              actual_fill_type, fallback_triggered, idempotency_key,
               client_order_id, venue_order_id, failure_code, failure_detail, trace_id,
               intent_payload, risk_payload, adapter_payload, created_at, updated_at, submitted_at,
               completed_at, cancelled_at, failed_at
             ) VALUES (
               :id, :intent_id, :correlation_id, :tenant_id, :user_id, :strategy_id, :symbol, :side, :order_type,
               :trading_mode, :venue, :state, :quantity, :requested_notional_cents, :reserved_cash_cents,
-              :locked_cash_cents, :filled_quantity, :avg_fill_price, :fees_cents, :idempotency_key,
+              :locked_cash_cents, :filled_quantity, :avg_fill_price, :fees_cents, :expected_gross_edge_bps,
+              :estimated_fee_bps, :estimated_slippage_bps, :estimated_total_cost_bps, :expected_net_edge_bps,
+              :execution_preference, :fallback_behavior, :maker_timeout_seconds, :limit_price_offset_bps,
+              NULL, :fallback_triggered, :idempotency_key,
               :client_order_id, NULL, :failure_code, :failure_detail, :trace_id,
               :intent_payload, :risk_payload, :adapter_payload, :created_at, :updated_at, NULL,
               NULL, NULL, :failed_at
@@ -189,6 +195,16 @@ class ExecutionService:
                         "filled_quantity": "0",
                         "avg_fill_price": None,
                         "fees_cents": 0,
+                        "expected_gross_edge_bps": request.expected_gross_edge_bps,
+                        "estimated_fee_bps": request.estimated_fee_bps,
+                        "estimated_slippage_bps": request.estimated_slippage_bps,
+                        "estimated_total_cost_bps": request.estimated_total_cost_bps,
+                        "expected_net_edge_bps": request.expected_net_edge_bps,
+                        "execution_preference": request.execution_preference,
+                        "fallback_behavior": request.fallback_behavior,
+                        "maker_timeout_seconds": request.maker_timeout_seconds,
+                        "limit_price_offset_bps": request.limit_price_offset_bps,
+                        "fallback_triggered": False,
                         "idempotency_key": request.idempotency_key,
                         "client_order_id": request.client_order_id,
                         "failure_code": "token_strategy_policy"
@@ -502,6 +518,7 @@ class ExecutionService:
     ) -> ExecutionRequest:
         trading_mode = TradingMode(intent["trading_mode"])
         intent_id = str(intent["intent_id"])
+        fee_economics = dict(intent.get("metadata", {}).get("fee_economics") or {})
         return ExecutionRequest(
             intent_id=intent["intent_id"],
             trace_id=trace_id,
@@ -517,6 +534,32 @@ class ExecutionService:
             price_hint=self._market_price_hint(
                 intent["instrument"]["symbol"], intent["side"]
             ),
+            execution_preference=str(
+                fee_economics.get("execution_preference", "maker_preferred")
+            ),
+            fallback_behavior=str(
+                fee_economics.get("fallback_behavior", "convert_to_taker")
+            ),
+            maker_timeout_seconds=int(
+                fee_economics.get("maker_timeout_seconds", 0) or 0
+            ),
+            limit_price_offset_bps=int(
+                fee_economics.get("limit_price_offset_bps", 0) or 0
+            ),
+            expected_gross_edge_bps=int(
+                fee_economics.get("expected_gross_edge_bps", 0) or 0
+            ),
+            estimated_fee_bps=int(fee_economics.get("estimated_fee_bps", 0) or 0),
+            estimated_slippage_bps=int(
+                fee_economics.get("estimated_slippage_bps", 0) or 0
+            ),
+            estimated_total_cost_bps=int(
+                fee_economics.get("estimated_total_cost_bps", 0) or 0
+            ),
+            expected_net_edge_bps=int(
+                fee_economics.get("expected_net_edge_bps", 0) or 0
+            ),
+            fee_profile=fee_economics,
             idempotency_key=self.build_idempotency_key(intent_id, trading_mode),
             client_order_id=self.build_client_order_id(intent_id, trading_mode),
             intent_payload=intent,
@@ -581,12 +624,43 @@ class ExecutionService:
             return ProcessResult(
                 order_id=order_id, state=ExecutionOrderStatus.FAILED, duplicated=False
             )
+        if target == ExecutionOrderStatus.CANCELLED:
+            if reserve_cents > 0:
+                self._release_reserved_capital(request, reserve_cents, order_id)
+            self._set_order_state(
+                order_id,
+                ExecutionOrderStatus.CANCELLED,
+                venue_order_id=submission.venue_order_id,
+                adapter_payload=submission.raw_payload,
+                cancelled_at=_utcnow(),
+                reserved_cash_cents=0,
+                actual_fill_type=submission.actual_fill_type,
+                fallback_triggered=submission.fallback_triggered,
+            )
+            self._record_metric(
+                rejected=True,
+                rejection_reason="execution_cancelled",
+            )
+            self._emit_event(
+                order_id,
+                request,
+                ExecutionOrderStatus.CANCELLED,
+                detail=submission.failure_detail or "Order cancelled",
+                payload=submission.raw_payload,
+            )
+            return ProcessResult(
+                order_id=order_id,
+                state=ExecutionOrderStatus.CANCELLED,
+                duplicated=False,
+            )
 
         self._set_order_state(
             order_id,
             target,
             venue_order_id=submission.venue_order_id,
             adapter_payload=submission.raw_payload,
+            actual_fill_type=submission.actual_fill_type,
+            fallback_triggered=submission.fallback_triggered,
         )
         self._emit_event(
             order_id,
@@ -1111,8 +1185,16 @@ class ExecutionService:
                     "final_decision": state.value,
                     "detail": detail,
                     "quantity": str(request.quantity),
+                    "expected_gross_edge_bps": request.expected_gross_edge_bps,
+                    "estimated_total_cost_bps": request.estimated_total_cost_bps,
+                    "expected_net_edge_bps": request.expected_net_edge_bps,
+                    "execution_preference": request.execution_preference,
+                    "fallback_behavior": request.fallback_behavior,
                     "token_policy": request.intent_payload.get("metadata", {}).get(
                         "token_policy_execution"
+                    ),
+                    "fee_economics": request.intent_payload.get("metadata", {}).get(
+                        "fee_economics"
                     ),
                     "metrics": self.metrics_snapshot(),
                 },

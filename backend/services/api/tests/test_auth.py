@@ -47,6 +47,33 @@ def test_admin_platform_settings_ok(client, root_user_and_token: tuple[str, str]
     assert "environment" in r.json()
 
 
+def test_admin_fee_settings_round_trip(client, root_user_and_token: tuple[str, str]):
+    _, token = root_user_and_token
+    get_response = client.get(
+        "/v1/admin/platform/fee-settings",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert get_response.status_code == 200, get_response.text
+    current = get_response.json()
+    assert "defaults" in current
+
+    updated = client.put(
+        "/v1/admin/platform/fee-settings",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "value": {
+                **current,
+                "defaults": {
+                    **current["defaults"],
+                    "min_expected_edge_bps": 42,
+                },
+            }
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["value"]["defaults"]["min_expected_edge_bps"] == 42
+
+
 def test_tenants_list_requires_root(client):
     r = client.get("/v1/tenants")
     assert r.status_code == 401

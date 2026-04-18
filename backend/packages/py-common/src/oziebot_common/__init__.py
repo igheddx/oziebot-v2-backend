@@ -1,6 +1,17 @@
 """Shared non-domain utilities (queues, Redis, token policy helpers)."""
 
 from oziebot_common.health import HealthState, start_health_server
+from oziebot_common.fee_model import (
+    DEFAULT_FEE_MODEL_SETTINGS,
+    SETTING_EXECUTION_FEE_MODEL,
+    bps_to_decimal,
+    calculate_round_trip_cost_bps,
+    default_fee_model_settings,
+    estimate_signal_expected_edge_bps,
+    is_trade_net_positive,
+    normalize_fee_model_settings,
+    resolve_fee_profile,
+)
 from oziebot_common.queues import QueueNames, brpop_json_any, redis_from_url
 from oziebot_common.strategy_defaults import (
     GLOBAL_SIGNAL_RULE_DEFAULTS,
@@ -25,19 +36,28 @@ __all__ = [
     "BboSample",
     "CandleSample",
     "DISCOURAGED_SIZE_MULTIPLIER",
+    "DEFAULT_FEE_MODEL_SETTINGS",
     "GLOBAL_SIGNAL_RULE_DEFAULTS",
     "HealthState",
     "QueueNames",
+    "SETTING_EXECUTION_FEE_MODEL",
     "StrategySuitabilityResult",
     "TOKEN_POLICY_RECOMMENDATIONS",
     "TOKEN_POLICY_STRATEGIES",
     "TokenMarketProfileResult",
     "TradeSample",
+    "bps_to_decimal",
+    "calculate_round_trip_cost_bps",
+    "default_fee_model_settings",
+    "estimate_signal_expected_edge_bps",
     "brpop_json_any",
     "compute_market_profile",
+    "is_trade_net_positive",
+    "normalize_fee_model_settings",
     "normalize_platform_strategy_config",
     "redis_from_url",
     "resolve_effective_token_policy",
+    "resolve_fee_profile",
     "score_strategy_suitability",
     "start_health_server",
     "strategy_platform_config",

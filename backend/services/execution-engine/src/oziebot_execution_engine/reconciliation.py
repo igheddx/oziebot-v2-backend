@@ -28,6 +28,12 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def _to_hex(uid: Any) -> str:
+    if isinstance(uid, uuid.UUID):
+        return uid.hex
+    return str(uid).replace("-", "")
+
+
 def _to_decimal(value: Any, default: str = "0") -> Decimal:
     if value in (None, ""):
         return Decimal(default)
@@ -171,7 +177,7 @@ class ReconciliationService:
                     text(
                         "SELECT * FROM execution_orders WHERE tenant_id = :tenant_id AND trading_mode = 'live'"
                     ),
-                    {"tenant_id": str(tenant_id)},
+                    {"tenant_id": _to_hex(tenant_id)},
                 )
                 .mappings()
                 .all()
@@ -420,7 +426,7 @@ class ReconciliationService:
                     text(
                         "SELECT user_id, strategy_id, symbol, trading_mode, side, quantity, price, realized_pnl_cents FROM execution_trades WHERE tenant_id = :tenant_id AND trading_mode = 'live' ORDER BY executed_at ASC"
                     ),
-                    {"tenant_id": str(tenant_id)},
+                    {"tenant_id": _to_hex(tenant_id)},
                 )
                 .mappings()
                 .all()
@@ -430,7 +436,7 @@ class ReconciliationService:
                     text(
                         "SELECT * FROM execution_positions WHERE tenant_id = :tenant_id AND trading_mode = 'live'"
                     ),
-                    {"tenant_id": str(tenant_id)},
+                    {"tenant_id": _to_hex(tenant_id)},
                 )
                 .mappings()
                 .all()

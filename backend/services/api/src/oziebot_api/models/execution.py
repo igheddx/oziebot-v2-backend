@@ -4,7 +4,16 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Uuid, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Uuid,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from oziebot_api.db.base import Base
@@ -43,6 +52,21 @@ class ExecutionOrder(Base):
     filled_quantity: Mapped[str] = mapped_column(String(64), nullable=False, default="0")
     avg_fill_price: Mapped[str | None] = mapped_column(String(64), nullable=True)
     fees_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    expected_gross_edge_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    estimated_fee_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    estimated_slippage_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    estimated_total_cost_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    expected_net_edge_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    execution_preference: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="maker_preferred"
+    )
+    fallback_behavior: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="convert_to_taker"
+    )
+    maker_timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    limit_price_offset_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    actual_fill_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    fallback_triggered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     client_order_id: Mapped[str] = mapped_column(String(128), nullable=False)
     venue_order_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)

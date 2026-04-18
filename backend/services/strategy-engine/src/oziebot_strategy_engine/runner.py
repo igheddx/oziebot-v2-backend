@@ -13,6 +13,12 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from oziebot_common.queues import QueueNames, push_json, strategy_signal_to_json
+from oziebot_common.fee_model import (
+    SETTING_EXECUTION_FEE_MODEL,
+    calculate_round_trip_cost_bps,
+    estimate_signal_expected_edge_bps,
+    resolve_fee_profile,
+)
 from oziebot_common.strategy_defaults import normalize_platform_strategy_config
 from oziebot_common.token_policy import resolve_effective_token_policy
 from oziebot_domain.signal_pipeline import StrategySignalEvent
@@ -72,6 +78,7 @@ class StrategyRunner:
         rows = self._load_enabled_user_strategies()
         processed = 0
         now = datetime.now(UTC)
+        fee_settings = self._load_fee_settings()
 
         for row in rows:
             user_id = str(row["user_id"])
@@ -250,6 +257,14 @@ class StrategyRunner:
                         signal = self._apply_token_policy_to_signal(
                             signal=signal, token_policy=token_policy
                         )
+                        signal = self._annotate_fee_economics(
+                            signal=signal,
+                            strategy_name=strategy_name,
+                            trading_mode=mode,
+                            symbol=symbol,
+                            config=config,
+                            fee_settings=fee_settings,
+                        )
                         suppress_reason = self._suppression_reason(
                             user_id=user_id,
                             strategy_name=strategy_name,
@@ -279,6 +294,9 @@ class StrategyRunner:
                                     "confidence": float(signal.confidence),
                                     "token_policy": (signal.metadata or {}).get(
                                         "token_policy"
+                                    ),
+                                    "fee_economics": (signal.metadata or {}).get(
+                                        "fee_economics"
                                     ),
                                 },
                                 started_at=now,
@@ -320,6 +338,9 @@ class StrategyRunner:
                                 "confidence": float(signal.confidence),
                                 "token_policy": (signal.metadata or {}).get(
                                     "token_policy"
+                                ),
+                                "fee_economics": (signal.metadata or {}).get(
+                                    "fee_economics"
                                 ),
                             },
                             started_at=now,
@@ -481,6 +502,111 @@ class StrategyRunner:
             except Exception:
                 return normalize_platform_strategy_config(strategy_id, None)
         return normalize_platform_strategy_config(strategy_id, payload)
+
+    def _load_fee_settings(self) -> dict[str, Any]:
+        stmt = text(
+            """
+            SELECT value
+            FROM platform_settings
+            WHERE key = :key
+            LIMIT 1
+            """
+        )
+        with self._engine.begin() as conn:
+            row = (
+                conn.execute(
+                    stmt,
+                    {"key": SETTING_EXECUTION_FEE_MODEL},
+                )
+                .mappings()
+                .first()
+            )
+        payload = row["value"] if row else None
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = None
+        return payload if isinstance(payload, dict) else {}
+
+    def _annotate_fee_economics(
+        self,
+        *,
+        signal: StrategySignal,
+        strategy_name: str,
+        trading_mode: TradingMode,
+        symbol: str,
+        config: dict[str, Any],
+        fee_settings: dict[str, Any],
+    ) -> StrategySignal:
+        action = self._signal_action(signal)
+        fee_profile = resolve_fee_profile(
+            fee_settings,
+            trading_mode=trading_mode,
+            strategy_id=strategy_name,
+            symbol=symbol,
+        )
+        expected_gross_edge_bps = estimate_signal_expected_edge_bps(
+            strategy_id=strategy_name,
+            action=action,
+            config=config,
+            fee_profile=fee_profile,
+        )
+        estimated_total_cost_bps = calculate_round_trip_cost_bps(
+            fee_profile.get("entry_fill_type", "maker"),
+            fee_profile.get("exit_fill_type", "taker"),
+            fee_profile.get("estimated_slippage_bps", 0),
+            fee_profile.get("spread_buffer_bps", 0),
+            fee_profile.get("safety_buffer_bps", 0),
+            fee_profile.get("coinbase_one_rebate_percent", 0),
+            maker_fee_bps=fee_profile.get("maker_fee_bps", 0),
+            taker_fee_bps=fee_profile.get("taker_fee_bps", 0),
+        )
+        fee_bps = calculate_round_trip_cost_bps(
+            fee_profile.get("entry_fill_type", "maker"),
+            fee_profile.get("exit_fill_type", "taker"),
+            0,
+            0,
+            0,
+            fee_profile.get("coinbase_one_rebate_percent", 0),
+            maker_fee_bps=fee_profile.get("maker_fee_bps", 0),
+            taker_fee_bps=fee_profile.get("taker_fee_bps", 0),
+        )
+        economics = {
+            "enabled": bool(fee_profile.get("enabled", True)),
+            "execution_preference": fee_profile.get("execution_preference"),
+            "fallback_behavior": fee_profile.get("fallback_behavior"),
+            "maker_timeout_seconds": int(
+                fee_profile.get("maker_timeout_seconds", 0) or 0
+            ),
+            "limit_price_offset_bps": int(
+                fee_profile.get("limit_price_offset_bps", 0) or 0
+            ),
+            "entry_fill_type": fee_profile.get("entry_fill_type"),
+            "exit_fill_type": fee_profile.get("exit_fill_type"),
+            "expected_gross_edge_bps": expected_gross_edge_bps,
+            "estimated_fee_bps": fee_bps,
+            "estimated_slippage_bps": int(
+                fee_profile.get("estimated_slippage_bps", 0) or 0
+            ),
+            "estimated_total_cost_bps": estimated_total_cost_bps,
+            "expected_net_edge_bps": expected_gross_edge_bps - estimated_total_cost_bps,
+            "min_notional_per_trade": fee_profile.get("min_notional_per_trade", 0),
+            "min_expected_edge_bps": fee_profile.get("min_expected_edge_bps", 0),
+            "min_expected_net_profit_dollars": fee_profile.get(
+                "min_expected_net_profit_dollars", 0
+            ),
+            "max_fee_percent_of_expected_profit": fee_profile.get(
+                "max_fee_percent_of_expected_profit", 1
+            ),
+            "max_slippage_bps": fee_profile.get("max_slippage_bps", 0),
+            "skip_trade_if_fee_too_high": bool(
+                fee_profile.get("skip_trade_if_fee_too_high", True)
+            ),
+        }
+        metadata = dict(signal.metadata or {})
+        metadata["fee_economics"] = economics
+        return signal.model_copy(update={"metadata": metadata})
 
     def _last_action_signal_ts(
         self,
@@ -1329,6 +1455,7 @@ class StrategyRunner:
                 "reason": signal.reason,
                 "signal_metadata": signal.metadata or {},
                 "token_policy": (signal.metadata or {}).get("token_policy"),
+                "fee_economics": (signal.metadata or {}).get("fee_economics"),
             },
             trading_mode=trading_mode,
             timestamp=timestamp,

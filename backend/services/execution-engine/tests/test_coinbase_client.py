@@ -58,6 +58,7 @@ class _StubResponse:
 class _StubClient:
     def __init__(self, response: _StubResponse):
         self._response = response
+        self.last_json: dict | None = None
 
     def __enter__(self):
         return self
@@ -66,6 +67,7 @@ class _StubClient:
         return False
 
     def post(self, url: str, *, headers: dict, json: dict) -> _StubResponse:
+        self.last_json = json
         return self._response
 
 
@@ -133,3 +135,39 @@ def test_coinbase_client_sums_nested_fill_fees(monkeypatch):
 
     assert submission.status.value == "filled"
     assert submission.fills[0].fee == Decimal("0.75")
+
+
+def test_coinbase_client_builds_limit_body_for_maker_preference(monkeypatch):
+    payload = {
+        "success": True,
+        "success_response": {
+            "order_id": "venue-order-3",
+            "completion_percentage": "0",
+        },
+    }
+    stub_client = _StubClient(_StubResponse(payload))
+    monkeypatch.setattr(
+        "oziebot_execution_engine.coinbase_client.build_cdp_jwt",
+        lambda **_: "token",
+    )
+    monkeypatch.setattr(httpx, "Client", lambda timeout: stub_client)
+
+    request = _request().model_copy(
+        update={
+            "order_type": OrderType.LIMIT,
+            "execution_preference": "maker_preferred",
+            "limit_price_offset_bps": 2,
+        }
+    )
+    client = HttpCoinbaseExecutionClient("https://api.coinbase.com")
+    submission = client.place_order(
+        request,
+        api_key_name="api-key",
+        private_key_pem="-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----",
+    )
+
+    assert submission.status.value == "pending"
+    assert stub_client.last_json is not None
+    limit_body = stub_client.last_json["order_configuration"]["limit_limit_gtc"]
+    assert limit_body["post_only"] is True
+    assert limit_body["limit_price"] == "49990.00"

@@ -87,6 +87,10 @@ def _setup_db(db_path: Path) -> None:
                 "order_type TEXT NOT NULL, trading_mode TEXT NOT NULL, venue TEXT NOT NULL, state TEXT NOT NULL,"
                 "quantity TEXT NOT NULL, requested_notional_cents INTEGER NOT NULL, reserved_cash_cents INTEGER NOT NULL,"
                 "locked_cash_cents INTEGER NOT NULL, filled_quantity TEXT NOT NULL, avg_fill_price TEXT, fees_cents INTEGER NOT NULL,"
+                "expected_gross_edge_bps INTEGER NOT NULL, estimated_fee_bps INTEGER NOT NULL, estimated_slippage_bps INTEGER NOT NULL,"
+                "estimated_total_cost_bps INTEGER NOT NULL, expected_net_edge_bps INTEGER NOT NULL,"
+                "execution_preference TEXT NOT NULL, fallback_behavior TEXT NOT NULL, maker_timeout_seconds INTEGER NOT NULL,"
+                "limit_price_offset_bps INTEGER NOT NULL, actual_fill_type TEXT, fallback_triggered BOOLEAN NOT NULL,"
                 "idempotency_key TEXT NOT NULL UNIQUE, client_order_id TEXT NOT NULL UNIQUE, venue_order_id TEXT,"
                 "failure_code TEXT, failure_detail TEXT, trace_id TEXT NOT NULL, intent_payload TEXT NOT NULL, risk_payload TEXT NOT NULL,"
                 "adapter_payload TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, submitted_at TEXT, completed_at TEXT,"
@@ -276,6 +280,24 @@ def _request(
         quantity=quantity,
         venue=Venue.COINBASE,
         price_hint=price_hint,
+        execution_preference="maker_preferred",
+        fallback_behavior="convert_to_taker",
+        maker_timeout_seconds=15,
+        limit_price_offset_bps=2,
+        expected_gross_edge_bps=150,
+        estimated_fee_bps=100,
+        estimated_slippage_bps=8,
+        estimated_total_cost_bps=115,
+        expected_net_edge_bps=35,
+        fee_profile={
+            "maker_fee_bps": 40,
+            "taker_fee_bps": 60,
+            "estimated_slippage_bps": 8,
+            "execution_preference": "maker_preferred",
+            "fallback_behavior": "convert_to_taker",
+            "maker_timeout_seconds": 15,
+            "limit_price_offset_bps": 2,
+        },
         idempotency_key=ExecutionService.build_idempotency_key(str(intent_id), mode),
         client_order_id=ExecutionService.build_client_order_id(str(intent_id), mode),
         intent_payload={
@@ -287,6 +309,19 @@ def _request(
             "side": side.value,
             "order_type": OrderType.MARKET.value,
             "quantity": {"amount": str(quantity)},
+            "metadata": {
+                "fee_economics": {
+                    "execution_preference": "maker_preferred",
+                    "fallback_behavior": "convert_to_taker",
+                    "maker_timeout_seconds": 15,
+                    "limit_price_offset_bps": 2,
+                    "expected_gross_edge_bps": 150,
+                    "estimated_fee_bps": 100,
+                    "estimated_slippage_bps": 8,
+                    "estimated_total_cost_bps": 115,
+                    "expected_net_edge_bps": 35,
+                }
+            },
         },
     )
 
@@ -459,6 +494,45 @@ def test_paper_fills_immediately_while_live_stays_pending(tmp_path: Path):
     assert redis.list_len("oziebot:queue:execution_events:live") >= 3
 
 
+def test_paper_maker_preferred_can_fill_mixed_with_fallback(tmp_path: Path):
+    db_path = tmp_path / "execution-mixed.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "momentum"
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER.value,
+        available_cash_cents=3_100_000,
+    )
+    service, _ = _service(db_path, redis)
+    base_request = _request(user_id, tenant_id, strategy_id, TradingMode.PAPER)
+    request = base_request.model_copy(
+        update={
+            "order_type": OrderType.LIMIT,
+            "intent_payload": {
+                **base_request.intent_payload,
+                "order_type": OrderType.LIMIT.value,
+            },
+        }
+    )
+
+    result = service.process_request(request)
+
+    assert result.state == ExecutionOrderStatus.FILLED
+    order = _last_order(db_path)
+    assert order["actual_fill_type"] == "mixed"
+    assert int(order["fallback_triggered"]) == 1
+    assert _count(db_path, "execution_fills") == 2
+
+
 def test_state_machine_rejects_invalid_transition():
     try:
         ensure_transition(ExecutionOrderStatus.FILLED, ExecutionOrderStatus.PENDING)
@@ -531,7 +605,7 @@ def test_paper_sell_closes_position_and_records_trade(tmp_path: Path):
     )
 
     assert buy.state == ExecutionOrderStatus.FILLED
-    assert int(buy_order["locked_cash_cents"]) == 2_502_500
+    assert int(buy_order["locked_cash_cents"]) == 2_517_012
 
     assert sell.state == ExecutionOrderStatus.FILLED
     assert _count(db_path, "execution_fills") == 2
@@ -542,10 +616,10 @@ def test_paper_sell_closes_position_and_records_trade(tmp_path: Path):
     last_order = _last_order(db_path)
     assert last_order["side"] == Side.SELL.value
     assert Decimal(str(last_order["filled_quantity"])) == Decimal("0.5")
-    assert Decimal(str(last_order["avg_fill_price"])) == Decimal("51000")
+    assert Decimal(str(last_order["avg_fill_price"])) == Decimal("50959.20000000")
     last_trade = _last_trade(db_path)
     assert last_trade["side"] == Side.SELL.value
-    assert int(last_trade["realized_pnl_cents"]) == 44_950
+    assert int(last_trade["realized_pnl_cents"]) == 15_660
 
 
 def test_day_trading_max_position_age_auto_closes_in_paper(tmp_path: Path):

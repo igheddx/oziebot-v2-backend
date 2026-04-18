@@ -38,3 +38,4 @@ class RiskDecision(OziebotModel):
     detail: str | None = None
     rules_evaluated: list[str] = Field(default_factory=list)
     trace_id: str
+    metadata: dict = Field(default_factory=dict)

@@ -20,3 +20,4 @@ class TradeIntent(OziebotModel):
     side: Side
     order_type: OrderType
     quantity: Quantity
+    metadata: dict = Field(default_factory=dict)

@@ -41,9 +41,11 @@ from oziebot_api.schemas.platform_admin import (
 )
 from oziebot_api.services.audit import record_admin_action
 from oziebot_api.services.platform_management import (
+    get_fee_settings,
     get_all_settings,
     get_or_create_trial_policy,
     list_users_with_coinbase,
+    set_fee_settings,
     set_global_trading_pause,
     upsert_setting,
 )
@@ -94,6 +96,36 @@ def platform_overview(
 @router.get("/settings")
 def list_settings(_admin: RootAdminUser, db: DbSession) -> dict[str, Any]:
     return get_all_settings(db)
+
+
+@router.get("/fee-settings")
+def read_fee_settings(_admin: RootAdminUser, db: DbSession) -> dict[str, Any]:
+    return get_fee_settings(db)
+
+
+@router.put("/fee-settings")
+def update_fee_settings(
+    body: SettingValueBody,
+    admin: RootAdminUser,
+    db: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    before = get_fee_settings(db)
+    row = set_fee_settings(
+        db,
+        value=body.value,
+        updated_by_user_id=admin.id,
+    )
+    _audit(
+        db,
+        admin,
+        action="platform_settings.fee_model_upsert",
+        resource_type="platform_settings",
+        resource_id=row.key,
+        details={"before": before, "after": row.value},
+        request=request,
+    )
+    return {"key": row.key, "value": row.value, "updated_at": row.updated_at.isoformat()}
 
 
 @router.put("/settings/{key}")

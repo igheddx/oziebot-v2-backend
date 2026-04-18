@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -12,6 +12,7 @@ from sqlalchemy.orm import joinedload
 
 from oziebot_api.deps import DbSession
 from oziebot_api.deps.auth import CurrentUser
+from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.execution import ExecutionOrder, ExecutionPosition, ExecutionTradeRecord
 from oziebot_api.models.platform_strategy import PlatformStrategy
@@ -78,6 +79,14 @@ def _to_float(value: str | None) -> float:
         return float(Decimal(value))
     except (InvalidOperation, ValueError):
         return 0.0
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 @router.get("/dashboard")
@@ -243,6 +252,91 @@ def dashboard_summary(
         for t in trades
     ]
 
+    now = datetime.now(UTC)
+    today_cutoff = now - timedelta(days=1)
+    week_cutoff = now - timedelta(days=7)
+    month_cutoff = now - timedelta(days=30)
+    mode_orders = (
+        db.query(ExecutionOrder)
+        .filter(
+            ExecutionOrder.user_id == user.id,
+            ExecutionOrder.trading_mode == mode,
+        )
+        .all()
+    )
+    mode_trades = (
+        db.query(ExecutionTradeRecord)
+        .filter(
+            ExecutionTradeRecord.user_id == user.id,
+            ExecutionTradeRecord.trading_mode == mode,
+        )
+        .all()
+    )
+    mode_risk_events = (
+        db.query(RiskEvent)
+        .filter(
+            RiskEvent.user_id == user.id,
+            RiskEvent.trading_mode == mode,
+        )
+        .all()
+    )
+
+    def _fees_since(cutoff: datetime) -> float:
+        return round(
+            sum(
+                (trade.fee_cents or 0)
+                for trade in mode_trades
+                if _as_utc(trade.executed_at) and _as_utc(trade.executed_at) >= cutoff
+            )
+            / 100,
+            2,
+        )
+
+    fees_by_strategy: dict[str, int] = {}
+    fees_by_symbol: dict[str, int] = {}
+    for trade in mode_trades:
+        fees_by_strategy[trade.strategy_id] = fees_by_strategy.get(trade.strategy_id, 0) + int(
+            trade.fee_cents or 0
+        )
+        fees_by_symbol[trade.symbol] = fees_by_symbol.get(trade.symbol, 0) + int(
+            trade.fee_cents or 0
+        )
+    executed_entry_orders = [
+        order
+        for order in mode_orders
+        if order.side.lower() == "buy"
+        and order.state in {"submitted", "pending", "partially_filled", "filled"}
+    ]
+    maker_count = sum(1 for order in mode_orders if (order.actual_fill_type or "") == "maker")
+    taker_count = sum(1 for order in mode_orders if (order.actual_fill_type or "") == "taker")
+    mixed_count = sum(1 for order in mode_orders if (order.actual_fill_type or "") == "mixed")
+    skipped_due_to_fees = sum(
+        1
+        for event in mode_risk_events
+        if (event.detail or "").startswith("fee_economics:")
+        or (event.detail or "").find("fee_economics") >= 0
+    )
+    total_mode_fees_cents = sum(int(trade.fee_cents or 0) for trade in mode_trades)
+    total_mode_net_pnl_cents = sum(int(trade.realized_pnl_cents or 0) for trade in mode_trades)
+    total_mode_gross_pnl_cents = total_mode_net_pnl_cents + total_mode_fees_cents
+
+    comparison: dict[str, dict[str, float]] = {}
+    for compare_mode in ("paper", "live"):
+        compare_trades = (
+            db.query(ExecutionTradeRecord)
+            .filter(
+                ExecutionTradeRecord.user_id == user.id,
+                ExecutionTradeRecord.trading_mode == compare_mode,
+            )
+            .all()
+        )
+        fees_cents = sum(int(trade.fee_cents or 0) for trade in compare_trades)
+        net_pnl_cents = sum(int(trade.realized_pnl_cents or 0) for trade in compare_trades)
+        comparison[compare_mode] = {
+            "fees": round(fees_cents / 100, 2),
+            "netPnl": round(net_pnl_cents / 100, 2),
+        }
+
     growth_points = 8
     if growth_points <= 1:
         growth = [portfolio_value]
@@ -264,6 +358,44 @@ def dashboard_summary(
         "positions": positions,
         "activeTrades": active_trades,
         "recentActivity": recent_activity,
+        "feeAnalytics": {
+            "grossPnl": round(total_mode_gross_pnl_cents / 100, 2),
+            "netPnl": round(total_mode_net_pnl_cents / 100, 2),
+            "totalFeesToday": _fees_since(today_cutoff),
+            "totalFeesWeek": _fees_since(week_cutoff),
+            "totalFeesMonth": _fees_since(month_cutoff),
+            "feesByStrategy": [
+                {"strategy": strategy, "fees": round(cents / 100, 2)}
+                for strategy, cents in sorted(
+                    fees_by_strategy.items(), key=lambda item: item[1], reverse=True
+                )
+            ],
+            "feesBySymbol": [
+                {"symbol": symbol, "fees": round(cents / 100, 2)}
+                for symbol, cents in sorted(
+                    fees_by_symbol.items(), key=lambda item: item[1], reverse=True
+                )
+            ],
+            "makerCount": maker_count,
+            "takerCount": taker_count,
+            "mixedCount": mixed_count,
+            "avgEstimatedSlippageBps": round(
+                (
+                    sum(order.estimated_slippage_bps or 0 for order in executed_entry_orders)
+                    / max(1, len(executed_entry_orders))
+                ),
+                2,
+            ),
+            "avgNetEdgeAtEntryBps": round(
+                (
+                    sum(order.expected_net_edge_bps or 0 for order in executed_entry_orders)
+                    / max(1, len(executed_entry_orders))
+                ),
+                2,
+            ),
+            "skippedTradesDueToFees": skipped_due_to_fees,
+            "paperLiveComparison": comparison,
+        },
     }
 
 

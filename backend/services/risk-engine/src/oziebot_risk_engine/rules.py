@@ -5,6 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from oziebot_common.fee_model import bps_to_decimal, is_trade_net_positive
 from oziebot_domain.risk import RejectionReason
 
 
@@ -22,6 +23,21 @@ class RuleContext:
     max_slippage_pct_allowed: Decimal
     fee_pct: Decimal
     expected_profit_buffer_pct: Decimal
+    expected_gross_edge_bps: int
+    estimated_fee_bps: int
+    estimated_slippage_bps: int
+    estimated_total_cost_bps: int
+    expected_net_edge_bps: int
+    min_notional_per_trade: Decimal
+    min_expected_edge_bps: int
+    min_expected_net_profit_dollars: Decimal
+    max_fee_percent_of_expected_profit: Decimal
+    max_slippage_bps: int
+    skip_trade_if_fee_too_high: bool
+    execution_preference: str
+    fallback_behavior: str
+    maker_timeout_seconds: int
+    limit_price_offset_bps: int
     now: datetime
 
     # Database-backed facts.
@@ -564,6 +580,89 @@ class ExecutionQualityRule(RiskRule):
         return None
 
 
+class FeeEconomicsRule(RiskRule):
+    name = "fee_economics"
+
+    def evaluate(self, ctx: RuleContext) -> RuleResult | None:
+        if ctx.action != "buy":
+            return None
+        notional = ctx.suggested_size * ctx.mid_price
+        if ctx.min_notional_per_trade > 0 and notional < ctx.min_notional_per_trade:
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.POLICY,
+                (
+                    f"Trade notional too small (${notional:.2f} < "
+                    f"${ctx.min_notional_per_trade:.2f})"
+                ),
+            )
+        if not ctx.skip_trade_if_fee_too_high:
+            return None
+        if (
+            ctx.max_slippage_bps > 0
+            and ctx.estimated_slippage_bps > ctx.max_slippage_bps
+        ):
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.POLICY,
+                (
+                    "Estimated slippage exceeds configured cap "
+                    f"({ctx.estimated_slippage_bps}bps > {ctx.max_slippage_bps}bps)"
+                ),
+            )
+        if not is_trade_net_positive(
+            ctx.expected_gross_edge_bps,
+            ctx.estimated_total_cost_bps,
+            ctx.min_expected_edge_bps,
+        ):
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.POLICY,
+                (
+                    "Expected net edge below threshold "
+                    f"({ctx.expected_net_edge_bps}bps < {ctx.min_expected_edge_bps}bps)"
+                ),
+            )
+        expected_gross_profit = notional * bps_to_decimal(ctx.expected_gross_edge_bps)
+        estimated_cost = notional * bps_to_decimal(ctx.estimated_total_cost_bps)
+        expected_net_profit = expected_gross_profit - estimated_cost
+        if (
+            ctx.min_expected_net_profit_dollars > 0
+            and expected_net_profit < ctx.min_expected_net_profit_dollars
+        ):
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.POLICY,
+                (
+                    "Expected net profit too low "
+                    f"(${expected_net_profit:.2f} < ${ctx.min_expected_net_profit_dollars:.2f})"
+                ),
+            )
+        if (
+            expected_gross_profit > 0
+            and ctx.max_fee_percent_of_expected_profit > 0
+            and estimated_cost
+            > (expected_gross_profit * ctx.max_fee_percent_of_expected_profit)
+        ):
+            allowed_cost = (
+                expected_gross_profit * ctx.max_fee_percent_of_expected_profit
+            )
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.POLICY,
+                (
+                    "Estimated execution cost too high for expected edge "
+                    f"(${estimated_cost:.2f} > ${allowed_cost:.2f})"
+                ),
+            )
+        return None
+
+
 def default_rules(settings) -> list[RiskRule]:
     return [
         PlatformPauseRule(),
@@ -585,5 +684,6 @@ def default_rules(settings) -> list[RiskRule]:
         GlobalDailyLossGuardRule(),
         CooldownAfterLossesRule(),
         StaleDataRule(),
+        FeeEconomicsRule(),
         ExecutionQualityRule(),
     ]

@@ -9,6 +9,10 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from oziebot_common.fee_model import (
+    SETTING_EXECUTION_FEE_MODEL,
+    normalize_fee_model_settings,
+)
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.platform_setting import PlatformSetting
 from oziebot_api.models.platform_trial_policy import PlatformTrialPolicy
@@ -85,6 +89,26 @@ def is_trading_globally_paused(db: Session) -> bool:
     if row is None:
         return False
     return bool(row.value.get("paused"))
+
+
+def get_fee_settings(db: Session) -> dict[str, Any]:
+    row = db.get(PlatformSetting, SETTING_EXECUTION_FEE_MODEL)
+    return normalize_fee_model_settings(row.value if row else None)
+
+
+def set_fee_settings(
+    db: Session,
+    *,
+    value: dict[str, Any],
+    updated_by_user_id: uuid.UUID | None,
+) -> PlatformSetting:
+    normalized = normalize_fee_model_settings(value)
+    return upsert_setting(
+        db,
+        key=SETTING_EXECUTION_FEE_MODEL,
+        value=normalized,
+        updated_by_user_id=updated_by_user_id,
+    )
 
 
 def get_or_create_trial_policy(db: Session) -> PlatformTrialPolicy:

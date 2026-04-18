@@ -364,6 +364,48 @@ def test_risk_approves_hold_without_trade_intent(tmp_path: Path):
     assert intent is None
 
 
+def test_risk_rejects_trade_when_fee_drag_exceeds_expected_edge(tmp_path: Path):
+    db_path = tmp_path / "risk-fee.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    signal = _signal(user_id).model_copy(
+        update={
+            "reasoning_metadata": {
+                "reason": "thin edge",
+                "fee_economics": {
+                    "expected_gross_edge_bps": 20,
+                    "estimated_fee_bps": 10,
+                    "estimated_slippage_bps": 20,
+                    "estimated_total_cost_bps": 40,
+                    "expected_net_edge_bps": -20,
+                    "execution_preference": "maker_preferred",
+                    "fallback_behavior": "convert_to_taker",
+                    "maker_timeout_seconds": 15,
+                    "limit_price_offset_bps": 2,
+                    "min_notional_per_trade": "25",
+                    "min_expected_edge_bps": 25,
+                    "min_expected_net_profit_dollars": "0.5",
+                    "max_fee_percent_of_expected_profit": "0.65",
+                    "max_slippage_bps": 35,
+                    "skip_trade_if_fee_too_high": True,
+                },
+            }
+        }
+    )
+
+    decision, intent = svc.evaluate(signal, trace_id="fee-risk")
+
+    assert decision.outcome == RiskOutcome.REJECT
+    assert decision.detail is not None
+    assert decision.detail.startswith("fee_economics:")
+    assert intent is None
+
+
 def test_paper_can_trade_without_entitlement_when_allowed(tmp_path: Path):
     db_path = tmp_path / "risk-paper-entitlement.sqlite"
     _setup_db(db_path)

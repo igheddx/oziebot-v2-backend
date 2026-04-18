@@ -10,6 +10,11 @@ from typing import Any
 
 from sqlalchemy import create_engine, text
 
+from oziebot_common.fee_model import (
+    SETTING_EXECUTION_FEE_MODEL,
+    calculate_round_trip_cost_bps,
+    resolve_fee_profile,
+)
 from oziebot_common.queues import QueueNames, notification_event_to_json, push_json
 from oziebot_common.strategy_defaults import normalize_platform_strategy_config
 from oziebot_common.token_policy import resolve_effective_token_policy
@@ -62,6 +67,11 @@ class RiskEngineService:
                 detail=None,
                 rules_evaluated=[],
                 trace_id=trace_id,
+                metadata={
+                    "fee_economics": self._json_dict(
+                        signal.reasoning_metadata.get("fee_economics")
+                    ),
+                },
             )
             self._persist_risk_event(signal, decision)
             self._record_metric()
@@ -83,6 +93,7 @@ class RiskEngineService:
                 detail="Signal size must be positive",
                 rules_evaluated=["signal_size_positive"],
                 trace_id=trace_id,
+                metadata={"fee_economics": facts.get("fee_economics", {})},
             )
             self._persist_risk_event(signal, decision)
             self._record_metric(rejected=True, rejection_reason="signal_size_positive")
@@ -102,6 +113,23 @@ class RiskEngineService:
             max_slippage_pct_allowed=facts["max_slippage_pct_allowed"],
             fee_pct=facts["fee_pct"],
             expected_profit_buffer_pct=facts["expected_profit_buffer_pct"],
+            expected_gross_edge_bps=facts["expected_gross_edge_bps"],
+            estimated_fee_bps=facts["estimated_fee_bps"],
+            estimated_slippage_bps=facts["estimated_slippage_bps"],
+            estimated_total_cost_bps=facts["estimated_total_cost_bps"],
+            expected_net_edge_bps=facts["expected_net_edge_bps"],
+            min_notional_per_trade=facts["min_notional_per_trade"],
+            min_expected_edge_bps=facts["min_expected_edge_bps"],
+            min_expected_net_profit_dollars=facts["min_expected_net_profit_dollars"],
+            max_fee_percent_of_expected_profit=facts[
+                "max_fee_percent_of_expected_profit"
+            ],
+            max_slippage_bps=facts["max_slippage_bps"],
+            skip_trade_if_fee_too_high=facts["skip_trade_if_fee_too_high"],
+            execution_preference=facts["execution_preference"],
+            fallback_behavior=facts["fallback_behavior"],
+            maker_timeout_seconds=facts["maker_timeout_seconds"],
+            limit_price_offset_bps=facts["limit_price_offset_bps"],
             now=now,
             platform_paused=facts["platform_paused"],
             entitled=facts["entitled"],
@@ -177,6 +205,7 @@ class RiskEngineService:
                 detail=f"{reject_result.rule_name}: {reject_result.detail}",
                 rules_evaluated=rules_evaluated,
                 trace_id=trace_id,
+                metadata={"fee_economics": facts.get("fee_economics", {})},
             )
             self._persist_risk_event(signal, decision)
             self._record_metric(
@@ -203,6 +232,7 @@ class RiskEngineService:
             detail=None,
             rules_evaluated=rules_evaluated,
             trace_id=trace_id,
+            metadata={"fee_economics": facts.get("fee_economics", {})},
         )
 
         intent = self._to_intent(signal, final_size)
@@ -287,6 +317,13 @@ class RiskEngineService:
         side = Side.BUY
         if action in {"sell", "close"}:
             side = Side.SELL
+        fee_economics = self._json_dict(signal.reasoning_metadata.get("fee_economics"))
+        order_type = OrderType.MARKET
+        if (
+            action == "buy"
+            and fee_economics.get("execution_preference") == "maker_preferred"
+        ):
+            order_type = OrderType.LIMIT
 
         return TradeIntent(
             intent_id=uuid.uuid4(),
@@ -296,8 +333,15 @@ class RiskEngineService:
             strategy_id=signal.strategy_name,
             instrument=Instrument(symbol=signal.symbol),
             side=side,
-            order_type=OrderType.MARKET,
+            order_type=order_type,
             quantity=Quantity(amount=str(final_size)),
+            metadata={
+                "reason": signal.reasoning_metadata.get("reason"),
+                "signal_metadata": self._json_dict(
+                    signal.reasoning_metadata.get("signal_metadata")
+                ),
+                "fee_economics": fee_economics,
+            },
         )
 
     def _lookup_primary_tenant(self, user_id: uuid.UUID):
@@ -454,6 +498,10 @@ class RiskEngineService:
             global_loss_guard = conn.execute(
                 text("SELECT value FROM platform_settings WHERE key = :k"),
                 {"k": "trading.global.daily_loss_guard"},
+            ).first()
+            fee_settings_row = conn.execute(
+                text("SELECT value FROM platform_settings WHERE key = :k"),
+                {"k": SETTING_EXECUTION_FEE_MODEL},
             ).first()
             paused = False
             if platform_paused:
@@ -746,6 +794,95 @@ class RiskEngineService:
             strategy_params=merged_strategy_params,
             signal_rules=signal_rules,
         )
+        fee_settings = self._json_dict(
+            fee_settings_row.value if fee_settings_row else None
+        )
+        fee_profile = resolve_fee_profile(
+            fee_settings,
+            trading_mode=signal.trading_mode,
+            strategy_id=signal.strategy_name,
+            symbol=symbol,
+        )
+        signal_fee_economics = self._json_dict(
+            signal.reasoning_metadata.get("fee_economics")
+        )
+        estimated_fee_bps = int(
+            signal_fee_economics.get(
+                "estimated_fee_bps",
+                calculate_round_trip_cost_bps(
+                    fee_profile.get("entry_fill_type", "maker"),
+                    fee_profile.get("exit_fill_type", "taker"),
+                    0,
+                    0,
+                    0,
+                    fee_profile.get("coinbase_one_rebate_percent", 0),
+                    maker_fee_bps=fee_profile.get("maker_fee_bps", 0),
+                    taker_fee_bps=fee_profile.get("taker_fee_bps", 0),
+                ),
+            )
+        )
+        estimated_slippage_bps = int(
+            signal_fee_economics.get(
+                "estimated_slippage_bps",
+                fee_profile.get("estimated_slippage_bps", 0),
+            )
+        )
+        estimated_total_cost_bps = int(
+            signal_fee_economics.get(
+                "estimated_total_cost_bps",
+                calculate_round_trip_cost_bps(
+                    fee_profile.get("entry_fill_type", "maker"),
+                    fee_profile.get("exit_fill_type", "taker"),
+                    estimated_slippage_bps,
+                    fee_profile.get("spread_buffer_bps", 0),
+                    fee_profile.get("safety_buffer_bps", 0),
+                    fee_profile.get("coinbase_one_rebate_percent", 0),
+                    maker_fee_bps=fee_profile.get("maker_fee_bps", 0),
+                    taker_fee_bps=fee_profile.get("taker_fee_bps", 0),
+                ),
+            )
+        )
+        expected_gross_edge_bps = int(
+            signal_fee_economics.get(
+                "expected_gross_edge_bps",
+                fee_profile.get("expected_gross_edge_bps", 0),
+            )
+        )
+        expected_net_edge_bps = int(
+            signal_fee_economics.get(
+                "expected_net_edge_bps",
+                expected_gross_edge_bps - estimated_total_cost_bps,
+            )
+        )
+        fee_economics = {
+            "expected_gross_edge_bps": expected_gross_edge_bps,
+            "estimated_fee_bps": estimated_fee_bps,
+            "estimated_slippage_bps": estimated_slippage_bps,
+            "estimated_total_cost_bps": estimated_total_cost_bps,
+            "expected_net_edge_bps": expected_net_edge_bps,
+            "execution_preference": fee_profile.get("execution_preference"),
+            "fallback_behavior": fee_profile.get("fallback_behavior"),
+            "maker_timeout_seconds": int(
+                fee_profile.get("maker_timeout_seconds", 0) or 0
+            ),
+            "limit_price_offset_bps": int(
+                fee_profile.get("limit_price_offset_bps", 0) or 0
+            ),
+            "min_notional_per_trade": str(fee_profile.get("min_notional_per_trade", 0)),
+            "min_expected_edge_bps": int(
+                fee_profile.get("min_expected_edge_bps", 0) or 0
+            ),
+            "min_expected_net_profit_dollars": str(
+                fee_profile.get("min_expected_net_profit_dollars", 0)
+            ),
+            "max_fee_percent_of_expected_profit": str(
+                fee_profile.get("max_fee_percent_of_expected_profit", 1)
+            ),
+            "max_slippage_bps": int(fee_profile.get("max_slippage_bps", 0) or 0),
+            "skip_trade_if_fee_too_high": bool(
+                fee_profile.get("skip_trade_if_fee_too_high", True)
+            ),
+        }
 
         max_consecutive_losses = int(
             risk_caps.get("max_consecutive_losses")
@@ -857,6 +994,40 @@ class RiskEngineService:
             "mid_price": mid,
             "spread_pct": spread_pct,
             "est_slippage_pct": est_slippage_pct,
+            "expected_gross_edge_bps": expected_gross_edge_bps,
+            "estimated_fee_bps": estimated_fee_bps,
+            "estimated_slippage_bps": estimated_slippage_bps,
+            "estimated_total_cost_bps": estimated_total_cost_bps,
+            "expected_net_edge_bps": expected_net_edge_bps,
+            "min_notional_per_trade": Decimal(
+                str(fee_profile.get("min_notional_per_trade", 0))
+            ),
+            "min_expected_edge_bps": int(
+                fee_profile.get("min_expected_edge_bps", 0) or 0
+            ),
+            "min_expected_net_profit_dollars": Decimal(
+                str(fee_profile.get("min_expected_net_profit_dollars", 0))
+            ),
+            "max_fee_percent_of_expected_profit": Decimal(
+                str(fee_profile.get("max_fee_percent_of_expected_profit", 1))
+            ),
+            "max_slippage_bps": int(fee_profile.get("max_slippage_bps", 0) or 0),
+            "skip_trade_if_fee_too_high": bool(
+                fee_profile.get("skip_trade_if_fee_too_high", True)
+            ),
+            "execution_preference": str(
+                fee_profile.get("execution_preference", "maker_preferred")
+            ),
+            "fallback_behavior": str(
+                fee_profile.get("fallback_behavior", "convert_to_taker")
+            ),
+            "maker_timeout_seconds": int(
+                fee_profile.get("maker_timeout_seconds", 0) or 0
+            ),
+            "limit_price_offset_bps": int(
+                fee_profile.get("limit_price_offset_bps", 0) or 0
+            ),
+            "fee_economics": fee_economics,
             **quality_controls,
             "stale_flags": stale_flags,
             "critical_stale_flags": critical_stale_flags,
@@ -1068,6 +1239,7 @@ class RiskEngineService:
                     "market_data_quality": signal.reasoning_metadata.get(
                         "market_data_quality"
                     ),
+                    "fee_economics": decision.metadata.get("fee_economics"),
                     "metrics": self.metrics_snapshot(),
                 },
                 default=str,

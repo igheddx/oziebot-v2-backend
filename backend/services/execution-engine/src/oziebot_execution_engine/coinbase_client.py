@@ -15,8 +15,7 @@ from oziebot_domain.execution import (
     ExecutionRequest,
     ExecutionSubmission,
 )
-from oziebot_domain.trading import Venue
-from oziebot_domain.trading import Side
+from oziebot_domain.trading import OrderType, Side, Venue
 
 ORDERS_PATH = "/api/v3/brokerage/orders"
 
@@ -84,16 +83,7 @@ class HttpCoinbaseExecutionClient:
     def place_order(
         self, request: ExecutionRequest, *, api_key_name: str, private_key_pem: str
     ) -> ExecutionSubmission:
-        body = {
-            "client_order_id": request.client_order_id,
-            "product_id": request.symbol,
-            "side": request.side.value.upper(),
-            "order_configuration": {
-                "market_market_ioc": {
-                    "base_size": str(request.quantity),
-                }
-            },
-        }
+        body = self._order_body(request)
         host = _host_from_base(self._base_url)
         token = build_cdp_jwt(
             method="POST",
@@ -148,13 +138,19 @@ class HttpCoinbaseExecutionClient:
             )
             if filled_price > 0:
                 fee = self._extract_fill_fee(payload)
+                liquidity = self._extract_fill_liquidity(payload, request)
+                slippage_bps = self._realized_slippage_bps(
+                    request=request,
+                    filled_price=filled_price,
+                )
                 fills.append(
                     ExecutionFill(
                         fill_id=str(order_id or request.client_order_id),
                         quantity=request.quantity,
                         price=filled_price,
                         fee=fee,
-                        liquidity="unknown",
+                        liquidity=liquidity,
+                        slippage_bps=slippage_bps,
                         raw_payload={
                             **payload,
                             "execution_quality": self._execution_quality_payload(
@@ -172,7 +168,40 @@ class HttpCoinbaseExecutionClient:
             venue_order_id=str(order_id) if order_id else None,
             fills=fills,
             raw_payload=payload,
+            actual_fill_type=fills[0].liquidity if fills else None,
         )
+
+    def _order_body(self, request: ExecutionRequest) -> dict[str, Any]:
+        body = {
+            "client_order_id": request.client_order_id,
+            "product_id": request.symbol,
+            "side": request.side.value.upper(),
+        }
+        if request.order_type == OrderType.LIMIT:
+            limit_price = self._limit_price(request)
+            body["order_configuration"] = {
+                "limit_limit_gtc": {
+                    "base_size": str(request.quantity),
+                    "limit_price": str(limit_price),
+                    "post_only": request.execution_preference == "maker_preferred",
+                }
+            }
+            return body
+        body["order_configuration"] = {
+            "market_market_ioc": {
+                "base_size": str(request.quantity),
+            }
+        }
+        return body
+
+    def _limit_price(self, request: ExecutionRequest) -> Decimal:
+        reference = request.price_hint or Decimal("0")
+        offset = Decimal(str(request.limit_price_offset_bps)) / Decimal("10000")
+        if reference <= 0:
+            return Decimal("0")
+        if request.side == Side.BUY:
+            return (reference * (Decimal("1") - offset)).quantize(Decimal("0.01"))
+        return (reference * (Decimal("1") + offset)).quantize(Decimal("0.01"))
 
     @staticmethod
     def _to_decimal(value: Any) -> Decimal | None:
@@ -244,8 +273,61 @@ class HttpCoinbaseExecutionClient:
             "price_hint": str(reference_price),
             "filled_price": str(filled_price),
             "realized_slippage_pct": str(slippage_pct.quantize(Decimal("0.00000001"))),
+            "realized_slippage_bps": str(
+                (slippage_pct * Decimal("10000")).quantize(Decimal("0.01"))
+            ),
             "fee": str(fee),
         }
+
+    def _realized_slippage_bps(
+        self,
+        *,
+        request: ExecutionRequest,
+        filled_price: Decimal,
+    ) -> Decimal:
+        reference_price = request.price_hint or filled_price
+        if reference_price <= 0:
+            return Decimal("0")
+        if request.side == Side.BUY:
+            slippage_pct = max(
+                Decimal("0"), (filled_price - reference_price) / reference_price
+            )
+        else:
+            slippage_pct = max(
+                Decimal("0"), (reference_price - filled_price) / reference_price
+            )
+        return (slippage_pct * Decimal("10000")).quantize(Decimal("0.01"))
+
+    def _extract_fill_liquidity(
+        self,
+        payload: dict[str, Any],
+        request: ExecutionRequest,
+    ) -> str:
+        success = payload.get("success_response", {}) or {}
+        fills = success.get("fills") or payload.get("fills") or []
+        if isinstance(fills, list):
+            values = []
+            for fill in fills:
+                if not isinstance(fill, dict):
+                    continue
+                indicator = str(
+                    fill.get("liquidity_indicator")
+                    or fill.get("liquidity")
+                    or fill.get("liquidity_type")
+                    or ""
+                ).lower()
+                if "maker" in indicator:
+                    values.append("maker")
+                elif "taker" in indicator:
+                    values.append("taker")
+            if values:
+                return values[0] if len(set(values)) == 1 else "mixed"
+        if (
+            request.order_type == OrderType.LIMIT
+            and request.execution_preference == "maker_preferred"
+        ):
+            return "maker"
+        return "taker" if request.order_type == OrderType.MARKET else "unknown"
 
     def list_balances(
         self, *, api_key_name: str, private_key_pem: str

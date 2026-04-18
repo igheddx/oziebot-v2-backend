@@ -9,6 +9,10 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from oziebot_common.fee_model import (
+    SETTING_EXECUTION_FEE_MODEL,
+    default_fee_model_settings,
+)
 from oziebot_api.config import get_settings
 from oziebot_api.db.session import make_session_factory
 from oziebot_api.models.platform_setting import PlatformSetting
@@ -149,6 +153,17 @@ def run() -> None:
                 )
             )
             print("Seeded billing.allow_paper_without_subscription (default: paper without sub).")
+
+        if session.get(PlatformSetting, SETTING_EXECUTION_FEE_MODEL) is None:
+            session.add(
+                PlatformSetting(
+                    key=SETTING_EXECUTION_FEE_MODEL,
+                    value=default_fee_model_settings(),
+                    updated_at=now,
+                    updated_by_user_id=None,
+                )
+            )
+            print("Seeded execution.fee_model defaults.")
 
         session.commit()
     finally:
