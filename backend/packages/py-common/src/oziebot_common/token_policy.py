@@ -6,7 +6,7 @@ from typing import Any, Mapping, Sequence
 
 TOKEN_POLICY_STRATEGIES = ("momentum", "reversion", "day_trading", "dca")
 TOKEN_POLICY_RECOMMENDATIONS = ("preferred", "allowed", "discouraged", "blocked")
-DISCOURAGED_SIZE_MULTIPLIER = Decimal("0.50")
+DISCOURAGED_SIZE_MULTIPLIER = Decimal("0.60")
 
 
 @dataclass(frozen=True)

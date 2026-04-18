@@ -21,6 +21,7 @@ from oziebot_common.queues import (
     risk_decision_from_json,
     trade_intent_from_json,
 )
+from oziebot_common.strategy_defaults import normalize_platform_strategy_config
 from oziebot_common.token_policy import resolve_effective_token_policy
 from oziebot_domain.events import NotificationEvent, NotificationEventType
 from oziebot_domain.execution import (
@@ -639,6 +640,7 @@ class ExecutionService:
         order = self._get_order(order_id)
         total_qty = Decimal(str(order["filled_quantity"]))
         weighted_notional = Decimal("0")
+        total_notional_cents = 0
         if order["avg_fill_price"]:
             weighted_notional = total_qty * Decimal(str(order["avg_fill_price"]))
         fees_cents = int(order["fees_cents"] or 0)
@@ -647,6 +649,7 @@ class ExecutionService:
             fill_fee_cents = _money_to_cents(fill.fee)
             total_qty += fill.quantity
             weighted_notional += fill.quantity * fill.price
+            total_notional_cents += fill_notional_cents
             fees_cents += fill_fee_cents
             fill_row_id = str(uuid.uuid4())
             with self._engine.begin() as conn:
@@ -701,6 +704,15 @@ class ExecutionService:
             fees_cents=fees_cents,
             completed_at=completed_at,
         )
+        if (
+            request.side == Side.BUY
+            and submission.status == ExecutionOrderStatus.FILLED
+        ):
+            self._reconcile_filled_buy_locked_capital(
+                order_id,
+                request,
+                actual_locked_cents=total_notional_cents + fees_cents,
+            )
 
     def _apply_fill_to_position(
         self,
@@ -723,25 +735,16 @@ class ExecutionService:
         avg_after = avg_before
         if request.side == Side.BUY:
             qty_after = qty_before + fill.quantity
-            total_cost = (qty_before * avg_before) + (fill.quantity * fill.price)
+            total_cost = (
+                (qty_before * avg_before)
+                + (fill.quantity * fill.price)
+                + (Decimal(str(fill_fee_cents)) / Decimal("100"))
+            )
             avg_after = (
                 (total_cost / qty_after).quantize(Decimal("0.00000001"))
                 if qty_after > 0
                 else Decimal("0")
             )
-            order = self._get_order(order_id)
-            locked_cash_cents = int(order["locked_cash_cents"] or 0)
-            actual_locked = fill_notional_cents + fill_fee_cents
-            excess = max(0, locked_cash_cents - actual_locked)
-            if excess > 0 and self._is_terminal_state(
-                ExecutionOrderStatus(order["state"])
-            ):
-                self._settle_capital(request, excess, 0, order_id)
-                self._set_order_reserved_locked(
-                    order_id,
-                    reserved_cash_cents=0,
-                    locked_cash_cents=locked_cash_cents - excess,
-                )
         else:
             close_qty = min(qty_before, fill.quantity)
             qty_after = max(Decimal("0"), qty_before - close_qty)
@@ -765,6 +768,23 @@ class ExecutionService:
             fill_fee_cents,
         )
         self._record_strategy_runtime_activity(request, fill.occurred_at)
+
+    def _reconcile_filled_buy_locked_capital(
+        self, order_id: str, request: ExecutionRequest, *, actual_locked_cents: int
+    ) -> None:
+        order = self._get_order(order_id)
+        locked_cash_cents = int(order["locked_cash_cents"] or 0)
+        delta = actual_locked_cents - locked_cash_cents
+        if delta > 0:
+            self._reserve_capital(request, delta, order_id)
+            self._lock_reserved_capital(request, delta, order_id)
+        elif delta < 0:
+            self._settle_capital(request, -delta, 0, order_id)
+        self._set_order_reserved_locked(
+            order_id,
+            reserved_cash_cents=0,
+            locked_cash_cents=actual_locked_cents,
+        )
 
     def _upsert_position(
         self,
@@ -1330,7 +1350,9 @@ class ExecutionService:
         platform_config = row["platform_config"]
         if isinstance(platform_config, str):
             platform_config = json.loads(platform_config)
-        platform_config = platform_config if isinstance(platform_config, dict) else {}
+        platform_config = normalize_platform_strategy_config(
+            "day_trading", platform_config
+        )
         user_config = user_config if isinstance(user_config, dict) else {}
         strategy_params = platform_config.get("strategy_params")
         if not isinstance(strategy_params, dict):

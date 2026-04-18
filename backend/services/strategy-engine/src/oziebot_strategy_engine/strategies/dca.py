@@ -15,7 +15,7 @@ class DCAStrategy(TradingStrategy):
     regularly regardless of price.
 
     Configuration:
-    - buy_amount_usd: Fixed USD amount to buy each cycle (default: 100)
+    - buy_amount_usd: Fixed USD amount to buy each cycle (default: 50)
     - buy_interval_hours: Hours between buys (default: 24 = daily)
     - only_on_green_days: Skip buy if price is down today (default: false)
     """
@@ -27,7 +27,7 @@ class DCAStrategy(TradingStrategy):
 
     def validate_config(self, config: dict) -> bool:
         """Validate DCA config."""
-        buy_amount = config.get("buy_amount_usd", 100)
+        buy_amount = config.get("buy_amount_usd", 50)
         buy_interval = config.get("buy_interval_hours", 24)
 
         if not (1 <= buy_amount <= 1000000):
@@ -45,7 +45,7 @@ class DCAStrategy(TradingStrategy):
         correlation_id: UUID,
     ) -> StrategySignal:
         """Generate DCA signal."""
-        buy_amount_usd = config.get("buy_amount_usd", 100)
+        buy_amount_usd = config.get("buy_amount_usd", 50)
         only_on_green = config.get("only_on_green_days", False)
 
         market = context.market_snapshot
@@ -73,7 +73,7 @@ class DCAStrategy(TradingStrategy):
     def get_default_config(self) -> dict:
         """Return default configuration."""
         return {
-            "buy_amount_usd": 100,
+            "buy_amount_usd": 50,
             "buy_interval_hours": 24,
             "only_on_green_days": False,
         }
@@ -87,7 +87,7 @@ class DCAStrategy(TradingStrategy):
                     "type": "number",
                     "minimum": 1,
                     "maximum": 1000000,
-                    "default": 100,
+                    "default": 50,
                     "description": "USD amount to buy each cycle",
                 },
                 "buy_interval_hours": {

@@ -28,10 +28,10 @@ class TestMomentumStrategy:
         """Valid config passes validation."""
         strategy = MomentumStrategy()
         config = {
-            "short_window": 5,
-            "long_window": 20,
-            "strength_threshold": 0.02,
-            "position_size": 0.1,
+            "short_window": 8,
+            "long_window": 34,
+            "strength_threshold": 0.012,
+            "position_size_fraction": 0.12,
         }
         assert strategy.validate_config(config)
 
@@ -141,7 +141,8 @@ class TestDayTradingStrategy:
         config = strategy.get_default_config()
         assert "entry_threshold" in config
         assert "exit_threshold" in config
-        assert "stop_loss" in config
+        assert "stop_loss_pct" in config
+        assert config["position_size_fraction"] == 0.08
 
     def test_day_trading_entry_signal_near_low(self):
         """Generate entry signal when price is near daily low."""
@@ -211,7 +212,7 @@ class TestDCAStrategy:
         """DCA has sensible defaults."""
         strategy = DCAStrategy()
         config = strategy.get_default_config()
-        assert config["buy_amount_usd"] == 100
+        assert config["buy_amount_usd"] == 50
         assert config["buy_interval_hours"] == 24
 
     def test_dca_always_buys_on_green_day(self):

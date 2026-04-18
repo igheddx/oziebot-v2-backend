@@ -197,7 +197,28 @@ class HttpCoinbaseExecutionClient:
             fee = self._to_decimal(candidate)
             if fee is not None and fee >= 0:
                 return fee
+        nested_fee = self._sum_fill_fees(success.get("fills")) or self._sum_fill_fees(
+            payload.get("fills")
+        )
+        if nested_fee is not None:
+            return nested_fee
         return Decimal("0")
+
+    def _sum_fill_fees(self, fills: Any) -> Decimal | None:
+        if not isinstance(fills, list):
+            return None
+        total = Decimal("0")
+        found = False
+        for fill in fills:
+            if not isinstance(fill, dict):
+                continue
+            for field in ("commission", "fee", "filled_fees", "total_fees"):
+                fee = self._to_decimal(fill.get(field))
+                if fee is not None and fee >= 0:
+                    total += fee
+                    found = True
+                    break
+        return total if found else None
 
     def _execution_quality_payload(
         self,

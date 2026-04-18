@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy import create_engine, text
 
 from oziebot_common.queues import QueueNames, notification_event_to_json, push_json
+from oziebot_common.strategy_defaults import normalize_platform_strategy_config
 from oziebot_common.token_policy import resolve_effective_token_policy
 from oziebot_domain.events import NotificationEvent, NotificationEventType
 from oziebot_domain.intents import TradeIntent
@@ -726,21 +727,14 @@ class RiskEngineService:
             pnl = int(md.get("realized_pnl_delta_cents", 0))
             if pnl < 0:
                 daily_loss += abs(pnl)
-        platform_cfg = self._json_dict(
-            platform_strategy_row["config_schema"] if platform_strategy_row else None
+        platform_cfg = normalize_platform_strategy_config(
+            signal.strategy_name,
+            platform_strategy_row["config_schema"] if platform_strategy_row else None,
         )
         user_cfg = self._json_dict(strategy_row["config"] if strategy_row else None)
-        strategy_params = (
-            platform_cfg.get("strategy_params")
-            if isinstance(platform_cfg, dict)
-            else {}
-        )
-        signal_rules = (
-            platform_cfg.get("signal_rules") if isinstance(platform_cfg, dict) else {}
-        )
-        risk_caps = (
-            platform_cfg.get("risk_caps") if isinstance(platform_cfg, dict) else {}
-        )
+        strategy_params = platform_cfg.get("strategy_params")
+        signal_rules = platform_cfg.get("signal_rules")
+        risk_caps = platform_cfg.get("risk_caps")
         if not isinstance(strategy_params, dict):
             strategy_params = {}
         if not isinstance(signal_rules, dict):

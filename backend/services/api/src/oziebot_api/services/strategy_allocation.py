@@ -23,9 +23,9 @@ from oziebot_api.services.tenant_scope import primary_tenant_id
 BPS_TOTAL = 10_000
 
 PRESET_WEIGHTS: dict[str, dict[str, int]] = {
-    "conservative": {"dca": 6000, "momentum": 2500, "day_trading": 1500},
-    "balanced": {"dca": 4000, "momentum": 3500, "day_trading": 2500},
-    "aggressive": {"dca": 2500, "momentum": 3000, "day_trading": 4500},
+    "conservative": {"dca": 4000, "momentum": 3500, "day_trading": 1500, "reversion": 1000},
+    "balanced": {"momentum": 4500, "day_trading": 2000, "reversion": 1000, "dca": 2500},
+    "aggressive": {"momentum": 5000, "day_trading": 2500, "dca": 2000, "reversion": 500},
 }
 
 

@@ -102,3 +102,34 @@ def test_coinbase_client_extracts_fee_and_slippage(monkeypatch):
         submission.fills[0].raw_payload["execution_quality"]["realized_slippage_pct"]
         == "0.00050000"
     )
+
+
+def test_coinbase_client_sums_nested_fill_fees(monkeypatch):
+    payload = {
+        "success": True,
+        "success_response": {
+            "order_id": "venue-order-2",
+            "completion_percentage": "100",
+            "average_filled_price": "50010",
+            "fills": [{"commission": "0.40"}, {"fee": "0.35"}],
+        },
+    }
+    monkeypatch.setattr(
+        "oziebot_execution_engine.coinbase_client.build_cdp_jwt",
+        lambda **_: "token",
+    )
+    monkeypatch.setattr(
+        httpx,
+        "Client",
+        lambda timeout: _StubClient(_StubResponse(payload)),
+    )
+
+    client = HttpCoinbaseExecutionClient("https://api.coinbase.com")
+    submission = client.place_order(
+        _request(),
+        api_key_name="api-key",
+        private_key_pem="-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----",
+    )
+
+    assert submission.status.value == "filled"
+    assert submission.fills[0].fee == Decimal("0.75")

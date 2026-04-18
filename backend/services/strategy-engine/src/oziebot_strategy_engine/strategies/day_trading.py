@@ -14,10 +14,11 @@ class DayTradingStrategy(TradingStrategy):
     Day trading strategy - enters and exits positions within the same day.
 
     Configuration:
-    - entry_threshold: Price vs low to trigger entry (default: 0.01, i.e. 1% above day low)
-    - exit_threshold: Profit target percentage (default: 0.02, i.e. 2% profit)
-    - stop_loss: Stop loss percentage (default: 0.01, i.e. 1% max loss)
-    - max_position_age_hours: Force exit after N hours (default: 4 hours)
+    - entry_threshold: Price vs low to trigger entry (default: 0.007)
+    - exit_threshold: Profit target percentage (default: 0.015)
+    - stop_loss_pct: Stop loss percentage (default: 0.008)
+    - position_size_fraction: Fraction of capital to deploy per trade (default: 0.08)
+    - max_position_age_hours: Force exit after N hours (default: 3 hours)
     """
 
     strategy_id = "day_trading"
@@ -27,12 +28,16 @@ class DayTradingStrategy(TradingStrategy):
 
     def validate_config(self, config: dict) -> bool:
         """Validate day trading config."""
-        entry_threshold = config.get("entry_threshold", 0.01)
+        entry_threshold = config.get("entry_threshold", 0.007)
         exit_threshold = config.get("exit_threshold", 0.015)
-        stop_loss = config.get("stop_loss", 0.008)
-        min_volume_multiplier = float(config.get("min_volume_multiplier", 1.5))
-        min_volatility_pct = float(config.get("min_volatility_pct", 0.0045))
-        min_entry_signals = int(config.get("min_entry_signals", 1))
+        stop_loss = config.get("stop_loss_pct", config.get("stop_loss", 0.008))
+        position_size_fraction = float(config.get("position_size_fraction", 0.08))
+        min_volume_multiplier = float(config.get("min_volume_multiplier", 1.3))
+        min_volatility_pct = float(config.get("min_volatility_pct", 0.005))
+        min_entry_signals = int(
+            config.get("min_entry_confirmations", config.get("min_entry_signals", 1))
+        )
+        max_position_age_hours = int(config.get("max_position_age_hours", 3))
 
         if not (0.0 <= entry_threshold <= 0.5):
             raise ValueError(f"entry_threshold must be 0-0.5, got {entry_threshold}")
@@ -40,6 +45,10 @@ class DayTradingStrategy(TradingStrategy):
             raise ValueError(f"exit_threshold must be >0 and <=1, got {exit_threshold}")
         if not (0.0 < stop_loss <= 1.0):
             raise ValueError(f"stop_loss must be >0 and <=1, got {stop_loss}")
+        if not (0.01 <= position_size_fraction <= 1.0):
+            raise ValueError(
+                f"position_size_fraction must be 0.01-1.0, got {position_size_fraction}"
+            )
         if not (1.0 <= min_volume_multiplier <= 10.0):
             raise ValueError(
                 f"min_volume_multiplier must be 1.0-10.0, got {min_volume_multiplier}"
@@ -50,6 +59,10 @@ class DayTradingStrategy(TradingStrategy):
             )
         if not (1 <= min_entry_signals <= 4):
             raise ValueError(f"min_entry_signals must be 1-4, got {min_entry_signals}")
+        if not (1 <= max_position_age_hours <= 24):
+            raise ValueError(
+                f"max_position_age_hours must be 1-24, got {max_position_age_hours}"
+            )
 
         return True
 
@@ -61,14 +74,17 @@ class DayTradingStrategy(TradingStrategy):
         correlation_id: UUID,
     ) -> StrategySignal:
         """Generate day trading signal using session high/low from candle history."""
-        entry_threshold = float(config.get("entry_threshold", 0.008))
+        entry_threshold = float(config.get("entry_threshold", 0.007))
         exit_threshold = float(config.get("exit_threshold", 0.015))
-        stop_loss = float(config.get("stop_loss", 0.007))
-        min_volume_multiplier = float(config.get("min_volume_multiplier", 1.5))
-        min_volatility_pct = float(config.get("min_volatility_pct", 0.0045))
+        stop_loss = float(config.get("stop_loss_pct", config.get("stop_loss", 0.008)))
+        position_size_fraction = float(config.get("position_size_fraction", 0.08))
+        min_volume_multiplier = float(config.get("min_volume_multiplier", 1.3))
+        min_volatility_pct = float(config.get("min_volatility_pct", 0.005))
         require_trend_alignment = bool(config.get("require_trend_alignment", True))
         breakout_lookback_candles = int(config.get("breakout_lookback_candles", 5))
-        min_entry_signals = int(config.get("min_entry_signals", 1))
+        min_entry_signals = int(
+            config.get("min_entry_confirmations", config.get("min_entry_signals", 1))
+        )
 
         market = context.market_snapshot
         position = context.position_state
@@ -98,6 +114,7 @@ class DayTradingStrategy(TradingStrategy):
                 signal_id,
                 correlation_id,
                 entry_threshold,
+                position_size_fraction,
             )
 
         # Use up to last 390 candles (~6.5 hours of 60s candles) for session range
@@ -177,6 +194,7 @@ class DayTradingStrategy(TradingStrategy):
                 signal_id,
                 correlation_id,
                 min(0.95, 0.55 + (confirmation_count * 0.1)),
+                position_size_fraction,
                 f"Near session low with confirmations: {current:.2f} "
                 f"(low={session_low:.2f} high={session_high:.2f} dist={distance_from_low:.1%}, "
                 f"volume={volume_spike}, trend={trend_alignment}, breakout={breakout}, volatility={volatility_pct:.2%})",
@@ -237,6 +255,7 @@ class DayTradingStrategy(TradingStrategy):
         signal_id: UUID,
         correlation_id: UUID,
         entry_threshold: float,
+        position_size_fraction: float,
     ) -> StrategySignal:
         market = context.market_snapshot
         session_high = float(market.high_price)
@@ -259,6 +278,7 @@ class DayTradingStrategy(TradingStrategy):
                 signal_id,
                 correlation_id,
                 0.55,
+                position_size_fraction,
                 (
                     f"Near daily low (snapshot fallback): {current:.2f} "
                     f"(low={session_low:.2f} high={session_high:.2f} pct_above_low={pct_above_low:.1%})"
@@ -278,15 +298,16 @@ class DayTradingStrategy(TradingStrategy):
     def get_default_config(self) -> dict:
         """Return default configuration."""
         return {
-            "entry_threshold": 0.01,
+            "entry_threshold": 0.007,
             "exit_threshold": 0.015,
-            "stop_loss": 0.008,
-            "max_position_age_hours": 4,
-            "min_volume_multiplier": 1.5,
-            "min_volatility_pct": 0.0045,
+            "stop_loss_pct": 0.008,
+            "position_size_fraction": 0.08,
+            "max_position_age_hours": 3,
+            "min_volume_multiplier": 1.3,
+            "min_volatility_pct": 0.005,
             "require_trend_alignment": True,
             "breakout_lookback_candles": 5,
-            "min_entry_signals": 1,
+            "min_entry_confirmations": 1,
         }
 
     def get_config_schema(self) -> dict:
@@ -298,7 +319,7 @@ class DayTradingStrategy(TradingStrategy):
                     "type": "number",
                     "minimum": 0.0,
                     "maximum": 0.5,
-                    "default": 0.01,
+                    "default": 0.007,
                     "description": "Price distance from low to trigger entry",
                 },
                 "exit_threshold": {
@@ -308,32 +329,39 @@ class DayTradingStrategy(TradingStrategy):
                     "default": 0.015,
                     "description": "Profit target as percentage",
                 },
-                "stop_loss": {
+                "stop_loss_pct": {
                     "type": "number",
                     "minimum": 0.001,
                     "maximum": 1.0,
                     "default": 0.008,
                     "description": "Stop loss as percentage",
                 },
+                "position_size_fraction": {
+                    "type": "number",
+                    "minimum": 0.01,
+                    "maximum": 1.0,
+                    "default": 0.08,
+                    "description": "Fraction of capital to deploy per entry",
+                },
                 "max_position_age_hours": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 24,
-                    "default": 4,
+                    "default": 3,
                     "description": "Hours to hold position max",
                 },
                 "min_volume_multiplier": {
                     "type": "number",
                     "minimum": 1.0,
                     "maximum": 10.0,
-                    "default": 1.5,
+                    "default": 1.3,
                     "description": "Require the latest volume to exceed this multiple of average volume",
                 },
                 "min_volatility_pct": {
                     "type": "number",
                     "minimum": 0.0,
                     "maximum": 1.0,
-                    "default": 0.0045,
+                    "default": 0.005,
                     "description": "Minimum recent volatility required before entering",
                 },
                 "require_trend_alignment": {
@@ -348,7 +376,7 @@ class DayTradingStrategy(TradingStrategy):
                     "default": 5,
                     "description": "Candles to inspect for a local breakout confirmation",
                 },
-                "min_entry_signals": {
+                "min_entry_confirmations": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 4,
@@ -364,6 +392,7 @@ class DayTradingStrategy(TradingStrategy):
         signal_id: UUID,
         correlation_id: UUID,
         confidence: float,
+        position_size_fraction: float,
         reason: str,
     ) -> StrategySignal:
         market = context.market_snapshot
@@ -382,7 +411,10 @@ class DayTradingStrategy(TradingStrategy):
             limit_price=market.current_price * Decimal("0.99"),  # 1% below current
             confidence=confidence,
             reason=reason,
-            metadata={"entry_strategy": "day_trading", "position_size_fraction": 0.1},
+            metadata={
+                "entry_strategy": "day_trading",
+                "position_size_fraction": position_size_fraction,
+            },
         )
 
     def _close_signal(

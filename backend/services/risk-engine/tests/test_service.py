@@ -469,7 +469,7 @@ def test_risk_rejects_spread_from_strategy_quality_controls(tmp_path: Path):
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
     svc = RiskEngineService(settings, redis)
 
-    decision, intent = svc.evaluate(_signal(user_id), trace_id="t-spread")
+    decision, intent = svc.evaluate(_signal(user_id, size="0.01"), trace_id="t-spread")
 
     assert decision.outcome == RiskOutcome.REJECT
     assert intent is None
@@ -516,10 +516,15 @@ def test_risk_rejects_after_consecutive_strategy_losses(tmp_path: Path):
             },
         )
 
-    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{db_path}",
+        risk_max_daily_loss_cents=100_000_000,
+    )
     svc = RiskEngineService(settings, _redis_with_fresh_market())
 
-    decision, intent = svc.evaluate(_signal(user_id), trace_id="t-cooldown")
+    decision, intent = svc.evaluate(
+        _signal(user_id, size="0.01"), trace_id="t-cooldown"
+    )
 
     assert decision.outcome == RiskOutcome.REJECT
     assert intent is None
@@ -560,10 +565,15 @@ def test_risk_rejects_when_global_daily_loss_guard_triggered(tmp_path: Path):
         )
 
     redis = _redis_with_fresh_market()
-    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{db_path}",
+        risk_max_daily_loss_cents=100_000_000,
+    )
     svc = RiskEngineService(settings, redis)
 
-    decision, intent = svc.evaluate(_signal(user_id), trace_id="t-global-guard")
+    decision, intent = svc.evaluate(
+        _signal(user_id, size="0.01"), trace_id="t-global-guard"
+    )
 
     assert decision.outcome == RiskOutcome.REJECT
     assert intent is None
@@ -597,16 +607,22 @@ def test_risk_reduces_size_for_discouraged_token_policy(tmp_path: Path):
     _seed_common(db_path, user_id, tenant_id)
     _insert_token_policy(db_path, strategy_name="momentum", status="discouraged")
 
-    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{db_path}",
+        risk_max_position_size_cents=1_000_000_000,
+        risk_max_per_trade_risk_pct=1.0,
+        risk_max_strategy_allocation_pct=1.0,
+        risk_max_token_concentration_pct=1.0,
+    )
     svc = RiskEngineService(settings, _redis_with_fresh_market())
 
     decision, intent = svc.evaluate(
-        _signal(user_id, size="1"), trace_id="t-token-policy-discouraged"
+        _signal(user_id, size="0.02"), trace_id="t-token-policy-discouraged"
     )
 
     assert decision.outcome == RiskOutcome.REDUCE_SIZE
     assert intent is not None
-    assert Decimal(decision.final_size) < Decimal(decision.original_size)
+    assert Decimal(decision.final_size) == Decimal("0.01200000")
 
 
 def test_risk_applies_max_position_pct_override(tmp_path: Path):
@@ -622,16 +638,22 @@ def test_risk_applies_max_position_pct_override(tmp_path: Path):
         max_position_pct_override=0.10,
     )
 
-    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{db_path}",
+        risk_max_position_size_cents=1_000_000_000,
+        risk_max_per_trade_risk_pct=1.0,
+        risk_max_strategy_allocation_pct=1.0,
+        risk_max_token_concentration_pct=1.0,
+    )
     svc = RiskEngineService(settings, _redis_with_fresh_market())
 
     decision, intent = svc.evaluate(
-        _signal(user_id, size="1"), trace_id="t-token-policy-cap"
+        _signal(user_id, size="0.1"), trace_id="t-token-policy-cap"
     )
 
     assert decision.outcome == RiskOutcome.REDUCE_SIZE
     assert intent is not None
-    assert Decimal(decision.final_size) == Decimal("0.39996000")
+    assert Decimal(decision.final_size) == Decimal("0.00399960")
 
 
 def test_stale_data_degrades_signal_without_full_rejection(tmp_path: Path):
@@ -644,6 +666,10 @@ def test_stale_data_degrades_signal_without_full_rejection(tmp_path: Path):
     settings = Settings(
         database_url=f"sqlite+pysqlite:///{db_path}",
         risk_stale_degraded_confidence_multiplier=0.75,
+        risk_max_per_trade_risk_pct=1.0,
+        risk_max_position_size_cents=1_000_000_000,
+        risk_max_strategy_allocation_pct=1.0,
+        risk_max_token_concentration_pct=1.0,
     )
     svc = RiskEngineService(
         settings,
@@ -655,12 +681,12 @@ def test_stale_data_degrades_signal_without_full_rejection(tmp_path: Path):
     )
 
     decision, intent = svc.evaluate(
-        _signal(user_id, size="0.1"), trace_id="t-stale-degraded"
+        _signal(user_id, size="0.01"), trace_id="t-stale-degraded"
     )
 
     assert decision.outcome == RiskOutcome.APPROVE
     assert intent is not None
-    assert Decimal(decision.original_size) == Decimal("0.07500000")
+    assert Decimal(decision.original_size) == Decimal("0.00750000")
     assert svc.metrics_snapshot()["signals_rejected"] == 0
 
 

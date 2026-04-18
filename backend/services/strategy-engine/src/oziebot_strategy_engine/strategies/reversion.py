@@ -36,16 +36,28 @@ class ReversionStrategy(TradingStrategy):
     def validate_config(self, config: dict) -> bool:
         band_window = int(config.get("band_window", 20))
         rsi_period = int(config.get("rsi_period", 14))
-        entry_zscore = float(config.get("entry_zscore", 1.8))
-        exit_zscore = float(config.get("exit_zscore", 0.35))
-        rsi_buy_threshold = float(config.get("rsi_buy_threshold", 32))
-        rsi_exit_threshold = float(config.get("rsi_exit_threshold", 52))
-        rsi_sell_threshold = float(config.get("rsi_sell_threshold", 68))
-        position_size = float(config.get("position_size", 0.06))
+        entry_zscore = float(
+            config.get("zscore_entry", config.get("entry_zscore", 1.6))
+        )
+        exit_zscore = float(config.get("zscore_exit", config.get("exit_zscore", 0.4)))
+        rsi_buy_threshold = float(
+            config.get("rsi_buy", config.get("rsi_buy_threshold", 30))
+        )
+        rsi_exit_threshold = float(
+            config.get("rsi_exit", config.get("rsi_exit_threshold", 50))
+        )
+        rsi_sell_threshold = float(
+            config.get("rsi_sell", config.get("rsi_sell_threshold", 65))
+        )
+        position_size = float(
+            config.get("position_size_fraction", config.get("position_size", 0.05))
+        )
         stop_loss_pct = float(config.get("stop_loss_pct", 0.025))
-        take_profit_pct = float(config.get("take_profit_pct", 0.045))
-        min_bandwidth_pct = float(config.get("min_bandwidth_pct", 0.015))
-        max_hold_minutes = int(config.get("max_hold_minutes", 180))
+        take_profit_pct = float(config.get("take_profit_pct", 0.04))
+        min_bandwidth_pct = float(
+            config.get("min_bandwidth", config.get("min_bandwidth_pct", 0.012))
+        )
+        max_hold_minutes = int(config.get("max_hold_minutes", 120))
         ema_long_window = int(config.get("ema_long_window", 200))
 
         if not (5 <= band_window <= 200):
@@ -98,16 +110,28 @@ class ReversionStrategy(TradingStrategy):
 
         band_window = int(config.get("band_window", 20))
         rsi_period = int(config.get("rsi_period", 14))
-        entry_zscore = float(config.get("entry_zscore", 1.8))
-        exit_zscore = float(config.get("exit_zscore", 0.35))
-        rsi_buy_threshold = float(config.get("rsi_buy_threshold", 32))
-        rsi_exit_threshold = float(config.get("rsi_exit_threshold", 52))
-        rsi_sell_threshold = float(config.get("rsi_sell_threshold", 68))
-        position_size = float(config.get("position_size", 0.06))
+        entry_zscore = float(
+            config.get("zscore_entry", config.get("entry_zscore", 1.6))
+        )
+        exit_zscore = float(config.get("zscore_exit", config.get("exit_zscore", 0.4)))
+        rsi_buy_threshold = float(
+            config.get("rsi_buy", config.get("rsi_buy_threshold", 30))
+        )
+        rsi_exit_threshold = float(
+            config.get("rsi_exit", config.get("rsi_exit_threshold", 50))
+        )
+        rsi_sell_threshold = float(
+            config.get("rsi_sell", config.get("rsi_sell_threshold", 65))
+        )
+        position_size = float(
+            config.get("position_size_fraction", config.get("position_size", 0.05))
+        )
         stop_loss_pct = float(config.get("stop_loss_pct", 0.025))
-        take_profit_pct = float(config.get("take_profit_pct", 0.045))
-        min_bandwidth_pct = float(config.get("min_bandwidth_pct", 0.015))
-        max_hold_minutes = int(config.get("max_hold_minutes", 180))
+        take_profit_pct = float(config.get("take_profit_pct", 0.04))
+        min_bandwidth_pct = float(
+            config.get("min_bandwidth", config.get("min_bandwidth_pct", 0.012))
+        )
+        max_hold_minutes = int(config.get("max_hold_minutes", 120))
         use_trend_filter = bool(config.get("use_trend_filter", True))
         ema_long_window = int(config.get("ema_long_window", 200))
 
@@ -259,16 +283,16 @@ class ReversionStrategy(TradingStrategy):
         return {
             "band_window": 20,
             "rsi_period": 14,
-            "entry_zscore": 1.8,
-            "exit_zscore": 0.35,
-            "rsi_buy_threshold": 32,
-            "rsi_exit_threshold": 52,
-            "rsi_sell_threshold": 68,
-            "position_size": 0.06,
+            "zscore_entry": 1.6,
+            "zscore_exit": 0.4,
+            "rsi_buy": 30,
+            "rsi_exit": 50,
+            "rsi_sell": 65,
+            "position_size_fraction": 0.05,
             "stop_loss_pct": 0.025,
-            "take_profit_pct": 0.045,
-            "min_bandwidth_pct": 0.015,
-            "max_hold_minutes": 180,
+            "take_profit_pct": 0.04,
+            "min_bandwidth": 0.012,
+            "max_hold_minutes": 120,
             "use_fear_index_filter": False,
             "fear_index_buy_max": 35,
             "fear_index_sell_min": 60,
@@ -294,46 +318,46 @@ class ReversionStrategy(TradingStrategy):
                     "default": 14,
                     "description": "Lookback period used for RSI calculation",
                 },
-                "entry_zscore": {
+                "zscore_entry": {
                     "type": "number",
                     "minimum": 0.1,
                     "maximum": 5.0,
-                    "default": 1.8,
+                    "default": 1.6,
                     "description": "Buy when price is this many standard deviations below the mean",
                 },
-                "exit_zscore": {
+                "zscore_exit": {
                     "type": "number",
                     "minimum": 0.0,
                     "maximum": 3.0,
-                    "default": 0.35,
+                    "default": 0.4,
                     "description": "Exit once price reverts back near the rolling mean",
                 },
-                "rsi_buy_threshold": {
+                "rsi_buy": {
                     "type": "number",
                     "minimum": 1,
                     "maximum": 50,
-                    "default": 32,
+                    "default": 30,
                     "description": "Buy only when RSI is at or below this value",
                 },
-                "rsi_exit_threshold": {
+                "rsi_exit": {
                     "type": "number",
                     "minimum": 20,
                     "maximum": 80,
-                    "default": 52,
+                    "default": 50,
                     "description": "Exit once RSI normalises back above this level",
                 },
-                "rsi_sell_threshold": {
+                "rsi_sell": {
                     "type": "number",
                     "minimum": 50,
                     "maximum": 99,
-                    "default": 68,
+                    "default": 65,
                     "description": "Prefer exits when the bounce becomes overbought",
                 },
-                "position_size": {
+                "position_size_fraction": {
                     "type": "number",
                     "minimum": 0.01,
                     "maximum": 1.0,
-                    "default": 0.06,
+                    "default": 0.05,
                     "description": "Fraction of capital to deploy per entry",
                 },
                 "stop_loss_pct": {
@@ -347,21 +371,21 @@ class ReversionStrategy(TradingStrategy):
                     "type": "number",
                     "minimum": 0.001,
                     "maximum": 1.0,
-                    "default": 0.045,
+                    "default": 0.04,
                     "description": "Take profit on a strong oversold bounce",
                 },
-                "min_bandwidth_pct": {
+                "min_bandwidth": {
                     "type": "number",
                     "minimum": 0.0,
                     "maximum": 1.0,
-                    "default": 0.015,
+                    "default": 0.012,
                     "description": "Skip trades when the rolling band width is narrower than this",
                 },
                 "max_hold_minutes": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 10080,
-                    "default": 180,
+                    "default": 120,
                     "description": "Maximum time to hold an open reversion position",
                 },
                 "use_fear_index_filter": {
@@ -396,7 +420,7 @@ class ReversionStrategy(TradingStrategy):
                     "description": "Long lookback window used for the hard trend filter",
                 },
             },
-            "required": ["band_window", "rsi_period", "entry_zscore", "exit_zscore"],
+            "required": ["band_window", "rsi_period", "zscore_entry", "zscore_exit"],
         }
 
     def _check_exit(

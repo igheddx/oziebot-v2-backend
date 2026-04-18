@@ -68,6 +68,14 @@ class RiskRule:
         raise NotImplementedError
 
 
+def _notional_cents(ctx: RuleContext) -> Decimal:
+    return (ctx.suggested_size * ctx.mid_price * Decimal("100")).quantize(Decimal("1"))
+
+
+def _cents_to_dollars(value_cents: int | Decimal) -> Decimal:
+    return Decimal(str(value_cents)) / Decimal("100")
+
+
 class PlatformPauseRule(RiskRule):
     name = "platform_pause"
 
@@ -186,7 +194,7 @@ class TokenStrategyPositionOverrideRule(RiskRule):
             or ctx.mid_price <= 0
         ):
             return None
-        notional = ctx.suggested_size * ctx.mid_price
+        notional = _notional_cents(ctx)
         projected = Decimal(str(ctx.current_strategy_token_exposure_cents)) + notional
         limit = Decimal(str(ctx.token_policy_max_position_cents))
         if projected <= limit:
@@ -202,7 +210,9 @@ class TokenStrategyPositionOverrideRule(RiskRule):
                 RejectionReason.POSITION_CAP,
                 "Token strategy position override cap reached",
             )
-        reduced = (allowed_notional / ctx.mid_price).quantize(Decimal("0.00000001"))
+        reduced = (_cents_to_dollars(allowed_notional) / ctx.mid_price).quantize(
+            Decimal("0.00000001")
+        )
         return RuleResult(
             self.name,
             "reduce_size",
@@ -224,7 +234,7 @@ class CapitalBucketRule(RiskRule):
                 "No strategy capital bucket",
             )
         buying_power = int(ctx.bucket["available_buying_power_cents"])
-        notional = int((ctx.suggested_size * ctx.mid_price).quantize(Decimal("1")))
+        notional = int(_notional_cents(ctx))
         if notional > buying_power:
             if buying_power <= 0:
                 return RuleResult(
@@ -233,7 +243,7 @@ class CapitalBucketRule(RiskRule):
                     RejectionReason.LIMIT_EXCEEDED,
                     "No buying power",
                 )
-            reduced = (Decimal(buying_power) / ctx.mid_price).quantize(
+            reduced = (_cents_to_dollars(buying_power) / ctx.mid_price).quantize(
                 Decimal("0.00000001")
             )
             return RuleResult(
@@ -259,9 +269,11 @@ class MaxPerTradeRiskRule(RiskRule):
         if buying_power <= 0:
             return None
         max_notional = buying_power * self._max_pct
-        notional = ctx.suggested_size * ctx.mid_price
+        notional = _notional_cents(ctx)
         if notional > max_notional:
-            reduced = (max_notional / ctx.mid_price).quantize(Decimal("0.00000001"))
+            reduced = (_cents_to_dollars(max_notional) / ctx.mid_price).quantize(
+                Decimal("0.00000001")
+            )
             return RuleResult(
                 self.name,
                 "reduce_size",
@@ -282,7 +294,7 @@ class MaxPositionSizeRule(RiskRule):
         if ctx.bucket is None:
             return None
         locked = int(ctx.bucket["locked_capital_cents"])
-        notional = int((ctx.suggested_size * ctx.mid_price).quantize(Decimal("1")))
+        notional = int(_notional_cents(ctx))
         projected = locked + notional
         if projected > self._max_cents:
             allowed = max(0, self._max_cents - locked)
@@ -293,7 +305,9 @@ class MaxPositionSizeRule(RiskRule):
                     RejectionReason.POSITION_CAP,
                     "Max position size reached",
                 )
-            reduced = (Decimal(allowed) / ctx.mid_price).quantize(Decimal("0.00000001"))
+            reduced = (_cents_to_dollars(allowed) / ctx.mid_price).quantize(
+                Decimal("0.00000001")
+            )
             return RuleResult(
                 self.name,
                 "reduce_size",
@@ -314,10 +328,12 @@ class MaxStrategyAllocationRule(RiskRule):
         if ctx.bucket is None:
             return None
         assigned = Decimal(str(ctx.bucket["assigned_capital_cents"]))
-        notional = ctx.suggested_size * ctx.mid_price
+        notional = _notional_cents(ctx)
         max_allowed = assigned * self._max_pct
         if notional > max_allowed:
-            reduced = (max_allowed / ctx.mid_price).quantize(Decimal("0.00000001"))
+            reduced = (_cents_to_dollars(max_allowed) / ctx.mid_price).quantize(
+                Decimal("0.00000001")
+            )
             return RuleResult(
                 self.name,
                 "reduce_size",
@@ -337,11 +353,13 @@ class MaxTokenConcentrationRule(RiskRule):
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
         if ctx.total_capital_cents <= 0:
             return None
-        notional = ctx.suggested_size * ctx.mid_price
+        notional = _notional_cents(ctx)
         ratio = notional / Decimal(str(ctx.total_capital_cents))
         if ratio > self._max_pct:
             allowed_notional = Decimal(str(ctx.total_capital_cents)) * self._max_pct
-            reduced = (allowed_notional / ctx.mid_price).quantize(Decimal("0.00000001"))
+            reduced = (_cents_to_dollars(allowed_notional) / ctx.mid_price).quantize(
+                Decimal("0.00000001")
+            )
             return RuleResult(
                 self.name,
                 "reduce_size",
@@ -362,7 +380,7 @@ class MaxStrategyExposureRule(RiskRule):
             or ctx.mid_price <= 0
         ):
             return None
-        notional = ctx.suggested_size * ctx.mid_price
+        notional = _notional_cents(ctx)
         projected = Decimal(str(ctx.current_strategy_exposure_cents)) + notional
         limit = Decimal(str(ctx.max_strategy_exposure_cents))
         if projected <= limit:
@@ -377,7 +395,9 @@ class MaxStrategyExposureRule(RiskRule):
                 RejectionReason.LIMIT_EXCEEDED,
                 "Strategy exposure cap reached",
             )
-        reduced = (allowed_notional / ctx.mid_price).quantize(Decimal("0.00000001"))
+        reduced = (_cents_to_dollars(allowed_notional) / ctx.mid_price).quantize(
+            Decimal("0.00000001")
+        )
         return RuleResult(
             self.name,
             "reduce_size",
@@ -397,7 +417,7 @@ class MaxTokenExposureRule(RiskRule):
             or ctx.mid_price <= 0
         ):
             return None
-        notional = ctx.suggested_size * ctx.mid_price
+        notional = _notional_cents(ctx)
         projected = Decimal(str(ctx.current_token_exposure_cents)) + notional
         limit = Decimal(str(ctx.max_token_exposure_cents))
         if projected <= limit:
@@ -412,7 +432,9 @@ class MaxTokenExposureRule(RiskRule):
                 RejectionReason.LIMIT_EXCEEDED,
                 "Token exposure cap reached",
             )
-        reduced = (allowed_notional / ctx.mid_price).quantize(Decimal("0.00000001"))
+        reduced = (_cents_to_dollars(allowed_notional) / ctx.mid_price).quantize(
+            Decimal("0.00000001")
+        )
         return RuleResult(
             self.name,
             "reduce_size",

@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from oziebot_common.queues import QueueNames, push_json, strategy_signal_to_json
+from oziebot_common.strategy_defaults import normalize_platform_strategy_config
 from oziebot_common.token_policy import resolve_effective_token_policy
 from oziebot_domain.signal_pipeline import StrategySignalEvent
 from oziebot_domain.strategy import SignalType, StrategySignal
@@ -470,16 +471,16 @@ class StrategyRunner:
         with self._engine.begin() as conn:
             row = conn.execute(stmt, {"strategy_id": strategy_id}).mappings().first()
         if not row:
-            return {}
+            return normalize_platform_strategy_config(strategy_id, None)
         payload = row["config_schema"]
         if payload is None:
-            return {}
+            return normalize_platform_strategy_config(strategy_id, None)
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
             except Exception:
-                return {}
-        return payload if isinstance(payload, dict) else {}
+                return normalize_platform_strategy_config(strategy_id, None)
+        return normalize_platform_strategy_config(strategy_id, payload)
 
     def _last_action_signal_ts(
         self,

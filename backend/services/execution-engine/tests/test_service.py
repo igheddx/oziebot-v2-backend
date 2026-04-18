@@ -371,6 +371,19 @@ def _last_order(db_path: Path) -> dict:
     return dict(row)
 
 
+def _last_trade(db_path: Path) -> dict:
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        row = (
+            conn.execute(
+                text("SELECT * FROM execution_trades ORDER BY executed_at DESC LIMIT 1")
+            )
+            .mappings()
+            .one()
+        )
+    return dict(row)
+
+
 def test_duplicate_intent_prevents_duplicate_order_and_fill(tmp_path: Path):
     db_path = tmp_path / "execution1.sqlite"
     _setup_db(db_path)
@@ -381,7 +394,14 @@ def test_duplicate_intent_prevents_duplicate_order_and_fill(tmp_path: Path):
     user_id = str(uuid4())
     tenant_id = str(uuid4())
     strategy_id = "momentum"
-    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER.value,
+        available_cash_cents=3_100_000,
+    )
 
     service, _ = _service(db_path, redis)
     request = _request(user_id, tenant_id, strategy_id, TradingMode.PAPER)
@@ -407,7 +427,14 @@ def test_paper_fills_immediately_while_live_stays_pending(tmp_path: Path):
     user_id = str(uuid4())
     tenant_id = str(uuid4())
     strategy_id = "momentum"
-    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER.value,
+        available_cash_cents=3_100_000,
+    )
     _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.LIVE.value)
 
     service, live_client = _service(db_path, redis)
@@ -471,7 +498,14 @@ def test_paper_sell_closes_position_and_records_trade(tmp_path: Path):
     user_id = str(uuid4())
     tenant_id = str(uuid4())
     strategy_id = "momentum"
-    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER.value,
+        available_cash_cents=3_100_000,
+    )
     service, _ = _service(db_path, redis)
 
     redis.set(
@@ -480,6 +514,7 @@ def test_paper_sell_closes_position_and_records_trade(tmp_path: Path):
     buy = service.process_request(
         _request(user_id, tenant_id, strategy_id, TradingMode.PAPER)
     )
+    buy_order = _last_order(db_path)
 
     redis.set(
         "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"51000","best_ask_price":"51010"}'
@@ -496,6 +531,8 @@ def test_paper_sell_closes_position_and_records_trade(tmp_path: Path):
     )
 
     assert buy.state == ExecutionOrderStatus.FILLED
+    assert int(buy_order["locked_cash_cents"]) == 2_502_500
+
     assert sell.state == ExecutionOrderStatus.FILLED
     assert _count(db_path, "execution_fills") == 2
     assert _count(db_path, "execution_trades") == 2
@@ -506,6 +543,9 @@ def test_paper_sell_closes_position_and_records_trade(tmp_path: Path):
     assert last_order["side"] == Side.SELL.value
     assert Decimal(str(last_order["filled_quantity"])) == Decimal("0.5")
     assert Decimal(str(last_order["avg_fill_price"])) == Decimal("51000")
+    last_trade = _last_trade(db_path)
+    assert last_trade["side"] == Side.SELL.value
+    assert int(last_trade["realized_pnl_cents"]) == 44_950
 
 
 def test_day_trading_max_position_age_auto_closes_in_paper(tmp_path: Path):
@@ -561,7 +601,14 @@ def test_execution_rejects_blocked_token_strategy_policy(tmp_path: Path):
     user_id = str(uuid4())
     tenant_id = str(uuid4())
     strategy_id = "momentum"
-    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER.value,
+        available_cash_cents=3_100_000,
+    )
     _insert_token_policy(
         db_path,
         strategy_id=strategy_id,
@@ -591,7 +638,14 @@ def test_execution_reduces_discouraged_token_strategy_size(tmp_path: Path):
     user_id = str(uuid4())
     tenant_id = str(uuid4())
     strategy_id = "momentum"
-    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER.value,
+        available_cash_cents=3_100_000,
+    )
     _insert_token_policy(
         db_path,
         strategy_id=strategy_id,
@@ -608,10 +662,10 @@ def test_execution_reduces_discouraged_token_strategy_size(tmp_path: Path):
 
     assert result.state == ExecutionOrderStatus.FILLED
     order = _last_order(db_path)
-    assert Decimal(str(order["quantity"])) == Decimal("0.50000000")
+    assert Decimal(str(order["quantity"])) == Decimal("0.60000000")
     position = _position(db_path)
     assert position is not None
-    assert Decimal(str(position["quantity"])) == Decimal("0.50000000")
+    assert Decimal(str(position["quantity"])) == Decimal("0.60000000")
 
 
 def test_execution_applies_token_strategy_position_cap(tmp_path: Path):

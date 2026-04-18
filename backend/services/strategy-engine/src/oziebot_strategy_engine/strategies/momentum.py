@@ -17,7 +17,7 @@ class MomentumStrategy(TradingStrategy):
     - short_window: Lookback period for short MA
     - long_window: Lookback period for long MA
     - strength_threshold: Minimum momentum to generate signal
-    - position_size: Fraction of capital to use per trade
+    - position_size_fraction: Fraction of capital to use per trade
     - stop_loss_pct: Hard stop below entry
     - take_profit_pct: Hard take-profit above entry
     - trailing_stop_pct: Exit when price retraces from peak
@@ -31,14 +31,16 @@ class MomentumStrategy(TradingStrategy):
 
     def validate_config(self, config: dict) -> bool:
         """Validate momentum config."""
-        short_window = config.get("short_window", 5)
-        long_window = config.get("long_window", 20)
-        strength_threshold = config.get("strength_threshold", 0.015)
-        position_size = config.get("position_size", 0.1)
-        stop_loss_pct = config.get("stop_loss_pct", 0.03)
-        take_profit_pct = config.get("take_profit_pct", 0.06)
-        trailing_stop_pct = config.get("trailing_stop_pct", 0.025)
-        max_hold_minutes = config.get("max_hold_minutes", 240)
+        short_window = config.get("short_window", 8)
+        long_window = config.get("long_window", 34)
+        strength_threshold = config.get("strength_threshold", 0.012)
+        position_size = config.get(
+            "position_size_fraction", config.get("position_size", 0.12)
+        )
+        stop_loss_pct = config.get("stop_loss_pct", 0.035)
+        take_profit_pct = config.get("take_profit_pct", 0.08)
+        trailing_stop_pct = config.get("trailing_stop_pct", 0.03)
+        max_hold_minutes = config.get("max_hold_minutes", 300)
 
         if not (1 <= short_window < long_window):
             raise ValueError(
@@ -75,13 +77,13 @@ class MomentumStrategy(TradingStrategy):
         correlation_id: UUID,
     ) -> StrategySignal:
         """Generate momentum signal using short/long moving average crossover."""
-        short_window = int(config.get("short_window", 5))
-        long_window = int(config.get("long_window", 20))
-        strength_threshold = float(config.get("strength_threshold", 0.015))
-        stop_loss_pct = float(config.get("stop_loss_pct", 0.03))
-        take_profit_pct = float(config.get("take_profit_pct", 0.06))
-        trailing_stop_pct = float(config.get("trailing_stop_pct", 0.025))
-        max_hold_minutes = int(config.get("max_hold_minutes", 240))
+        short_window = int(config.get("short_window", 8))
+        long_window = int(config.get("long_window", 34))
+        strength_threshold = float(config.get("strength_threshold", 0.012))
+        stop_loss_pct = float(config.get("stop_loss_pct", 0.035))
+        take_profit_pct = float(config.get("take_profit_pct", 0.08))
+        trailing_stop_pct = float(config.get("trailing_stop_pct", 0.03))
+        max_hold_minutes = int(config.get("max_hold_minutes", 300))
 
         market = context.market_snapshot
         position = context.position_state
@@ -160,14 +162,14 @@ class MomentumStrategy(TradingStrategy):
     def get_default_config(self) -> dict:
         """Return default configuration."""
         return {
-            "short_window": 5,
-            "long_window": 20,
-            "strength_threshold": 0.015,
-            "position_size": 0.1,
-            "stop_loss_pct": 0.03,
-            "take_profit_pct": 0.06,
-            "trailing_stop_pct": 0.025,
-            "max_hold_minutes": 240,
+            "short_window": 8,
+            "long_window": 34,
+            "strength_threshold": 0.012,
+            "position_size_fraction": 0.12,
+            "stop_loss_pct": 0.035,
+            "take_profit_pct": 0.08,
+            "trailing_stop_pct": 0.03,
+            "max_hold_minutes": 300,
         }
 
     def get_config_schema(self) -> dict:
@@ -178,55 +180,55 @@ class MomentumStrategy(TradingStrategy):
                 "short_window": {
                     "type": "integer",
                     "minimum": 1,
-                    "default": 5,
+                    "default": 8,
                     "description": "Short moving average window",
                 },
                 "long_window": {
                     "type": "integer",
                     "minimum": 2,
-                    "default": 20,
+                    "default": 34,
                     "description": "Long moving average window",
                 },
                 "strength_threshold": {
                     "type": "number",
                     "minimum": 0.0,
                     "maximum": 1.0,
-                    "default": 0.015,
+                    "default": 0.012,
                     "description": "Minimum momentum to trade (e.g. 0.02 = 2%)",
                 },
-                "position_size": {
+                "position_size_fraction": {
                     "type": "number",
                     "minimum": 0.01,
                     "maximum": 1.0,
-                    "default": 0.1,
+                    "default": 0.12,
                     "description": "Fraction of capital to use per trade",
                 },
                 "stop_loss_pct": {
                     "type": "number",
                     "minimum": 0.001,
                     "maximum": 1.0,
-                    "default": 0.03,
+                    "default": 0.035,
                     "description": "Exit if price falls this far below entry",
                 },
                 "take_profit_pct": {
                     "type": "number",
                     "minimum": 0.001,
                     "maximum": 1.0,
-                    "default": 0.06,
+                    "default": 0.08,
                     "description": "Take profit once price rises this far above entry",
                 },
                 "trailing_stop_pct": {
                     "type": "number",
                     "minimum": 0.001,
                     "maximum": 1.0,
-                    "default": 0.025,
+                    "default": 0.03,
                     "description": "Exit if price retraces this far from peak after entry",
                 },
                 "max_hold_minutes": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 10080,
-                    "default": 240,
+                    "default": 300,
                     "description": "Maximum time to hold an open position",
                 },
             },
@@ -318,7 +320,9 @@ class MomentumStrategy(TradingStrategy):
         reason: str,
     ) -> StrategySignal:
         market = context.market_snapshot
-        position_size = config.get("position_size", 0.1)
+        position_size = config.get(
+            "position_size_fraction", config.get("position_size", 0.12)
+        )
 
         return StrategySignal(
             signal_id=signal_id,

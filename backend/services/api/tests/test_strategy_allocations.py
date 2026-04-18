@@ -18,6 +18,7 @@ def _seed_enabled_strategies(client, token: str) -> None:
     _create_enabled_strategy(client, token, "momentum")
     _create_enabled_strategy(client, token, "day_trading")
     _create_enabled_strategy(client, token, "dca")
+    _create_enabled_strategy(client, token, "reversion")
 
 
 def test_manual_allocation_creates_mode_buckets(client, regular_user_and_token):
@@ -65,6 +66,11 @@ def test_guided_preset_allocations(client, regular_user_and_token):
     assert r.status_code == 200, r.text
     assert r.json()["allocation_mode"] == "guided"
     assert r.json()["preset_name"] == "balanced"
+    by_strategy = {item["strategy_id"]: item for item in r.json()["items"]}
+    assert by_strategy["momentum"]["allocation_bps"] == 4500
+    assert by_strategy["day_trading"]["allocation_bps"] == 2000
+    assert by_strategy["reversion"]["allocation_bps"] == 1000
+    assert by_strategy["dca"]["allocation_bps"] == 2500
 
 
 def test_starvation_prevention_between_strategies(client, regular_user_and_token):
