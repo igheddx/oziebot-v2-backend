@@ -44,6 +44,84 @@ class TokenStrategyPolicyPatch(BaseModel):
     notes: str | None = None
 
 
+class TokenPolicyTokenSummary(BaseModel):
+    id: str
+    symbol: str
+    quote_currency: str
+    display_name: str | None = None
+    is_enabled: bool
+    extra: dict[str, Any] | None = None
+
+
+class TokenMarketProfileResponse(BaseModel):
+    liquidity_score: float
+    spread_score: float
+    volatility_score: float
+    trend_score: float
+    reversion_score: float
+    slippage_score: float
+    avg_daily_volume_usd: float
+    avg_spread_pct: float
+    avg_intraday_volatility_pct: float
+    last_computed_at: str
+    raw_metrics_json: dict[str, Any] | None = None
+
+
+class TokenPolicyProfileEntry(BaseModel):
+    token: TokenPolicyTokenSummary
+    market_profile: TokenMarketProfileResponse | None = None
+
+
+class TokenStrategyPolicyResponse(BaseModel):
+    id: str
+    strategy_id: str
+    strategy_display_name: str | None = None
+    admin_enabled: bool
+    suitability_score: float
+    computed_recommendation_status: str
+    computed_recommendation_reason: str | None = None
+    effective_recommendation_status: str
+    effective_recommendation_reason: str | None = None
+    recommendation_status: str
+    recommendation_reason: str | None = None
+    recommendation_status_override: str | None = None
+    recommendation_reason_override: str | None = None
+    max_position_pct_override: float | None = None
+    notes: str | None = None
+    computed_at: str | None = None
+    updated_at: str | None = None
+
+
+class TokenPolicyDetailResponse(BaseModel):
+    token: TokenPolicyTokenSummary
+    market_profile: TokenMarketProfileResponse | None = None
+    strategy_policies: list[TokenStrategyPolicyResponse]
+
+
+class TokenPolicySizingImpact(BaseModel):
+    original_size: str | None = None
+    final_size: str | None = None
+    size_multiplier: str | None = None
+    max_position_pct_override: str | None = None
+    requested_quantity: str | None = None
+
+
+class TokenPolicyDecisionResponse(BaseModel):
+    record_id: str
+    enforced_in: str
+    strategy_name: str
+    token: str
+    trading_mode: str
+    computed_recommendation_status: str
+    effective_recommendation_status: str
+    admin_enabled: bool
+    confidence_score: float | None = None
+    final_sizing_impact: TokenPolicySizingImpact
+    decision_outcome: Literal["emitted", "reduced", "rejected", "executed"]
+    decision_reason: str | None = None
+    timestamp: str
+
+
 class StrategyCatalogCreate(BaseModel):
     slug: str = Field(min_length=1, max_length=64)
     display_name: str = Field(min_length=1, max_length=256)

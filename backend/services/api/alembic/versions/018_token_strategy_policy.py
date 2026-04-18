@@ -1,7 +1,7 @@
 """token strategy policy
 
 Revision ID: 018_token_strategy_policy
-Revises: 017_backtesting_analytics
+Revises: 017
 Create Date: 2026-04-18 00:00:00.000000
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "018_token_strategy_policy"
-down_revision = "017_backtesting_analytics"
+down_revision = "017"
 branch_labels = None
 depends_on = None
 

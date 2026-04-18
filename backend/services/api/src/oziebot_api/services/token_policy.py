@@ -31,6 +31,42 @@ class TokenPolicyService:
     def __init__(self, db: Session):
         self._db = db
 
+    def list_market_profiles(self) -> list[dict[str, Any]]:
+        tokens = self._db.scalars(
+            select(PlatformTokenAllowlist).order_by(
+                PlatformTokenAllowlist.sort_order,
+                PlatformTokenAllowlist.symbol,
+            )
+        ).all()
+        profile_map = {
+            row.token_id: row
+            for row in self._db.scalars(select(TokenMarketProfile)).all()
+        }
+        return [
+            {
+                "token": {
+                    "id": str(token.id),
+                    "symbol": token.symbol,
+                    "quote_currency": token.quote_currency,
+                    "display_name": token.display_name,
+                    "is_enabled": token.is_enabled,
+                    "extra": token.extra,
+                },
+                "market_profile": self._profile_out(profile_map.get(token.id)),
+            }
+            for token in tokens
+        ]
+
+    def list_token_matrix(self, *, symbol: str | None = None) -> list[dict[str, Any]]:
+        stmt = select(PlatformTokenAllowlist).order_by(
+            PlatformTokenAllowlist.sort_order,
+            PlatformTokenAllowlist.symbol,
+        )
+        if symbol:
+            stmt = stmt.where(PlatformTokenAllowlist.symbol.ilike(f"%{symbol.strip().upper()}%"))
+        tokens = self._db.scalars(stmt).all()
+        return [self.describe_token(token) for token in tokens]
+
     def recalculate_token(self, token: PlatformTokenAllowlist) -> dict[str, Any]:
         candles = self._load_candles(token.symbol)
         bbos = self._load_bbos(token.symbol)
@@ -250,6 +286,8 @@ class TokenPolicyService:
             "suitability_score": float(policy.suitability_score),
             "computed_recommendation_status": policy.recommendation_status,
             "computed_recommendation_reason": policy.recommendation_reason,
+            "effective_recommendation_status": effective["effective_recommendation_status"],
+            "effective_recommendation_reason": effective["effective_recommendation_reason"],
             "recommendation_status": effective["effective_recommendation_status"],
             "recommendation_reason": effective["effective_recommendation_reason"],
             "recommendation_status_override": policy.recommendation_status_override,

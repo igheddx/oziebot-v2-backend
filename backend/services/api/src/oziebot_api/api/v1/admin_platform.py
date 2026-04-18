@@ -33,6 +33,9 @@ from oziebot_api.schemas.platform_admin import (
     TenantCoinbaseHealthPatch,
     TokenAllowlistCreate,
     TokenAllowlistPatch,
+    TokenPolicyDecisionResponse,
+    TokenPolicyDetailResponse,
+    TokenPolicyProfileEntry,
     TokenStrategyPolicyPatch,
     TrialPolicyBody,
 )
@@ -45,6 +48,9 @@ from oziebot_api.services.platform_management import (
     upsert_setting,
 )
 from oziebot_api.services.token_policy import TokenPolicyService
+from oziebot_api.services.token_policy_verification import (
+    TokenPolicyVerificationService,
+)
 
 router = APIRouter(prefix="/admin/platform", tags=["admin-platform"])
 
@@ -280,6 +286,33 @@ def get_token_market_profile(
     return payload
 
 
+@router.get("/token-policy/market-profiles", response_model=list[TokenPolicyProfileEntry])
+def list_token_market_profiles(
+    _admin: RootAdminUser,
+    db: DbSession,
+) -> list[dict[str, Any]]:
+    return TokenPolicyService(db).list_market_profiles()
+
+
+@router.get("/token-policy/matrix", response_model=list[TokenPolicyDetailResponse])
+def list_token_policy_matrix(
+    _admin: RootAdminUser,
+    db: DbSession,
+    symbol: str | None = Query(default=None, min_length=1),
+) -> list[dict[str, Any]]:
+    return TokenPolicyService(db).list_token_matrix(symbol=symbol)
+
+
+@router.get("/token-policy/tokens/{token_id}", response_model=TokenPolicyDetailResponse)
+def get_token_policy_detail(
+    token_id: uuid.UUID,
+    _admin: RootAdminUser,
+    db: DbSession,
+) -> dict[str, Any]:
+    token = _get_token_or_404(db, token_id)
+    return TokenPolicyService(db).describe_token(token)
+
+
 @router.get("/tokens/{token_id}/strategy-policies")
 def get_token_strategy_policies(
     token_id: uuid.UUID,
@@ -343,6 +376,28 @@ def patch_token_strategy_policy(
         request=request,
     )
     return payload
+
+
+@router.get("/token-policy/decisions", response_model=list[TokenPolicyDecisionResponse])
+def list_token_policy_decisions(
+    _admin: RootAdminUser,
+    db: DbSession,
+    symbol: str | None = Query(default=None, min_length=1),
+    strategy_id: str | None = Query(default=None, min_length=1),
+    trading_mode: str | None = Query(default=None, pattern="^(paper|live)$"),
+    outcome: str | None = Query(
+        default=None,
+        pattern="^(emitted|reduced|rejected|executed)$",
+    ),
+    limit: int = Query(default=100, ge=1, le=200),
+) -> list[dict[str, Any]]:
+    return TokenPolicyVerificationService(db).list_recent_decisions(
+        symbol=symbol,
+        strategy_id=strategy_id,
+        trading_mode=trading_mode,
+        outcome=outcome,
+        limit=limit,
+    )
 
 
 def _strategy_out(r: PlatformStrategy) -> dict[str, Any]:
