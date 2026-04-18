@@ -50,7 +50,4 @@ jobs:
       - python
       - docker
     uses: ./.github/workflows/backend-deploy.yml
-    with:
-      deploy_sha: ${{ github.sha }}
-      deploy_ref: ${{ github.ref_name }}
     secrets: inherit

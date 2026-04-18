@@ -3,37 +3,17 @@ name: Backend Deploy
 
 on:
   workflow_call:
-    inputs:
-      deploy_sha:
-        description: Commit SHA to deploy
-        required: true
-        type: string
-      deploy_ref:
-        description: Branch name for concurrency grouping
-        required: false
-        type: string
   workflow_dispatch:
-    inputs:
-      deploy_sha:
-        description: Commit SHA to deploy (defaults to the selected ref)
-        required: false
-        type: string
-      deploy_ref:
-        description: Branch name for concurrency grouping (defaults to the selected ref)
-        required: false
-        type: string
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: backend-deploy-${{ inputs.deploy_ref != '' && inputs.deploy_ref || github.ref_name }}
+  group: backend-deploy-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  DEPLOY_SHA: ${{ inputs.deploy_sha != '' && inputs.deploy_sha || github.sha }}
-  DEPLOY_REF: ${{ inputs.deploy_ref != '' && inputs.deploy_ref || github.ref_name }}
   AWS_ACCOUNT_ID: "608713827509"
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'oziebot-prod' }}
@@ -62,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.DEPLOY_SHA }}
+          ref: ${{ github.sha }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -77,8 +57,8 @@ jobs:
       - name: Set image metadata
         id: meta
         run: |
-          echo "image_tag=${DEPLOY_SHA}" >> "$GITHUB_OUTPUT"
-          echo "image_uri=${ECR_REGISTRY}/oziebot/api:${DEPLOY_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_uri=${ECR_REGISTRY}/oziebot/api:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push API image
         uses: docker/build-push-action@v6
@@ -96,7 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.DEPLOY_SHA }}
+          ref: ${{ github.sha }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -224,7 +204,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.DEPLOY_SHA }}
+          ref: ${{ github.sha }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -325,7 +305,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.DEPLOY_SHA }}
+          ref: ${{ github.sha }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -367,7 +347,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:${{ env.DEPLOY_SHA }}
+            ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:${{ github.sha }}
             ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:latest
 
       - name: Render task definition template
@@ -394,7 +374,7 @@ jobs:
         with:
           task-definition: task-definition.json
           container-name: ${{ matrix.container_name }}
-          image: ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:${{ env.DEPLOY_SHA }}
+          image: ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:${{ github.sha }}
 
       - name: Deploy task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
