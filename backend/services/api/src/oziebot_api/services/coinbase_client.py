@@ -26,6 +26,34 @@ class CoinbaseValidationResult(BaseModel):
     raw_body_preview: str | None = Field(default=None, repr=False)
 
 
+def list_coinbase_accounts(
+    api_key_name: str,
+    private_key_pem: str,
+    *,
+    base_url: str = DEFAULT_BASE_URL,
+    timeout: float = 20.0,
+    force_ipv4: bool = False,
+) -> list[dict[str, Any]]:
+    host = _host_from_base(base_url)
+    token = build_cdp_jwt(
+        method="GET",
+        request_path=ACCOUNTS_PATH,
+        host=host,
+        api_key_name=api_key_name.strip(),
+        private_key_pem=private_key_pem,
+    )
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    url = base_url.rstrip("/") + ACCOUNTS_PATH
+    client_kwargs: dict[str, Any] = {"timeout": timeout}
+    if force_ipv4:
+        client_kwargs["transport"] = httpx.HTTPTransport(local_address="0.0.0.0")
+    with httpx.Client(**client_kwargs) as client:
+        response = client.get(url, headers=headers)
+        response.raise_for_status()
+    payload = response.json()
+    return list(payload.get("accounts") or [])
+
+
 def _host_from_base(base_url: str) -> str:
     u = base_url.strip().rstrip("/")
     for prefix in ("https://", "http://"):

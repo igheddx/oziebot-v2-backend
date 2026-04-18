@@ -6,12 +6,14 @@ from decimal import Decimal, InvalidOperation
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
-from oziebot_api.deps import DbSession
+from oziebot_api.config import Settings
+from oziebot_api.deps import DbSession, settings_dep
 from oziebot_api.deps.auth import CurrentUser
+from oziebot_api.models.exchange_connection import ExchangeConnection
 from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.execution import ExecutionOrder, ExecutionPosition, ExecutionTradeRecord
@@ -21,6 +23,8 @@ from oziebot_api.models.tenant import Tenant
 from oziebot_api.models.user import User
 from oziebot_api.models.user_strategy import UserStrategy
 from oziebot_api.schemas.me import MeOut, TenantBrief, TradingModePatch
+from oziebot_api.services.coinbase_client import list_coinbase_accounts
+from oziebot_api.services.credential_crypto import CredentialCrypto
 from oziebot_api.services.entitlements import has_strategy_entitlement
 from oziebot_api.services.tenant_scope import primary_tenant_id
 from oziebot_api.services.trading_mode_policy import can_set_trading_mode
@@ -81,6 +85,15 @@ def _to_float(value: str | None) -> float:
         return 0.0
 
 
+def _to_decimal(value: str | None) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    try:
+        return Decimal(value)
+    except (InvalidOperation, ValueError):
+        return Decimal("0")
+
+
 def _as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -89,11 +102,85 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(UTC)
 
 
+def _cents(amount: Decimal) -> int:
+    return int((amount * Decimal("100")).quantize(Decimal("1")))
+
+
+def _live_coinbase_balance_snapshot(
+    db: DbSession,
+    tenant_id: Any,
+    settings: Settings,
+    positions_rows: list[ExecutionPosition],
+) -> tuple[int, int] | None:
+    connection = db.scalar(
+        select(ExchangeConnection).where(
+            ExchangeConnection.tenant_id == tenant_id,
+            ExchangeConnection.provider == "coinbase",
+        )
+    )
+    if (
+        connection is None
+        or connection.validation_status != "valid"
+        or connection.health_status != "healthy"
+        or connection.can_read_balances is not True
+    ):
+        return None
+
+    crypto = CredentialCrypto(settings.exchange_credentials_encryption_key)
+    if not crypto.configured:
+        return None
+
+    try:
+        private_key_pem = crypto.decrypt(connection.encrypted_secret).decode("utf-8")
+        accounts = list_coinbase_accounts(
+            connection.api_key_name,
+            private_key_pem,
+            base_url=settings.coinbase_api_base_url,
+            force_ipv4=settings.coinbase_force_ipv4,
+        )
+    except Exception:
+        return None
+
+    mark_prices: dict[str, Decimal] = {}
+    for row in positions_rows:
+        symbol = (row.symbol or "").upper()
+        if "-" not in symbol:
+            continue
+        base_currency = symbol.split("-", 1)[0]
+        if base_currency and base_currency not in mark_prices:
+            mark_prices[base_currency] = _to_decimal(row.avg_entry_price)
+
+    available_balance_cents = 0
+    portfolio_cents = 0
+    for account in accounts:
+        currency = str(
+            account.get("currency")
+            or (account.get("available_balance") or {}).get("currency")
+            or ""
+        ).upper()
+        available = _to_decimal((account.get("available_balance") or {}).get("value"))
+        hold = _to_decimal((account.get("hold") or {}).get("value"))
+        total = available + hold
+        if total <= 0:
+            continue
+        if currency in {"USD", "USDT"}:
+            available_balance_cents += _cents(available)
+            portfolio_cents += _cents(total)
+            continue
+        mark_price = mark_prices.get(currency)
+        if mark_price is None or mark_price <= 0:
+            continue
+        portfolio_cents += _cents(total * mark_price)
+
+    return available_balance_cents, portfolio_cents
+
+
 @router.get("/dashboard")
 def dashboard_summary(
     user: CurrentUser,
     db: DbSession,
     trading_mode: TradingMode | None = None,
+    settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
     mode = (
         trading_mode.value if trading_mode is not None else (user.current_trading_mode or "paper")
@@ -177,6 +264,13 @@ def dashboard_summary(
         .limit(50)
         .all()
     )
+    if mode == TradingMode.LIVE.value and tenant_id is not None:
+        live_balances = _live_coinbase_balance_snapshot(db, tenant_id, settings, positions_rows)
+        if live_balances is not None:
+            available_balance_cents, portfolio_cents = live_balances
+            portfolio_value = portfolio_cents / 100
+            base = max(1.0, portfolio_value - pnl_value)
+            pnl_percent = (pnl_value / base) * 100
     positions: list[dict[str, Any]] = []
     for row in positions_rows:
         qty = _to_float(row.quantity)

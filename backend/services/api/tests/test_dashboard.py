@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import os
 import uuid
+from unittest.mock import patch
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.execution import ExecutionOrder, ExecutionTradeRecord
+from oziebot_api.models.exchange_connection import ExchangeConnection
+from oziebot_api.models.execution import ExecutionOrder, ExecutionPosition, ExecutionTradeRecord
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.strategy_allocation import StrategyCapitalBucket
 from oziebot_api.models.user import User
+from oziebot_api.services.credential_crypto import CredentialCrypto
 
 
 def test_dashboard_reports_available_balance_separately_from_portfolio(
@@ -184,3 +188,99 @@ def test_dashboard_includes_fee_analytics(client, regular_user_and_token, db_ses
     assert analytics["mixedCount"] == 1
     assert analytics["avgNetEdgeAtEntryBps"] == 35.0
     assert analytics["skippedTradesDueToFees"] == 1
+
+
+@patch("oziebot_api.api.v1.me.list_coinbase_accounts")
+def test_live_dashboard_uses_coinbase_balances_for_available_and_portfolio(
+    mock_list_coinbase_accounts,
+    client,
+    regular_user_and_token,
+    db_session: Session,
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    crypto = CredentialCrypto(os.environ["EXCHANGE_CREDENTIALS_ENCRYPTION_KEY"])
+    db_session.add(
+        ExchangeConnection(
+            tenant_id=membership.tenant_id,
+            provider="coinbase",
+            api_key_name="organizations/test/key",
+            encrypted_secret=crypto.encrypt(b"test-private-key"),
+            secret_ciphertext_version=1,
+            validation_status="valid",
+            health_status="healthy",
+            can_trade=True,
+            can_read_balances=True,
+            created_at=now,
+            updated_at=now,
+            last_validated_at=now,
+            last_health_check_at=now,
+        )
+    )
+    db_session.add(
+        StrategyCapitalBucket(
+            user_id=user.id,
+            strategy_id="momentum",
+            trading_mode="live",
+            assigned_capital_cents=999_999,
+            available_cash_cents=999_999,
+            reserved_cash_cents=0,
+            locked_capital_cents=0,
+            realized_pnl_cents=0,
+            unrealized_pnl_cents=0,
+            available_buying_power_cents=999_999,
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.add(
+        ExecutionPosition(
+            id=uuid.uuid4(),
+            tenant_id=membership.tenant_id,
+            user_id=user.id,
+            strategy_id="momentum",
+            symbol="BTC-USD",
+            trading_mode="live",
+            quantity="0.60",
+            avg_entry_price="50000",
+            realized_pnl_cents=0,
+            updated_at=now,
+            created_at=now,
+        )
+    )
+    db_session.commit()
+
+    mock_list_coinbase_accounts.return_value = [
+        {
+            "currency": "USD",
+            "available_balance": {"currency": "USD", "value": "120.50"},
+            "hold": {"currency": "USD", "value": "10.25"},
+        },
+        {
+            "currency": "USDT",
+            "available_balance": {"currency": "USDT", "value": "50.00"},
+            "hold": {"currency": "USDT", "value": "5.00"},
+        },
+        {
+            "currency": "BTC",
+            "available_balance": {"currency": "BTC", "value": "0.50"},
+            "hold": {"currency": "BTC", "value": "0.10"},
+        },
+    ]
+
+    summary = client.get(
+        "/v1/me/dashboard?trading_mode=live",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert summary.status_code == 200, summary.text
+    payload = summary.json()
+    assert payload["availableBalance"] == 170.5
+    assert payload["portfolioValue"] == 30185.75
