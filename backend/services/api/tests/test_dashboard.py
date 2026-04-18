@@ -265,9 +265,9 @@ def test_live_dashboard_uses_coinbase_balances_for_available_and_portfolio(
             "hold": {"currency": "USD", "value": "10.25"},
         },
         {
-            "currency": "USDT",
-            "available_balance": {"currency": "USDT", "value": "50.00"},
-            "hold": {"currency": "USDT", "value": "5.00"},
+            "currency": "USDC",
+            "available_balance": {"currency": "USDC", "value": "50.00"},
+            "hold": {"currency": "USDC", "value": "5.00"},
         },
         {
             "currency": "BTC",

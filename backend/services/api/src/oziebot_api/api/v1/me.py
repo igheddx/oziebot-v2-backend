@@ -163,7 +163,7 @@ def _live_coinbase_balance_snapshot(
         total = available + hold
         if total <= 0:
             continue
-        if currency in {"USD", "USDT"}:
+        if currency in {"USD", "USDC", "USDT"}:
             available_balance_cents += _cents(available)
             portfolio_cents += _cents(total)
             continue
