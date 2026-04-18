@@ -6,11 +6,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 WORKDIR /app
 COPY backend/packages/domain /app/packages/domain
 COPY backend/packages/py-common /app/packages/py-common
+COPY backend/services/strategy-engine /app/services/strategy-engine
 COPY backend/services/api /app/services/api
 
 RUN pip install --no-cache-dir --upgrade pip \
   && pip install --no-cache-dir -e /app/packages/domain \
   && pip install --no-cache-dir -e /app/packages/py-common \
+  && pip install --no-cache-dir -e /app/services/strategy-engine \
   && pip install --no-cache-dir -e /app/services/api
 
 ENV PYTHONPATH=/app/services/api/src
