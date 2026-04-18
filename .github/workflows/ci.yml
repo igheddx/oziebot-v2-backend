@@ -49,5 +49,8 @@ jobs:
     needs:
       - python
       - docker
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/backend-deploy.yml
     secrets: inherit
