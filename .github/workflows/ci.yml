@@ -42,6 +42,7 @@ jobs:
           context: .
           file: backend/services/api/Dockerfile
           push: false
+          load: true
           tags: oziebot-api:ci
       - name: API image import check
         run: |
