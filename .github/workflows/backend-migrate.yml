@@ -78,21 +78,64 @@ jobs:
           echo "task_definition_arn=${TASK_DEF_ARN}" >> "$GITHUB_OUTPUT"
 
       - name: Run Alembic migration task
+        shell: bash
         run: |
-          TASK_ARN="$(aws ecs run-task \
+          set -euo pipefail
+
+          RUN_OUTPUT="$(aws ecs run-task \
             --cluster "${ECS_CLUSTER}" \
             --launch-type FARGATE \
             --task-definition "${{ steps.register.outputs.task_definition_arn }}" \
             --network-configuration "awsvpcConfiguration={subnets=[${ECS_SUBNETS}],securityGroups=[${ECS_SECURITY_GROUPS}],assignPublicIp=${ECS_ASSIGN_PUBLIC_IP}}" \
-            --query 'tasks[0].taskArn' \
-            --output text)"
+            --query '{taskArn: tasks[0].taskArn, failures: failures}' \
+            --output json)"
+
+          echo "${RUN_OUTPUT}"
+
+          TASK_ARN="$(RUN_OUTPUT="${RUN_OUTPUT}" python3 - <<'PY'
+          import json
+          import os
+
+          payload = json.loads(os.environ["RUN_OUTPUT"])
+          failures = payload.get("failures") or []
+          if failures:
+              raise SystemExit(
+                  f"ECS run-task returned failures: {json.dumps(failures, sort_keys=True)}"
+              )
+          task_arn = payload.get("taskArn")
+          if not task_arn:
+              raise SystemExit("ECS run-task did not return a taskArn")
+          print(task_arn)
+          PY
+          )"
 
           aws ecs wait tasks-stopped --cluster "${ECS_CLUSTER}" --tasks "${TASK_ARN}"
 
-          EXIT_CODE="$(aws ecs describe-tasks \
+          TASK_DETAILS="$(aws ecs describe-tasks \
             --cluster "${ECS_CLUSTER}" \
             --tasks "${TASK_ARN}" \
-            --query 'tasks[0].containers[0].exitCode' \
-            --output text)"
+            --query 'tasks[0]' \
+            --output json)"
 
-          test "${EXIT_CODE}" = "0"
+          echo "${TASK_DETAILS}"
+
+          EXIT_CODE="$(TASK_DETAILS="${TASK_DETAILS}" python3 - <<'PY'
+          import json
+          import os
+
+          task = json.loads(os.environ["TASK_DETAILS"])
+          containers = task.get("containers") or []
+          exit_code = containers[0].get("exitCode") if containers else None
+          print("" if exit_code is None else exit_code)
+          PY
+          )"
+
+          if [ "${EXIT_CODE}" != "0" ]; then
+            TASK_ID="${TASK_ARN##*/}"
+            aws logs tail "/ecs/oziebot-prod/db-migrate" \
+              --log-stream-names "ecs/db-migrate/${TASK_ID}" \
+              --since 1h \
+              --format short || true
+            echo "Migration task exited with code ${EXIT_CODE}" >&2
+            exit 1
+          fi

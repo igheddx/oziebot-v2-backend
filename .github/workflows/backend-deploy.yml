@@ -2,23 +2,38 @@ name: Backend Deploy
 # Repo-local deploy workflow for the split backend repository.
 
 on:
+  workflow_call:
+    inputs:
+      deploy_sha:
+        description: Commit SHA to deploy
+        required: true
+        type: string
+      deploy_ref:
+        description: Branch name for concurrency grouping
+        required: false
+        type: string
   workflow_dispatch:
-  push:
-    branches: [main, master]
-    paths:
-      - "backend/**"
-      - "infrastructure/aws/backend/**"
-      - ".github/workflows/backend-deploy.yml"
+    inputs:
+      deploy_sha:
+        description: Commit SHA to deploy (defaults to the selected ref)
+        required: false
+        type: string
+      deploy_ref:
+        description: Branch name for concurrency grouping (defaults to the selected ref)
+        required: false
+        type: string
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: backend-deploy-${{ github.ref }}
+  group: backend-deploy-${{ inputs.deploy_ref != '' && inputs.deploy_ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
+  DEPLOY_SHA: ${{ inputs.deploy_sha != '' && inputs.deploy_sha || github.sha }}
+  DEPLOY_REF: ${{ inputs.deploy_ref != '' && inputs.deploy_ref || github.ref_name }}
   AWS_ACCOUNT_ID: "608713827509"
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'oziebot-prod' }}
@@ -46,6 +61,8 @@ jobs:
       image_uri: ${{ steps.meta.outputs.image_uri }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -60,8 +77,8 @@ jobs:
       - name: Set image metadata
         id: meta
         run: |
-          echo "image_tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          echo "image_uri=${ECR_REGISTRY}/oziebot/api:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${DEPLOY_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_uri=${ECR_REGISTRY}/oziebot/api:${DEPLOY_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push API image
         uses: docker/build-push-action@v6
@@ -78,6 +95,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -135,24 +154,67 @@ jobs:
           echo "task_definition_arn=${TASK_DEF_ARN}" >> "$GITHUB_OUTPUT"
 
       - name: Run Alembic migration task
+        shell: bash
         run: |
-          TASK_ARN="$(aws ecs run-task \
+          set -euo pipefail
+
+          RUN_OUTPUT="$(aws ecs run-task \
             --cluster "${ECS_CLUSTER}" \
             --launch-type FARGATE \
             --task-definition "${{ steps.register.outputs.task_definition_arn }}" \
             --network-configuration "awsvpcConfiguration={subnets=[${ECS_SUBNETS}],securityGroups=[${ECS_SECURITY_GROUPS}],assignPublicIp=${ECS_ASSIGN_PUBLIC_IP}}" \
-            --query 'tasks[0].taskArn' \
-            --output text)"
+            --query '{taskArn: tasks[0].taskArn, failures: failures}' \
+            --output json)"
+
+          echo "${RUN_OUTPUT}"
+
+          TASK_ARN="$(RUN_OUTPUT="${RUN_OUTPUT}" python3 - <<'PY'
+          import json
+          import os
+
+          payload = json.loads(os.environ["RUN_OUTPUT"])
+          failures = payload.get("failures") or []
+          if failures:
+              raise SystemExit(
+                  f"ECS run-task returned failures: {json.dumps(failures, sort_keys=True)}"
+              )
+          task_arn = payload.get("taskArn")
+          if not task_arn:
+              raise SystemExit("ECS run-task did not return a taskArn")
+          print(task_arn)
+          PY
+          )"
 
           aws ecs wait tasks-stopped --cluster "${ECS_CLUSTER}" --tasks "${TASK_ARN}"
 
-          EXIT_CODE="$(aws ecs describe-tasks \
+          TASK_DETAILS="$(aws ecs describe-tasks \
             --cluster "${ECS_CLUSTER}" \
             --tasks "${TASK_ARN}" \
-            --query 'tasks[0].containers[0].exitCode' \
-            --output text)"
+            --query 'tasks[0]' \
+            --output json)"
 
-          test "${EXIT_CODE}" = "0"
+          echo "${TASK_DETAILS}"
+
+          EXIT_CODE="$(TASK_DETAILS="${TASK_DETAILS}" python3 - <<'PY'
+          import json
+          import os
+
+          task = json.loads(os.environ["TASK_DETAILS"])
+          containers = task.get("containers") or []
+          exit_code = containers[0].get("exitCode") if containers else None
+          print("" if exit_code is None else exit_code)
+          PY
+          )"
+
+          if [ "${EXIT_CODE}" != "0" ]; then
+            TASK_ID="${TASK_ARN##*/}"
+            aws logs tail "/ecs/oziebot-prod/db-migrate" \
+              --log-stream-names "ecs/db-migrate/${TASK_ID}" \
+              --since 1h \
+              --format short || true
+            echo "Migration task exited with code ${EXIT_CODE}" >&2
+            exit 1
+          fi
 
   deploy-api:
     needs:
@@ -161,6 +223,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -260,6 +324,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -301,7 +367,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:${{ env.DEPLOY_SHA }}
             ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:latest
 
       - name: Render task definition template
@@ -328,7 +394,7 @@ jobs:
         with:
           task-definition: task-definition.json
           container-name: ${{ matrix.container_name }}
-          image: ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:${{ github.sha }}
+          image: ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:${{ env.DEPLOY_SHA }}
 
       - name: Deploy task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2

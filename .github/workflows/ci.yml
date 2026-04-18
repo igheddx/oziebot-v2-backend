@@ -43,3 +43,14 @@ jobs:
           file: backend/services/api/Dockerfile
           push: false
           tags: oziebot-api:ci
+
+  deploy:
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
+    needs:
+      - python
+      - docker
+    uses: ./.github/workflows/backend-deploy.yml
+    with:
+      deploy_sha: ${{ github.sha }}
+      deploy_ref: ${{ github.ref_name }}
+    secrets: inherit
