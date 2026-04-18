@@ -68,9 +68,7 @@ class TokenPolicyVerificationService:
         )
         if outcome:
             wanted = outcome.strip().lower()
-            records = [
-                record for record in records if record["decision_outcome"].lower() == wanted
-            ]
+            records = [record for record in records if record["decision_outcome"].lower() == wanted]
         records.sort(key=lambda item: item["timestamp"], reverse=True)
         return records[:limit]
 
@@ -119,9 +117,7 @@ class TokenPolicyVerificationService:
                         "original_size": None,
                         "final_size": None,
                         "size_multiplier": token_policy["size_multiplier"],
-                        "max_position_pct_override": token_policy[
-                            "max_position_pct_override"
-                        ],
+                        "max_position_pct_override": token_policy["max_position_pct_override"],
                     },
                     "decision_outcome": "rejected",
                     "decision_reason": metadata.get("suppression_reason")
@@ -160,9 +156,7 @@ class TokenPolicyVerificationService:
                         "original_size": signal.suggested_size,
                         "final_size": signal.suggested_size,
                         "size_multiplier": token_policy["size_multiplier"],
-                        "max_position_pct_override": token_policy[
-                            "max_position_pct_override"
-                        ],
+                        "max_position_pct_override": token_policy["max_position_pct_override"],
                     },
                     "decision_outcome": "emitted",
                     "decision_reason": reasoning.get("decision_reason")
@@ -225,9 +219,7 @@ class TokenPolicyVerificationService:
                         "original_size": row.original_size,
                         "final_size": row.final_size,
                         "size_multiplier": token_policy["size_multiplier"],
-                        "max_position_pct_override": token_policy[
-                            "max_position_pct_override"
-                        ],
+                        "max_position_pct_override": token_policy["max_position_pct_override"],
                     },
                     "decision_outcome": self._map_risk_outcome(row.outcome),
                     "decision_reason": row.detail
@@ -290,22 +282,17 @@ class TokenPolicyVerificationService:
                         "original_size": risk_payload.get("final_size"),
                         "final_size": self._final_execution_size(row, intent_payload, risk_payload),
                         "size_multiplier": token_policy["size_multiplier"],
-                        "max_position_pct_override": token_policy[
-                            "max_position_pct_override"
-                        ],
+                        "max_position_pct_override": token_policy["max_position_pct_override"],
                         "requested_quantity": row.quantity,
                     },
-                    "decision_outcome": self._map_execution_outcome(row, intent_payload, risk_payload),
+                    "decision_outcome": self._map_execution_outcome(
+                        row, intent_payload, risk_payload
+                    ),
                     "decision_reason": row.failure_detail
-                    or self._as_dict(intent_payload.get("metadata")).get(
-                        "policy_adjustment_reason"
-                    )
+                    or self._as_dict(intent_payload.get("metadata")).get("policy_adjustment_reason")
                     or token_policy["effective_recommendation_reason"],
                     "timestamp": self._iso(
-                        row.completed_at
-                        or row.failed_at
-                        or row.submitted_at
-                        or row.created_at
+                        row.completed_at or row.failed_at or row.submitted_at or row.created_at
                     ),
                 }
             )
@@ -373,9 +360,7 @@ class TokenPolicyVerificationService:
                 "computed_recommendation_status": policy.get(
                     "computed_recommendation_status", "allowed"
                 ),
-                "effective_recommendation_status": policy.get(
-                    "recommendation_status", "allowed"
-                ),
+                "effective_recommendation_status": policy.get("recommendation_status", "allowed"),
                 "effective_recommendation_reason": policy.get("recommendation_reason"),
                 "size_multiplier": cls._normalize_decimal(policy.get("size_multiplier"), "1"),
                 "max_position_pct_override": cls._normalize_decimal(

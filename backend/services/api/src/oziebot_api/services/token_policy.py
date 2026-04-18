@@ -39,8 +39,7 @@ class TokenPolicyService:
             )
         ).all()
         profile_map = {
-            row.token_id: row
-            for row in self._db.scalars(select(TokenMarketProfile)).all()
+            row.token_id: row for row in self._db.scalars(select(TokenMarketProfile)).all()
         }
         return [
             {
