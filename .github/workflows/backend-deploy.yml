@@ -1,0 +1,234 @@
+name: Backend Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "backend/**"
+      - "infrastructure/aws/backend/**"
+      - ".github/workflows/backend-deploy.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: backend-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_ACCOUNT_ID: "608713827509"
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'oziebot-prod' }}
+  ECR_REGISTRY: 608713827509.dkr.ecr.${{ vars.AWS_REGION || 'us-east-1' }}.amazonaws.com
+  ECS_EXECUTION_ROLE_ARN: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
+  ECS_TASK_ROLE_ARN: ${{ vars.ECS_TASK_ROLE_ARN }}
+  DATABASE_URL_SECRET_ARN: ${{ vars.DATABASE_URL_SECRET_ARN }}
+  JWT_SECRET_SECRET_ARN: ${{ vars.JWT_SECRET_SECRET_ARN }}
+  STRIPE_SECRET_KEY_SECRET_ARN: ${{ vars.STRIPE_SECRET_KEY_SECRET_ARN }}
+  STRIPE_WEBHOOK_SECRET_SECRET_ARN: ${{ vars.STRIPE_WEBHOOK_SECRET_SECRET_ARN }}
+  EXCHANGE_CREDENTIALS_ENCRYPTION_KEY_SECRET_ARN: ${{ vars.EXCHANGE_CREDENTIALS_ENCRYPTION_KEY_SECRET_ARN }}
+  SMS_WEBHOOK_URL_SECRET_ARN: ${{ vars.SMS_WEBHOOK_URL_SECRET_ARN }}
+  SLACK_WEBHOOK_URL_SECRET_ARN: ${{ vars.SLACK_WEBHOOK_URL_SECRET_ARN }}
+  TELEGRAM_BOT_TOKEN_SECRET_ARN: ${{ vars.TELEGRAM_BOT_TOKEN_SECRET_ARN }}
+  ECS_SUBNETS: ${{ vars.ECS_SUBNETS }}
+  ECS_SECURITY_GROUPS: ${{ vars.ECS_SECURITY_GROUPS }}
+  ECS_ASSIGN_PUBLIC_IP: ${{ vars.ECS_ASSIGN_PUBLIC_IP || 'DISABLED' }}
+  REDIS_URL: ${{ vars.REDIS_URL }}
+
+jobs:
+  build-api-image:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      image_uri: ${{ steps.meta.outputs.image_uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Set image metadata
+        id: meta
+        run: |
+          echo "image_tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_uri=${ECR_REGISTRY}/oziebot/api:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/services/api/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image_uri }}
+            ${{ env.ECR_REGISTRY }}/oziebot/api:latest
+
+  migrate-api:
+    needs: build-api-image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install envsubst
+        run: sudo apt-get update && sudo apt-get install -y gettext-base
+
+      - name: Render migration task definition
+        env:
+          IMAGE_URI: ${{ needs.build-api-image.outputs.image_uri }}
+        run: envsubst < infrastructure/aws/backend/task-definitions/db-migrate.json > task-definition.json
+
+      - name: Register migration task definition
+        id: register
+        run: |
+          TASK_DEF_ARN="$(aws ecs register-task-definition --cli-input-json file://task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)"
+          echo "task_definition_arn=${TASK_DEF_ARN}" >> "$GITHUB_OUTPUT"
+
+      - name: Run Alembic migration task
+        run: |
+          TASK_ARN="$(aws ecs run-task \
+            --cluster "${ECS_CLUSTER}" \
+            --launch-type FARGATE \
+            --task-definition "${{ steps.register.outputs.task_definition_arn }}" \
+            --network-configuration "awsvpcConfiguration={subnets=[${ECS_SUBNETS}],securityGroups=[${ECS_SECURITY_GROUPS}],assignPublicIp=${ECS_ASSIGN_PUBLIC_IP}}" \
+            --query 'tasks[0].taskArn' \
+            --output text)"
+
+          aws ecs wait tasks-stopped --cluster "${ECS_CLUSTER}" --tasks "${TASK_ARN}"
+
+          EXIT_CODE="$(aws ecs describe-tasks \
+            --cluster "${ECS_CLUSTER}" \
+            --tasks "${TASK_ARN}" \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)"
+
+          test "${EXIT_CODE}" = "0"
+
+  deploy-api:
+    needs:
+      - build-api-image
+      - migrate-api
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install envsubst
+        run: sudo apt-get update && sudo apt-get install -y gettext-base
+
+      - name: Render API task definition template
+        run: envsubst < infrastructure/aws/backend/task-definitions/api.json > task-definition.json
+
+      - name: Inject image into task definition
+        id: render-task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: api
+          image: ${{ needs.build-api-image.outputs.image_uri }}
+
+      - name: Deploy API task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-task.outputs.task-definition }}
+          service: oziebot-api
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+  deploy-workers:
+    needs: migrate-api
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: backend/services/strategy-engine/Dockerfile
+            repository: oziebot/strategy-engine
+            task_definition: infrastructure/aws/backend/task-definitions/strategy-engine.json
+            ecs_service: oziebot-strategy-engine
+            container_name: strategy-engine
+          - dockerfile: backend/services/risk-engine/Dockerfile
+            repository: oziebot/risk-engine
+            task_definition: infrastructure/aws/backend/task-definitions/risk-engine.json
+            ecs_service: oziebot-risk-engine
+            container_name: risk-engine
+          - dockerfile: backend/services/execution-engine/Dockerfile
+            repository: oziebot/execution-engine
+            task_definition: infrastructure/aws/backend/task-definitions/execution-engine.json
+            ecs_service: oziebot-execution-engine
+            container_name: execution-engine
+          - dockerfile: backend/services/alerts-worker/Dockerfile
+            repository: oziebot/alerts-worker
+            task_definition: infrastructure/aws/backend/task-definitions/alerts-worker.json
+            ecs_service: oziebot-alerts-worker
+            container_name: alerts-worker
+          - dockerfile: backend/services/market-data-ingestor/Dockerfile
+            repository: oziebot/market-data-ingestor
+            task_definition: infrastructure/aws/backend/task-definitions/market-data-ingestor.json
+            ecs_service: oziebot-market-data-ingestor
+            container_name: market-data-ingestor
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Install envsubst
+        run: sudo apt-get update && sudo apt-get install -y gettext-base
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:latest
+
+      - name: Render task definition template
+        run: |
+          envsubst < "${{ matrix.task_definition }}" > task-definition.json
+
+      - name: Inject image into task definition
+        id: render-task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ matrix.container_name }}
+          image: ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:${{ github.sha }}
+
+      - name: Deploy task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-task.outputs.task-definition }}
+          service: ${{ matrix.ecs_service }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true

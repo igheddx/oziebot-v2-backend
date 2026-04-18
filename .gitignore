@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnp.*
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.env
+.env.local
+.env.*.local
+
+# Next.js
+apps/web/.next/
+apps/web/out/
+next-env.d.ts
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Python
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.db
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Split-repo setup
+frontend/
+apps/
+.github/workflows/frontend-deploy.yml

@@ -1,0 +1,44 @@
+{
+  "family": "oziebot-alerts-worker",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "${ECS_EXECUTION_ROLE_ARN}",
+  "taskRoleArn": "${ECS_TASK_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "alerts-worker",
+      "image": "IMAGE_URI",
+      "essential": true,
+      "environment": [
+        { "name": "APP_ENV", "value": "production" },
+        { "name": "REDIS_URL", "value": "${REDIS_URL}" },
+        { "name": "OZIEBOT_HEALTH_PORT", "value": "8080" },
+        { "name": "NOTIFY_MAX_RETRIES", "value": "3" }
+      ],
+      "secrets": [
+        { "name": "DATABASE_URL", "valueFrom": "${DATABASE_URL_SECRET_ARN}" },
+        { "name": "SMS_WEBHOOK_URL", "valueFrom": "${SMS_WEBHOOK_URL_SECRET_ARN}" },
+        { "name": "SLACK_WEBHOOK_URL", "valueFrom": "${SLACK_WEBHOOK_URL_SECRET_ARN}" },
+        { "name": "TELEGRAM_BOT_TOKEN", "valueFrom": "${TELEGRAM_BOT_TOKEN_SECRET_ARN}" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/oziebot-prod/alerts-worker",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\" || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 30
+      }
+    }
+  ]
+}

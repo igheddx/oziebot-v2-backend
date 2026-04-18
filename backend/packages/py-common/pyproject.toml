@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "oziebot-common"
+version = "0.1.0"
+description = "Shared Redis queue helpers and serialization"
+requires-python = ">=3.12"
+dependencies = [
+  "oziebot-domain",
+  "redis>=5.0",
+  "pydantic>=2.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/oziebot_common"]

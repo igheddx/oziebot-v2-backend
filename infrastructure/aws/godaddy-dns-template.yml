@@ -1,0 +1,27 @@
+domain: oziebot.com
+provider: godaddy
+records:
+  - host: app
+    type: CNAME
+    ttl: 600
+    value: <cloudfront-distribution-domain>
+    notes: Point app.oziebot.com to the CloudFront distribution domain name
+  - host: api
+    type: CNAME
+    ttl: 600
+    value: <alb-dns-name>
+    notes: Point api.oziebot.com to the Application Load Balancer DNS name
+  - host: _acm-validation-app
+    type: CNAME
+    ttl: 600
+    value: <value-issued-by-acm-for-app.oziebot.com>
+    notes: Use the exact ACM validation name/value for the certificate covering app.oziebot.com
+  - host: _acm-validation-api
+    type: CNAME
+    ttl: 600
+    value: <value-issued-by-acm-for-api.oziebot.com>
+    notes: Use the exact ACM validation name/value for the certificate covering api.oziebot.com
+notes:
+  - ACM validation token values are generated only when the certificate request is created.
+  - Request the CloudFront certificate in us-east-1.
+  - Request the ALB/API certificate in the same region as the ECS services.

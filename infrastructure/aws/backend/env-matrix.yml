@@ -1,0 +1,155 @@
+shared:
+  local:
+    DATABASE_URL: postgresql+psycopg://oziebot:oziebot@postgres:5432/oziebot
+    REDIS_URL: redis://redis:6379/0
+    APP_ENV: development
+  production:
+    DATABASE_URL:
+      source: secrets-manager
+      secret_name: oziebot/prod/shared/database-url
+      notes: Full RDS connection string with sslmode=require
+    REDIS_URL:
+      source: env
+      value_template: redis://<elasticache-primary-endpoint>:6379/0
+    APP_ENV:
+      source: env
+      value: production
+
+services:
+  api:
+    local:
+      RUN_DB_MIGRATIONS_ON_STARTUP: "1"
+      JWT_SECRET: dev-jwt-secret-change-in-production-min-32-chars
+      CORS_ORIGINS: http://localhost:3000
+      STRIPE_WEBHOOK_SECRET: ""
+      STRIPE_SECRET_KEY: ""
+      STRIPE_CHECKOUT_SUCCESS_URL: http://localhost:3000/billing/success?session_id={CHECKOUT_SESSION_ID}
+      STRIPE_CHECKOUT_CANCEL_URL: http://localhost:3000/billing/cancel
+      EXCHANGE_CREDENTIALS_ENCRYPTION_KEY: ""
+      COINBASE_API_BASE_URL: https://api.coinbase.com
+    production:
+      RUN_DB_MIGRATIONS_ON_STARTUP:
+        source: env
+        value: "0"
+      JWT_SECRET:
+        source: secrets-manager
+        secret_name: oziebot/prod/api/jwt-secret
+      STRIPE_SECRET_KEY:
+        source: secrets-manager
+        secret_name: oziebot/prod/api/stripe-secret-key
+      STRIPE_WEBHOOK_SECRET:
+        source: secrets-manager
+        secret_name: oziebot/prod/api/stripe-webhook-secret
+      EXCHANGE_CREDENTIALS_ENCRYPTION_KEY:
+        source: secrets-manager
+        secret_name: oziebot/prod/shared/exchange-credentials-encryption-key
+      CORS_ORIGINS:
+        source: env
+        value: https://app.oziebot.com
+      STRIPE_CHECKOUT_SUCCESS_URL:
+        source: env
+        value: https://app.oziebot.com/billing/success?session_id={CHECKOUT_SESSION_ID}
+      STRIPE_CHECKOUT_CANCEL_URL:
+        source: env
+        value: https://app.oziebot.com/billing/cancel
+      COINBASE_API_BASE_URL:
+        source: env
+        value: https://api.coinbase.com
+
+  strategy-engine:
+    local:
+      OZIEBOT_STRATEGY_DEMO: "0"
+      OZIEBOT_TRADING_MODE: paper
+      OZIEBOT_STRATEGY_RUNNER_POLL_SEC: "1.0"
+    production:
+      OZIEBOT_STRATEGY_DEMO:
+        source: env
+        value: "0"
+      OZIEBOT_TRADING_MODE:
+        source: env
+        value: paper
+      OZIEBOT_STRATEGY_RUNNER_POLL_SEC:
+        source: env
+        value: "1.0"
+
+  risk-engine:
+    local:
+      RISK_STALE_TRADE_SECONDS: "20"
+      RISK_STALE_BBO_SECONDS: "15"
+      RISK_STALE_CANDLE_SECONDS: "180"
+    production:
+      RISK_STALE_TRADE_SECONDS:
+        source: env
+        value: "20"
+      RISK_STALE_BBO_SECONDS:
+        source: env
+        value: "15"
+      RISK_STALE_CANDLE_SECONDS:
+        source: env
+        value: "180"
+
+  execution-engine:
+    local:
+      COINBASE_API_BASE_URL: https://api.coinbase.com
+      PAPER_DEFAULT_FEE_BPS: "15"
+      PAPER_DEFAULT_SLIPPAGE_BPS: "8"
+      RECONCILIATION_INTERVAL_SECONDS: "60"
+      EXCHANGE_CREDENTIALS_ENCRYPTION_KEY: ""
+    production:
+      COINBASE_API_BASE_URL:
+        source: env
+        value: https://api.coinbase.com
+      PAPER_DEFAULT_FEE_BPS:
+        source: env
+        value: "15"
+      PAPER_DEFAULT_SLIPPAGE_BPS:
+        source: env
+        value: "8"
+      RECONCILIATION_INTERVAL_SECONDS:
+        source: env
+        value: "60"
+      EXCHANGE_CREDENTIALS_ENCRYPTION_KEY:
+        source: secrets-manager
+        secret_name: oziebot/prod/shared/exchange-credentials-encryption-key
+
+  alerts-worker:
+    local:
+      NOTIFY_MAX_RETRIES: "3"
+      SMS_WEBHOOK_URL: ""
+      SLACK_WEBHOOK_URL: ""
+      TELEGRAM_BOT_TOKEN: ""
+    production:
+      NOTIFY_MAX_RETRIES:
+        source: env
+        value: "3"
+      SMS_WEBHOOK_URL:
+        source: secrets-manager
+        secret_name: oziebot/prod/alerts/sms-webhook-url
+      SLACK_WEBHOOK_URL:
+        source: secrets-manager
+        secret_name: oziebot/prod/alerts/slack-webhook-url
+      TELEGRAM_BOT_TOKEN:
+        source: secrets-manager
+        secret_name: oziebot/prod/alerts/telegram-bot-token
+
+  market-data-ingestor:
+    local:
+      COINBASE_WS_URL: wss://advanced-trade-ws.coinbase.com
+      COINBASE_REST_URL: https://api.exchange.coinbase.com
+      CANDLES_GRANULARITY_SEC: "60"
+    production:
+      COINBASE_WS_URL:
+        source: env
+        value: wss://advanced-trade-ws.coinbase.com
+      COINBASE_REST_URL:
+        source: env
+        value: https://api.exchange.coinbase.com
+      CANDLES_GRANULARITY_SEC:
+        source: env
+        value: "60"
+
+notes:
+  - Keep SQLite limited to isolated tests; use PostgreSQL for local docker-compose and CI integration runs.
+  - Store full DATABASE_URL in Secrets Manager for phase 1 to preserve current code paths.
+  - Run Alembic in a one-off migration task for ECS; keep RUN_DB_MIGRATIONS_ON_STARTUP disabled in the long-running API service.
+  - Coinbase tenant credentials remain in PostgreSQL, encrypted with EXCHANGE_CREDENTIALS_ENCRYPTION_KEY.

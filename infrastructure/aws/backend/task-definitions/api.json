@@ -1,0 +1,55 @@
+{
+  "family": "oziebot-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "${ECS_EXECUTION_ROLE_ARN}",
+  "taskRoleArn": "${ECS_TASK_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "IMAGE_URI",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "APP_ENV", "value": "production" },
+        { "name": "RUN_DB_MIGRATIONS_ON_STARTUP", "value": "0" },
+        { "name": "CORS_ORIGINS", "value": "https://app.oziebot.com" },
+        { "name": "STRIPE_CHECKOUT_SUCCESS_URL", "value": "https://app.oziebot.com/billing/success?session_id={CHECKOUT_SESSION_ID}" },
+        { "name": "STRIPE_CHECKOUT_CANCEL_URL", "value": "https://app.oziebot.com/billing/cancel" },
+        { "name": "COINBASE_API_BASE_URL", "value": "https://api.coinbase.com" },
+        { "name": "REDIS_URL", "value": "${REDIS_URL}" }
+      ],
+      "secrets": [
+        { "name": "DATABASE_URL", "valueFrom": "${DATABASE_URL_SECRET_ARN}" },
+        { "name": "JWT_SECRET", "valueFrom": "${JWT_SECRET_SECRET_ARN}" },
+        { "name": "STRIPE_SECRET_KEY", "valueFrom": "${STRIPE_SECRET_KEY_SECRET_ARN}" },
+        { "name": "STRIPE_WEBHOOK_SECRET", "valueFrom": "${STRIPE_WEBHOOK_SECRET_SECRET_ARN}" },
+        { "name": "EXCHANGE_CREDENTIALS_ENCRYPTION_KEY", "valueFrom": "${EXCHANGE_CREDENTIALS_ENCRYPTION_KEY_SECRET_ARN}" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/oziebot-prod/api",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -fsS http://localhost:8000/v1/ready || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}

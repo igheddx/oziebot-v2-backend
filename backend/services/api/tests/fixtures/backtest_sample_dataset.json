@@ -1,0 +1,17 @@
+{
+  "dataset_name": "sample-btc-eth-1h",
+  "timeframe": "1h",
+  "candles": [
+    {"ts": "2026-01-01T00:00:00Z", "symbol": "BTC-USD", "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 10.0},
+    {"ts": "2026-01-01T01:00:00Z", "symbol": "BTC-USD", "open": 100.0, "high": 103.0, "low": 99.5, "close": 102.0, "volume": 12.0},
+    {"ts": "2026-01-01T02:00:00Z", "symbol": "BTC-USD", "open": 102.0, "high": 104.0, "low": 101.0, "close": 103.0, "volume": 9.0},
+    {"ts": "2026-01-01T03:00:00Z", "symbol": "BTC-USD", "open": 103.0, "high": 105.0, "low": 102.0, "close": 104.0, "volume": 11.0},
+    {"ts": "2026-01-01T04:00:00Z", "symbol": "BTC-USD", "open": 104.0, "high": 105.0, "low": 100.0, "close": 101.0, "volume": 14.0},
+
+    {"ts": "2026-01-01T00:00:00Z", "symbol": "ETH-USD", "open": 50.0, "high": 50.4, "low": 49.5, "close": 50.0, "volume": 100.0},
+    {"ts": "2026-01-01T01:00:00Z", "symbol": "ETH-USD", "open": 50.0, "high": 50.8, "low": 49.9, "close": 50.6, "volume": 110.0},
+    {"ts": "2026-01-01T02:00:00Z", "symbol": "ETH-USD", "open": 50.6, "high": 51.1, "low": 50.3, "close": 50.9, "volume": 105.0},
+    {"ts": "2026-01-01T03:00:00Z", "symbol": "ETH-USD", "open": 50.9, "high": 51.2, "low": 50.7, "close": 51.0, "volume": 99.0},
+    {"ts": "2026-01-01T04:00:00Z", "symbol": "ETH-USD", "open": 51.0, "high": 51.1, "low": 50.0, "close": 50.2, "volume": 130.0}
+  ]
+}

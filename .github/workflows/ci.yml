@@ -1,0 +1,45 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install packages
+        run: |
+          pip install --upgrade pip
+          pip install ruff
+          pip install -e backend/packages/domain -e backend/packages/py-common
+          pip install -e "backend/services/api[dev]" -e backend/services/strategy-engine -e backend/services/risk-engine \
+            -e backend/services/execution-engine -e backend/services/alerts-worker
+      - name: Ruff
+        run: ruff check backend/packages backend/services && ruff format --check backend/packages backend/services
+      - name: Pytest (API)
+        working-directory: backend/services/api
+        run: pytest -v
+      - name: Import check
+        working-directory: backend/services/api
+        env:
+          PYTHONPATH: src
+        run: python -c "from oziebot_api.main import app; print(app.title)"
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/services/api/Dockerfile
+          push: false
+          tags: oziebot-api:ci

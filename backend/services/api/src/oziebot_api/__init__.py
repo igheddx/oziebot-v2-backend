@@ -1,0 +1,1 @@
+"""Oziebot FastAPI application."""

@@ -1,0 +1,116 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-oziebot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oziebot}
+      POSTGRES_DB: ${POSTGRES_DB:-oziebot}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oziebot} -d ${POSTGRES_DB:-oziebot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/services/api/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://oziebot:oziebot@postgres:5432/oziebot}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production-min-32-chars}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  strategy-engine:
+    build:
+      context: .
+      dockerfile: backend/services/strategy-engine/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://oziebot:oziebot@postgres:5432/oziebot}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      OZIEBOT_STRATEGY_DEMO: ${OZIEBOT_STRATEGY_DEMO:-1}
+      OZIEBOT_TRADING_MODE: ${OZIEBOT_TRADING_MODE:-paper}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  risk-engine:
+    build:
+      context: .
+      dockerfile: backend/services/risk-engine/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://oziebot:oziebot@postgres:5432/oziebot}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  execution-engine:
+    build:
+      context: .
+      dockerfile: backend/services/execution-engine/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://oziebot:oziebot@postgres:5432/oziebot}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  alerts-worker:
+    build:
+      context: .
+      dockerfile: backend/services/alerts-worker/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://oziebot:oziebot@postgres:5432/oziebot}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  market-data-ingestor:
+    build:
+      context: .
+      dockerfile: backend/services/market-data-ingestor/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://oziebot:oziebot@postgres:5432/oziebot}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      COINBASE_WS_URL: ${COINBASE_WS_URL:-wss://advanced-trade-ws.coinbase.com}
+      COINBASE_REST_URL: ${COINBASE_REST_URL:-https://api.exchange.coinbase.com}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:

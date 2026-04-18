@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "oziebot-domain"
+version = "0.1.0"
+description = "Shared domain types for Oziebot (no I/O)"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/oziebot_domain"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
