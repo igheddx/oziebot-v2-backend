@@ -41,6 +41,8 @@ class ReversionStrategy(TradingStrategy):
         take_profit_pct = float(config.get("take_profit_pct", 0.045))
         min_bandwidth_pct = float(config.get("min_bandwidth_pct", 0.015))
         max_hold_minutes = int(config.get("max_hold_minutes", 180))
+        use_trend_filter = bool(config.get("use_trend_filter", False))
+        ema_long_window = int(config.get("ema_long_window", 200))
 
         if not (5 <= band_window <= 200):
             raise ValueError(f"band_window must be 5-200, got {band_window}")
@@ -65,6 +67,8 @@ class ReversionStrategy(TradingStrategy):
             raise ValueError(f"min_bandwidth_pct must be 0.0-1.0, got {min_bandwidth_pct}")
         if not (1 <= max_hold_minutes <= 10_080):
             raise ValueError(f"max_hold_minutes must be between 1 and 10080, got {max_hold_minutes}")
+        if not (5 <= ema_long_window <= 500):
+            raise ValueError(f"ema_long_window must be between 5 and 500, got {ema_long_window}")
 
         return True
 
@@ -90,9 +94,11 @@ class ReversionStrategy(TradingStrategy):
         take_profit_pct = float(config.get("take_profit_pct", 0.045))
         min_bandwidth_pct = float(config.get("min_bandwidth_pct", 0.015))
         max_hold_minutes = int(config.get("max_hold_minutes", 180))
+        use_trend_filter = bool(config.get("use_trend_filter", False))
+        ema_long_window = int(config.get("ema_long_window", 200))
 
         closes = [float(value) for value in market.metadata.get("candle_closes", [])]
-        required = max(band_window, rsi_period + 1)
+        required = max(band_window, rsi_period + 1, ema_long_window if use_trend_filter else 0)
         if len(closes) < required:
             return self._hold_signal(
                 context,
@@ -137,6 +143,12 @@ class ReversionStrategy(TradingStrategy):
             fear_buy_ok = fear_index <= fear_index_buy_max
             fear_sell_ok = fear_index >= fear_index_sell_min
 
+        market_regime = self._market_regime(market)
+        ema_long = self._ema(closes[-ema_long_window:], ema_long_window)
+        trend_buy_ok = (not use_trend_filter) or (
+            price >= ema_long and market_regime != "bearish"
+        )
+
         if position.quantity > 0:
             managed_exit = self._check_exit(
                 context=context,
@@ -169,6 +181,14 @@ class ReversionStrategy(TradingStrategy):
                 signal_id,
                 correlation_id,
                 f"Range too tight: bandwidth={bandwidth_pct:.2%} min={min_bandwidth_pct:.2%}",
+            )
+
+        if not trend_buy_ok:
+            return self._hold_signal(
+                context,
+                signal_id,
+                correlation_id,
+                f"Trend filter blocked entry: price={price:.4f}, ema_long={ema_long:.4f}, regime={market_regime or 'unknown'}",
             )
 
         if zscore <= -entry_zscore and rsi_value <= rsi_buy_threshold and fear_buy_ok:
@@ -215,6 +235,8 @@ class ReversionStrategy(TradingStrategy):
             "use_fear_index_filter": False,
             "fear_index_buy_max": 35,
             "fear_index_sell_min": 60,
+            "use_trend_filter": False,
+            "ema_long_window": 200,
         }
 
     def get_config_schema(self) -> dict:
@@ -323,6 +345,18 @@ class ReversionStrategy(TradingStrategy):
                     "maximum": 100,
                     "default": 60,
                     "description": "Prefer exits when fear index is at or above this level",
+                },
+                "use_trend_filter": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "If true, block entries below the long EMA or in bearish market regime",
+                },
+                "ema_long_window": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 500,
+                    "default": 200,
+                    "description": "Long lookback window used for the hard trend filter",
                 },
             },
             "required": ["band_window", "rsi_period", "entry_zscore", "exit_zscore"],
@@ -507,3 +541,23 @@ class ReversionStrategy(TradingStrategy):
             return float(raw)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _market_regime(market: MarketSnapshot) -> str | None:
+        if not isinstance(market.metadata, dict):
+            return None
+        raw = market.metadata.get("market_regime")
+        if raw is None:
+            return None
+        return str(raw).strip().lower() or None
+
+    @staticmethod
+    def _ema(values: list[float], window: int) -> float:
+        series = values[-window:] if len(values) >= window else values
+        if not series:
+            return 0.0
+        alpha = 2 / (len(series) + 1)
+        ema = series[0]
+        for value in series[1:]:
+            ema = (value * alpha) + (ema * (1 - alpha))
+        return ema

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -18,12 +19,16 @@ from oziebot_risk_engine.service import RiskEngineService
 class FakeRedis:
     def __init__(self):
         self._kv: dict[str, str] = {}
+        self._lists: dict[str, list[str]] = {}
 
     def get(self, key: str):
         return self._kv.get(key)
 
     def set(self, key: str, value: str):
         self._kv[key] = value
+
+    def lpush(self, key: str, value: str):
+        self._lists.setdefault(key, []).insert(0, value)
 
 
 def _setup_db(db_path: Path) -> None:
@@ -46,7 +51,7 @@ def _setup_db(db_path: Path) -> None:
         conn.execute(
             text(
                 "CREATE TABLE platform_strategies ("
-                "id TEXT PRIMARY KEY, slug TEXT, display_name TEXT, is_enabled BOOLEAN, created_at TEXT, updated_at TEXT)"
+                "id TEXT PRIMARY KEY, slug TEXT, display_name TEXT, is_enabled BOOLEAN, created_at TEXT, updated_at TEXT, config_schema TEXT)"
             )
         )
         conn.execute(
@@ -70,6 +75,13 @@ def _setup_db(db_path: Path) -> None:
         )
         conn.execute(
             text(
+                "CREATE TABLE execution_positions ("
+                "id TEXT PRIMARY KEY, tenant_id TEXT, user_id TEXT, strategy_id TEXT, symbol TEXT, trading_mode TEXT,"
+                "quantity TEXT, avg_entry_price TEXT, realized_pnl_cents INTEGER, created_at TEXT, updated_at TEXT, last_trade_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
                 "CREATE TABLE strategy_capital_ledger ("
                 "id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, trading_mode TEXT, event_type TEXT, metadata TEXT, created_at TEXT)"
             )
@@ -82,6 +94,13 @@ def _setup_db(db_path: Path) -> None:
                 "trace_id TEXT, rules_evaluated TEXT, signal_payload TEXT, created_at TEXT)"
             )
         )
+        conn.execute(
+            text(
+                "CREATE TABLE user_strategy_states ("
+                "id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, trading_mode TEXT, state TEXT, created_at TEXT, updated_at TEXT,"
+                "UNIQUE(user_id, strategy_id, trading_mode))"
+            )
+        )
 
 
 def _seed_common(db_path: Path, user_id: str, tenant_id: str, strategy_name: str = "momentum") -> None:
@@ -92,6 +111,13 @@ def _seed_common(db_path: Path, user_id: str, tenant_id: str, strategy_name: str
         conn.execute(
             text("INSERT INTO tenant_memberships (id, user_id, tenant_id, role, created_at) VALUES (:id,:u,:t,'user',:c)"),
             {"id": str(uuid4()), "u": user_id, "t": tenant_id, "c": now},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO platform_strategies (id, slug, display_name, is_enabled, created_at, updated_at, config_schema) "
+                "VALUES (:id,:slug,:slug,1,:c,:c,'{}')"
+            ),
+            {"id": str(uuid4()), "slug": strategy_name, "c": now},
         )
         conn.execute(
             text(
@@ -109,7 +135,7 @@ def _seed_common(db_path: Path, user_id: str, tenant_id: str, strategy_name: str
         )
         token_id = str(uuid4())
         conn.execute(
-            text("INSERT INTO platform_token_allowlist (id, symbol, quote_currency, is_enabled) VALUES (:id,'BTC','USD',1)"),
+            text("INSERT INTO platform_token_allowlist (id, symbol, quote_currency, is_enabled) VALUES (:id,'BTC-USD','USD',1)"),
             {"id": token_id},
         )
         conn.execute(
@@ -302,3 +328,136 @@ def test_paper_can_relax_daily_loss_but_live_rejects(tmp_path: Path):
 
     assert live_decision.outcome == RiskOutcome.REJECT
     assert paper_decision.outcome in (RiskOutcome.APPROVE, RiskOutcome.REDUCE_SIZE)
+
+
+def test_risk_rejects_spread_from_strategy_quality_controls(tmp_path: Path):
+    db_path = tmp_path / "risk-spread.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE platform_strategies SET config_schema = :config WHERE slug = 'momentum'"
+            ),
+            {
+                "config": json.dumps(
+                    {
+                        "strategy_params": {
+                            "max_spread_pct": 0.001,
+                            "max_slippage_pct": 0.005,
+                        }
+                    }
+                )
+            },
+        )
+
+    redis = _redis_with_fresh_market()
+    redis.set(
+        "oziebot:md:bbo:BTC-USD",
+        '{"best_bid_price":"50000","best_bid_size":"2","best_ask_price":"50120","best_ask_size":"2"}',
+    )
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = RiskEngineService(settings, redis)
+
+    decision, intent = svc.evaluate(_signal(user_id), trace_id="t-spread")
+
+    assert decision.outcome == RiskOutcome.REJECT
+    assert intent is None
+    assert "Spread too wide" in (decision.detail or "")
+
+
+def test_risk_rejects_after_consecutive_strategy_losses(tmp_path: Path):
+    db_path = tmp_path / "risk-cooldown.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    now = datetime.now(UTC).isoformat()
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        conn.execute(
+            text("UPDATE platform_strategies SET config_schema = :config WHERE slug = 'momentum'"),
+            {
+                "config": json.dumps(
+                    {
+                        "risk_caps": {
+                            "max_consecutive_losses": 2,
+                            "loss_cooldown_minutes": 120,
+                        }
+                    }
+                )
+            },
+        )
+        conn.execute(
+            text(
+                "INSERT INTO strategy_capital_ledger (id, user_id, strategy_id, trading_mode, event_type, metadata, created_at) "
+                "VALUES (:id,:u,'momentum','live','settle',:m,:c),(:id2,:u,'momentum','live','settle',:m2,:c)"
+            ),
+            {
+                "id": str(uuid4()),
+                "id2": str(uuid4()),
+                "u": user_id,
+                "m": '{"realized_pnl_delta_cents": -5000}',
+                "m2": '{"realized_pnl_delta_cents": -2500}',
+                "c": now,
+            },
+        )
+
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = RiskEngineService(settings, _redis_with_fresh_market())
+
+    decision, intent = svc.evaluate(_signal(user_id), trace_id="t-cooldown")
+
+    assert decision.outcome == RiskOutcome.REJECT
+    assert intent is None
+    assert "Cooldown active" in (decision.detail or "")
+
+
+def test_risk_rejects_when_global_daily_loss_guard_triggered(tmp_path: Path):
+    db_path = tmp_path / "risk-global-guard.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    now = datetime.now(UTC).isoformat()
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platform_settings (key, value, updated_at, updated_by_user_id) "
+                "VALUES ('trading.global.daily_loss_guard', :value, :updated_at, NULL)"
+            ),
+            {
+                "value": '{"enabled": true, "daily_loss_pct": 5}',
+                "updated_at": now,
+            },
+        )
+        conn.execute(
+            text(
+                "INSERT INTO strategy_capital_ledger (id, user_id, strategy_id, trading_mode, event_type, metadata, created_at) "
+                "VALUES (:id,:u,'momentum','live','settle',:m,:c)"
+            ),
+            {
+                "id": str(uuid4()),
+                "u": user_id,
+                "m": '{"realized_pnl_delta_cents": -20000}',
+                "c": now,
+            },
+        )
+
+    redis = _redis_with_fresh_market()
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = RiskEngineService(settings, redis)
+
+    decision, intent = svc.evaluate(_signal(user_id), trace_id="t-global-guard")
+
+    assert decision.outcome == RiskOutcome.REJECT
+    assert intent is None
+    assert "Global daily loss guard active" in (decision.detail or "")
+    assert redis._lists

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -105,6 +105,25 @@ def _setup_db(db_path: Path) -> None:
                 "trading_mode TEXT NOT NULL, quantity TEXT NOT NULL, avg_entry_price TEXT NOT NULL, realized_pnl_cents INTEGER NOT NULL,"
                 "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_trade_at TEXT,"
                 "UNIQUE(tenant_id, user_id, strategy_id, symbol, trading_mode))"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE platform_strategies ("
+                "id TEXT PRIMARY KEY, slug TEXT, config_schema TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE user_strategies ("
+                "id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, is_enabled BOOLEAN, config TEXT, created_at TEXT, updated_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE user_strategy_states ("
+                "id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, trading_mode TEXT, state TEXT, created_at TEXT, updated_at TEXT,"
+                "UNIQUE(user_id, strategy_id, trading_mode))"
             )
         )
 
@@ -338,3 +357,38 @@ def test_paper_sell_closes_position_and_records_trade(tmp_path: Path):
     assert last_order["side"] == Side.SELL.value
     assert Decimal(str(last_order["filled_quantity"])) == Decimal("0.5")
     assert Decimal(str(last_order["avg_fill_price"])) == Decimal("51000")
+
+
+def test_day_trading_max_position_age_auto_closes_in_paper(tmp_path: Path):
+    db_path = tmp_path / "execution-age.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set("oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}')
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "day_trading"
+    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
+    service, _ = _service(db_path, redis)
+
+    buy = service.process_request(_request(user_id, tenant_id, strategy_id, TradingMode.PAPER))
+    assert buy.state == ExecutionOrderStatus.FILLED
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    aged_at = (datetime.now(UTC) - timedelta(hours=5)).isoformat()
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE execution_positions SET last_trade_at = :aged_at WHERE strategy_id = :strategy_id AND trading_mode = :trading_mode"
+            ),
+            {"aged_at": aged_at, "strategy_id": strategy_id, "trading_mode": TradingMode.PAPER.value},
+        )
+
+    enforced = service.enforce_runtime_controls()
+
+    assert enforced == 1
+    position = _position(db_path)
+    assert position is not None
+    assert Decimal(str(position["quantity"])) == Decimal("0")
+    last_order = _last_order(db_path)
+    assert last_order["strategy_id"] == strategy_id
+    assert last_order["side"] == Side.SELL.value

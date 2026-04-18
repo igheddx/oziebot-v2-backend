@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -8,6 +9,8 @@ from typing import Any
 
 from sqlalchemy import create_engine, text
 
+from oziebot_common.queues import QueueNames, notification_event_to_json, push_json
+from oziebot_domain.events import NotificationEvent, NotificationEventType
 from oziebot_domain.intents import TradeIntent
 from oziebot_domain.risk import RejectionReason, RiskDecision, RiskOutcome
 from oziebot_domain.signal_pipeline import StrategySignalEvent
@@ -15,6 +18,8 @@ from oziebot_domain.trading import Instrument, OrderType, Quantity, Side
 from oziebot_domain.trading_mode import TradingMode
 from oziebot_risk_engine.config import Settings
 from oziebot_risk_engine.rules import RuleContext, RuleResult, default_rules
+
+log = logging.getLogger("risk-engine.service")
 
 
 class RiskEngineService:
@@ -30,6 +35,7 @@ class RiskEngineService:
     def evaluate(self, signal: StrategySignalEvent, trace_id: str) -> tuple[RiskDecision, TradeIntent | None]:
         now = datetime.now(UTC)
         facts = self._load_facts(signal, now)
+        self._maybe_emit_global_loss_alert(signal, facts, now, trace_id)
         size = Decimal(str(signal.suggested_size))
         if signal.action.value == "hold":
             decision = RiskDecision(
@@ -49,6 +55,7 @@ class RiskEngineService:
                 trace_id=trace_id,
             )
             self._persist_risk_event(signal, decision)
+            self._log_decision(signal, decision)
             return decision, None
         if size <= 0:
             decision = RiskDecision(
@@ -68,16 +75,22 @@ class RiskEngineService:
                 trace_id=trace_id,
             )
             self._persist_risk_event(signal, decision)
+            self._log_decision(signal, decision)
             return decision, None
 
         ctx = RuleContext(
             signal=signal,
+            action=signal.action.value,
             trading_mode=signal.trading_mode.value,
             symbol=signal.symbol,
             suggested_size=size,
             mid_price=facts["mid_price"],
             spread_pct=facts["spread_pct"],
             est_slippage_pct=facts["est_slippage_pct"],
+            max_spread_pct_allowed=facts["max_spread_pct_allowed"],
+            max_slippage_pct_allowed=facts["max_slippage_pct_allowed"],
+            fee_pct=facts["fee_pct"],
+            expected_profit_buffer_pct=facts["expected_profit_buffer_pct"],
             now=now,
             platform_paused=facts["platform_paused"],
             entitled=facts["entitled"],
@@ -88,7 +101,13 @@ class RiskEngineService:
             total_capital_cents=facts["total_capital_cents"],
             daily_loss_cents=facts["daily_loss_cents"],
             recent_loss_count=facts["recent_loss_count"],
+            cooldown_loss_threshold=facts["cooldown_loss_threshold"],
             cooldown_until=facts["cooldown_until"],
+            current_strategy_exposure_cents=facts["current_strategy_exposure_cents"],
+            current_token_exposure_cents=facts["current_token_exposure_cents"],
+            max_strategy_exposure_cents=facts["max_strategy_exposure_cents"],
+            max_token_exposure_cents=facts["max_token_exposure_cents"],
+            global_daily_loss_limit_pct=facts["global_daily_loss_limit_pct"],
             stale_flags=facts["stale_flags"],
         )
 
@@ -136,6 +155,7 @@ class RiskEngineService:
                 trace_id=trace_id,
             )
             self._persist_risk_event(signal, decision)
+            self._log_decision(signal, decision)
             return decision, None
 
         final_size = ctx.suggested_size
@@ -159,6 +179,7 @@ class RiskEngineService:
 
         intent = self._to_intent(signal, final_size)
         self._persist_risk_event(signal, decision)
+        self._log_decision(signal, decision)
         return decision, intent
 
     def _to_intent(self, signal: StrategySignalEvent, final_size: Decimal) -> TradeIntent | None:
@@ -194,15 +215,48 @@ class RiskEngineService:
             """
         )
         with self._engine.begin() as conn:
-            row = conn.execute(stmt, {"user_id": user_id.hex if hasattr(user_id, 'hex') else str(user_id).replace('-', '')}).first()
+            row = conn.execute(stmt, {"user_id": str(user_id)}).first()
         if row is None:
             raise ValueError("User has no tenant membership")
         return row.tenant_id
 
+    @staticmethod
+    def _json_dict(value: Any) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except Exception:
+                return {}
+        return value if isinstance(value, dict) else {}
+
+    def _strategy_quality_controls(
+        self,
+        *,
+        strategy_params: dict[str, Any],
+        signal_rules: dict[str, Any],
+    ) -> dict[str, Decimal]:
+        max_spread_pct = strategy_params.get("max_spread_pct")
+        if max_spread_pct is None and signal_rules.get("skip_if_spread_bps_over") is not None:
+            max_spread_pct = Decimal(str(signal_rules["skip_if_spread_bps_over"])) / Decimal("10000")
+        if max_spread_pct is None:
+            max_spread_pct = self._settings.risk_max_spread_pct
+
+        max_slippage_pct = strategy_params.get("max_slippage_pct", self._settings.risk_max_slippage_pct)
+        fee_pct = strategy_params.get("fee_pct", 0)
+        expected_profit_buffer_pct = strategy_params.get("expected_profit_buffer_pct", 0)
+        return {
+            "max_spread_pct_allowed": Decimal(str(max_spread_pct)),
+            "max_slippage_pct_allowed": Decimal(str(max_slippage_pct)),
+            "fee_pct": Decimal(str(fee_pct)),
+            "expected_profit_buffer_pct": Decimal(str(expected_profit_buffer_pct)),
+        }
+
     def _load_facts(self, signal: StrategySignalEvent, now: datetime) -> dict[str, Any]:
         symbol = signal.symbol
-        user_id = signal.user_id.hex if hasattr(signal.user_id, 'hex') else str(signal.user_id).replace('-', '')
-        now_iso = now.strftime("%Y-%m-%d %H:%M:%S")
+        user_id = str(signal.user_id)
+        now_iso = now.isoformat()
         token, quote = symbol.split("-", 1) if "-" in symbol else (symbol, "USD")
 
         bbo_raw = self._redis.get(f"oziebot:md:bbo:{symbol}")
@@ -222,6 +276,27 @@ class RiskEngineService:
             if depth > 0:
                 participation = min(Decimal("1"), Decimal(str(signal.suggested_size)) / depth)
                 est_slippage_pct = spread_pct * participation
+                candle_history = []
+                if hasattr(self._redis, "lrange"):
+                    candle_history = list(
+                        self._redis.lrange(f"oziebot:md:candles:60:{symbol}", 0, 19) or []
+                    )
+                closes: list[Decimal] = []
+                for raw in reversed(candle_history):
+                    try:
+                        candle = json.loads(raw)
+                        closes.append(Decimal(str(candle.get("close"))))
+                    except Exception:
+                        continue
+                volatility_component = Decimal("0")
+                if len(closes) >= 2:
+                    returns = []
+                    for prev, cur in zip(closes, closes[1:]):
+                        if prev > 0:
+                            returns.append(abs(cur - prev) / prev)
+                    if returns:
+                        volatility_component = sum(returns, Decimal("0")) / Decimal(len(returns))
+                est_slippage_pct = max(est_slippage_pct, volatility_component * min(Decimal("1"), participation * Decimal("2")))
 
         stale_flags = {
             "trade": self._is_stale(
@@ -244,6 +319,10 @@ class RiskEngineService:
                 text("SELECT value FROM platform_settings WHERE key = :k"),
                 {"k": "billing.allow_paper_without_subscription"},
             ).first()
+            global_loss_guard = conn.execute(
+                text("SELECT value FROM platform_settings WHERE key = :k"),
+                {"k": "trading.global.daily_loss_guard"},
+            ).first()
             paused = False
             if platform_paused:
                 val = platform_paused.value
@@ -257,16 +336,27 @@ class RiskEngineService:
                     val = json.loads(val)
                 allow_paper_without_subscription = bool(val.get("enabled", True))
 
-            strategy_enabled = conn.execute(
+            strategy_row = conn.execute(
                 text(
                     """
-                    SELECT is_enabled FROM user_strategies
+                    SELECT is_enabled, config FROM user_strategies
                     WHERE user_id = :user_id AND strategy_id = :sid
                     LIMIT 1
                     """
                 ),
                 {"user_id": user_id, "sid": signal.strategy_name},
-            ).first()
+            ).mappings().first()
+            platform_strategy_row = conn.execute(
+                text(
+                    """
+                    SELECT config_schema
+                    FROM platform_strategies
+                    WHERE slug = :slug
+                    LIMIT 1
+                    """
+                ),
+                {"slug": signal.strategy_name},
+            ).mappings().first()
 
             token_platform_enabled = conn.execute(
                 text(
@@ -321,6 +411,32 @@ class RiskEngineService:
                     """
                 ),
                 {"user_id": user_id, "mode": signal.trading_mode.value},
+            ).first()
+            strategy_exposure = conn.execute(
+                text(
+                    """
+                    SELECT COALESCE(SUM(CAST(quantity AS NUMERIC) * CAST(avg_entry_price AS NUMERIC)), 0) AS total
+                    FROM execution_positions
+                    WHERE user_id = :user_id
+                      AND trading_mode = :mode
+                      AND strategy_id = :sid
+                      AND CAST(quantity AS NUMERIC) > 0
+                    """
+                ),
+                {"user_id": user_id, "mode": signal.trading_mode.value, "sid": signal.strategy_name},
+            ).first()
+            token_exposure = conn.execute(
+                text(
+                    """
+                    SELECT COALESCE(SUM(CAST(quantity AS NUMERIC) * CAST(avg_entry_price AS NUMERIC)), 0) AS total
+                    FROM execution_positions
+                    WHERE user_id = :user_id
+                      AND trading_mode = :mode
+                      AND symbol = :symbol
+                      AND CAST(quantity AS NUMERIC) > 0
+                    """
+                ),
+                {"user_id": user_id, "mode": signal.trading_mode.value, "symbol": symbol},
             ).first()
 
             tenant = conn.execute(
@@ -377,6 +493,24 @@ class RiskEngineService:
                 ),
                 {"user_id": user_id, "mode": signal.trading_mode.value, "day_start": day_start},
             ).all()
+            strategy_settles = conn.execute(
+                text(
+                    """
+                    SELECT metadata, created_at
+                    FROM strategy_capital_ledger
+                    WHERE user_id = :user_id
+                      AND strategy_id = :strategy_id
+                      AND trading_mode = :mode
+                      AND event_type = 'settle'
+                    ORDER BY created_at DESC
+                    """
+                ),
+                {
+                    "user_id": user_id,
+                    "strategy_id": signal.strategy_name,
+                    "mode": signal.trading_mode.value,
+                },
+            ).all()
 
         daily_loss = 0
         recent_loss_count = 0
@@ -391,17 +525,53 @@ class RiskEngineService:
             pnl = int(md.get("realized_pnl_delta_cents", 0))
             if pnl < 0:
                 daily_loss += abs(pnl)
-                if created_at >= now - timedelta(minutes=self._settings.risk_cooldown_minutes):
-                    recent_loss_count += 1
-        if recent_loss_count >= self._settings.risk_cooldown_loss_count and settles:
-            latest_created_at = settles[0].created_at
-            if isinstance(latest_created_at, str):
-                latest_created_at = datetime.fromisoformat(latest_created_at.replace("Z", "+00:00"))
-            cooldown_until = latest_created_at + timedelta(minutes=self._settings.risk_cooldown_minutes)
+        platform_cfg = self._json_dict(platform_strategy_row["config_schema"] if platform_strategy_row else None)
+        user_cfg = self._json_dict(strategy_row["config"] if strategy_row else None)
+        strategy_params = platform_cfg.get("strategy_params") if isinstance(platform_cfg, dict) else {}
+        signal_rules = platform_cfg.get("signal_rules") if isinstance(platform_cfg, dict) else {}
+        risk_caps = platform_cfg.get("risk_caps") if isinstance(platform_cfg, dict) else {}
+        if not isinstance(strategy_params, dict):
+            strategy_params = {}
+        if not isinstance(signal_rules, dict):
+            signal_rules = {}
+        if not isinstance(risk_caps, dict):
+            risk_caps = {}
+        merged_strategy_params = {**user_cfg, **strategy_params}
+        quality_controls = self._strategy_quality_controls(
+            strategy_params=merged_strategy_params,
+            signal_rules=signal_rules,
+        )
+
+        max_consecutive_losses = int(
+            risk_caps.get("max_consecutive_losses") or self._settings.risk_cooldown_loss_count
+        )
+        loss_cooldown_minutes = int(
+            risk_caps.get("loss_cooldown_minutes") or self._settings.risk_cooldown_minutes
+        )
+        latest_loss_at = None
+        for row in strategy_settles:
+            md = row.metadata or {}
+            if isinstance(md, str):
+                md = json.loads(md)
+            pnl = int(md.get("realized_pnl_delta_cents", 0))
+            if pnl >= 0:
+                break
+            recent_loss_count += 1
+            if latest_loss_at is None:
+                latest_loss_at = row.created_at
+                if isinstance(latest_loss_at, str):
+                    latest_loss_at = datetime.fromisoformat(latest_loss_at.replace("Z", "+00:00"))
+        if recent_loss_count >= max_consecutive_losses and latest_loss_at is not None:
+            cooldown_until = latest_loss_at + timedelta(minutes=loss_cooldown_minutes)
+
+        global_guard_cfg = self._json_dict(global_loss_guard.value if global_loss_guard else None)
+        global_daily_loss_limit_pct = Decimal(
+            str(global_guard_cfg.get("daily_loss_pct", 0) if global_guard_cfg.get("enabled", True) else 0)
+        )
 
         return {
             "platform_paused": paused,
-            "strategy_enabled": bool(strategy_enabled and strategy_enabled.is_enabled),
+            "strategy_enabled": bool(strategy_row and strategy_row["is_enabled"]),
             "token_platform_enabled": bool(token_platform_enabled and token_platform_enabled.is_enabled),
             "token_user_enabled": bool(token_user_enabled and token_user_enabled.is_enabled),
             "bucket": dict(bucket) if bucket else None,
@@ -409,10 +579,25 @@ class RiskEngineService:
             "entitled": entitled,
             "daily_loss_cents": daily_loss,
             "recent_loss_count": recent_loss_count,
+            "cooldown_loss_threshold": max_consecutive_losses,
             "cooldown_until": cooldown_until,
+            "current_strategy_exposure_cents": int(
+                (Decimal(str(strategy_exposure.total if strategy_exposure else 0)) * Decimal("100")).quantize(Decimal("1"))
+            ),
+            "current_token_exposure_cents": int(
+                (Decimal(str(token_exposure.total if token_exposure else 0)) * Decimal("100")).quantize(Decimal("1"))
+            ),
+            "max_strategy_exposure_cents": int(
+                Decimal(str(risk_caps.get("max_exposure_per_strategy") or 0)) * Decimal("100")
+            ),
+            "max_token_exposure_cents": int(
+                Decimal(str(risk_caps.get("max_exposure_per_token") or 0)) * Decimal("100")
+            ),
+            "global_daily_loss_limit_pct": global_daily_loss_limit_pct,
             "mid_price": mid,
             "spread_pct": spread_pct,
             "est_slippage_pct": est_slippage_pct,
+            **quality_controls,
             "stale_flags": stale_flags,
         }
 
@@ -462,3 +647,129 @@ class RiskEngineService:
                     "created_at": datetime.now(UTC),
                 },
             )
+
+    def _load_runtime_state(self, user_id: uuid.UUID, strategy_id: str, trading_mode: str) -> dict[str, Any]:
+        stmt = text(
+            """
+            SELECT state
+            FROM user_strategy_states
+            WHERE user_id = :user_id
+              AND strategy_id = :strategy_id
+              AND trading_mode = :trading_mode
+            LIMIT 1
+            """
+        )
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                stmt,
+                {
+                    "user_id": str(user_id),
+                    "strategy_id": strategy_id,
+                    "trading_mode": trading_mode,
+                },
+            ).mappings().first()
+        return self._json_dict(row["state"] if row else None)
+
+    def _upsert_runtime_state(
+        self,
+        user_id: uuid.UUID,
+        strategy_id: str,
+        trading_mode: str,
+        state: dict[str, Any],
+        now: datetime,
+    ) -> None:
+        stmt = text(
+            """
+            INSERT INTO user_strategy_states (id, user_id, strategy_id, trading_mode, state, created_at, updated_at)
+            VALUES (:id, :user_id, :strategy_id, :trading_mode, CAST(:state AS JSON), :created_at, :updated_at)
+            ON CONFLICT (user_id, strategy_id, trading_mode)
+            DO UPDATE SET state = CAST(:state AS JSON), updated_at = :updated_at
+            """
+        )
+        with self._engine.begin() as conn:
+            conn.execute(
+                stmt,
+                {
+                    "id": str(uuid.uuid4()),
+                    "user_id": str(user_id),
+                    "strategy_id": strategy_id,
+                    "trading_mode": trading_mode,
+                    "state": json.dumps(state, default=str),
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+
+    def _maybe_emit_global_loss_alert(
+        self,
+        signal: StrategySignalEvent,
+        facts: dict[str, Any],
+        now: datetime,
+        trace_id: str,
+    ) -> None:
+        limit = Decimal(str(facts.get("global_daily_loss_limit_pct", 0)))
+        total_capital_cents = int(facts.get("total_capital_cents", 0) or 0)
+        daily_loss_cents = int(facts.get("daily_loss_cents", 0) or 0)
+        if limit <= 0 or total_capital_cents <= 0 or daily_loss_cents <= 0:
+            return
+        loss_pct = (Decimal(str(daily_loss_cents)) * Decimal("100")) / Decimal(str(total_capital_cents))
+        if loss_pct < limit:
+            return
+
+        state = self._load_runtime_state(signal.user_id, "__global__", signal.trading_mode.value)
+        guard_state = self._json_dict(state.get("global_daily_loss_guard"))
+        today = now.date().isoformat()
+        if guard_state.get("day") == today:
+            return
+
+        state["global_daily_loss_guard"] = {
+            "day": today,
+            "triggered_at": now.isoformat(),
+            "daily_loss_cents": daily_loss_cents,
+            "loss_pct": float(loss_pct),
+            "limit_pct": float(limit),
+        }
+        self._upsert_runtime_state(signal.user_id, "__global__", signal.trading_mode.value, state, now)
+        notification = NotificationEvent(
+            event_id=uuid.uuid4(),
+            tenant_id=self._lookup_primary_tenant(signal.user_id),
+            user_id=signal.user_id,
+            trading_mode=signal.trading_mode,
+            event_type=NotificationEventType.STRATEGY_PAUSED,
+            trace_id=trace_id,
+            title="Global loss guard triggered",
+            message=(
+                f"All strategies paused for {signal.trading_mode.value} after daily loss reached "
+                f"{loss_pct:.2f}%."
+            ),
+            payload={
+                "scope": "global",
+                "daily_loss_cents": daily_loss_cents,
+                "daily_loss_pct": float(loss_pct),
+                "limit_pct": float(limit),
+            },
+        )
+        push_json(
+            self._redis,
+            QueueNames.alerts(signal.trading_mode),
+            notification_event_to_json(notification),
+        )
+
+    def _log_decision(self, signal: StrategySignalEvent, decision: RiskDecision) -> None:
+        log.info(
+            "risk_decision %s",
+            json.dumps(
+                {
+                    "strategy": signal.strategy_name,
+                    "token": signal.symbol,
+                    "signal_reason": signal.reasoning_metadata.get("reason"),
+                    "rejection_reason": decision.reason.value if decision.reason else None,
+                    "confidence_score": signal.confidence,
+                    "applied_risk_rules": decision.rules_evaluated,
+                    "outcome": decision.outcome.value,
+                    "final_size": decision.final_size,
+                    "detail": decision.detail,
+                },
+                default=str,
+            ),
+        )

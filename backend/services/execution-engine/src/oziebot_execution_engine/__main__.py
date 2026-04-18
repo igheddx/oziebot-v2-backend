@@ -51,6 +51,9 @@ def main() -> None:
         now = datetime.now(UTC)
         health.touch()
         if (now - last_reconcile).total_seconds() >= settings.reconciliation_interval_seconds:
+            enforced = service.enforce_runtime_controls()
+            if enforced:
+                log.info("runtime_controls_enforced count=%s", enforced)
             summaries = reconciler.reconcile_all_live()
             for summary in summaries:
                 log.info(

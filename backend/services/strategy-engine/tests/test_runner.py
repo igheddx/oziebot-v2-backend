@@ -312,3 +312,94 @@ def test_run_once_processes_all_allowed_symbols():
         ("ETH-USD", "paper"),
         ("ETH-USD", "live"),
     }
+
+
+def test_dca_scheduler_enforces_buy_interval_from_runtime_state():
+    class DcaRunner(StrategyRunner):
+        def __init__(self):
+            super().__init__(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+            self.generated = 0
+
+        def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
+            return [
+                {
+                    "user_id": str(uuid.uuid4()),
+                    "strategy_id": "dca",
+                    "tenant_id": uuid.uuid4(),
+                    "config": {},
+                }
+            ]
+
+        def _load_platform_strategy_config(self, strategy_id: str) -> dict[str, object]:
+            return {"strategy_params": {"buy_interval_hours": 24}}
+
+        def _load_allowed_symbols(self, user_id: str) -> list[str]:
+            return ["BTC-USD"]
+
+        def _load_market_snapshot(self, symbol: str) -> MarketSnapshot | None:
+            return MarketSnapshot(
+                timestamp=datetime.now(UTC),
+                symbol=symbol,
+                current_price=Decimal("50000"),
+                bid_price=Decimal("49990"),
+                ask_price=Decimal("50010"),
+                volume_24h=Decimal("100"),
+                open_price=Decimal("50000"),
+                high_price=Decimal("50500"),
+                low_price=Decimal("49500"),
+                close_price=Decimal("50000"),
+            )
+
+        def _load_position_state(self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str) -> PositionState:
+            return PositionState(symbol=symbol, quantity=Decimal("0"))
+
+        def _sync_position_runtime_state(
+            self,
+            *,
+            user_id: str,
+            strategy_name: str,
+            trading_mode: str,
+            position_state: PositionState,
+            market: MarketSnapshot,
+            now: datetime,
+        ) -> PositionState:
+            return position_state
+
+        def _load_strategy_runtime_state(self, *, user_id: str, strategy_name: str, trading_mode: str) -> dict[str, object]:
+            last_buy_at = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+            return {"symbols": {"BTC-USD": {"last_buy_at": last_buy_at}}}
+
+        def _generate_signal(
+            self,
+            *,
+            tenant_id,
+            strategy_name: str,
+            trading_mode: TradingMode,
+            market: MarketSnapshot,
+            position_state: PositionState,
+            config: dict[str, object],
+        ) -> StrategySignal:
+            self.generated += 1
+            return StrategySignal(
+                signal_id=uuid.uuid4(),
+                correlation_id=uuid.uuid4(),
+                tenant_id=uuid.uuid4(),
+                strategy_id=strategy_name,
+                trading_mode=trading_mode,
+                signal_type=SignalType.BUY,
+                confidence=0.9,
+                reason="scheduled buy",
+            )
+
+        def _persist_run(self, **kwargs) -> None:
+            return None
+
+        def _persist_signal(self, event: StrategySignalEvent) -> None:
+            raise AssertionError("signal should have been scheduled out")
+
+    runner = DcaRunner()
+
+    processed = runner.run_once()
+
+    assert processed == 0
+    assert runner.generated == 0

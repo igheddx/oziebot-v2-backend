@@ -18,12 +18,15 @@ def _context(
     entry_price: str | None = None,
     opened_at: datetime | None = None,
     fear_index: float | None = None,
+    market_regime: str | None = None,
 ) -> StrategyContext:
     now = datetime.now(UTC)
     price = Decimal(current_price or str(closes[-1]))
     metadata = {"candle_closes": closes}
     if fear_index is not None:
         metadata["fear_index"] = fear_index
+    if market_regime is not None:
+        metadata["market_regime"] = market_regime
     market = MarketSnapshot(
         timestamp=now,
         symbol="AERO-USD",
@@ -114,3 +117,14 @@ def test_reversion_exits_on_stop_loss():
 
     assert signal.signal_type == SignalType.CLOSE
     assert "Stop loss hit" in signal.reason
+
+
+def test_reversion_trend_filter_blocks_bearish_entry():
+    strategy = ReversionStrategy()
+    closes = [120 - (idx * 0.1) for idx in range(180)] + [95, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85, 84, 83, 82, 81, 80, 79, 78, 77, 76]
+    context = _context(closes=closes, current_price="76", market_regime="bearish")
+
+    signal = strategy.generate_signal(context, {"use_trend_filter": True, "ema_long_window": 50}, uuid4(), uuid4())
+
+    assert signal.signal_type == SignalType.HOLD
+    assert "Trend filter blocked entry" in signal.reason

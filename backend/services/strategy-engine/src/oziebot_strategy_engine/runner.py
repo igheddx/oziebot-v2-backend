@@ -4,7 +4,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -127,9 +127,52 @@ class StrategyRunner:
                         market=market,
                         now=now,
                     )
+                    runtime_state: dict[str, Any] = {}
+                    if strategy_name == "dca":
+                        runtime_state = self._load_strategy_runtime_state(
+                            user_id=user_id,
+                            strategy_name=strategy_name,
+                            trading_mode=mode.value,
+                        )
                     run_id = uuid.uuid4()
                     trace_id = str(run_id)
                     try:
+                        schedule_reason = self._scheduler_reason(
+                            strategy_name=strategy_name,
+                            config=config,
+                            trading_mode=mode,
+                            symbol=symbol,
+                            runtime_state=runtime_state,
+                            now=now,
+                        )
+                        if schedule_reason is not None:
+                            self._persist_run(
+                                run_id=run_id,
+                                user_id=user_id,
+                                strategy_name=strategy_name,
+                                symbol=symbol,
+                                trading_mode=mode.value,
+                                status="completed",
+                                trace_id=trace_id,
+                                metadata={
+                                    "suppressed": True,
+                                    "suppression_reason": schedule_reason,
+                                    "scheduler": True,
+                                },
+                                started_at=now,
+                                completed_at=datetime.now(UTC),
+                            )
+                            log.info(
+                                "signal_scheduled_out run_id=%s user_id=%s strategy=%s mode=%s symbol=%s reason=%s",
+                                run_id,
+                                user_id,
+                                strategy_name,
+                                mode.value,
+                                symbol,
+                                schedule_reason,
+                            )
+                            continue
+
                         signal = self._generate_signal(
                             tenant_id=tenant_id,
                             strategy_name=strategy_name,
@@ -520,6 +563,35 @@ class StrategyRunner:
 
         return None
 
+    def _scheduler_reason(
+        self,
+        *,
+        strategy_name: str,
+        config: dict[str, Any],
+        trading_mode: TradingMode,
+        symbol: str,
+        runtime_state: dict[str, Any],
+        now: datetime,
+    ) -> str | None:
+        if strategy_name != "dca":
+            return None
+
+        symbol_state = self._coerce_symbol_runtime_states(runtime_state).get(symbol, {})
+        last_buy_at_raw = symbol_state.get("last_buy_at")
+        if not last_buy_at_raw:
+            return None
+
+        if isinstance(last_buy_at_raw, str):
+            last_buy_at = datetime.fromisoformat(last_buy_at_raw.replace("Z", "+00:00"))
+        else:
+            last_buy_at = last_buy_at_raw
+
+        interval_hours = int(config.get("buy_interval_hours", 24) or 24)
+        next_due_at = last_buy_at + timedelta(hours=interval_hours)
+        if now < next_due_at:
+            return f"dca interval active until {next_due_at.isoformat()}"
+        return None
+
     def _load_enabled_user_strategies(self) -> list[dict[str, Any]]:
         stmt = text(
             """
@@ -610,6 +682,7 @@ class StrategyRunner:
         now: datetime,
     ) -> dict[str, dict[str, Any]]:
         merged = dict(symbol_states)
+        existing = dict(merged.get(position_state.symbol, {}))
         if position_state.quantity > 0:
             baseline_peak = max(
                 position_state.entry_price or Decimal("0"),
@@ -619,16 +692,54 @@ class StrategyRunner:
             position_state.peak_price = baseline_peak if baseline_peak > 0 else None
             if position_state.opened_at is None:
                 position_state.opened_at = now
-            merged[position_state.symbol] = {
-                "peak_price": str(position_state.peak_price),
-                "opened_at": position_state.opened_at.isoformat(),
-            }
+            existing["peak_price"] = str(position_state.peak_price)
+            existing["opened_at"] = position_state.opened_at.isoformat()
+            merged[position_state.symbol] = existing
             return merged
 
         position_state.peak_price = None
         position_state.opened_at = None
-        merged.pop(position_state.symbol, None)
+        existing.pop("peak_price", None)
+        existing.pop("opened_at", None)
+        if existing:
+            merged[position_state.symbol] = existing
+        else:
+            merged.pop(position_state.symbol, None)
         return merged
+
+    def _load_strategy_runtime_state(
+        self,
+        *,
+        user_id: str,
+        strategy_name: str,
+        trading_mode: str,
+    ) -> dict[str, Any]:
+        stmt = text(
+            """
+            SELECT state
+            FROM user_strategy_states
+            WHERE user_id = :user_id
+              AND strategy_id = :strategy_name
+              AND trading_mode = :trading_mode
+            LIMIT 1
+            """
+        )
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                stmt,
+                {
+                    "user_id": user_id,
+                    "strategy_name": strategy_name,
+                    "trading_mode": trading_mode,
+                },
+            ).mappings().first()
+        state = row["state"] if row else {}
+        if isinstance(state, str):
+            try:
+                state = json.loads(state)
+            except Exception:
+                return {}
+        return state if isinstance(state, dict) else {}
 
     def _load_position_state(
         self,
@@ -867,13 +978,17 @@ class StrategyRunner:
         risk_caps: dict | None = None,
         market: "MarketSnapshot | None" = None,
     ) -> StrategySignalEvent:
+        confidence = Decimal(str(signal.confidence))
         suggested_size = Decimal("0")
         if signal.quantity is not None:
             suggested_size = Decimal(str(signal.quantity.amount))
         elif signal.signal_type in {SignalType.CLOSE, SignalType.SELL} and position_state is not None:
             suggested_size = abs(position_state.quantity)
         elif signal.metadata and "buy_amount_usd" in signal.metadata:
-            suggested_size = Decimal(str(signal.metadata["buy_amount_usd"]))
+            price = market.current_price if market is not None else Decimal("0")
+            usd_amount = Decimal(str(signal.metadata["buy_amount_usd"])) * confidence
+            if price > 0:
+                suggested_size = usd_amount / price
         elif signal.metadata and "position_size_fraction" in signal.metadata:
             fraction = Decimal(str(signal.metadata["position_size_fraction"]))
             caps = risk_caps or {}
@@ -881,10 +996,10 @@ class StrategyRunner:
             price = market.current_price if market is not None else Decimal("0")
             if max_pos_usd > 0 and price > 0:
                 # Convert: fraction of max capital → USD → token quantity
-                usd_amount = fraction * max_pos_usd
+                usd_amount = fraction * max_pos_usd * confidence
                 suggested_size = usd_amount / price
             else:
-                suggested_size = fraction  # fallback: pass fraction as-is
+                suggested_size = fraction * confidence  # fallback: pass fraction as-is
 
         return StrategySignalEvent(
             signal_id=signal.signal_id,

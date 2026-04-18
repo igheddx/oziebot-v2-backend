@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
@@ -21,13 +22,15 @@ from oziebot_common.queues import (
 )
 from oziebot_domain.events import NotificationEvent, NotificationEventType
 from oziebot_domain.execution import ExecutionEvent, ExecutionOrderStatus, ExecutionRequest, ExecutionSubmission
-from oziebot_domain.risk import RiskDecision
-from oziebot_domain.trading import Side, Venue
+from oziebot_domain.risk import RiskDecision, RiskOutcome
+from oziebot_domain.trading import OrderType, Side, Venue
 from oziebot_domain.trading_mode import TradingMode
 
 from oziebot_execution_engine.adapters import ExecutionAdapter
 from oziebot_execution_engine.credential_crypto import CredentialCrypto
 from oziebot_execution_engine.state_machine import ensure_transition
+
+log = logging.getLogger("execution-engine.service")
 
 
 def _utcnow() -> datetime:
@@ -178,6 +181,26 @@ class ExecutionService:
         adapter = self._paper_adapter if request.trading_mode == TradingMode.PAPER else self._live_adapter
         submission = adapter.submit(request)
         return self._apply_submission(request, order_id, reserve_cents, submission)
+
+    def enforce_runtime_controls(self) -> int:
+        if self._engine is None:
+            raise RuntimeError("DATABASE_URL is required")
+        enforced = 0
+        with self._engine.begin() as conn:
+            positions = conn.execute(
+                text(
+                    """
+                    SELECT *
+                    FROM execution_positions
+                    WHERE strategy_id = 'day_trading'
+                      AND CAST(quantity AS NUMERIC) > 0
+                    """
+                )
+            ).mappings().all()
+        for row in positions:
+            if self._enforce_day_trading_position_age(dict(row)):
+                enforced += 1
+        return enforced
 
     def _build_request(self, *, intent: dict[str, Any], risk: RiskDecision, trace_id: str) -> ExecutionRequest:
         trading_mode = TradingMode(intent["trading_mode"])
@@ -356,6 +379,7 @@ class ExecutionService:
                 avg_after = Decimal("0")
         self._upsert_position(request, qty_after, avg_after, realized_pnl_cents)
         self._insert_trade(order_id, fill_row_id, request, fill, qty_after, avg_after, realized_pnl_cents, fill_notional_cents, fill_fee_cents)
+        self._record_strategy_runtime_activity(request, fill.occurred_at)
 
     def _upsert_position(self, request: ExecutionRequest, quantity: Decimal, avg_entry_price: Decimal, realized_pnl_delta_cents: int) -> None:
         existing = self._get_position(request)
@@ -597,3 +621,280 @@ class ExecutionService:
     @staticmethod
     def _is_terminal_state(state: ExecutionOrderStatus) -> bool:
         return state in {ExecutionOrderStatus.FILLED, ExecutionOrderStatus.CANCELLED, ExecutionOrderStatus.FAILED}
+
+    @staticmethod
+    def _parse_db_timestamp(value: Any) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+    @staticmethod
+    def _uuid_from_db(value: Any) -> uuid.UUID:
+        raw = str(value)
+        return uuid.UUID(hex=raw) if "-" not in raw else uuid.UUID(raw)
+
+    def _load_strategy_state(self, user_id: str, strategy_id: str, trading_mode: str) -> dict[str, Any]:
+        stmt = text(
+            """
+            SELECT state
+            FROM user_strategy_states
+            WHERE user_id = :user_id
+              AND strategy_id = :strategy_id
+              AND trading_mode = :trading_mode
+            LIMIT 1
+            """
+        )
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                stmt,
+                {
+                    "user_id": user_id,
+                    "strategy_id": strategy_id,
+                    "trading_mode": trading_mode,
+                },
+            ).mappings().first()
+        if row is None:
+            return {}
+        state = row["state"]
+        if isinstance(state, str):
+            try:
+                state = json.loads(state)
+            except Exception:
+                return {}
+        return state if isinstance(state, dict) else {}
+
+    def _upsert_strategy_state(
+        self,
+        *,
+        user_id: str,
+        strategy_id: str,
+        trading_mode: str,
+        state: dict[str, Any],
+        now: datetime,
+    ) -> None:
+        stmt = text(
+            """
+            INSERT INTO user_strategy_states (id, user_id, strategy_id, trading_mode, state, created_at, updated_at)
+            VALUES (:id, :user_id, :strategy_id, :trading_mode, CAST(:state AS JSON), :created_at, :updated_at)
+            ON CONFLICT (user_id, strategy_id, trading_mode)
+            DO UPDATE SET state = CAST(:state AS JSON), updated_at = :updated_at
+            """
+        )
+        with self._engine.begin() as conn:
+            conn.execute(
+                stmt,
+                {
+                    "id": str(uuid.uuid4()),
+                    "user_id": user_id,
+                    "strategy_id": strategy_id,
+                    "trading_mode": trading_mode,
+                    "state": json.dumps(state, default=str),
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+
+    def _record_strategy_runtime_activity(self, request: ExecutionRequest, occurred_at: datetime) -> None:
+        if request.strategy_id != "dca" or request.side != Side.BUY:
+            return
+        user_id = _to_hex(request.user_id)
+        trading_mode = request.trading_mode.value
+        state = self._load_strategy_state(user_id, request.strategy_id, trading_mode)
+        symbols = state.get("symbols")
+        if not isinstance(symbols, dict):
+            symbols = {}
+        symbol_state = symbols.get(request.symbol)
+        if not isinstance(symbol_state, dict):
+            symbol_state = {}
+        symbol_state["last_buy_at"] = occurred_at.isoformat()
+        symbols[request.symbol] = symbol_state
+        state["symbols"] = symbols
+        self._upsert_strategy_state(
+            user_id=user_id,
+            strategy_id=request.strategy_id,
+            trading_mode=trading_mode,
+            state=state,
+            now=occurred_at,
+        )
+
+    def _load_strategy_runtime_symbol_state(
+        self,
+        *,
+        user_id: str,
+        strategy_id: str,
+        trading_mode: str,
+        symbol: str,
+    ) -> dict[str, Any]:
+        state = self._load_strategy_state(user_id, strategy_id, trading_mode)
+        symbols = state.get("symbols")
+        if not isinstance(symbols, dict):
+            return {}
+        symbol_state = symbols.get(symbol)
+        return symbol_state if isinstance(symbol_state, dict) else {}
+
+    def _load_day_trading_config(self, user_id: str) -> dict[str, Any]:
+        stmt = text(
+            """
+            SELECT
+              us.config AS user_config,
+              ps.config_schema AS platform_config
+            FROM user_strategies us
+            LEFT JOIN platform_strategies ps ON ps.slug = us.strategy_id
+            WHERE us.user_id = :user_id
+              AND us.strategy_id = 'day_trading'
+            LIMIT 1
+            """
+        )
+        with self._engine.begin() as conn:
+            row = conn.execute(stmt, {"user_id": user_id}).mappings().first()
+        if row is None:
+            return {}
+        user_config = row["user_config"]
+        if isinstance(user_config, str):
+            user_config = json.loads(user_config)
+        platform_config = row["platform_config"]
+        if isinstance(platform_config, str):
+            platform_config = json.loads(platform_config)
+        platform_config = platform_config if isinstance(platform_config, dict) else {}
+        user_config = user_config if isinstance(user_config, dict) else {}
+        strategy_params = platform_config.get("strategy_params")
+        if not isinstance(strategy_params, dict):
+            strategy_params = {}
+        return {**user_config, **strategy_params}
+
+    def _has_open_exit_order(
+        self,
+        *,
+        user_id: str,
+        strategy_id: str,
+        symbol: str,
+        trading_mode: str,
+    ) -> bool:
+        stmt = text(
+            """
+            SELECT 1
+            FROM execution_orders
+            WHERE user_id = :user_id
+              AND strategy_id = :strategy_id
+              AND symbol = :symbol
+              AND trading_mode = :trading_mode
+              AND side = :side
+              AND state IN ('created', 'capital_reserved', 'submitted', 'pending', 'partially_filled')
+            LIMIT 1
+            """
+        )
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                stmt,
+                {
+                    "user_id": user_id,
+                    "strategy_id": strategy_id,
+                    "symbol": symbol,
+                    "trading_mode": trading_mode,
+                    "side": Side.SELL.value,
+                },
+            ).first()
+        return row is not None
+
+    def _enforce_day_trading_position_age(self, position: dict[str, Any]) -> bool:
+        user_id = str(position["user_id"])
+        config = self._load_day_trading_config(user_id)
+        max_age_hours = int(config.get("max_position_age_hours", 4) or 4)
+        symbol_state = self._load_day_trading_runtime_symbol_state(position)
+        opened_at = self._parse_db_timestamp(symbol_state.get("opened_at")) or self._parse_db_timestamp(
+            position.get("last_trade_at")
+        )
+        if opened_at is None:
+            return False
+        now = _utcnow()
+        if now - opened_at < timedelta(hours=max_age_hours):
+            return False
+        if self._has_open_exit_order(
+            user_id=user_id,
+            strategy_id=str(position["strategy_id"]),
+            symbol=str(position["symbol"]),
+            trading_mode=str(position["trading_mode"]),
+        ):
+            return False
+        request = self._build_day_trading_guard_close_request(position, opened_at, max_age_hours)
+        result = self.process_request(request)
+        log.info(
+            "position_age_guard order_id=%s mode=%s symbol=%s duplicated=%s",
+            result.order_id,
+            position["trading_mode"],
+            position["symbol"],
+            result.duplicated,
+        )
+        return True
+
+    def _load_day_trading_runtime_symbol_state(self, position: dict[str, Any]) -> dict[str, Any]:
+        return self._load_strategy_runtime_symbol_state(
+            user_id=str(position["user_id"]),
+            strategy_id=str(position["strategy_id"]),
+            trading_mode=str(position["trading_mode"]),
+            symbol=str(position["symbol"]),
+        )
+
+    def _build_day_trading_guard_close_request(
+        self,
+        position: dict[str, Any],
+        opened_at: datetime,
+        max_age_hours: int,
+    ) -> ExecutionRequest:
+        intent_id = uuid.uuid4()
+        trading_mode = TradingMode(str(position["trading_mode"]))
+        tenant_id = self._uuid_from_db(position["tenant_id"])
+        user_id = self._uuid_from_db(position["user_id"])
+        quantity = abs(Decimal(str(position["quantity"])))
+        trace_id = f"position-age-{intent_id.hex[:16]}"
+        risk = RiskDecision(
+            outcome=RiskOutcome.APPROVE,
+            approved=True,
+            signal_id=uuid.uuid4(),
+            run_id=uuid.uuid4(),
+            user_id=user_id,
+            strategy_name=str(position["strategy_id"]),
+            symbol=str(position["symbol"]),
+            original_size=str(quantity),
+            final_size=str(quantity),
+            trading_mode=trading_mode,
+            detail=(
+                f"execution_position_age_guard: opened_at={opened_at.isoformat()} "
+                f"max_age_hours={max_age_hours}"
+            ),
+            rules_evaluated=["execution_position_age_guard"],
+            trace_id=trace_id,
+        )
+        return ExecutionRequest(
+            intent_id=intent_id,
+            trace_id=trace_id,
+            user_id=user_id,
+            risk=risk,
+            tenant_id=tenant_id,
+            trading_mode=trading_mode,
+            strategy_id=str(position["strategy_id"]),
+            symbol=str(position["symbol"]),
+            side=Side.SELL,
+            order_type=OrderType.MARKET,
+            quantity=quantity,
+            price_hint=self._market_price_hint(str(position["symbol"]), Side.SELL.value),
+            idempotency_key=self.build_idempotency_key(str(intent_id), trading_mode),
+            client_order_id=self.build_client_order_id(str(intent_id), trading_mode),
+            intent_payload={
+                "intent_id": str(intent_id),
+                "tenant_id": str(tenant_id),
+                "trading_mode": trading_mode.value,
+                "strategy_id": str(position["strategy_id"]),
+                "instrument": {"symbol": str(position["symbol"])},
+                "side": Side.SELL.value,
+                "order_type": OrderType.MARKET.value,
+                "quantity": {"amount": str(quantity)},
+                "metadata": {
+                    "guard": "max_position_age_hours",
+                    "opened_at": opened_at.isoformat(),
+                    "max_age_hours": max_age_hours,
+                },
+            },
+        )

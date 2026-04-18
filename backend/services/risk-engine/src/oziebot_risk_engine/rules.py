@@ -11,12 +11,17 @@ from oziebot_domain.risk import RejectionReason
 @dataclass
 class RuleContext:
     signal: Any
+    action: str
     trading_mode: str
     symbol: str
     suggested_size: Decimal
     mid_price: Decimal
     spread_pct: Decimal
     est_slippage_pct: Decimal
+    max_spread_pct_allowed: Decimal
+    max_slippage_pct_allowed: Decimal
+    fee_pct: Decimal
+    expected_profit_buffer_pct: Decimal
     now: datetime
 
     # Database-backed facts.
@@ -29,7 +34,13 @@ class RuleContext:
     total_capital_cents: int
     daily_loss_cents: int
     recent_loss_count: int
+    cooldown_loss_threshold: int
     cooldown_until: datetime | None
+    current_strategy_exposure_cents: int
+    current_token_exposure_cents: int
+    max_strategy_exposure_cents: int
+    max_token_exposure_cents: int
+    global_daily_loss_limit_pct: Decimal
     stale_flags: dict[str, bool]
 
 
@@ -217,6 +228,64 @@ class MaxTokenConcentrationRule(RiskRule):
         return None
 
 
+class MaxStrategyExposureRule(RiskRule):
+    name = "max_strategy_exposure"
+
+    def evaluate(self, ctx: RuleContext) -> RuleResult | None:
+        if ctx.action != "buy" or ctx.max_strategy_exposure_cents <= 0 or ctx.mid_price <= 0:
+            return None
+        notional = ctx.suggested_size * ctx.mid_price
+        projected = Decimal(str(ctx.current_strategy_exposure_cents)) + notional
+        limit = Decimal(str(ctx.max_strategy_exposure_cents))
+        if projected <= limit:
+            return None
+        allowed_notional = max(Decimal("0"), limit - Decimal(str(ctx.current_strategy_exposure_cents)))
+        if allowed_notional <= 0:
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.LIMIT_EXCEEDED,
+                "Strategy exposure cap reached",
+            )
+        reduced = (allowed_notional / ctx.mid_price).quantize(Decimal("0.00000001"))
+        return RuleResult(
+            self.name,
+            "reduce_size",
+            RejectionReason.LIMIT_EXCEEDED,
+            "Reduced by strategy exposure cap",
+            reduced_size=max(reduced, Decimal("0")),
+        )
+
+
+class MaxTokenExposureRule(RiskRule):
+    name = "max_token_exposure"
+
+    def evaluate(self, ctx: RuleContext) -> RuleResult | None:
+        if ctx.action != "buy" or ctx.max_token_exposure_cents <= 0 or ctx.mid_price <= 0:
+            return None
+        notional = ctx.suggested_size * ctx.mid_price
+        projected = Decimal(str(ctx.current_token_exposure_cents)) + notional
+        limit = Decimal(str(ctx.max_token_exposure_cents))
+        if projected <= limit:
+            return None
+        allowed_notional = max(Decimal("0"), limit - Decimal(str(ctx.current_token_exposure_cents)))
+        if allowed_notional <= 0:
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.LIMIT_EXCEEDED,
+                "Token exposure cap reached",
+            )
+        reduced = (allowed_notional / ctx.mid_price).quantize(Decimal("0.00000001"))
+        return RuleResult(
+            self.name,
+            "reduce_size",
+            RejectionReason.LIMIT_EXCEEDED,
+            "Reduced by token exposure cap",
+            reduced_size=max(reduced, Decimal("0")),
+        )
+
+
 class MaxDailyLossRule(RiskRule):
     name = "max_daily_loss"
 
@@ -234,15 +303,31 @@ class MaxDailyLossRule(RiskRule):
         return None
 
 
+class GlobalDailyLossGuardRule(RiskRule):
+    name = "global_daily_loss_guard"
+
+    def evaluate(self, ctx: RuleContext) -> RuleResult | None:
+        if ctx.global_daily_loss_limit_pct <= 0 or ctx.total_capital_cents <= 0:
+            return None
+        loss_pct = (Decimal(str(ctx.daily_loss_cents)) * Decimal("100")) / Decimal(str(ctx.total_capital_cents))
+        if loss_pct >= ctx.global_daily_loss_limit_pct:
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.DRAWDOWN,
+                (
+                    "Global daily loss guard active "
+                    f"({loss_pct:.2f}% >= {ctx.global_daily_loss_limit_pct:.2f}%)"
+                ),
+            )
+        return None
+
+
 class CooldownAfterLossesRule(RiskRule):
     name = "cooldown_after_losses"
 
-    def __init__(self, loss_count: int, cooldown_minutes: int):
-        self._loss_count = loss_count
-        self._cooldown_minutes = cooldown_minutes
-
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
-        if ctx.recent_loss_count >= self._loss_count and ctx.cooldown_until is not None:
+        if ctx.recent_loss_count >= ctx.cooldown_loss_threshold and ctx.cooldown_until is not None:
             if ctx.now < ctx.cooldown_until:
                 return RuleResult(
                     self.name,
@@ -262,28 +347,43 @@ class StaleDataRule(RiskRule):
         return None
 
 
-class AbnormalSpreadRule(RiskRule):
-    name = "abnormal_spread_slippage"
-
-    def __init__(self, max_spread_pct: float, max_slippage_pct: float):
-        self._max_spread_pct = Decimal(str(max_spread_pct))
-        self._max_slippage_pct = Decimal(str(max_slippage_pct))
+class ExecutionQualityRule(RiskRule):
+    name = "execution_quality"
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
-        if ctx.spread_pct > self._max_spread_pct:
+        if ctx.action != "buy":
+            return None
+        if ctx.max_spread_pct_allowed > 0 and ctx.spread_pct > ctx.max_spread_pct_allowed:
             return RuleResult(
                 self.name,
                 "reject",
                 RejectionReason.POLICY,
-                f"Spread too wide ({ctx.spread_pct:.6f} > {self._max_spread_pct:.6f})",
+                f"Spread too wide ({ctx.spread_pct:.6f} > {ctx.max_spread_pct_allowed:.6f})",
             )
-        if ctx.est_slippage_pct > self._max_slippage_pct:
+        if ctx.max_slippage_pct_allowed > 0 and ctx.est_slippage_pct > ctx.max_slippage_pct_allowed:
             return RuleResult(
                 self.name,
                 "reject",
                 RejectionReason.POLICY,
-                f"Estimated slippage too high ({ctx.est_slippage_pct:.6f} > {self._max_slippage_pct:.6f})",
+                (
+                    "Estimated slippage too high "
+                    f"({ctx.est_slippage_pct:.6f} > {ctx.max_slippage_pct_allowed:.6f})"
+                ),
             )
+        if ctx.fee_pct > 0 and ctx.expected_profit_buffer_pct > 0 and ctx.mid_price > 0:
+            notional = ctx.suggested_size * ctx.mid_price
+            estimated_fees = notional * ctx.fee_pct
+            expected_profit_buffer = notional * ctx.expected_profit_buffer_pct
+            if estimated_fees >= expected_profit_buffer:
+                return RuleResult(
+                    self.name,
+                    "reject",
+                    RejectionReason.POLICY,
+                    (
+                        "Estimated fees exceed expected profit buffer "
+                        f"({estimated_fees:.8f} >= {expected_profit_buffer:.8f})"
+                    ),
+                )
         return None
 
 
@@ -299,8 +399,11 @@ def default_rules(settings) -> list[RiskRule]:
         MaxPositionSizeRule(settings.risk_max_position_size_cents),
         MaxStrategyAllocationRule(settings.risk_max_strategy_allocation_pct),
         MaxTokenConcentrationRule(settings.risk_max_token_concentration_pct),
+        MaxStrategyExposureRule(),
+        MaxTokenExposureRule(),
         MaxDailyLossRule(settings.risk_max_daily_loss_cents),
-        CooldownAfterLossesRule(settings.risk_cooldown_loss_count, settings.risk_cooldown_minutes),
+        GlobalDailyLossGuardRule(),
+        CooldownAfterLossesRule(),
         StaleDataRule(),
-        AbnormalSpreadRule(settings.risk_max_spread_pct, settings.risk_max_slippage_pct),
+        ExecutionQualityRule(),
     ]
