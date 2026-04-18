@@ -36,13 +36,25 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install envsubst
-        run: sudo apt-get update && sudo apt-get install -y gettext-base
-
       - name: Render migration task definition
         env:
           IMAGE_URI: ${{ env.ECR_REGISTRY }}/oziebot/api:${{ inputs.image_tag }}
-        run: envsubst < infrastructure/aws/backend/task-definitions/db-migrate.json > task-definition.json
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          template = Path("infrastructure/aws/backend/task-definitions/db-migrate.json").read_text()
+
+          def replace_env(match):
+              return json.dumps(os.environ.get(match.group(1), ""))[1:-1]
+
+          rendered = re.sub(r"\$\{([A-Z0-9_]+)\}", replace_env, template)
+          json.loads(rendered)
+          Path("task-definition.json").write_text(rendered)
+          PY
 
       - name: Register migration task definition
         id: register

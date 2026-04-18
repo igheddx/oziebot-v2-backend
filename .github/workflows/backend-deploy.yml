@@ -85,13 +85,25 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install envsubst
-        run: sudo apt-get update && sudo apt-get install -y gettext-base
-
       - name: Render migration task definition
         env:
           IMAGE_URI: ${{ needs.build-api-image.outputs.image_uri }}
-        run: envsubst < infrastructure/aws/backend/task-definitions/db-migrate.json > task-definition.json
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          template = Path("infrastructure/aws/backend/task-definitions/db-migrate.json").read_text()
+
+          def replace_env(match):
+              return json.dumps(os.environ.get(match.group(1), ""))[1:-1]
+
+          rendered = re.sub(r"\$\{([A-Z0-9_]+)\}", replace_env, template)
+          json.loads(rendered)
+          Path("task-definition.json").write_text(rendered)
+          PY
 
       - name: Register migration task definition
         id: register
@@ -133,11 +145,23 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install envsubst
-        run: sudo apt-get update && sudo apt-get install -y gettext-base
-
       - name: Render API task definition template
-        run: envsubst < infrastructure/aws/backend/task-definitions/api.json > task-definition.json
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          template = Path("infrastructure/aws/backend/task-definitions/api.json").read_text()
+
+          def replace_env(match):
+              return json.dumps(os.environ.get(match.group(1), ""))[1:-1]
+
+          rendered = re.sub(r"\$\{([A-Z0-9_]+)\}", replace_env, template)
+          json.loads(rendered)
+          Path("task-definition.json").write_text(rendered)
+          PY
 
       - name: Inject image into task definition
         id: render-task
@@ -201,9 +225,6 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Install envsubst
-        run: sudo apt-get update && sudo apt-get install -y gettext-base
-
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
@@ -216,7 +237,21 @@ jobs:
 
       - name: Render task definition template
         run: |
-          envsubst < "${{ matrix.task_definition }}" > task-definition.json
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          template = Path("${{ matrix.task_definition }}").read_text()
+
+          def replace_env(match):
+              return json.dumps(os.environ.get(match.group(1), ""))[1:-1]
+
+          rendered = re.sub(r"\$\{([A-Z0-9_]+)\}", replace_env, template)
+          json.loads(rendered)
+          Path("task-definition.json").write_text(rendered)
+          PY
 
       - name: Inject image into task definition
         id: render-task
