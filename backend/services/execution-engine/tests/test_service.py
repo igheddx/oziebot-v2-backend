@@ -115,6 +115,21 @@ def _setup_db(db_path: Path) -> None:
         )
         conn.execute(
             text(
+                "CREATE TABLE platform_token_allowlist ("
+                "id TEXT PRIMARY KEY, symbol TEXT, quote_currency TEXT, is_enabled BOOLEAN)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE token_strategy_policy ("
+                "id TEXT PRIMARY KEY, token_id TEXT, strategy_id TEXT, admin_enabled BOOLEAN,"
+                "suitability_score REAL, recommendation_status TEXT, recommendation_reason TEXT,"
+                "recommendation_status_override TEXT, recommendation_reason_override TEXT,"
+                "max_position_pct_override REAL, notes TEXT, computed_at TEXT, updated_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
                 "CREATE TABLE user_strategies ("
                 "id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, is_enabled BOOLEAN, config TEXT, created_at TEXT, updated_at TEXT)"
             )
@@ -140,6 +155,50 @@ def _seed_bucket(db_path: Path, user_id: str, tenant_id: str, strategy_id: str, 
                 "VALUES (:id, :user_id, :strategy_id, :trading_mode, :available_cash_cents, :available_cash_cents, 0, 0, 0, 0, :available_cash_cents, 1, :now, :now)"
             ),
             {"id": str(uuid4()), "user_id": _compact_id(user_id), "strategy_id": strategy_id, "trading_mode": trading_mode, "available_cash_cents": available_cash_cents, "now": now},
+        )
+
+
+def _insert_token_policy(
+    db_path: Path,
+    *,
+    strategy_id: str,
+    symbol: str = "BTC-USD",
+    admin_enabled: bool = True,
+    recommendation_status: str = "allowed",
+    recommendation_reason: str = "policy",
+    max_position_pct_override: float | None = None,
+) -> None:
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    now = datetime.now(UTC).isoformat()
+    with eng.begin() as conn:
+        token_id = str(uuid4())
+        conn.execute(
+            text(
+                "INSERT INTO platform_token_allowlist (id, symbol, quote_currency, is_enabled) "
+                "VALUES (:id, :symbol, 'USD', 1)"
+            ),
+            {"id": token_id, "symbol": symbol},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO token_strategy_policy ("
+                "id, token_id, strategy_id, admin_enabled, suitability_score, recommendation_status, recommendation_reason,"
+                "recommendation_status_override, recommendation_reason_override, max_position_pct_override, notes, computed_at, updated_at"
+                ") VALUES ("
+                ":id, :token_id, :strategy_id, :admin_enabled, 80, :recommendation_status, :recommendation_reason,"
+                "NULL, NULL, :max_position_pct_override, NULL, :computed_at, :updated_at)"
+            ),
+            {
+                "id": str(uuid4()),
+                "token_id": token_id,
+                "strategy_id": strategy_id,
+                "admin_enabled": 1 if admin_enabled else 0,
+                "recommendation_status": recommendation_status,
+                "recommendation_reason": recommendation_reason,
+                "max_position_pct_override": max_position_pct_override,
+                "computed_at": now,
+                "updated_at": now,
+            },
         )
 
 
@@ -392,3 +451,83 @@ def test_day_trading_max_position_age_auto_closes_in_paper(tmp_path: Path):
     last_order = _last_order(db_path)
     assert last_order["strategy_id"] == strategy_id
     assert last_order["side"] == Side.SELL.value
+
+
+def test_execution_rejects_blocked_token_strategy_policy(tmp_path: Path):
+    db_path = tmp_path / "execution-token-policy-blocked.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set("oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}')
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "momentum"
+    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
+    _insert_token_policy(
+        db_path,
+        strategy_id=strategy_id,
+        recommendation_status="blocked",
+        recommendation_reason="blocked for execution",
+    )
+    service, _ = _service(db_path, redis)
+
+    result = service.process_request(_request(user_id, tenant_id, strategy_id, TradingMode.PAPER))
+
+    assert result.state == ExecutionOrderStatus.FAILED
+    order = _last_order(db_path)
+    assert order["failure_code"] == "token_strategy_policy"
+    assert "blocked" in str(order["failure_detail"])
+    assert _count(db_path, "execution_fills") == 0
+
+
+def test_execution_reduces_discouraged_token_strategy_size(tmp_path: Path):
+    db_path = tmp_path / "execution-token-policy-discouraged.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set("oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}')
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "momentum"
+    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
+    _insert_token_policy(
+        db_path,
+        strategy_id=strategy_id,
+        recommendation_status="discouraged",
+        recommendation_reason="reduced for execution",
+    )
+    service, _ = _service(db_path, redis)
+
+    result = service.process_request(
+        _request(user_id, tenant_id, strategy_id, TradingMode.PAPER, quantity=Decimal("1"))
+    )
+
+    assert result.state == ExecutionOrderStatus.FILLED
+    order = _last_order(db_path)
+    assert Decimal(str(order["quantity"])) == Decimal("0.50000000")
+    position = _position(db_path)
+    assert position is not None
+    assert Decimal(str(position["quantity"])) == Decimal("0.50000000")
+
+
+def test_execution_applies_token_strategy_position_cap(tmp_path: Path):
+    db_path = tmp_path / "execution-token-policy-cap.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set("oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}')
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "momentum"
+    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
+    _insert_token_policy(
+        db_path,
+        strategy_id=strategy_id,
+        max_position_pct_override=0.10,
+    )
+    service, _ = _service(db_path, redis)
+
+    result = service.process_request(
+        _request(user_id, tenant_id, strategy_id, TradingMode.PAPER, quantity=Decimal("1"))
+    )
+
+    assert result.state == ExecutionOrderStatus.FILLED
+    order = _last_order(db_path)
+    assert Decimal(str(order["quantity"])) == Decimal("0.06000000")

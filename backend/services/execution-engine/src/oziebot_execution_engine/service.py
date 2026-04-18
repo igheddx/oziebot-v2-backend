@@ -6,7 +6,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from typing import Any
 
 from sqlalchemy import create_engine, text
@@ -20,6 +20,7 @@ from oziebot_common.queues import (
     risk_decision_from_json,
     trade_intent_from_json,
 )
+from oziebot_common.token_policy import resolve_effective_token_policy
 from oziebot_domain.events import NotificationEvent, NotificationEventType
 from oziebot_domain.execution import ExecutionEvent, ExecutionOrderStatus, ExecutionRequest, ExecutionSubmission
 from oziebot_domain.risk import RiskDecision, RiskOutcome
@@ -109,6 +110,7 @@ class ExecutionService:
         if existing is not None:
             return ProcessResult(order_id=str(existing["id"]), state=ExecutionOrderStatus(existing["state"]), duplicated=True)
 
+        request, policy_failure = self._apply_token_strategy_policy(request)
         reserve_cents = self._estimate_reserve_cents(request)
         now = _utcnow()
         order_id = str(uuid.uuid4())
@@ -125,9 +127,9 @@ class ExecutionService:
               :id, :intent_id, :correlation_id, :tenant_id, :user_id, :strategy_id, :symbol, :side, :order_type,
               :trading_mode, :venue, :state, :quantity, :requested_notional_cents, :reserved_cash_cents,
               :locked_cash_cents, :filled_quantity, :avg_fill_price, :fees_cents, :idempotency_key,
-              :client_order_id, NULL, NULL, NULL, :trace_id,
+              :client_order_id, NULL, :failure_code, :failure_detail, :trace_id,
               :intent_payload, :risk_payload, :adapter_payload, :created_at, :updated_at, NULL,
-              NULL, NULL, NULL
+              NULL, NULL, :failed_at
             )
             """
         )
@@ -147,7 +149,11 @@ class ExecutionService:
                         "order_type": request.order_type.value,
                         "trading_mode": request.trading_mode.value,
                         "venue": request.venue.value,
-                        "state": ExecutionOrderStatus.CREATED.value,
+                        "state": (
+                            ExecutionOrderStatus.FAILED.value
+                            if policy_failure is not None
+                            else ExecutionOrderStatus.CREATED.value
+                        ),
                         "quantity": str(request.quantity),
                         "requested_notional_cents": reserve_cents or 0,
                         "reserved_cash_cents": 0,
@@ -157,12 +163,15 @@ class ExecutionService:
                         "fees_cents": 0,
                         "idempotency_key": request.idempotency_key,
                         "client_order_id": request.client_order_id,
+                        "failure_code": "token_strategy_policy" if policy_failure is not None else None,
+                        "failure_detail": policy_failure,
                         "trace_id": request.trace_id,
                         "intent_payload": json.dumps(request.intent_payload, default=str),
                         "risk_payload": json.dumps(request.risk.model_dump(mode="json"), default=str),
                         "adapter_payload": json.dumps({}, default=str),
                         "created_at": now,
                         "updated_at": now,
+                        "failed_at": now if policy_failure is not None else None,
                     },
                 )
         except IntegrityError:
@@ -170,6 +179,20 @@ class ExecutionService:
             if existing is None:
                 raise
             return ProcessResult(order_id=str(existing["id"]), state=ExecutionOrderStatus(existing["state"]), duplicated=True)
+
+        if policy_failure is not None:
+            self._emit_event(
+                order_id,
+                request,
+                ExecutionOrderStatus.FAILED,
+                detail=policy_failure,
+                payload={"failure_code": "token_strategy_policy"},
+            )
+            return ProcessResult(
+                order_id=order_id,
+                state=ExecutionOrderStatus.FAILED,
+                duplicated=False,
+            )
 
         self._emit_event(order_id, request, ExecutionOrderStatus.CREATED, detail="Order created")
 
@@ -181,6 +204,171 @@ class ExecutionService:
         adapter = self._paper_adapter if request.trading_mode == TradingMode.PAPER else self._live_adapter
         submission = adapter.submit(request)
         return self._apply_submission(request, order_id, reserve_cents, submission)
+
+    def _apply_token_strategy_policy(
+        self,
+        request: ExecutionRequest,
+    ) -> tuple[ExecutionRequest, str | None]:
+        if request.side != Side.BUY:
+            return request, None
+
+        policy_row = self._load_token_strategy_policy(
+            symbol=request.symbol,
+            strategy_id=request.strategy_id,
+        )
+        effective = resolve_effective_token_policy(policy_row)
+        intent_payload = dict(request.intent_payload)
+        metadata = dict(intent_payload.get("metadata") or {})
+        metadata["token_policy_execution"] = {
+            "admin_enabled": effective["admin_enabled"],
+            "recommendation_status": effective["effective_recommendation_status"],
+            "recommendation_reason": effective["effective_recommendation_reason"],
+            "size_multiplier": str(effective["size_multiplier"]),
+            "max_position_pct_override": str(effective["max_position_pct_override"])
+            if effective["max_position_pct_override"] is not None
+            else None,
+        }
+        intent_payload["metadata"] = metadata
+        request = request.model_copy(update={"intent_payload": intent_payload})
+
+        if not effective["admin_enabled"]:
+            return request, "Execution rejected: token strategy disabled by admin"
+        if effective["effective_recommendation_status"] == "blocked":
+            reason = effective["effective_recommendation_reason"] or "blocked by token strategy policy"
+            return request, f"Execution rejected: token strategy blocked ({reason})"
+
+        adjusted_quantity = request.quantity
+        if effective["effective_recommendation_status"] == "discouraged":
+            adjusted_quantity = (adjusted_quantity * effective["size_multiplier"]).quantize(
+                Decimal("0.00000001"),
+                rounding=ROUND_DOWN,
+            )
+            if adjusted_quantity <= 0:
+                return request, "Execution rejected: token strategy policy reduced size to zero"
+
+        max_position_pct_override = effective["max_position_pct_override"]
+        if max_position_pct_override is not None:
+            if request.price_hint is None or request.price_hint <= 0:
+                return request, "Execution rejected: missing price hint for token strategy position cap"
+            total_capital_cents = self._load_total_capital_cents(
+                user_id=request.user_id,
+                trading_mode=request.trading_mode,
+            )
+            max_position_cents = int(
+                (Decimal(str(total_capital_cents)) * max_position_pct_override).quantize(
+                    Decimal("1"),
+                    rounding=ROUND_DOWN,
+                )
+            )
+            current_exposure_cents = self._load_strategy_token_exposure_cents(request)
+            remaining_cents = max_position_cents - current_exposure_cents
+            if remaining_cents <= 0:
+                return request, "Execution rejected: token strategy position override cap reached"
+            max_quantity = (
+                (Decimal(str(remaining_cents)) / Decimal("100")) / request.price_hint
+            ).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
+            adjusted_quantity = min(adjusted_quantity, max_quantity)
+            if adjusted_quantity <= 0:
+                return request, "Execution rejected: token strategy position override cap reached"
+
+        if adjusted_quantity == request.quantity:
+            return request, None
+
+        metadata["token_policy_execution"]["adjusted_quantity"] = str(adjusted_quantity)
+        intent_payload["quantity"] = {
+            **dict(intent_payload.get("quantity") or {}),
+            "amount": str(adjusted_quantity),
+        }
+        intent_payload["metadata"] = metadata
+        return (
+            request.model_copy(
+                update={
+                    "quantity": adjusted_quantity,
+                    "intent_payload": intent_payload,
+                }
+            ),
+            None,
+        )
+
+    def _load_token_strategy_policy(
+        self,
+        *,
+        symbol: str,
+        strategy_id: str,
+    ) -> dict[str, Any] | None:
+        stmt = text(
+            """
+            SELECT
+              tsp.admin_enabled,
+              tsp.recommendation_status,
+              tsp.recommendation_reason,
+              tsp.recommendation_status_override,
+              tsp.recommendation_reason_override,
+              tsp.max_position_pct_override
+            FROM platform_token_allowlist p
+            LEFT JOIN token_strategy_policy tsp
+              ON tsp.token_id = p.id
+             AND tsp.strategy_id = :strategy_id
+            WHERE p.symbol = :symbol
+            LIMIT 1
+            """
+        )
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                stmt,
+                {"symbol": symbol, "strategy_id": strategy_id},
+            ).mappings().first()
+        return dict(row) if row else None
+
+    def _load_total_capital_cents(
+        self,
+        *,
+        user_id: uuid.UUID,
+        trading_mode: TradingMode,
+    ) -> int:
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT COALESCE(SUM(assigned_capital_cents), 0) AS total
+                    FROM strategy_capital_buckets
+                    WHERE user_id = :user_id
+                      AND trading_mode = :trading_mode
+                    """
+                ),
+                {
+                    "user_id": _to_hex(user_id),
+                    "trading_mode": trading_mode.value,
+                },
+            ).first()
+        return int(row.total or 0) if row is not None else 0
+
+    def _load_strategy_token_exposure_cents(self, request: ExecutionRequest) -> int:
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT COALESCE(SUM(CAST(quantity AS NUMERIC) * CAST(avg_entry_price AS NUMERIC)), 0) AS total
+                    FROM execution_positions
+                    WHERE user_id = :user_id
+                      AND strategy_id = :strategy_id
+                      AND symbol = :symbol
+                      AND trading_mode = :trading_mode
+                      AND CAST(quantity AS NUMERIC) > 0
+                    """
+                ),
+                {
+                    "user_id": _to_hex(request.user_id),
+                    "strategy_id": request.strategy_id,
+                    "symbol": request.symbol,
+                    "trading_mode": request.trading_mode.value,
+                },
+            ).first()
+        return int(
+            (
+                Decimal(str(row.total if row is not None else 0)) * Decimal("100")
+            ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
 
     def enforce_runtime_controls(self) -> int:
         if self._engine is None:
