@@ -16,6 +16,7 @@ from oziebot_market_data_ingestor.normalizer import (
     normalize_orderbook_top,
     normalize_trade,
 )
+from oziebot_market_data_ingestor.policy_refresh import TokenPolicyRefresher
 from oziebot_market_data_ingestor.redis_cache import RedisMarketCache
 from oziebot_market_data_ingestor.stale import StaleDataDetector, StaleThresholds
 from oziebot_market_data_ingestor.storage import MarketDataStore
@@ -97,6 +98,7 @@ async def main() -> None:
 
     cache = RedisMarketCache(r, ttl_seconds=s.cache_ttl_seconds)
     store = MarketDataStore(engine)
+    refresher = TokenPolicyRefresher(engine)
     stale = StaleDataDetector(
         thresholds=StaleThresholds(
             trade=s.stale_trade_seconds,
@@ -125,10 +127,12 @@ async def main() -> None:
     await _reconcile_bbo(rest, store, cache, stale, products)
     health.touch()
     await _reconcile_candles(rest, store, cache, stale, products, s.candles_granularity_sec)
+    refresher.refresh_active_tokens()
     health.mark_ready()
 
     channels = ["ticker", "matches", "level2"]
     last_candle_reconcile = datetime.now(UTC)
+    last_policy_refresh = datetime.now(UTC)
     try:
         async for msg in ws.subscribe_and_stream(products, channels):
             typ = msg.get("type")
@@ -171,6 +175,10 @@ async def main() -> None:
             if (now - last_candle_reconcile).total_seconds() >= s.candles_granularity_sec:
                 await _reconcile_candles(rest, store, cache, stale, products, s.candles_granularity_sec)
                 last_candle_reconcile = now
+                health.touch()
+            if (now - last_policy_refresh).total_seconds() >= s.token_policy_recalc_interval_seconds:
+                refresher.refresh_active_tokens()
+                last_policy_refresh = now
                 health.touch()
     finally:
         await rest.close()

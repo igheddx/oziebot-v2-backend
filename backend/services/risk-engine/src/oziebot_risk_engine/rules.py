@@ -30,14 +30,20 @@ class RuleContext:
     token_platform_enabled: bool
     token_user_enabled: bool
     strategy_enabled: bool
+    token_policy_admin_enabled: bool
+    token_policy_status: str
+    token_policy_reason: str | None
+    token_policy_size_multiplier: Decimal
     bucket: dict[str, Any] | None
     total_capital_cents: int
     daily_loss_cents: int
     recent_loss_count: int
     cooldown_loss_threshold: int
     cooldown_until: datetime | None
+    current_strategy_token_exposure_cents: int
     current_strategy_exposure_cents: int
     current_token_exposure_cents: int
+    token_policy_max_position_cents: int
     max_strategy_exposure_cents: int
     max_token_exposure_cents: int
     global_daily_loss_limit_pct: Decimal
@@ -103,6 +109,77 @@ class StrategyEnabledRule(RiskRule):
         if not ctx.strategy_enabled:
             return RuleResult(self.name, "reject", RejectionReason.POLICY, "Strategy is disabled")
         return None
+
+
+class TokenStrategyPolicyRule(RiskRule):
+    name = "token_strategy_policy"
+
+    def evaluate(self, ctx: RuleContext) -> RuleResult | None:
+        if not ctx.token_policy_admin_enabled:
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.POLICY,
+                "Token strategy policy disabled by admin",
+            )
+        if ctx.token_policy_status == "blocked":
+            detail = ctx.token_policy_reason or "Token strategy policy blocked this trade"
+            return RuleResult(self.name, "reject", RejectionReason.POLICY, detail)
+        return None
+
+
+class DiscouragedTokenPolicySizingRule(RiskRule):
+    name = "token_strategy_discouraged"
+
+    def evaluate(self, ctx: RuleContext) -> RuleResult | None:
+        if ctx.action != "buy":
+            return None
+        if ctx.token_policy_status != "discouraged":
+            return None
+        if ctx.token_policy_size_multiplier <= 0 or ctx.token_policy_size_multiplier >= Decimal("1"):
+            return None
+        reduced = (ctx.suggested_size * ctx.token_policy_size_multiplier).quantize(
+            Decimal("0.00000001")
+        )
+        return RuleResult(
+            self.name,
+            "reduce_size",
+            RejectionReason.POLICY,
+            ctx.token_policy_reason or "Reduced by discouraged token strategy policy",
+            reduced_size=max(reduced, Decimal("0")),
+        )
+
+
+class TokenStrategyPositionOverrideRule(RiskRule):
+    name = "token_strategy_position_override"
+
+    def evaluate(self, ctx: RuleContext) -> RuleResult | None:
+        if ctx.action != "buy" or ctx.token_policy_max_position_cents <= 0 or ctx.mid_price <= 0:
+            return None
+        notional = ctx.suggested_size * ctx.mid_price
+        projected = Decimal(str(ctx.current_strategy_token_exposure_cents)) + notional
+        limit = Decimal(str(ctx.token_policy_max_position_cents))
+        if projected <= limit:
+            return None
+        allowed_notional = max(
+            Decimal("0"),
+            limit - Decimal(str(ctx.current_strategy_token_exposure_cents)),
+        )
+        if allowed_notional <= 0:
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.POSITION_CAP,
+                "Token strategy position override cap reached",
+            )
+        reduced = (allowed_notional / ctx.mid_price).quantize(Decimal("0.00000001"))
+        return RuleResult(
+            self.name,
+            "reduce_size",
+            RejectionReason.POSITION_CAP,
+            "Reduced by token strategy position override",
+            reduced_size=max(reduced, Decimal("0")),
+        )
 
 
 class CapitalBucketRule(RiskRule):
@@ -394,11 +471,14 @@ def default_rules(settings) -> list[RiskRule]:
         TokenAllowlistRule(),
         UserTokenRule(),
         StrategyEnabledRule(),
+        TokenStrategyPolicyRule(),
+        DiscouragedTokenPolicySizingRule(),
         CapitalBucketRule(),
         MaxPerTradeRiskRule(settings.risk_max_per_trade_risk_pct),
         MaxPositionSizeRule(settings.risk_max_position_size_cents),
         MaxStrategyAllocationRule(settings.risk_max_strategy_allocation_pct),
         MaxTokenConcentrationRule(settings.risk_max_token_concentration_pct),
+        TokenStrategyPositionOverrideRule(),
         MaxStrategyExposureRule(),
         MaxTokenExposureRule(),
         MaxDailyLossRule(settings.risk_max_daily_loss_cents),

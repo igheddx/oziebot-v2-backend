@@ -22,6 +22,7 @@ from oziebot_api.models.platform_trial_policy import PlatformTrialPolicy
 from oziebot_api.models.subscription_plan import SubscriptionPlan
 from oziebot_api.models.tenant import Tenant
 from oziebot_api.models.tenant_integration import TenantIntegration
+from oziebot_api.models.token_market_profile import TokenMarketProfile
 from oziebot_api.schemas.platform_admin import (
     GlobalPauseBody,
     SettingValueBody,
@@ -32,6 +33,7 @@ from oziebot_api.schemas.platform_admin import (
     TenantCoinbaseHealthPatch,
     TokenAllowlistCreate,
     TokenAllowlistPatch,
+    TokenStrategyPolicyPatch,
     TrialPolicyBody,
 )
 from oziebot_api.services.audit import record_admin_action
@@ -42,6 +44,7 @@ from oziebot_api.services.platform_management import (
     set_global_trading_pause,
     upsert_setting,
 )
+from oziebot_api.services.token_policy import TokenPolicyService
 
 router = APIRouter(prefix="/admin/platform", tags=["admin-platform"])
 
@@ -151,6 +154,13 @@ def _token_out(r: PlatformTokenAllowlist) -> dict[str, Any]:
     }
 
 
+def _get_token_or_404(db: Session, token_id: uuid.UUID) -> PlatformTokenAllowlist:
+    row = db.get(PlatformTokenAllowlist, token_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Token not found")
+    return row
+
+
 @router.post("/tokens", status_code=201)
 def create_token(
     body: TokenAllowlistCreate,
@@ -177,13 +187,14 @@ def create_token(
         db.flush()
     except IntegrityError as e:
         raise HTTPException(status_code=409, detail="Token row conflict") from e
+    policy_snapshot = TokenPolicyService(db).recalculate_token(row)
     _audit(
         db,
         admin,
         action="token_allowlist.create",
         resource_type="platform_token_allowlist",
         resource_id=str(row.id),
-        details={"record": _token_out(row)},
+        details={"record": _token_out(row), "policy_snapshot": policy_snapshot},
         request=request,
     )
     return _token_out(row)
@@ -197,9 +208,7 @@ def patch_token(
     db: DbSession,
     request: Request,
 ) -> dict[str, Any]:
-    row = db.get(PlatformTokenAllowlist, token_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Token not found")
+    row = _get_token_or_404(db, token_id)
     before = _token_out(row)
     data = body.model_dump(exclude_unset=True)
     if "symbol" in data and data["symbol"]:
@@ -217,13 +226,14 @@ def patch_token(
     if "extra" in data:
         row.extra = data["extra"]
     row.updated_at = datetime.now(UTC)
+    policy_snapshot = TokenPolicyService(db).recalculate_token(row)
     _audit(
         db,
         admin,
         action="token_allowlist.update",
         resource_type="platform_token_allowlist",
         resource_id=str(token_id),
-        details={"before": before, "after": _token_out(row)},
+        details={"before": before, "after": _token_out(row), "policy_snapshot": policy_snapshot},
         request=request,
     )
     return _token_out(row)
@@ -236,9 +246,7 @@ def delete_token(
     db: DbSession,
     request: Request,
 ) -> None:
-    row = db.get(PlatformTokenAllowlist, token_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Token not found")
+    row = _get_token_or_404(db, token_id)
     snap = _token_out(row)
     db.delete(row)
     try:
@@ -257,6 +265,84 @@ def delete_token(
         details={"deleted": snap},
         request=request,
     )
+
+
+@router.get("/tokens/{token_id}/market-profile")
+def get_token_market_profile(
+    token_id: uuid.UUID,
+    _admin: RootAdminUser,
+    db: DbSession,
+) -> dict[str, Any]:
+    token = _get_token_or_404(db, token_id)
+    payload = TokenPolicyService(db).describe_token(token)
+    if payload["market_profile"] is None:
+        raise HTTPException(status_code=404, detail="Token market profile not found")
+    return payload
+
+
+@router.get("/tokens/{token_id}/strategy-policies")
+def get_token_strategy_policies(
+    token_id: uuid.UUID,
+    _admin: RootAdminUser,
+    db: DbSession,
+) -> dict[str, Any]:
+    token = _get_token_or_404(db, token_id)
+    return TokenPolicyService(db).describe_token(token)
+
+
+@router.post("/tokens/{token_id}/recalculate-policy")
+def recalculate_token_policy(
+    token_id: uuid.UUID,
+    admin: RootAdminUser,
+    db: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    token = _get_token_or_404(db, token_id)
+    payload = TokenPolicyService(db).recalculate_token(token)
+    _audit(
+        db,
+        admin,
+        action="token_policy.recalculate",
+        resource_type="platform_token_allowlist",
+        resource_id=str(token_id),
+        details={"token": _token_out(token)},
+        request=request,
+    )
+    return payload
+
+
+@router.patch("/tokens/{token_id}/strategy-policies/{strategy_id}")
+def patch_token_strategy_policy(
+    token_id: uuid.UUID,
+    strategy_id: str,
+    body: TokenStrategyPolicyPatch,
+    admin: RootAdminUser,
+    db: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    token = _get_token_or_404(db, token_id)
+    profile = db.scalar(select(TokenMarketProfile).where(TokenMarketProfile.token_id == token_id))
+    if profile is None:
+        TokenPolicyService(db).recalculate_token(token)
+    payload = TokenPolicyService(db).update_policy_override(
+        token=token,
+        strategy_id=strategy_id.strip().lower(),
+        admin_enabled=body.admin_enabled,
+        recommendation_status=body.recommendation_status,
+        recommendation_reason=body.recommendation_reason,
+        max_position_pct_override=body.max_position_pct_override,
+        notes=body.notes,
+    )
+    _audit(
+        db,
+        admin,
+        action="token_policy.override",
+        resource_type="token_strategy_policy",
+        resource_id=f"{token_id}:{strategy_id}",
+        details=body.model_dump(exclude_unset=True),
+        request=request,
+    )
+    return payload
 
 
 def _strategy_out(r: PlatformStrategy) -> dict[str, Any]:

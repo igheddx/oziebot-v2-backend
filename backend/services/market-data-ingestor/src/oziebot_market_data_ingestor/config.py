@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     candles_granularity_sec: int = 60  # poll REST every 60s for candles
     cache_ttl_seconds: int = 300
     trade_recovery_limit: int = 20
+    token_policy_recalc_interval_seconds: int = 900
     loop_sleep_sec: float = 1.0
 
 

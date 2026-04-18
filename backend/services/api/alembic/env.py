@@ -22,6 +22,8 @@ from oziebot_api.models import (  # noqa: F401
     TenantEntitlement,
     TenantIntegration,
     TenantMembership,
+    TokenMarketProfile,
+    TokenStrategyPolicy,
     User,
 )
 

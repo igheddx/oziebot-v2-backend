@@ -403,3 +403,149 @@ def test_dca_scheduler_enforces_buy_interval_from_runtime_state():
 
     assert processed == 0
     assert runner.generated == 0
+
+
+def test_momentum_runner_skips_blocked_token_policy():
+    class PolicyRunner(StrategyRunner):
+        def __init__(self):
+            super().__init__(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+            self.generated = 0
+
+        def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
+            return [
+                {
+                    "user_id": str(uuid.uuid4()),
+                    "strategy_id": "momentum",
+                    "tenant_id": uuid.uuid4(),
+                    "config": {},
+                }
+            ]
+
+        def _load_platform_strategy_config(self, strategy_id: str) -> dict[str, object]:
+            return {}
+
+        def _load_allowed_symbols(self, user_id: str) -> list[str]:
+            return ["BTC-USD"]
+
+        def _load_market_snapshot(self, symbol: str) -> MarketSnapshot | None:
+            return MarketSnapshot(
+                timestamp=datetime.now(UTC),
+                symbol=symbol,
+                current_price=Decimal("50000"),
+                bid_price=Decimal("49990"),
+                ask_price=Decimal("50010"),
+                volume_24h=Decimal("100"),
+                open_price=Decimal("50000"),
+                high_price=Decimal("50500"),
+                low_price=Decimal("49500"),
+                close_price=Decimal("50000"),
+            )
+
+        def _load_position_state(self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str) -> PositionState:
+            return PositionState(symbol=symbol, quantity=Decimal("0"))
+
+        def _sync_position_runtime_state(
+            self,
+            *,
+            user_id: str,
+            strategy_name: str,
+            trading_mode: str,
+            position_state: PositionState,
+            market: MarketSnapshot,
+            now: datetime,
+        ) -> PositionState:
+            return position_state
+
+        def _load_token_strategy_policy(self, *, symbol: str, strategy_name: str) -> dict[str, object] | None:
+            return {
+                "admin_enabled": True,
+                "recommendation_status": "blocked",
+                "recommendation_reason": "blocked token",
+            }
+
+        def _generate_signal(self, **kwargs) -> StrategySignal:
+            self.generated += 1
+            raise AssertionError("blocked token should not reach strategy generation")
+
+        def _persist_run(self, **kwargs) -> None:
+            return None
+
+        def _persist_signal(self, event: StrategySignalEvent) -> None:
+            raise AssertionError("blocked token should not emit a signal")
+
+    runner = PolicyRunner()
+    assert runner.run_once() == 0
+    assert runner.generated == 0
+
+
+def test_mean_reversion_runner_skips_admin_disabled_token_policy():
+    class PolicyRunner(StrategyRunner):
+        def __init__(self):
+            super().__init__(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+            self.generated = 0
+
+        def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
+            return [
+                {
+                    "user_id": str(uuid.uuid4()),
+                    "strategy_id": "reversion",
+                    "tenant_id": uuid.uuid4(),
+                    "config": {},
+                }
+            ]
+
+        def _load_platform_strategy_config(self, strategy_id: str) -> dict[str, object]:
+            return {}
+
+        def _load_allowed_symbols(self, user_id: str) -> list[str]:
+            return ["ETH-USD"]
+
+        def _load_market_snapshot(self, symbol: str) -> MarketSnapshot | None:
+            return MarketSnapshot(
+                timestamp=datetime.now(UTC),
+                symbol=symbol,
+                current_price=Decimal("3000"),
+                bid_price=Decimal("2999"),
+                ask_price=Decimal("3001"),
+                volume_24h=Decimal("250"),
+                open_price=Decimal("2950"),
+                high_price=Decimal("3025"),
+                low_price=Decimal("2940"),
+                close_price=Decimal("3000"),
+            )
+
+        def _load_position_state(self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str) -> PositionState:
+            return PositionState(symbol=symbol, quantity=Decimal("0"))
+
+        def _sync_position_runtime_state(
+            self,
+            *,
+            user_id: str,
+            strategy_name: str,
+            trading_mode: str,
+            position_state: PositionState,
+            market: MarketSnapshot,
+            now: datetime,
+        ) -> PositionState:
+            return position_state
+
+        def _load_token_strategy_policy(self, *, symbol: str, strategy_name: str) -> dict[str, object] | None:
+            return {
+                "admin_enabled": False,
+                "recommendation_status": "allowed",
+                "recommendation_reason": "manually disabled",
+            }
+
+        def _generate_signal(self, **kwargs) -> StrategySignal:
+            self.generated += 1
+            raise AssertionError("admin-disabled token should not reach strategy generation")
+
+        def _persist_run(self, **kwargs) -> None:
+            return None
+
+        def _persist_signal(self, event: StrategySignalEvent) -> None:
+            raise AssertionError("admin-disabled token should not emit a signal")
+
+    runner = PolicyRunner()
+    assert runner.run_once() == 0
+    assert runner.generated == 0

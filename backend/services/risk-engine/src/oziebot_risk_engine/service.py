@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import create_engine, text
 
 from oziebot_common.queues import QueueNames, notification_event_to_json, push_json
+from oziebot_common.token_policy import resolve_effective_token_policy
 from oziebot_domain.events import NotificationEvent, NotificationEventType
 from oziebot_domain.intents import TradeIntent
 from oziebot_domain.risk import RejectionReason, RiskDecision, RiskOutcome
@@ -97,14 +98,20 @@ class RiskEngineService:
             token_platform_enabled=facts["token_platform_enabled"],
             token_user_enabled=facts["token_user_enabled"],
             strategy_enabled=facts["strategy_enabled"],
+            token_policy_admin_enabled=facts["token_policy_admin_enabled"],
+            token_policy_status=facts["token_policy_status"],
+            token_policy_reason=facts["token_policy_reason"],
+            token_policy_size_multiplier=facts["token_policy_size_multiplier"],
             bucket=facts["bucket"],
             total_capital_cents=facts["total_capital_cents"],
             daily_loss_cents=facts["daily_loss_cents"],
             recent_loss_count=facts["recent_loss_count"],
             cooldown_loss_threshold=facts["cooldown_loss_threshold"],
             cooldown_until=facts["cooldown_until"],
+            current_strategy_token_exposure_cents=facts["current_strategy_token_exposure_cents"],
             current_strategy_exposure_cents=facts["current_strategy_exposure_cents"],
             current_token_exposure_cents=facts["current_token_exposure_cents"],
+            token_policy_max_position_cents=facts["token_policy_max_position_cents"],
             max_strategy_exposure_cents=facts["max_strategy_exposure_cents"],
             max_token_exposure_cents=facts["max_token_exposure_cents"],
             global_daily_loss_limit_pct=facts["global_daily_loss_limit_pct"],
@@ -369,6 +376,26 @@ class RiskEngineService:
                 ),
                 {"symbol": symbol},
             ).first()
+            token_policy_row = conn.execute(
+                text(
+                    """
+                    SELECT
+                      tsp.admin_enabled,
+                      tsp.recommendation_status,
+                      tsp.recommendation_reason,
+                      tsp.recommendation_status_override,
+                      tsp.recommendation_reason_override,
+                      tsp.max_position_pct_override
+                    FROM platform_token_allowlist p
+                    LEFT JOIN token_strategy_policy tsp
+                      ON tsp.token_id = p.id
+                     AND tsp.strategy_id = :strategy_id
+                    WHERE p.symbol = :symbol
+                    LIMIT 1
+                    """
+                ),
+                {"symbol": symbol, "strategy_id": signal.strategy_name},
+            ).mappings().first()
 
             token_user_enabled = conn.execute(
                 text(
@@ -424,6 +451,25 @@ class RiskEngineService:
                     """
                 ),
                 {"user_id": user_id, "mode": signal.trading_mode.value, "sid": signal.strategy_name},
+            ).first()
+            strategy_token_exposure = conn.execute(
+                text(
+                    """
+                    SELECT COALESCE(SUM(CAST(quantity AS NUMERIC) * CAST(avg_entry_price AS NUMERIC)), 0) AS total
+                    FROM execution_positions
+                    WHERE user_id = :user_id
+                      AND trading_mode = :mode
+                      AND strategy_id = :sid
+                      AND symbol = :symbol
+                      AND CAST(quantity AS NUMERIC) > 0
+                    """
+                ),
+                {
+                    "user_id": user_id,
+                    "mode": signal.trading_mode.value,
+                    "sid": signal.strategy_name,
+                    "symbol": symbol,
+                },
             ).first()
             token_exposure = conn.execute(
                 text(
@@ -568,25 +614,46 @@ class RiskEngineService:
         global_daily_loss_limit_pct = Decimal(
             str(global_guard_cfg.get("daily_loss_pct", 0) if global_guard_cfg.get("enabled", True) else 0)
         )
+        effective_token_policy = resolve_effective_token_policy(
+            dict(token_policy_row) if token_policy_row else None
+        )
+        total_capital_cents = int(total_capital.total if total_capital else 0)
+        token_policy_max_position_cents = 0
+        max_position_pct_override = effective_token_policy["max_position_pct_override"]
+        if max_position_pct_override is not None and total_capital_cents > 0:
+            token_policy_max_position_cents = int(
+                (Decimal(str(total_capital_cents)) * max_position_pct_override).quantize(Decimal("1"))
+            )
 
         return {
             "platform_paused": paused,
             "strategy_enabled": bool(strategy_row and strategy_row["is_enabled"]),
             "token_platform_enabled": bool(token_platform_enabled and token_platform_enabled.is_enabled),
             "token_user_enabled": bool(token_user_enabled and token_user_enabled.is_enabled),
+            "token_policy_admin_enabled": bool(effective_token_policy["admin_enabled"]),
+            "token_policy_status": str(effective_token_policy["effective_recommendation_status"]),
+            "token_policy_reason": effective_token_policy["effective_recommendation_reason"],
+            "token_policy_size_multiplier": effective_token_policy["size_multiplier"],
             "bucket": dict(bucket) if bucket else None,
-            "total_capital_cents": int(total_capital.total if total_capital else 0),
+            "total_capital_cents": total_capital_cents,
             "entitled": entitled,
             "daily_loss_cents": daily_loss,
             "recent_loss_count": recent_loss_count,
             "cooldown_loss_threshold": max_consecutive_losses,
             "cooldown_until": cooldown_until,
+            "current_strategy_token_exposure_cents": int(
+                (
+                    Decimal(str(strategy_token_exposure.total if strategy_token_exposure else 0))
+                    * Decimal("100")
+                ).quantize(Decimal("1"))
+            ),
             "current_strategy_exposure_cents": int(
                 (Decimal(str(strategy_exposure.total if strategy_exposure else 0)) * Decimal("100")).quantize(Decimal("1"))
             ),
             "current_token_exposure_cents": int(
                 (Decimal(str(token_exposure.total if token_exposure else 0)) * Decimal("100")).quantize(Decimal("1"))
             ),
+            "token_policy_max_position_cents": token_policy_max_position_cents,
             "max_strategy_exposure_cents": int(
                 Decimal(str(risk_caps.get("max_exposure_per_strategy") or 0)) * Decimal("100")
             ),
@@ -766,6 +833,7 @@ class RiskEngineService:
                     "rejection_reason": decision.reason.value if decision.reason else None,
                     "confidence_score": signal.confidence,
                     "applied_risk_rules": decision.rules_evaluated,
+                    "token_policy": signal.reasoning_metadata.get("token_policy"),
                     "outcome": decision.outcome.value,
                     "final_size": decision.final_size,
                     "detail": decision.detail,

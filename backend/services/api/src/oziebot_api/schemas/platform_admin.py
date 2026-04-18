@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -34,6 +34,14 @@ class TokenAllowlistPatch(BaseModel):
     is_enabled: bool | None = None
     sort_order: int | None = None
     extra: dict[str, Any] | None = None
+
+
+class TokenStrategyPolicyPatch(BaseModel):
+    admin_enabled: bool | None = None
+    recommendation_status: Literal["preferred", "allowed", "discouraged", "blocked"] | None = None
+    recommendation_reason: str | None = None
+    max_position_pct_override: Annotated[float | None, Field(default=None, ge=0, le=1)] = None
+    notes: str | None = None
 
 
 class StrategyCatalogCreate(BaseModel):

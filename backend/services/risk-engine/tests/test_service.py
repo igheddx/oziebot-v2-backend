@@ -64,6 +64,15 @@ def _setup_db(db_path: Path) -> None:
             text("CREATE TABLE platform_token_allowlist (id TEXT PRIMARY KEY, symbol TEXT, quote_currency TEXT, is_enabled BOOLEAN)")
         )
         conn.execute(
+            text(
+                "CREATE TABLE token_strategy_policy ("
+                "id TEXT PRIMARY KEY, token_id TEXT, strategy_id TEXT, admin_enabled BOOLEAN, suitability_score REAL,"
+                "recommendation_status TEXT, recommendation_reason TEXT, recommendation_status_override TEXT,"
+                "recommendation_reason_override TEXT, max_position_pct_override REAL, notes TEXT,"
+                "computed_at TEXT, updated_at TEXT)"
+            )
+        )
+        conn.execute(
             text("CREATE TABLE user_token_permissions (id TEXT PRIMARY KEY, user_id TEXT, platform_token_id TEXT, is_enabled BOOLEAN)")
         )
         conn.execute(
@@ -150,6 +159,43 @@ def _seed_common(db_path: Path, user_id: str, tenant_id: str, strategy_name: str
                 "VALUES (:id,:u,:s,'live',200000,100000,0),(:id2,:u,:s,'paper',200000,100000,0)"
             ),
             {"id": str(uuid4()), "id2": str(uuid4()), "u": user_id, "s": strategy_name},
+        )
+
+
+def _insert_token_policy(
+    db_path: Path,
+    *,
+    strategy_name: str,
+    status: str = "allowed",
+    admin_enabled: bool = True,
+    max_position_pct_override: float | None = None,
+) -> None:
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    now = datetime.now(UTC).isoformat()
+    with eng.begin() as conn:
+        token_id = conn.execute(
+            text("SELECT id FROM platform_token_allowlist WHERE symbol = 'BTC-USD' LIMIT 1")
+        ).first()
+        assert token_id is not None
+        conn.execute(
+            text(
+                "INSERT INTO token_strategy_policy ("
+                "id, token_id, strategy_id, admin_enabled, suitability_score, recommendation_status,"
+                "recommendation_reason, recommendation_status_override, recommendation_reason_override,"
+                "max_position_pct_override, notes, computed_at, updated_at"
+                ") VALUES (:id,:token_id,:strategy_id,:admin_enabled,80,:status,:reason,NULL,NULL,:max_position_pct_override,NULL,:computed_at,:updated_at)"
+            ),
+            {
+                "id": str(uuid4()),
+                "token_id": token_id[0],
+                "strategy_id": strategy_name,
+                "admin_enabled": 1 if admin_enabled else 0,
+                "status": status,
+                "reason": f"{strategy_name}:{status}",
+                "max_position_pct_override": max_position_pct_override,
+                "computed_at": now,
+                "updated_at": now,
+            },
         )
 
 
@@ -461,3 +507,62 @@ def test_risk_rejects_when_global_daily_loss_guard_triggered(tmp_path: Path):
     assert intent is None
     assert "Global daily loss guard active" in (decision.detail or "")
     assert redis._lists
+
+
+def test_risk_rejects_blocked_token_strategy_policy(tmp_path: Path):
+    db_path = tmp_path / "risk-token-policy-blocked.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+    _insert_token_policy(db_path, strategy_name="momentum", status="blocked")
+
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = RiskEngineService(settings, _redis_with_fresh_market())
+
+    decision, intent = svc.evaluate(_signal(user_id), trace_id="t-token-policy-blocked")
+
+    assert decision.outcome == RiskOutcome.REJECT
+    assert intent is None
+    assert "token_strategy_policy" in (decision.detail or "")
+
+
+def test_risk_reduces_size_for_discouraged_token_policy(tmp_path: Path):
+    db_path = tmp_path / "risk-token-policy-discouraged.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+    _insert_token_policy(db_path, strategy_name="momentum", status="discouraged")
+
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = RiskEngineService(settings, _redis_with_fresh_market())
+
+    decision, intent = svc.evaluate(_signal(user_id, size="1"), trace_id="t-token-policy-discouraged")
+
+    assert decision.outcome == RiskOutcome.REDUCE_SIZE
+    assert intent is not None
+    assert Decimal(decision.final_size) < Decimal(decision.original_size)
+
+
+def test_risk_applies_max_position_pct_override(tmp_path: Path):
+    db_path = tmp_path / "risk-token-policy-cap.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+    _insert_token_policy(
+        db_path,
+        strategy_name="momentum",
+        status="allowed",
+        max_position_pct_override=0.10,
+    )
+
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = RiskEngineService(settings, _redis_with_fresh_market())
+
+    decision, intent = svc.evaluate(_signal(user_id, size="1"), trace_id="t-token-policy-cap")
+
+    assert decision.outcome == RiskOutcome.REDUCE_SIZE
+    assert intent is not None
+    assert Decimal(decision.final_size) == Decimal("0.39996000")

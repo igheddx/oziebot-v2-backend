@@ -45,6 +45,8 @@ from oziebot_api.models.subscription_plan import SubscriptionPlan
 from oziebot_api.models.tenant import Tenant
 from oziebot_api.models.tenant_entitlement import TenantEntitlement
 from oziebot_api.models.tenant_integration import TenantIntegration
+from oziebot_api.models.token_market_profile import TokenMarketProfile
+from oziebot_api.models.token_strategy_policy import TokenStrategyPolicy
 from oziebot_api.models.user import User
 from oziebot_api.models.user_token_permission import UserTokenPermission
 from oziebot_api.models.user_strategy import (
@@ -95,6 +97,8 @@ __all__ = [
     "TenantEntitlement",
     "TenantIntegration",
     "TenantMembership",
+    "TokenMarketProfile",
+    "TokenStrategyPolicy",
     "User",
     "UserStrategy",
     "UserStrategyState",

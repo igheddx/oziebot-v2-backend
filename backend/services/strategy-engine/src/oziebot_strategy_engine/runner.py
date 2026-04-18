@@ -12,6 +12,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from oziebot_common.queues import QueueNames, push_json, strategy_signal_to_json
+from oziebot_common.token_policy import resolve_effective_token_policy
 from oziebot_domain.signal_pipeline import StrategySignalEvent
 from oziebot_domain.strategy import SignalType, StrategySignal
 from oziebot_domain.tenant import TenantId
@@ -100,6 +101,10 @@ class StrategyRunner:
                 market = self._load_market_snapshot(symbol)
                 if market is None:
                     continue
+                token_policy = self._load_token_strategy_policy(
+                    symbol=symbol,
+                    strategy_name=strategy_name,
+                )
 
                 for mode in (TradingMode.PAPER, TradingMode.LIVE):
                     interval = STRATEGY_INTERVAL_SECONDS.get(strategy_name, 60)
@@ -137,6 +142,25 @@ class StrategyRunner:
                     run_id = uuid.uuid4()
                     trace_id = str(run_id)
                     try:
+                        policy_reason = self._token_policy_suppression_reason(token_policy)
+                        if policy_reason is not None:
+                            self._persist_run(
+                                run_id=run_id,
+                                user_id=user_id,
+                                strategy_name=strategy_name,
+                                symbol=symbol,
+                                trading_mode=mode.value,
+                                status="completed",
+                                trace_id=trace_id,
+                                metadata={
+                                    "suppressed": True,
+                                    "suppression_reason": policy_reason,
+                                    "token_policy": token_policy,
+                                },
+                                started_at=now,
+                                completed_at=datetime.now(UTC),
+                            )
+                            continue
                         schedule_reason = self._scheduler_reason(
                             strategy_name=strategy_name,
                             config=config,
@@ -181,6 +205,7 @@ class StrategyRunner:
                             position_state=position_state,
                             config=config,
                         )
+                        signal = self._apply_token_policy_to_signal(signal=signal, token_policy=token_policy)
                         suppress_reason = self._suppression_reason(
                             user_id=user_id,
                             strategy_name=strategy_name,
@@ -204,6 +229,7 @@ class StrategyRunner:
                                     "suppressed": True,
                                     "suppression_reason": suppress_reason,
                                     "confidence": float(signal.confidence),
+                                    "token_policy": (signal.metadata or {}).get("token_policy"),
                                 },
                                 started_at=now,
                                 completed_at=datetime.now(UTC),
@@ -239,7 +265,10 @@ class StrategyRunner:
                             trading_mode=mode.value,
                             status="completed",
                             trace_id=trace_id,
-                            metadata={"confidence": float(signal.confidence)},
+                            metadata={
+                                "confidence": float(signal.confidence),
+                                "token_policy": (signal.metadata or {}).get("token_policy"),
+                            },
                             started_at=now,
                             completed_at=datetime.now(UTC),
                         )
@@ -591,6 +620,70 @@ class StrategyRunner:
         if now < next_due_at:
             return f"dca interval active until {next_due_at.isoformat()}"
         return None
+
+    def _load_token_strategy_policy(
+        self,
+        *,
+        symbol: str,
+        strategy_name: str,
+    ) -> dict[str, Any] | None:
+        if self._engine is None:
+            return None
+        stmt = text(
+            """
+            SELECT
+              tsp.admin_enabled,
+              tsp.recommendation_status,
+              tsp.recommendation_reason,
+              tsp.recommendation_status_override,
+              tsp.recommendation_reason_override,
+              tsp.max_position_pct_override
+            FROM platform_token_allowlist p
+            LEFT JOIN token_strategy_policy tsp
+              ON tsp.token_id = p.id
+             AND tsp.strategy_id = :strategy_name
+            WHERE p.symbol = :symbol
+            LIMIT 1
+            """
+        )
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                stmt,
+                {"symbol": symbol, "strategy_name": strategy_name},
+            ).mappings().first()
+        return dict(row) if row else None
+
+    def _token_policy_suppression_reason(self, token_policy: dict[str, Any] | None) -> str | None:
+        effective = resolve_effective_token_policy(token_policy)
+        if not effective["admin_enabled"]:
+            return "token strategy disabled by admin"
+        if effective["effective_recommendation_status"] == "blocked":
+            reason = effective["effective_recommendation_reason"] or "blocked by token strategy policy"
+            return f"token strategy blocked: {reason}"
+        return None
+
+    def _apply_token_policy_to_signal(
+        self,
+        *,
+        signal: StrategySignal,
+        token_policy: dict[str, Any] | None,
+    ) -> StrategySignal:
+        if token_policy is None:
+            return signal
+        effective = resolve_effective_token_policy(token_policy)
+        metadata = dict(signal.metadata or {})
+        metadata["token_policy"] = {
+            "admin_enabled": effective["admin_enabled"],
+            "computed_recommendation_status": effective["computed_recommendation_status"],
+            "recommendation_status": effective["effective_recommendation_status"],
+            "recommendation_reason": effective["effective_recommendation_reason"],
+            "size_multiplier": str(effective["size_multiplier"]),
+            "max_position_pct_override": str(effective["max_position_pct_override"])
+            if effective["max_position_pct_override"] is not None
+            else None,
+        }
+        signal.metadata = metadata
+        return signal
 
     def _load_enabled_user_strategies(self) -> list[dict[str, Any]]:
         stmt = text(
@@ -1013,6 +1106,7 @@ class StrategyRunner:
             reasoning_metadata={
                 "reason": signal.reason,
                 "signal_metadata": signal.metadata or {},
+                "token_policy": (signal.metadata or {}).get("token_policy"),
             },
             trading_mode=trading_mode,
             timestamp=timestamp,
