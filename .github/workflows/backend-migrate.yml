@@ -17,8 +17,8 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'oziebot-prod' }}
   ECR_REGISTRY: 608713827509.dkr.ecr.${{ vars.AWS_REGION || 'us-east-1' }}.amazonaws.com
-  ECS_EXECUTION_ROLE_ARN: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
-  ECS_TASK_ROLE_ARN: ${{ vars.ECS_TASK_ROLE_ARN }}
+  ECS_EXECUTION_ROLE_ARN: ${{ vars.ECS_EXECUTION_ROLE_ARN || 'arn:aws:iam::608713827509:role/oziebot-ecs-execution-role' }}
+  ECS_TASK_ROLE_ARN: ${{ vars.ECS_TASK_ROLE_ARN || 'arn:aws:iam::608713827509:role/oziebot-ecs-task-role' }}
   DATABASE_URL_SECRET_ARN: ${{ vars.DATABASE_URL_SECRET_ARN }}
   ECS_SUBNETS: ${{ vars.ECS_SUBNETS }}
   ECS_SECURITY_GROUPS: ${{ vars.ECS_SECURITY_GROUPS }}
@@ -35,6 +35,21 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Normalize deploy inputs
+        run: |
+          for name in \
+            ECS_EXECUTION_ROLE_ARN \
+            ECS_TASK_ROLE_ARN \
+            DATABASE_URL_SECRET_ARN \
+            ECS_SUBNETS \
+            ECS_SECURITY_GROUPS \
+            ECS_ASSIGN_PUBLIC_IP
+          do
+            value="${!name:-}"
+            cleaned="$(printf '%s' "$value" | tr -d '[:space:]')"
+            echo "${name}=${cleaned}" >> "$GITHUB_ENV"
+          done
 
       - name: Render migration task definition
         env:
