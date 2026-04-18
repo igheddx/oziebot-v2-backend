@@ -22,6 +22,7 @@ from oziebot_api.schemas.auth import (
     TokenResponse,
 )
 from oziebot_api.services.passwords import hash_password, verify_password
+from oziebot_api.services.root_admin_defaults import ensure_root_admin_strategy_access
 from oziebot_api.services.strategy_catalog import ensure_platform_strategy_catalog
 from oziebot_api.services.tenant_scope import primary_tenant_id
 from oziebot_api.services.token_permissions import TokenPermissionService
@@ -37,6 +38,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _issue_token_pair(db: DbSession, settings: Settings, user: User) -> TokenResponse:
+    ensure_root_admin_strategy_access(db, user)
     tenant_id = primary_tenant_id(db, user)
     sess, raw = create_refresh_session(db, settings, user)
     access = create_access_token(

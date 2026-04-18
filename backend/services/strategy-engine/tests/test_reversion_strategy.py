@@ -61,29 +61,32 @@ def test_reversion_buys_oversold_stretch():
     strategy = ReversionStrategy()
     closes = [
         100,
-        101,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
         100,
         99,
-        100,
+        98.5,
         98,
-        97,
-        96,
-        95,
-        94,
-        93,
-        92,
-        91,
-        90,
-        89,
-        88,
-        87,
-        86,
-        85,
-        83,
     ]
-    context = _context(closes=closes, current_price="83")
+    context = _context(closes=closes, current_price="98")
 
-    signal = strategy.generate_signal(context, {}, uuid4(), uuid4())
+    signal = strategy.generate_signal(
+        context, {"use_trend_filter": False}, uuid4(), uuid4()
+    )
 
     assert signal.signal_type == SignalType.BUY
     assert "Oversold reversion entry" in signal.reason
@@ -141,30 +144,34 @@ def test_reversion_honors_fear_filter_for_entries():
     strategy = ReversionStrategy()
     closes = [
         100,
-        101,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
         100,
         99,
-        100,
+        98.5,
         98,
-        97,
-        96,
-        95,
-        94,
-        93,
-        92,
-        91,
-        90,
-        89,
-        88,
-        87,
-        86,
-        85,
-        83,
     ]
-    context = _context(closes=closes, current_price="83", fear_index=60)
+    context = _context(closes=closes, current_price="98", fear_index=60)
 
     signal = strategy.generate_signal(
-        context, {"use_fear_index_filter": True}, uuid4(), uuid4()
+        context,
+        {"use_fear_index_filter": True, "use_trend_filter": False},
+        uuid4(),
+        uuid4(),
     )
 
     assert signal.signal_type == SignalType.HOLD
@@ -241,3 +248,38 @@ def test_reversion_trend_filter_blocks_bearish_entry():
 
     assert signal.signal_type == SignalType.HOLD
     assert "Trend filter blocked entry" in signal.reason
+
+
+def test_reversion_default_trend_filter_blocks_strong_downtrend():
+    strategy = ReversionStrategy()
+    closes = [120 - (idx * 0.2) for idx in range(180)] + [
+        90,
+        89,
+        88,
+        87,
+        86,
+        85,
+        84,
+        83,
+        82,
+        81,
+        80,
+        79,
+        78,
+        77,
+        76,
+        75,
+        74,
+        73,
+        72,
+        71,
+    ]
+    context = _context(closes=closes, current_price="71", market_regime="bearish")
+
+    signal = strategy.generate_signal(context, {}, uuid4(), uuid4())
+
+    assert signal.signal_type == SignalType.HOLD
+    assert (
+        "Trend filter blocked entry" in signal.reason
+        or "Strong downtrend blocked entry" in signal.reason
+    )

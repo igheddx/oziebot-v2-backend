@@ -580,3 +580,91 @@ def test_mean_reversion_runner_skips_admin_disabled_token_policy():
     runner = PolicyRunner()
     assert runner.run_once() == 0
     assert runner.generated == 0
+
+
+def test_runner_requires_max_position_usd_for_fractional_sizing():
+    class SizingRunner(StrategyRunner):
+        def __init__(self):
+            super().__init__(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+            self.generated = 0
+
+        def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
+            return [
+                {
+                    "user_id": str(uuid.uuid4()),
+                    "strategy_id": "momentum",
+                    "tenant_id": uuid.uuid4(),
+                    "config": {},
+                }
+            ]
+
+        def _load_platform_strategy_config(self, strategy_id: str) -> dict[str, object]:
+            return {"risk_caps": {}}
+
+        def _load_allowed_symbols(self, user_id: str) -> list[str]:
+            return ["BTC-USD"]
+
+        def _load_market_snapshot(self, symbol: str) -> MarketSnapshot | None:
+            return MarketSnapshot(
+                timestamp=datetime.now(UTC),
+                symbol=symbol,
+                current_price=Decimal("50000"),
+                bid_price=Decimal("49990"),
+                ask_price=Decimal("50010"),
+                volume_24h=Decimal("100"),
+                open_price=Decimal("50000"),
+                high_price=Decimal("50500"),
+                low_price=Decimal("49500"),
+                close_price=Decimal("50000"),
+            )
+
+        def _load_position_state(
+            self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str
+        ) -> PositionState:
+            return PositionState(symbol=symbol, quantity=Decimal("0"))
+
+        def _sync_position_runtime_state(
+            self,
+            *,
+            user_id: str,
+            strategy_name: str,
+            trading_mode: str,
+            position_state: PositionState,
+            market: MarketSnapshot,
+            now: datetime,
+        ) -> PositionState:
+            return position_state
+
+        def _generate_signal(self, **kwargs) -> StrategySignal:
+            self.generated += 1
+            return StrategySignal(
+                signal_id=uuid.uuid4(),
+                correlation_id=uuid.uuid4(),
+                tenant_id=uuid.uuid4(),
+                strategy_id="momentum",
+                trading_mode=kwargs["trading_mode"],
+                signal_type=SignalType.BUY,
+                confidence=0.8,
+                reason="fractional entry",
+                metadata={"position_size_fraction": 0.1},
+            )
+
+        def _persist_run(self, **kwargs) -> None:
+            return None
+
+        def _persist_signal(self, event: StrategySignalEvent) -> None:
+            raise AssertionError(
+                "signal should be suppressed when max_position_usd is missing"
+            )
+
+    runner = SizingRunner()
+
+    assert runner.run_once() == 0
+    assert runner.generated == 2
+    assert runner.metrics_snapshot()["signals_rejected"] == 2
+    assert (
+        runner.metrics_snapshot()["rejection_reasons"][
+            "max_position_usd required for usd-normalized sizing"
+        ]
+        == 2
+    )

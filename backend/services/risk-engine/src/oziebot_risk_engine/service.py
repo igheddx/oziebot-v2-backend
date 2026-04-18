@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -15,6 +16,7 @@ from oziebot_domain.events import NotificationEvent, NotificationEventType
 from oziebot_domain.intents import TradeIntent
 from oziebot_domain.risk import RejectionReason, RiskDecision, RiskOutcome
 from oziebot_domain.signal_pipeline import StrategySignalEvent
+from oziebot_domain.strategy import SignalType
 from oziebot_domain.trading import Instrument, OrderType, Quantity, Side
 from oziebot_domain.trading_mode import TradingMode
 from oziebot_risk_engine.config import Settings
@@ -32,12 +34,15 @@ class RiskEngineService:
         self._paper_relaxed = {
             x.strip() for x in settings.risk_relaxed_paper_rules.split(",") if x.strip()
         }
+        self._metrics: Counter[str] = Counter()
+        self._rejection_reasons: Counter[str] = Counter()
 
     def evaluate(
         self, signal: StrategySignalEvent, trace_id: str
     ) -> tuple[RiskDecision, TradeIntent | None]:
         now = datetime.now(UTC)
         facts = self._load_facts(signal, now)
+        signal = self._apply_market_data_degradation(signal, facts)
         self._maybe_emit_global_loss_alert(signal, facts, now, trace_id)
         size = Decimal(str(signal.suggested_size))
         if signal.action.value == "hold":
@@ -58,6 +63,7 @@ class RiskEngineService:
                 trace_id=trace_id,
             )
             self._persist_risk_event(signal, decision)
+            self._record_metric()
             self._log_decision(signal, decision)
             return decision, None
         if size <= 0:
@@ -78,6 +84,7 @@ class RiskEngineService:
                 trace_id=trace_id,
             )
             self._persist_risk_event(signal, decision)
+            self._record_metric(rejected=True, rejection_reason="signal_size_positive")
             self._log_decision(signal, decision)
             return decision, None
 
@@ -120,6 +127,8 @@ class RiskEngineService:
             max_token_exposure_cents=facts["max_token_exposure_cents"],
             global_daily_loss_limit_pct=facts["global_daily_loss_limit_pct"],
             stale_flags=facts["stale_flags"],
+            critical_stale_flags=facts["critical_stale_flags"],
+            stale_ages=facts["stale_ages"],
         )
 
         rules_evaluated: list[str] = []
@@ -169,6 +178,10 @@ class RiskEngineService:
                 trace_id=trace_id,
             )
             self._persist_risk_event(signal, decision)
+            self._record_metric(
+                rejected=True,
+                rejection_reason=reject_result.rule_name,
+            )
             self._log_decision(signal, decision)
             return decision, None
 
@@ -193,8 +206,74 @@ class RiskEngineService:
 
         intent = self._to_intent(signal, final_size)
         self._persist_risk_event(signal, decision)
+        self._record_metric()
         self._log_decision(signal, decision)
         return decision, intent
+
+    def metrics_snapshot(self) -> dict[str, Any]:
+        return {
+            "signals_generated": int(self._metrics["signals_generated"]),
+            "signals_rejected": int(self._metrics["signals_rejected"]),
+            "signals_executed": int(self._metrics["signals_executed"]),
+            "rejection_reasons": dict(self._rejection_reasons),
+        }
+
+    def _record_metric(
+        self,
+        *,
+        rejected: bool = False,
+        executed: bool = False,
+        rejection_reason: str | None = None,
+    ) -> None:
+        self._metrics["signals_generated"] += 1
+        if rejected:
+            self._metrics["signals_rejected"] += 1
+        if executed:
+            self._metrics["signals_executed"] += 1
+        if rejection_reason:
+            self._rejection_reasons[rejection_reason] += 1
+
+    def _apply_market_data_degradation(
+        self,
+        signal: StrategySignalEvent,
+        facts: dict[str, Any],
+    ) -> StrategySignalEvent:
+        stale_flags = facts["stale_flags"]
+        critical_stale_flags = facts["critical_stale_flags"]
+        if not any(stale_flags.values()):
+            return signal
+
+        metadata = dict(signal.reasoning_metadata or {})
+        quality = {
+            "stale_flags": stale_flags,
+            "critical_stale_flags": critical_stale_flags,
+            "stale_ages": facts["stale_ages"],
+            "degraded": not any(critical_stale_flags.values()),
+        }
+        metadata["market_data_quality"] = quality
+        if any(critical_stale_flags.values()):
+            return signal.model_copy(update={"reasoning_metadata": metadata})
+
+        multiplier = Decimal(
+            str(self._settings.risk_stale_degraded_confidence_multiplier)
+        )
+        adjusted_size = (Decimal(str(signal.suggested_size)) * multiplier).quantize(
+            Decimal("0.00000001")
+        )
+        adjusted_confidence = min(
+            1.0,
+            max(0.0, float(Decimal(str(signal.confidence)) * multiplier)),
+        )
+        quality["confidence_multiplier"] = str(multiplier)
+        quality["adjusted_confidence"] = adjusted_confidence
+        quality["adjusted_size"] = str(adjusted_size)
+        return signal.model_copy(
+            update={
+                "confidence": adjusted_confidence,
+                "suggested_size": adjusted_size,
+                "reasoning_metadata": metadata,
+            }
+        )
 
     def _to_intent(
         self, signal: StrategySignalEvent, final_size: Decimal
@@ -332,22 +411,34 @@ class RiskEngineService:
                     * min(Decimal("1"), participation * Decimal("2")),
                 )
 
+        stale_assessments = {
+            "trade": self._staleness_state(
+                key=f"oziebot:md:last_update:trade:{symbol}",
+                threshold_seconds=self._settings.risk_stale_trade_seconds,
+                now=now,
+            ),
+            "bbo": self._staleness_state(
+                key=f"oziebot:md:last_update:bbo:{symbol}",
+                threshold_seconds=self._settings.risk_stale_bbo_seconds,
+                now=now,
+            ),
+            "candle": self._staleness_state(
+                key=f"oziebot:md:last_update:candle:{symbol}",
+                threshold_seconds=self._settings.risk_stale_candle_seconds,
+                now=now,
+            ),
+        }
         stale_flags = {
-            "trade": self._is_stale(
-                f"oziebot:md:last_update:trade:{symbol}",
-                self._settings.risk_stale_trade_seconds,
-                now,
-            ),
-            "bbo": self._is_stale(
-                f"oziebot:md:last_update:bbo:{symbol}",
-                self._settings.risk_stale_bbo_seconds,
-                now,
-            ),
-            "candle": self._is_stale(
-                f"oziebot:md:last_update:candle:{symbol}",
-                self._settings.risk_stale_candle_seconds,
-                now,
-            ),
+            name: bool(assessment["stale"])
+            for name, assessment in stale_assessments.items()
+        }
+        critical_stale_flags = {
+            name: bool(assessment["critical"])
+            for name, assessment in stale_assessments.items()
+        }
+        stale_ages = {
+            name: assessment["age_seconds"]
+            for name, assessment in stale_assessments.items()
         }
 
         with self._engine.begin() as conn:
@@ -774,17 +865,29 @@ class RiskEngineService:
             "est_slippage_pct": est_slippage_pct,
             **quality_controls,
             "stale_flags": stale_flags,
+            "critical_stale_flags": critical_stale_flags,
+            "stale_ages": stale_ages,
         }
 
-    def _is_stale(self, key: str, threshold_seconds: int, now: datetime) -> bool:
+    def _staleness_state(
+        self, *, key: str, threshold_seconds: int, now: datetime
+    ) -> dict[str, float | bool | None]:
         raw = self._redis.get(key)
         if not raw:
-            return True
+            return {"stale": True, "critical": True, "age_seconds": None}
         try:
             last = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
         except Exception:
-            return True
-        return (now - last).total_seconds() > threshold_seconds
+            return {"stale": True, "critical": True, "age_seconds": None}
+        age_seconds = max(0.0, (now - last).total_seconds())
+        critical_threshold = (
+            threshold_seconds * self._settings.risk_critical_stale_multiplier
+        )
+        return {
+            "stale": age_seconds > threshold_seconds,
+            "critical": age_seconds > critical_threshold,
+            "age_seconds": age_seconds,
+        }
 
     def _persist_risk_event(
         self, signal: StrategySignalEvent, decision: RiskDecision
@@ -953,8 +1056,10 @@ class RiskEngineService:
             "risk_decision %s",
             json.dumps(
                 {
+                    "stage": "risk",
                     "strategy": signal.strategy_name,
                     "token": signal.symbol,
+                    "signal_generated": signal.action != SignalType.HOLD,
                     "signal_reason": signal.reasoning_metadata.get("reason"),
                     "rejection_reason": decision.reason.value
                     if decision.reason
@@ -963,8 +1068,13 @@ class RiskEngineService:
                     "applied_risk_rules": decision.rules_evaluated,
                     "token_policy": signal.reasoning_metadata.get("token_policy"),
                     "outcome": decision.outcome.value,
+                    "final_decision": decision.outcome.value,
                     "final_size": decision.final_size,
                     "detail": decision.detail,
+                    "market_data_quality": signal.reasoning_metadata.get(
+                        "market_data_quality"
+                    ),
+                    "metrics": self.metrics_snapshot(),
                 },
                 default=str,
             ),

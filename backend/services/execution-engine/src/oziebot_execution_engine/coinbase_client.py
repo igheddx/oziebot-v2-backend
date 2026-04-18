@@ -16,6 +16,7 @@ from oziebot_domain.execution import (
     ExecutionSubmission,
 )
 from oziebot_domain.trading import Venue
+from oziebot_domain.trading import Side
 
 ORDERS_PATH = "/api/v3/brokerage/orders"
 
@@ -146,14 +147,22 @@ class HttpCoinbaseExecutionClient:
                 )
             )
             if filled_price > 0:
+                fee = self._extract_fill_fee(payload)
                 fills.append(
                     ExecutionFill(
                         fill_id=str(order_id or request.client_order_id),
                         quantity=request.quantity,
                         price=filled_price,
-                        fee=Decimal("0"),
+                        fee=fee,
                         liquidity="unknown",
-                        raw_payload=payload,
+                        raw_payload={
+                            **payload,
+                            "execution_quality": self._execution_quality_payload(
+                                request=request,
+                                filled_price=filled_price,
+                                fee=fee,
+                            ),
+                        },
                     )
                 )
                 status = ExecutionOrderStatus.FILLED
@@ -164,6 +173,58 @@ class HttpCoinbaseExecutionClient:
             fills=fills,
             raw_payload=payload,
         )
+
+    @staticmethod
+    def _to_decimal(value: Any) -> Decimal | None:
+        if value in (None, ""):
+            return None
+        try:
+            return Decimal(str(value))
+        except Exception:
+            return None
+
+    def _extract_fill_fee(self, payload: dict[str, Any]) -> Decimal:
+        success = payload.get("success_response", {}) or {}
+        candidates = (
+            success.get("total_fees"),
+            success.get("total_fee"),
+            success.get("filled_fees"),
+            success.get("commission"),
+            payload.get("total_fees"),
+            payload.get("fee"),
+        )
+        for candidate in candidates:
+            fee = self._to_decimal(candidate)
+            if fee is not None and fee >= 0:
+                return fee
+        return Decimal("0")
+
+    def _execution_quality_payload(
+        self,
+        *,
+        request: ExecutionRequest,
+        filled_price: Decimal,
+        fee: Decimal,
+    ) -> dict[str, Any]:
+        reference_price = request.price_hint or filled_price
+        slippage_pct = Decimal("0")
+        if reference_price > 0:
+            if request.side == Side.BUY:
+                slippage_pct = max(
+                    Decimal("0"),
+                    (filled_price - reference_price) / reference_price,
+                )
+            else:
+                slippage_pct = max(
+                    Decimal("0"),
+                    (reference_price - filled_price) / reference_price,
+                )
+        return {
+            "price_hint": str(reference_price),
+            "filled_price": str(filled_price),
+            "realized_slippage_pct": str(slippage_pct.quantize(Decimal("0.00000001"))),
+            "fee": str(fee),
+        }
 
     def list_balances(
         self, *, api_key_name: str, private_key_pem: str

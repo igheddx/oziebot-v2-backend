@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from sqlalchemy import select
+
+from oziebot_api.models.tenant_entitlement import TenantEntitlement
+from oziebot_api.models.user import User
+from oziebot_api.models.user_strategy import UserStrategy
+
 
 def test_register_login_me(client):
     r = client.post(
@@ -149,6 +155,67 @@ def test_root_admin_with_tenant_membership_can_switch_trading_mode(
     )
     assert r.status_code == 200, r.text
     assert r.json()["current_trading_mode"] == "live"
+
+
+def test_root_admin_login_bootstraps_strategy_access(client, db_session):
+    email = "dominic@oziebot.com"
+    password = "password-123"
+    register = client.post(
+        "/v1/auth/register",
+        json={
+            "email": email,
+            "password": password,
+            "tenant_name": "Oziebot Admin",
+        },
+    )
+    assert register.status_code == 201, register.text
+
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    user.is_root_admin = True
+    db_session.add(user)
+    db_session.commit()
+
+    login = client.post("/v1/auth/login", json={"email": email, "password": password})
+    assert login.status_code == 200, login.text
+    token = login.json()["access_token"]
+
+    catalog = client.get(
+        "/v1/me/strategies/catalog",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert catalog.status_code == 200, catalog.text
+    strategy_rows = {
+        row["strategy_id"]: row
+        for row in catalog.json()["strategies"]
+        if row["strategy_id"] in {"momentum", "day_trading", "dca", "reversion"}
+    }
+    assert set(strategy_rows) == {"momentum", "day_trading", "dca", "reversion"}
+    assert all(row["is_assigned"] is True for row in strategy_rows.values())
+
+    configured = client.get(
+        "/v1/me/strategies",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert configured.status_code == 200, configured.text
+    configured_ids = {row["strategy_id"] for row in configured.json()["strategies"]}
+    assert {"momentum", "day_trading", "dca", "reversion"}.issubset(configured_ids)
+
+    entitlement = db_session.scalar(
+        select(TenantEntitlement).where(
+            TenantEntitlement.source == "root_admin",
+        )
+    )
+    assert entitlement is not None
+
+    bootstrapped = db_session.scalars(
+        select(UserStrategy).where(
+            UserStrategy.user_id == user.id,
+            UserStrategy.strategy_id.in_(("momentum", "day_trading", "dca", "reversion")),
+        )
+    ).all()
+    assert len(bootstrapped) == 4
+    assert all(row.is_enabled is True for row in bootstrapped)
 
 
 def test_refresh_and_logout(client):

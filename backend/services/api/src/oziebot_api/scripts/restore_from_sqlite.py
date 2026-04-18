@@ -73,6 +73,28 @@ STEPS = [
         ON CONFLICT (id) DO NOTHING
     """,
     ),
+    # --------------------------------------------------- tenant_entitlements
+    (
+        "tenant_entitlements",
+        """
+        INSERT INTO tenant_entitlements
+          (id, tenant_id, platform_strategy_id, source, valid_from, valid_until,
+           stripe_subscription_id, stripe_subscription_item_row_id, is_active, created_at, updated_at)
+        VALUES
+          ('d4c72547-7862-45af-8210-85cb6ad57127',
+           '1cafada4-d71b-41ce-ab8f-e9146ed1c841',
+           NULL,
+           'root_admin',
+           '2026-04-13 01:46:05.552225',
+           NULL,
+           NULL,
+           NULL,
+           true,
+           '2026-04-13 01:46:05.552225',
+           '2026-04-13 01:46:05.552225')
+        ON CONFLICT (id) DO NOTHING
+    """,
+    ),
     # ------------------------------------------ platform_token_allowlist
     (
         "platform_token_allowlist",
@@ -147,7 +169,15 @@ STEPS = [
           ('4811dbcb-e225-34f8-7768-4736273fb191',
            'a6953388-1b93-4c39-bace-e750f5f97431',
            'day_trading', true, '{}', NULL,
-           '2026-04-16 12:52:35+00', '2026-04-16 12:52:35+00')
+           '2026-04-16 12:52:35+00', '2026-04-16 12:52:35+00'),
+          ('a67a72d2-99bd-42ae-b6e1-c502532a799f',
+           'a6953388-1b93-4c39-bace-e750f5f97431',
+           'dca', true, '{}', '{"bootstrap":"root_admin"}',
+           '2026-04-18 15:58:00+00', '2026-04-18 15:58:00+00'),
+          ('f4bd6b9f-7d1d-4b17-97fc-4c2ef9695f0f',
+           'a6953388-1b93-4c39-bace-e750f5f97431',
+           'reversion', true, '{}', '{"bootstrap":"root_admin"}',
+           '2026-04-18 15:58:00+00', '2026-04-18 15:58:00+00')
         ON CONFLICT (id) DO NOTHING
     """,
     ),

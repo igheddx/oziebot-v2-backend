@@ -121,3 +121,16 @@ def test_momentum_exits_on_max_hold_time():
 
     assert signal.signal_type == SignalType.CLOSE
     assert "Max hold reached" in signal.reason
+
+
+def test_momentum_default_threshold_generates_more_entries():
+    strategy = MomentumStrategy()
+    context = _context(
+        current_price="102.5",
+        closes=[100.0] * 15 + [102.5] * 5,
+    )
+
+    signal = strategy.generate_signal(context, {}, uuid4(), uuid4())
+
+    assert signal.signal_type == SignalType.BUY
+    assert "MA crossover bullish" in signal.reason

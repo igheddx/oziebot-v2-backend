@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -267,6 +267,26 @@ def _redis_with_fresh_market() -> FakeRedis:
     r.set(
         "oziebot:md:bbo:BTC-USD",
         '{"best_bid_price":"50000","best_bid_size":"2","best_ask_price":"50010","best_ask_size":"2"}',
+    )
+    return r
+
+
+def _redis_with_stale_market(
+    *, trade_age_seconds: int, bbo_age_seconds: int, candle_age_seconds: int
+) -> FakeRedis:
+    r = _redis_with_fresh_market()
+    now = datetime.now(UTC)
+    r.set(
+        "oziebot:md:last_update:trade:BTC-USD",
+        (now - timedelta(seconds=trade_age_seconds)).isoformat(),
+    )
+    r.set(
+        "oziebot:md:last_update:bbo:BTC-USD",
+        (now - timedelta(seconds=bbo_age_seconds)).isoformat(),
+    )
+    r.set(
+        "oziebot:md:last_update:candle:BTC-USD",
+        (now - timedelta(seconds=candle_age_seconds)).isoformat(),
     )
     return r
 
@@ -612,3 +632,60 @@ def test_risk_applies_max_position_pct_override(tmp_path: Path):
     assert decision.outcome == RiskOutcome.REDUCE_SIZE
     assert intent is not None
     assert Decimal(decision.final_size) == Decimal("0.39996000")
+
+
+def test_stale_data_degrades_signal_without_full_rejection(tmp_path: Path):
+    db_path = tmp_path / "risk-stale-degraded.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{db_path}",
+        risk_stale_degraded_confidence_multiplier=0.75,
+    )
+    svc = RiskEngineService(
+        settings,
+        _redis_with_stale_market(
+            trade_age_seconds=25,
+            bbo_age_seconds=10,
+            candle_age_seconds=90,
+        ),
+    )
+
+    decision, intent = svc.evaluate(
+        _signal(user_id, size="0.1"), trace_id="t-stale-degraded"
+    )
+
+    assert decision.outcome == RiskOutcome.APPROVE
+    assert intent is not None
+    assert Decimal(decision.original_size) == Decimal("0.07500000")
+    assert svc.metrics_snapshot()["signals_rejected"] == 0
+
+
+def test_critical_stale_data_still_rejects(tmp_path: Path):
+    db_path = tmp_path / "risk-stale-critical.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = RiskEngineService(
+        settings,
+        _redis_with_stale_market(
+            trade_age_seconds=10,
+            bbo_age_seconds=61,
+            candle_age_seconds=90,
+        ),
+    )
+
+    decision, intent = svc.evaluate(
+        _signal(user_id, size="0.1"), trace_id="t-stale-critical"
+    )
+
+    assert decision.outcome == RiskOutcome.REJECT
+    assert intent is None
+    assert "Critically stale market data" in (decision.detail or "")
+    assert svc.metrics_snapshot()["signals_rejected"] == 1

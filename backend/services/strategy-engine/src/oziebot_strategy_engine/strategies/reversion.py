@@ -41,7 +41,7 @@ class ReversionStrategy(TradingStrategy):
         rsi_buy_threshold = float(config.get("rsi_buy_threshold", 32))
         rsi_exit_threshold = float(config.get("rsi_exit_threshold", 52))
         rsi_sell_threshold = float(config.get("rsi_sell_threshold", 68))
-        position_size = float(config.get("position_size", 0.08))
+        position_size = float(config.get("position_size", 0.06))
         stop_loss_pct = float(config.get("stop_loss_pct", 0.025))
         take_profit_pct = float(config.get("take_profit_pct", 0.045))
         min_bandwidth_pct = float(config.get("min_bandwidth_pct", 0.015))
@@ -103,17 +103,19 @@ class ReversionStrategy(TradingStrategy):
         rsi_buy_threshold = float(config.get("rsi_buy_threshold", 32))
         rsi_exit_threshold = float(config.get("rsi_exit_threshold", 52))
         rsi_sell_threshold = float(config.get("rsi_sell_threshold", 68))
-        position_size = float(config.get("position_size", 0.08))
+        position_size = float(config.get("position_size", 0.06))
         stop_loss_pct = float(config.get("stop_loss_pct", 0.025))
         take_profit_pct = float(config.get("take_profit_pct", 0.045))
         min_bandwidth_pct = float(config.get("min_bandwidth_pct", 0.015))
         max_hold_minutes = int(config.get("max_hold_minutes", 180))
-        use_trend_filter = bool(config.get("use_trend_filter", False))
+        use_trend_filter = bool(config.get("use_trend_filter", True))
         ema_long_window = int(config.get("ema_long_window", 200))
 
         closes = [float(value) for value in market.metadata.get("candle_closes", [])]
         required = max(
-            band_window, rsi_period + 1, ema_long_window if use_trend_filter else 0
+            band_window,
+            rsi_period + 1,
+            ema_long_window if use_trend_filter and position.quantity <= 0 else 0,
         )
         if len(closes) < required:
             return self._hold_signal(
@@ -164,6 +166,12 @@ class ReversionStrategy(TradingStrategy):
         trend_buy_ok = (not use_trend_filter) or (
             price >= ema_long and market_regime != "bearish"
         )
+        strong_downtrend = self._strong_downtrend(
+            closes=closes,
+            price=price,
+            ema_long=ema_long,
+            market_regime=market_regime,
+        )
 
         if position.quantity > 0:
             managed_exit = self._check_exit(
@@ -207,6 +215,17 @@ class ReversionStrategy(TradingStrategy):
                 f"Trend filter blocked entry: price={price:.4f}, ema_long={ema_long:.4f}, regime={market_regime or 'unknown'}",
             )
 
+        if strong_downtrend:
+            return self._hold_signal(
+                context,
+                signal_id,
+                correlation_id,
+                (
+                    f"Strong downtrend blocked entry: price={price:.4f}, ema_long={ema_long:.4f}, "
+                    f"regime={market_regime or 'unknown'}"
+                ),
+            )
+
         if zscore <= -entry_zscore and rsi_value <= rsi_buy_threshold and fear_buy_ok:
             confidence = min(
                 0.9, 0.65 + abs(zscore) * 0.05 + max(0.0, (50 - rsi_value) / 100)
@@ -245,7 +264,7 @@ class ReversionStrategy(TradingStrategy):
             "rsi_buy_threshold": 32,
             "rsi_exit_threshold": 52,
             "rsi_sell_threshold": 68,
-            "position_size": 0.08,
+            "position_size": 0.06,
             "stop_loss_pct": 0.025,
             "take_profit_pct": 0.045,
             "min_bandwidth_pct": 0.015,
@@ -253,7 +272,7 @@ class ReversionStrategy(TradingStrategy):
             "use_fear_index_filter": False,
             "fear_index_buy_max": 35,
             "fear_index_sell_min": 60,
-            "use_trend_filter": False,
+            "use_trend_filter": True,
             "ema_long_window": 200,
         }
 
@@ -314,7 +333,7 @@ class ReversionStrategy(TradingStrategy):
                     "type": "number",
                     "minimum": 0.01,
                     "maximum": 1.0,
-                    "default": 0.08,
+                    "default": 0.06,
                     "description": "Fraction of capital to deploy per entry",
                 },
                 "stop_loss_pct": {
@@ -366,7 +385,7 @@ class ReversionStrategy(TradingStrategy):
                 },
                 "use_trend_filter": {
                     "type": "boolean",
-                    "default": False,
+                    "default": True,
                     "description": "If true, block entries below the long EMA or in bearish market regime",
                 },
                 "ema_long_window": {
@@ -484,6 +503,20 @@ class ReversionStrategy(TradingStrategy):
                 **metadata,
             },
         )
+
+    @staticmethod
+    def _strong_downtrend(
+        *, closes: list[float], price: float, ema_long: float, market_regime: str | None
+    ) -> bool:
+        if market_regime == "bearish" and price < ema_long * 0.99:
+            return True
+        if len(closes) < 20 or ema_long <= 0:
+            return False
+        lookback_price = closes[-20]
+        if lookback_price <= 0:
+            return False
+        twenty_bar_return = (price - lookback_price) / lookback_price
+        return twenty_bar_return <= -0.06 and price < ema_long * 0.98
 
     def _close_signal(
         self,

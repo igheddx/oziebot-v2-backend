@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -63,6 +64,8 @@ class StrategyRunner:
         self._redis = redis_client
         self._schedule = StrategyScheduleState()
         self._candle_granularity_sec = candle_granularity_sec
+        self._metrics: Counter[str] = Counter()
+        self._rejection_reasons: Counter[str] = Counter()
 
     def run_once(self) -> int:
         rows = self._load_enabled_user_strategies()
@@ -168,6 +171,9 @@ class StrategyRunner:
                             token_policy
                         )
                         if policy_reason is not None:
+                            self._record_signal_metric(
+                                rejected=True, rejection_reason=policy_reason
+                            )
                             self._persist_run(
                                 run_id=run_id,
                                 user_id=user_id,
@@ -183,6 +189,16 @@ class StrategyRunner:
                                 },
                                 started_at=now,
                                 completed_at=datetime.now(UTC),
+                            )
+                            self._log_signal_evaluation(
+                                stage="strategy",
+                                strategy_name=strategy_name,
+                                symbol=symbol,
+                                trading_mode=mode,
+                                signal_generated=False,
+                                rejection_reason=policy_reason,
+                                confidence_score=None,
+                                final_decision="rejected",
                             )
                             continue
                         schedule_reason = self._scheduler_reason(
@@ -210,14 +226,15 @@ class StrategyRunner:
                                 started_at=now,
                                 completed_at=datetime.now(UTC),
                             )
-                            log.info(
-                                "signal_scheduled_out run_id=%s user_id=%s strategy=%s mode=%s symbol=%s reason=%s",
-                                run_id,
-                                user_id,
-                                strategy_name,
-                                mode.value,
-                                symbol,
-                                schedule_reason,
+                            self._log_signal_evaluation(
+                                stage="strategy",
+                                strategy_name=strategy_name,
+                                symbol=symbol,
+                                trading_mode=mode,
+                                signal_generated=False,
+                                rejection_reason=schedule_reason,
+                                confidence_score=None,
+                                final_decision="scheduled_out",
                             )
                             continue
 
@@ -243,6 +260,10 @@ class StrategyRunner:
                             risk_caps=risk_caps,
                         )
                         if suppress_reason is not None:
+                            self._record_signal_metric(
+                                rejected=True,
+                                rejection_reason=suppress_reason,
+                            )
                             self._persist_run(
                                 run_id=run_id,
                                 user_id=user_id,
@@ -262,14 +283,15 @@ class StrategyRunner:
                                 started_at=now,
                                 completed_at=datetime.now(UTC),
                             )
-                            log.info(
-                                "signal_suppressed run_id=%s user_id=%s strategy=%s mode=%s symbol=%s reason=%s",
-                                run_id,
-                                user_id,
-                                strategy_name,
-                                mode.value,
-                                symbol,
-                                suppress_reason,
+                            self._log_signal_evaluation(
+                                stage="suppression",
+                                strategy_name=strategy_name,
+                                symbol=symbol,
+                                trading_mode=mode,
+                                signal_generated=False,
+                                rejection_reason=suppress_reason,
+                                confidence_score=signal.confidence,
+                                final_decision="rejected",
                             )
                             continue
 
@@ -313,17 +335,28 @@ class StrategyRunner:
                             },
                         )
                         processed += 1
-                        log.info(
-                            "signal_generated run_id=%s user_id=%s strategy=%s mode=%s symbol=%s action=%s confidence=%.3f",
-                            run_id,
-                            user_id,
-                            strategy_name,
-                            mode.value,
-                            symbol,
-                            event.action,
-                            event.confidence,
+                        signal_generated = event.action != SignalType.HOLD
+                        if signal_generated:
+                            self._record_signal_metric(generated=True)
+                        self._log_signal_evaluation(
+                            stage="strategy",
+                            strategy_name=strategy_name,
+                            symbol=symbol,
+                            trading_mode=mode,
+                            signal_generated=signal_generated,
+                            rejection_reason=None,
+                            confidence_score=event.confidence,
+                            final_decision=event.action.value,
+                            extra={
+                                "suggested_size": str(event.suggested_size),
+                                "reason": event.reasoning_metadata.get("reason"),
+                                "metrics": self.metrics_snapshot(),
+                            },
                         )
                     except Exception as exc:
+                        self._record_signal_metric(
+                            rejected=True, rejection_reason="strategy_run_failed"
+                        )
                         self._persist_run(
                             run_id=run_id,
                             user_id=user_id,
@@ -336,6 +369,20 @@ class StrategyRunner:
                             started_at=now,
                             completed_at=datetime.now(UTC),
                         )
+                        self._log_signal_evaluation(
+                            stage="strategy",
+                            strategy_name=strategy_name,
+                            symbol=symbol,
+                            trading_mode=mode,
+                            signal_generated=False,
+                            rejection_reason="strategy_run_failed",
+                            confidence_score=None,
+                            final_decision="error",
+                            extra={
+                                "error": str(exc),
+                                "metrics": self.metrics_snapshot(),
+                            },
+                        )
                         log.exception(
                             "strategy_run_failed run_id=%s user_id=%s strategy=%s mode=%s symbol=%s",
                             run_id,
@@ -345,6 +392,58 @@ class StrategyRunner:
                             symbol,
                         )
         return processed
+
+    def metrics_snapshot(self) -> dict[str, Any]:
+        return {
+            "signals_generated": int(self._metrics["signals_generated"]),
+            "signals_rejected": int(self._metrics["signals_rejected"]),
+            "signals_executed": int(self._metrics["signals_executed"]),
+            "rejection_reasons": dict(self._rejection_reasons),
+        }
+
+    def _record_signal_metric(
+        self,
+        *,
+        generated: bool = False,
+        rejected: bool = False,
+        executed: bool = False,
+        rejection_reason: str | None = None,
+    ) -> None:
+        if generated:
+            self._metrics["signals_generated"] += 1
+        if rejected:
+            self._metrics["signals_rejected"] += 1
+        if executed:
+            self._metrics["signals_executed"] += 1
+        if rejection_reason:
+            self._rejection_reasons[rejection_reason] += 1
+
+    def _log_signal_evaluation(
+        self,
+        *,
+        stage: str,
+        strategy_name: str,
+        symbol: str,
+        trading_mode: TradingMode,
+        signal_generated: bool,
+        rejection_reason: str | None,
+        confidence_score: float | None,
+        final_decision: str,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        payload = {
+            "stage": stage,
+            "strategy": strategy_name,
+            "token": symbol,
+            "trading_mode": trading_mode.value,
+            "signal_generated": signal_generated,
+            "rejection_reason": rejection_reason,
+            "confidence_score": confidence_score,
+            "final_decision": final_decision,
+        }
+        if extra:
+            payload.update(extra)
+        log.info("signal_evaluation %s", json.dumps(payload, default=str))
 
     def _signal_action(self, signal: StrategySignal) -> str:
         raw = getattr(signal, "signal_type", "")
@@ -588,6 +687,14 @@ class StrategyRunner:
             if hour < 13 or hour >= 22:
                 return "outside liquid-hours window"
 
+        sizing_reason = self._usd_sizing_suppression_reason(
+            signal=signal,
+            market=market,
+            risk_caps=risk_caps,
+        )
+        if sizing_reason is not None:
+            return sizing_reason
+
         cooldown_seconds = int(signal_rules.get("cooldown_seconds") or 0)
         if cooldown_seconds > 0:
             last_ts = self._last_action_signal_ts(
@@ -649,6 +756,27 @@ class StrategyRunner:
                         if loss_pct >= max_daily_loss_pct:
                             return "max_daily_loss_pct reached"
 
+        return None
+
+    def _usd_sizing_suppression_reason(
+        self,
+        *,
+        signal: StrategySignal,
+        market: MarketSnapshot,
+        risk_caps: dict[str, Any],
+    ) -> str | None:
+        metadata = signal.metadata or {}
+        if signal.quantity is not None or self._signal_action(signal) != "buy":
+            return None
+        if "buy_amount_usd" in metadata and market.current_price <= 0:
+            return "market price unavailable for usd-normalized sizing"
+        if "position_size_fraction" not in metadata:
+            return None
+        max_position_usd = self._to_decimal(risk_caps.get("max_position_usd"))
+        if max_position_usd <= 0:
+            return "max_position_usd required for usd-normalized sizing"
+        if market.current_price <= 0:
+            return "market price unavailable for usd-normalized sizing"
         return None
 
     def _scheduler_reason(
@@ -1186,8 +1314,6 @@ class StrategyRunner:
                 # Convert: fraction of max capital → USD → token quantity
                 usd_amount = fraction * max_pos_usd * confidence
                 suggested_size = usd_amount / price
-            else:
-                suggested_size = fraction * confidence  # fallback: pass fraction as-is
 
         return StrategySignalEvent(
             signal_id=signal.signal_id,

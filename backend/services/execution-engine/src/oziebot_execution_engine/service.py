@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
@@ -78,6 +79,8 @@ class ExecutionService:
         self._paper_adapter = paper_adapter
         self._live_adapter = live_adapter
         self._crypto = CredentialCrypto(settings.exchange_credentials_encryption_key)
+        self._metrics: Counter[str] = Counter()
+        self._rejection_reasons: Counter[str] = Counter()
 
     @staticmethod
     def build_idempotency_key(intent_id: str, trading_mode: TradingMode) -> str:
@@ -215,6 +218,10 @@ class ExecutionService:
             )
 
         if policy_failure is not None:
+            self._record_metric(
+                rejected=True,
+                rejection_reason="token_strategy_policy",
+            )
             self._emit_event(
                 order_id,
                 request,
@@ -253,6 +260,29 @@ class ExecutionService:
         )
         submission = adapter.submit(request)
         return self._apply_submission(request, order_id, reserve_cents, submission)
+
+    def metrics_snapshot(self) -> dict[str, Any]:
+        return {
+            "signals_generated": int(self._metrics["signals_generated"]),
+            "signals_rejected": int(self._metrics["signals_rejected"]),
+            "signals_executed": int(self._metrics["signals_executed"]),
+            "rejection_reasons": dict(self._rejection_reasons),
+        }
+
+    def _record_metric(
+        self,
+        *,
+        rejected: bool = False,
+        executed: bool = False,
+        rejection_reason: str | None = None,
+    ) -> None:
+        self._metrics["signals_generated"] += 1
+        if rejected:
+            self._metrics["signals_rejected"] += 1
+        if executed:
+            self._metrics["signals_executed"] += 1
+        if rejection_reason:
+            self._rejection_reasons[rejection_reason] += 1
 
     def _apply_token_strategy_policy(
         self,
@@ -567,6 +597,7 @@ class ExecutionService:
 
         if submission.fills:
             self._persist_fills_and_positions(order_id, request, submission)
+        self._record_metric(executed=True)
 
         return ProcessResult(order_id=order_id, state=target, duplicated=False)
 
@@ -590,6 +621,10 @@ class ExecutionService:
             adapter_payload=submission.raw_payload,
             failed_at=_utcnow(),
             reserved_cash_cents=0,
+        )
+        self._record_metric(
+            rejected=True,
+            rejection_reason=submission.failure_code or "execution_failed",
         )
         self._emit_event(
             order_id,
@@ -951,6 +986,13 @@ class ExecutionService:
         detail: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> None:
+        payload = payload or {}
+        self._log_execution_decision(
+            request=request,
+            state=state,
+            detail=detail,
+            payload=payload,
+        )
         if self._redis is None:
             return
         event = ExecutionEvent(
@@ -965,7 +1007,7 @@ class ExecutionService:
             venue=Venue.COINBASE,
             client_order_id=request.client_order_id,
             detail=detail,
-            payload=payload or {},
+            payload=payload,
         )
         push_json(
             self._redis,
@@ -1013,6 +1055,50 @@ class ExecutionService:
                 QueueNames.alerts(request.trading_mode),
                 notification_event_to_json(notif),
             )
+
+    def _log_execution_decision(
+        self,
+        *,
+        request: ExecutionRequest,
+        state: ExecutionOrderStatus,
+        detail: str | None,
+        payload: dict[str, Any],
+    ) -> None:
+        rejection_reason = None
+        if state == ExecutionOrderStatus.FAILED:
+            rejection_reason = payload.get(
+                "failure_code"
+            ) or request.intent_payload.get("metadata", {}).get(
+                "token_policy_execution", {}
+            ).get("recommendation_status")
+        log.info(
+            "execution_decision %s",
+            json.dumps(
+                {
+                    "stage": "execution",
+                    "strategy": request.strategy_id,
+                    "token": request.symbol,
+                    "trading_mode": request.trading_mode.value,
+                    "signal_generated": state
+                    not in {
+                        ExecutionOrderStatus.FAILED,
+                        ExecutionOrderStatus.CANCELLED,
+                    },
+                    "rejection_reason": rejection_reason,
+                    "confidence_score": request.intent_payload.get("metadata", {}).get(
+                        "confidence_score"
+                    ),
+                    "final_decision": state.value,
+                    "detail": detail,
+                    "quantity": str(request.quantity),
+                    "token_policy": request.intent_payload.get("metadata", {}).get(
+                        "token_policy_execution"
+                    ),
+                    "metrics": self.metrics_snapshot(),
+                },
+                default=str,
+            ),
+        )
 
     def _set_order_reserved_locked(
         self, order_id: str, *, reserved_cash_cents: int, locked_cash_cents: int

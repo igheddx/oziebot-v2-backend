@@ -33,7 +33,7 @@ class MomentumStrategy(TradingStrategy):
         """Validate momentum config."""
         short_window = config.get("short_window", 5)
         long_window = config.get("long_window", 20)
-        strength_threshold = config.get("strength_threshold", 0.02)
+        strength_threshold = config.get("strength_threshold", 0.015)
         position_size = config.get("position_size", 0.1)
         stop_loss_pct = config.get("stop_loss_pct", 0.03)
         take_profit_pct = config.get("take_profit_pct", 0.06)
@@ -75,8 +75,8 @@ class MomentumStrategy(TradingStrategy):
         correlation_id: UUID,
     ) -> StrategySignal:
         """Generate momentum signal using short/long moving average crossover."""
-        short_window = int(config.get("short_window", 8))
-        long_window = int(config.get("long_window", 34))
+        short_window = int(config.get("short_window", 5))
+        long_window = int(config.get("long_window", 20))
         strength_threshold = float(config.get("strength_threshold", 0.015))
         stop_loss_pct = float(config.get("stop_loss_pct", 0.03))
         take_profit_pct = float(config.get("take_profit_pct", 0.06))
@@ -162,7 +162,7 @@ class MomentumStrategy(TradingStrategy):
         return {
             "short_window": 5,
             "long_window": 20,
-            "strength_threshold": 0.02,
+            "strength_threshold": 0.015,
             "position_size": 0.1,
             "stop_loss_pct": 0.03,
             "take_profit_pct": 0.06,
@@ -191,7 +191,7 @@ class MomentumStrategy(TradingStrategy):
                     "type": "number",
                     "minimum": 0.0,
                     "maximum": 1.0,
-                    "default": 0.02,
+                    "default": 0.015,
                     "description": "Minimum momentum to trade (e.g. 0.02 = 2%)",
                 },
                 "position_size": {

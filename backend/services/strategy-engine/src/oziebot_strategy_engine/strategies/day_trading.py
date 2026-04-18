@@ -28,11 +28,11 @@ class DayTradingStrategy(TradingStrategy):
     def validate_config(self, config: dict) -> bool:
         """Validate day trading config."""
         entry_threshold = config.get("entry_threshold", 0.01)
-        exit_threshold = config.get("exit_threshold", 0.02)
-        stop_loss = config.get("stop_loss", 0.01)
+        exit_threshold = config.get("exit_threshold", 0.015)
+        stop_loss = config.get("stop_loss", 0.008)
         min_volume_multiplier = float(config.get("min_volume_multiplier", 1.5))
-        min_volatility_pct = float(config.get("min_volatility_pct", 0.006))
-        min_entry_signals = int(config.get("min_entry_signals", 2))
+        min_volatility_pct = float(config.get("min_volatility_pct", 0.0045))
+        min_entry_signals = int(config.get("min_entry_signals", 1))
 
         if not (0.0 <= entry_threshold <= 0.5):
             raise ValueError(f"entry_threshold must be 0-0.5, got {entry_threshold}")
@@ -65,10 +65,10 @@ class DayTradingStrategy(TradingStrategy):
         exit_threshold = float(config.get("exit_threshold", 0.015))
         stop_loss = float(config.get("stop_loss", 0.007))
         min_volume_multiplier = float(config.get("min_volume_multiplier", 1.5))
-        min_volatility_pct = float(config.get("min_volatility_pct", 0.006))
+        min_volatility_pct = float(config.get("min_volatility_pct", 0.0045))
         require_trend_alignment = bool(config.get("require_trend_alignment", True))
         breakout_lookback_candles = int(config.get("breakout_lookback_candles", 5))
-        min_entry_signals = int(config.get("min_entry_signals", 2))
+        min_entry_signals = int(config.get("min_entry_signals", 1))
 
         market = context.market_snapshot
         position = context.position_state
@@ -279,14 +279,14 @@ class DayTradingStrategy(TradingStrategy):
         """Return default configuration."""
         return {
             "entry_threshold": 0.01,
-            "exit_threshold": 0.02,
-            "stop_loss": 0.01,
+            "exit_threshold": 0.015,
+            "stop_loss": 0.008,
             "max_position_age_hours": 4,
             "min_volume_multiplier": 1.5,
-            "min_volatility_pct": 0.006,
+            "min_volatility_pct": 0.0045,
             "require_trend_alignment": True,
             "breakout_lookback_candles": 5,
-            "min_entry_signals": 2,
+            "min_entry_signals": 1,
         }
 
     def get_config_schema(self) -> dict:
@@ -305,14 +305,14 @@ class DayTradingStrategy(TradingStrategy):
                     "type": "number",
                     "minimum": 0.001,
                     "maximum": 1.0,
-                    "default": 0.02,
+                    "default": 0.015,
                     "description": "Profit target as percentage",
                 },
                 "stop_loss": {
                     "type": "number",
                     "minimum": 0.001,
                     "maximum": 1.0,
-                    "default": 0.01,
+                    "default": 0.008,
                     "description": "Stop loss as percentage",
                 },
                 "max_position_age_hours": {
@@ -333,7 +333,7 @@ class DayTradingStrategy(TradingStrategy):
                     "type": "number",
                     "minimum": 0.0,
                     "maximum": 1.0,
-                    "default": 0.006,
+                    "default": 0.0045,
                     "description": "Minimum recent volatility required before entering",
                 },
                 "require_trend_alignment": {
@@ -352,7 +352,7 @@ class DayTradingStrategy(TradingStrategy):
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 4,
-                    "default": 2,
+                    "default": 1,
                     "description": "Minimum number of entry confirmation signals required",
                 },
             },

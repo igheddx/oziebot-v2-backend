@@ -13,6 +13,7 @@ from oziebot_api.config import get_settings
 from oziebot_api.db.session import make_engine, make_session_factory
 from oziebot_api.models.user import User
 from oziebot_api.services.passwords import hash_password
+from oziebot_api.services.root_admin_defaults import ensure_root_admin_strategy_access
 
 
 def run() -> None:
@@ -56,6 +57,13 @@ def run() -> None:
                 )
             )
             print(f"Created root admin: {email}")
+        session.flush()
+        user = (
+            existing
+            if existing is not None
+            else session.scalars(select(User).where(func.lower(User.email) == email)).one()
+        )
+        ensure_root_admin_strategy_access(session, user)
         session.commit()
     finally:
         session.close()

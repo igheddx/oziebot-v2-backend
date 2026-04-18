@@ -48,6 +48,8 @@ class RuleContext:
     max_token_exposure_cents: int
     global_daily_loss_limit_pct: Decimal
     stale_flags: dict[str, bool]
+    critical_stale_flags: dict[str, bool]
+    stale_ages: dict[str, float | None]
 
 
 @dataclass
@@ -481,12 +483,15 @@ class StaleDataRule(RiskRule):
     name = "stale_data"
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
-        if any(ctx.stale_flags.values()):
+        if any(ctx.critical_stale_flags.values()):
             return RuleResult(
                 self.name,
                 "reject",
                 RejectionReason.POLICY,
-                f"Stale market data: {ctx.stale_flags}",
+                (
+                    "Critically stale market data: "
+                    f"critical={ctx.critical_stale_flags}, stale={ctx.stale_flags}, ages={ctx.stale_ages}"
+                ),
             )
         return None
 
