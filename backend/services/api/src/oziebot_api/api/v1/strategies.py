@@ -31,6 +31,7 @@ from oziebot_api.schemas.strategies import (
     UserStrategiesListResponse,
 )
 from oziebot_api.services.entitlements import has_strategy_entitlement
+from oziebot_api.services.strategy_catalog import ensure_platform_strategy_catalog
 from oziebot_api.services.tenant_scope import primary_tenant_id
 
 router = APIRouter(prefix="/me/strategies", tags=["strategies"])
@@ -62,6 +63,7 @@ def list_available_strategies(db: DbSession) -> AvailableStrategiesResponse:
 
 @router.get("/catalog")
 def list_effective_strategy_catalog(user: CurrentUser, db: DbSession) -> dict[str, Any]:
+    ensure_platform_strategy_catalog(db)
     rows = db.scalars(
         select(PlatformStrategy).order_by(PlatformStrategy.sort_order, PlatformStrategy.slug)
     ).all()
@@ -139,6 +141,15 @@ def create_strategy(
 
     Configuration will be validated against strategy schema.
     """
+    # Import registry here
+    from oziebot_strategy_engine.registry import StrategyRegistry
+
+    # Verify strategy exists
+    if not StrategyRegistry.strategy_exists(body.strategy_id):
+        raise HTTPException(status_code=404, detail=f"Strategy '{body.strategy_id}' not found")
+
+    ensure_platform_strategy_catalog(db)
+
     tenant_id = primary_tenant_id(db, user)
     if tenant_id is None:
         if user.is_root_admin:
@@ -149,13 +160,6 @@ def create_strategy(
         raise HTTPException(status_code=400, detail="No tenant membership")
     if not has_strategy_entitlement(db, tenant_id, body.strategy_id):
         raise HTTPException(status_code=403, detail="Strategy is not assigned to this tenant")
-
-    # Import registry here
-    from oziebot_strategy_engine.registry import StrategyRegistry
-
-    # Verify strategy exists
-    if not StrategyRegistry.strategy_exists(body.strategy_id):
-        raise HTTPException(status_code=404, detail=f"Strategy '{body.strategy_id}' not found")
 
     # Verify not already configured
     existing = (
@@ -235,6 +239,8 @@ def update_strategy(
         )
         .first()
     )
+
+    ensure_platform_strategy_catalog(db)
 
     if not strategy:
         tenant_id = primary_tenant_id(db, user)

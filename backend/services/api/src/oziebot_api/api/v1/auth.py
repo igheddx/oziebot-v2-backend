@@ -22,6 +22,7 @@ from oziebot_api.schemas.auth import (
     TokenResponse,
 )
 from oziebot_api.services.passwords import hash_password, verify_password
+from oziebot_api.services.strategy_catalog import ensure_platform_strategy_catalog
 from oziebot_api.services.tenant_scope import primary_tenant_id
 from oziebot_api.services.token_permissions import TokenPermissionService
 from oziebot_api.services.trial import start_trial_for_new_tenant
@@ -96,6 +97,7 @@ def register(
         )
     )
     db.flush()
+    ensure_platform_strategy_catalog(db)
     start_trial_for_new_tenant(db, tenant.id)
     # Initialize user with permissions for all currently enabled platform tokens
     TokenPermissionService.initialize_user_tokens(db, user.id, enabled=True)

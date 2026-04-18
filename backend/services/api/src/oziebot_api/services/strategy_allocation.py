@@ -17,6 +17,7 @@ from oziebot_api.models.strategy_allocation import (
 from oziebot_api.models.user import User
 from oziebot_api.models.user_strategy import UserStrategy
 from oziebot_api.services.entitlements import has_strategy_entitlement
+from oziebot_api.services.strategy_catalog import ensure_platform_strategy_catalog
 from oziebot_api.services.tenant_scope import primary_tenant_id
 
 BPS_TOTAL = 10_000
@@ -98,6 +99,7 @@ def _snapshot(bucket: StrategyCapitalBucket) -> dict[str, int]:
 class StrategyAllocationService:
     @staticmethod
     def _allowed_strategy_ids(db: Session, *, user_id: UUID) -> set[str]:
+        ensure_platform_strategy_catalog(db)
         configured_enabled = {
             row.strategy_id
             for row in db.query(UserStrategy)

@@ -78,14 +78,26 @@ class DayTradingStrategy(TradingStrategy):
         candle_highs: list[float] = market.metadata.get("candle_highs", [])
         candle_lows: list[float] = market.metadata.get("candle_lows", [])
 
-        # Need at least a few candles for a meaningful session range
-        required_candles = max(21, breakout_lookback_candles + 1, 5)
-        if len(closes) < required_candles:
-            return self._hold_signal(
+        # Preserve stop-loss/profit exits even when only a single market snapshot is available.
+        if position.quantity > 0:
+            return self._check_exit(
                 context,
                 signal_id,
                 correlation_id,
-                f"Insufficient history: {len(closes)}/{required_candles} candles",
+                position,
+                market,
+                exit_threshold,
+                stop_loss,
+            )
+
+        # Need at least a few candles for a meaningful session range
+        required_candles = max(21, breakout_lookback_candles + 1, 5)
+        if len(closes) < required_candles:
+            return self._generate_legacy_entry_signal(
+                context,
+                signal_id,
+                correlation_id,
+                entry_threshold,
             )
 
         # Use up to last 390 candles (~6.5 hours of 60s candles) for session range
@@ -99,18 +111,6 @@ class DayTradingStrategy(TradingStrategy):
         session_range = session_high - session_low
 
         current = float(market.current_price)
-
-        # If we have a position, check exit conditions
-        if position.quantity > 0:
-            return self._check_exit(
-                context,
-                signal_id,
-                correlation_id,
-                position,
-                market,
-                exit_threshold,
-                stop_loss,
-            )
 
         # Entry: price near session low (buy the dip)
         if session_range > 0:
@@ -229,6 +229,50 @@ class DayTradingStrategy(TradingStrategy):
         # Still holding
         return self._hold_signal(
             context, signal_id, correlation_id, f"Position P&L: {pnl:.2%}"
+        )
+
+    def _generate_legacy_entry_signal(
+        self,
+        context: StrategyContext,
+        signal_id: UUID,
+        correlation_id: UUID,
+        entry_threshold: float,
+    ) -> StrategySignal:
+        market = context.market_snapshot
+        session_high = float(market.high_price)
+        session_low = float(market.low_price)
+        current = float(market.current_price)
+        session_range = session_high - session_low
+
+        if session_range <= 0 or session_low <= 0:
+            return self._hold_signal(
+                context,
+                signal_id,
+                correlation_id,
+                "Insufficient history and invalid session range",
+            )
+
+        pct_above_low = (current - session_low) / session_low
+        if pct_above_low <= entry_threshold:
+            return self._buy_signal(
+                context,
+                signal_id,
+                correlation_id,
+                0.55,
+                (
+                    f"Near daily low (snapshot fallback): {current:.2f} "
+                    f"(low={session_low:.2f} high={session_high:.2f} pct_above_low={pct_above_low:.1%})"
+                ),
+            )
+
+        return self._hold_signal(
+            context,
+            signal_id,
+            correlation_id,
+            (
+                f"Insufficient history: using snapshot fallback "
+                f"(pct_above_low={pct_above_low:.1%} threshold={entry_threshold:.1%})"
+            ),
         )
 
     def get_default_config(self) -> dict:
