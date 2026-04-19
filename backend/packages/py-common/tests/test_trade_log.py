@@ -4,6 +4,13 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from oziebot_common.trade_log import append_trade_log_event, read_trade_log_events
+from oziebot_common.trade_log_intelligence import (
+    append_trade_log_sample,
+    build_market_signal_snapshot,
+    read_trade_log_samples,
+    read_trade_log_summaries,
+    write_trade_log_summary,
+)
 
 
 class FakePipeline:
@@ -23,15 +30,30 @@ class FakePipeline:
         self._ops.append(("expire", args, kwargs))
         return self
 
+    def sadd(self, *args, **kwargs):
+        self._ops.append(("sadd", args, kwargs))
+        return self
+
+    def setex(self, *args, **kwargs):
+        self._ops.append(("setex", args, kwargs))
+        return self
+
+    def get(self, *args, **kwargs):
+        self._ops.append(("get", args, kwargs))
+        return self
+
     def execute(self):
+        results = []
         for name, args, kwargs in self._ops:
-            getattr(self._client, name)(*args, **kwargs)
-        return []
+            results.append(getattr(self._client, name)(*args, **kwargs))
+        return results
 
 
 class FakeRedis:
     def __init__(self) -> None:
         self._sorted: dict[str, dict[str, float]] = {}
+        self._sets: dict[str, set[str]] = {}
+        self._strings: dict[str, str] = {}
 
     def pipeline(self) -> FakePipeline:
         return FakePipeline(self)
@@ -59,6 +81,19 @@ class FakeRedis:
 
     def expire(self, key: str, seconds: int) -> None:  # noqa: ARG002
         return None
+
+    def sadd(self, key: str, *values: str) -> None:
+        bucket = self._sets.setdefault(key, set())
+        bucket.update(values)
+
+    def smembers(self, key: str) -> set[str]:
+        return self._sets.get(key, set())
+
+    def setex(self, key: str, seconds: int, value: str) -> None:  # noqa: ARG002
+        self._strings[key] = value
+
+    def get(self, key: str) -> str | None:
+        return self._strings.get(key)
 
     def zrevrangebyscore(
         self,
@@ -147,3 +182,83 @@ def test_trade_log_preserves_structured_details() -> None:
         "event_time": now.isoformat(),
         "nested": {"spread_pct": "0.0234"},
     }
+
+
+def test_trade_log_filters_by_symbol_and_event_type() -> None:
+    client = FakeRedis()
+    now = datetime.now(UTC)
+    append_trade_log_event(
+        client,
+        symbol="BTC-USD",
+        event_type="market_snapshot",
+        message="btc snapshot",
+        timestamp=now - timedelta(seconds=5),
+    )
+    append_trade_log_event(
+        client,
+        symbol="ETH-USD",
+        event_type="trade_tick",
+        message="eth tick",
+        timestamp=now - timedelta(seconds=4),
+    )
+
+    events = read_trade_log_events(
+        client,
+        now=now,
+        window_seconds=120,
+        limit=10,
+        symbol="BTC-USD",
+        event_type="market_snapshot",
+    )
+
+    assert len(events) == 1
+    assert events[0]["symbol"] == "BTC-USD"
+    assert events[0]["event_type"] == "market_snapshot"
+
+
+def test_trade_log_summary_round_trip_and_snapshot_build() -> None:
+    client = FakeRedis()
+    now = datetime.now(UTC)
+    for seconds, mid_price, volume, buy_volume, sell_volume in [
+        (30, "64000", "120000", "0.9", "0.6"),
+        (18, "64035", "185000", "1.3", "0.5"),
+        (6, "64105", "260000", "1.7", "0.4"),
+    ]:
+        append_trade_log_sample(
+            client,
+            symbol="BTC-USD",
+            timestamp=now - timedelta(seconds=seconds),
+            sample={
+                "mid_price": Decimal(mid_price),
+                "spread_pct": Decimal("0.018"),
+                "best_bid": Decimal(mid_price) - Decimal("2"),
+                "best_ask": Decimal(mid_price) + Decimal("2"),
+                "bid_size": Decimal("2.4"),
+                "ask_size": Decimal("2.1"),
+                "trade_volume": Decimal("2.0"),
+                "trade_notional_usd": Decimal(volume),
+                "buy_volume": Decimal(buy_volume),
+                "sell_volume": Decimal(sell_volume),
+                "trade_count": 12,
+                "last_price": Decimal(mid_price),
+                "price_high": Decimal(mid_price) + Decimal("10"),
+                "price_low": Decimal(mid_price) - Decimal("10"),
+            },
+        )
+
+    snapshot = build_market_signal_snapshot(
+        symbol="BTC-USD",
+        samples=read_trade_log_samples(
+            client, symbol="BTC-USD", now=now, window_seconds=60
+        ),
+    )
+
+    assert snapshot is not None
+    assert snapshot["symbol"] == "BTC-USD"
+    assert snapshot["market_state"]["trend"] == "UP"
+    assert snapshot["signal_quality_label"] in {"MODERATE", "HIGH"}
+
+    write_trade_log_summary(client, symbol="BTC-USD", summary=snapshot)
+    summaries = read_trade_log_summaries(client)
+    assert len(summaries) == 1
+    assert summaries[0]["symbol"] == "BTC-USD"

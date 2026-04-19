@@ -23,17 +23,18 @@ from oziebot_market_data_ingestor.normalizer import (
 )
 from oziebot_market_data_ingestor.policy_refresh import TokenPolicyRefresher
 from oziebot_market_data_ingestor.redis_cache import RedisMarketCache
+from oziebot_market_data_ingestor.signal_panel import SignalPanelEmitter
 from oziebot_market_data_ingestor.stale import StaleDataDetector, StaleThresholds
 from oziebot_market_data_ingestor.storage import MarketDataStore
 from oziebot_market_data_ingestor.universe import SymbolUniverseProvider
 
 log = logging.getLogger("market-data-ingestor")
 logging.basicConfig(level=logging.INFO)
-STREAM_LOG_SAMPLE_SECONDS = 15
+RAW_STREAM_LOG_SAMPLE_SECONDS = 15
 
 
 class TradeLogSampler:
-    def __init__(self, interval_seconds: int = STREAM_LOG_SAMPLE_SECONDS) -> None:
+    def __init__(self, interval_seconds: int = RAW_STREAM_LOG_SAMPLE_SECONDS) -> None:
         self._interval_seconds = interval_seconds
         self._last_emit: dict[tuple[str, str], datetime] = {}
 
@@ -208,14 +209,6 @@ async def _reconcile_candles(
                 streamed=False,
                 granularity_sec=granularity,
             )
-            append_trade_log_event(
-                log_client,
-                symbol=p,
-                event_type="candles_refresh",
-                message=message,
-                timestamp=now,
-                details=details,
-            )
         except Exception as exc:
             log.warning("candle reconciliation failed product=%s err=%s", p, exc)
 
@@ -228,6 +221,7 @@ async def _reconcile_trades(
     stale: StaleDataDetector,
     products: list[str],
     limit: int,
+    signal_panel: SignalPanelEmitter | None = None,
 ) -> None:
     for p in products:
         try:
@@ -239,16 +233,10 @@ async def _reconcile_trades(
                 cache.put_trade(item)
                 store.insert_trade_snapshot(item)
                 stale.mark_trade(item.product_id, item.ingest_time)
+                if signal_panel is not None:
+                    signal_panel.observe_trade(item)
             if not normalized:
                 continue
-            message, details = _trade_snapshot_summary(normalized)
-            append_trade_log_event(
-                log_client,
-                symbol=p,
-                event_type="market_snapshot",
-                message=message,
-                details=details,
-            )
         except Exception as exc:
             log.warning("trade reconciliation failed product=%s err=%s", p, exc)
 
@@ -260,6 +248,7 @@ async def _reconcile_bbo(
     log_client,
     stale: StaleDataDetector,
     products: list[str],
+    signal_panel: SignalPanelEmitter | None = None,
 ) -> None:
     for p in products:
         try:
@@ -268,6 +257,8 @@ async def _reconcile_bbo(
             cache.put_bbo(item)
             store.insert_bbo_snapshot(item)
             stale.mark_bbo(item.product_id, item.ingest_time)
+            if signal_panel is not None:
+                signal_panel.observe_bbo(item)
             message, details = _bbo_summary(item, streamed=False)
             append_trade_log_event(
                 log_client,
@@ -276,6 +267,8 @@ async def _reconcile_bbo(
                 message=message,
                 details=details,
             )
+            if signal_panel is not None:
+                signal_panel.force_emit(p, now=item.ingest_time)
         except Exception as exc:
             log.warning("bbo reconciliation failed product=%s err=%s", p, exc)
 
@@ -299,6 +292,7 @@ async def main() -> None:
     cache = RedisMarketCache(r, ttl_seconds=s.cache_ttl_seconds)
     store = MarketDataStore(engine)
     refresher = TokenPolicyRefresher(engine)
+    signal_panel = SignalPanelEmitter(r)
     stale = StaleDataDetector(
         thresholds=StaleThresholds(
             trade=s.stale_trade_seconds,
@@ -323,9 +317,10 @@ async def main() -> None:
         stale,
         products,
         s.trade_recovery_limit,
+        signal_panel,
     )
     health.touch()
-    await _reconcile_bbo(rest, store, cache, r, stale, products)
+    await _reconcile_bbo(rest, store, cache, r, stale, products, signal_panel)
     health.touch()
     await _reconcile_candles(
         rest, store, cache, r, stale, products, s.candles_granularity_sec
@@ -359,6 +354,7 @@ async def main() -> None:
                         timestamp=trade.ingest_time,
                         details=details,
                     )
+                signal_panel.observe_trade(trade)
             elif typ == "ticker":
                 bbo = normalize_bbo(msg)
                 cache.put_bbo(bbo)
@@ -373,51 +369,20 @@ async def main() -> None:
                     append_trade_log_event(
                         r,
                         symbol=bbo.product_id,
-                        event_type="bbo_stream",
+                        event_type="bbo_update",
                         message=message,
                         timestamp=bbo.ingest_time,
                         details=details,
                     )
+                signal_panel.observe_bbo(bbo)
             elif typ in {"snapshot", "l2update"} and msg.get("product_id"):
                 top = normalize_orderbook_top(msg, depth=s.orderbook_depth)
                 cache.put_orderbook(top)
-                if trade_log_sampler.should_emit(
-                    symbol=top.product_id,
-                    event_type="orderbook_top",
-                    now=top.ingest_time,
-                ):
-                    message, details = _orderbook_summary(top)
-                    append_trade_log_event(
-                        r,
-                        symbol=top.product_id,
-                        event_type="orderbook_top",
-                        message=message,
-                        timestamp=top.ingest_time,
-                        details=details,
-                    )
             elif typ == "candle":
                 candle = normalize_candle(msg, s.candles_granularity_sec)
                 cache.put_candle(candle)
                 store.insert_candle(candle)
                 stale.mark_candle(candle.product_id, candle.ingest_time)
-                if trade_log_sampler.should_emit(
-                    symbol=candle.product_id,
-                    event_type="candle_stream",
-                    now=candle.ingest_time,
-                ):
-                    message, details = _candle_summary(
-                        [candle],
-                        streamed=True,
-                        granularity_sec=s.candles_granularity_sec,
-                    )
-                    append_trade_log_event(
-                        r,
-                        symbol=candle.product_id,
-                        event_type="candle_stream",
-                        message=message,
-                        timestamp=candle.ingest_time,
-                        details=details,
-                    )
             health.touch()
 
             now = datetime.now(UTC)
@@ -434,8 +399,17 @@ async def main() -> None:
                     stale,
                     stale_map["trade"],
                     s.trade_recovery_limit,
+                    signal_panel,
                 )
-                await _reconcile_bbo(rest, store, cache, r, stale, stale_map["bbo"])
+                await _reconcile_bbo(
+                    rest,
+                    store,
+                    cache,
+                    r,
+                    stale,
+                    stale_map["bbo"],
+                    signal_panel,
+                )
                 await _reconcile_candles(
                     rest,
                     store,

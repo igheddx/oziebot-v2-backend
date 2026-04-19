@@ -12,6 +12,7 @@ from oziebot_common.trade_log import (
     MAX_TRADE_LOG_WINDOW_SECONDS,
     read_trade_log_events,
 )
+from oziebot_common.trade_log_intelligence import read_trade_log_summaries
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
@@ -21,6 +22,8 @@ def get_trade_log(
     _user: CurrentUser,
     window_seconds: int = Query(default=120, ge=1, le=MAX_TRADE_LOG_WINDOW_SECONDS),
     limit: int = Query(default=200, ge=1, le=MAX_TRADE_LOG_LIMIT),
+    symbol: str | None = Query(default=None),
+    event_type: str | None = Query(default=None),
     settings: Settings = Depends(settings_dep),
 ) -> dict[str, object]:
     try:
@@ -34,12 +37,25 @@ def get_trade_log(
             client,
             window_seconds=window_seconds,
             limit=limit,
+            symbol=symbol,
+            event_type=event_type,
         )
+        summaries = read_trade_log_summaries(client, symbol=symbol)
     except (redis.RedisError, ValueError) as exc:
         raise HTTPException(status_code=503, detail="Trade log temporarily unavailable") from exc
+    available_symbols = sorted(
+        {str(event["symbol"]) for event in events}
+        | {str(summary.get("symbol") or "") for summary in summaries if summary.get("symbol")}
+    )
+    available_event_types = sorted({str(event["event_type"]) for event in events})
     return {
         "window_seconds": window_seconds,
         "limit": limit,
+        "symbol": symbol.upper() if symbol else None,
+        "event_type": event_type,
         "count": len(events),
+        "available_symbols": available_symbols,
+        "available_event_types": available_event_types,
+        "summaries": summaries,
         "events": events,
     }

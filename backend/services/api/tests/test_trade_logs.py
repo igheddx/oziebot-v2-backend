@@ -7,6 +7,7 @@ from unittest.mock import patch
 import redis
 
 from oziebot_common.trade_log import append_trade_log_event
+from oziebot_common.trade_log_intelligence import write_trade_log_summary
 
 
 class FakePipeline:
@@ -26,15 +27,30 @@ class FakePipeline:
         self._ops.append(("expire", args, kwargs))
         return self
 
+    def sadd(self, *args, **kwargs):
+        self._ops.append(("sadd", args, kwargs))
+        return self
+
+    def setex(self, *args, **kwargs):
+        self._ops.append(("setex", args, kwargs))
+        return self
+
+    def get(self, *args, **kwargs):
+        self._ops.append(("get", args, kwargs))
+        return self
+
     def execute(self):
+        results = []
         for name, args, kwargs in self._ops:
-            getattr(self._client, name)(*args, **kwargs)
-        return []
+            results.append(getattr(self._client, name)(*args, **kwargs))
+        return results
 
 
 class FakeRedis:
     def __init__(self) -> None:
         self._sorted: dict[str, dict[str, float]] = {}
+        self._sets: dict[str, set[str]] = {}
+        self._strings: dict[str, str] = {}
 
     def pipeline(self) -> FakePipeline:
         return FakePipeline(self)
@@ -58,6 +74,19 @@ class FakeRedis:
 
     def expire(self, key: str, seconds: int) -> None:  # noqa: ARG002
         return None
+
+    def sadd(self, key: str, *values: str) -> None:
+        bucket = self._sets.setdefault(key, set())
+        bucket.update(values)
+
+    def smembers(self, key: str) -> set[str]:
+        return self._sets.get(key, set())
+
+    def setex(self, key: str, seconds: int, value: str) -> None:  # noqa: ARG002
+        self._strings[key] = value
+
+    def get(self, key: str) -> str | None:
+        return self._strings.get(key)
 
     def zrevrangebyscore(
         self,
@@ -109,23 +138,45 @@ def test_trade_log_endpoint_returns_recent_events(
             "spread_pct": Decimal("0.0469"),
         },
     )
+    write_trade_log_summary(
+        fake_redis,
+        symbol="ETH-USD",
+        summary={
+            "timestamp": now.isoformat(),
+            "symbol": "ETH-USD",
+            "summary_line": "Trend: UP | Volatility: MEDIUM | Liquidity: HIGH | Bias: BUY",
+            "market_state": {
+                "trend": "UP",
+                "volatility": "MEDIUM",
+                "liquidity": "HIGH",
+                "trade_bias": "BUY",
+            },
+            "signal_quality_score": 78,
+            "signal_quality_label": "HIGH",
+            "raw_metrics": {"spread_pct": "0.0469"},
+        },
+    )
 
     response = client.get(
-        "/v1/logs/trade?window_seconds=120&limit=200",
+        "/v1/logs/trade?window_seconds=120&limit=200&symbol=ETH-USD&event_type=bbo_update",
         headers={"Authorization": f"Bearer {token}"},
     )
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["count"] == 2
-    assert payload["events"][0]["symbol"] == "BTC-USD"
-    assert payload["events"][1]["message"] == "ETH-USD BBO updated"
-    assert payload["events"][1]["source"] == "coinbase"
-    assert payload["events"][1]["details"] == {
+    assert payload["count"] == 1
+    assert payload["symbol"] == "ETH-USD"
+    assert payload["event_type"] == "bbo_update"
+    assert payload["events"][0]["message"] == "ETH-USD BBO updated"
+    assert payload["events"][0]["source"] == "coinbase"
+    assert payload["events"][0]["details"] == {
         "best_bid": "2450.1",
         "best_ask": "2451.25",
         "spread_pct": "0.0469",
     }
+    assert payload["available_symbols"] == ["ETH-USD"]
+    assert payload["available_event_types"] == ["bbo_update"]
+    assert payload["summaries"][0]["signal_quality_score"] == 78
 
 
 @patch("oziebot_api.api.v1.logs.redis_from_url")

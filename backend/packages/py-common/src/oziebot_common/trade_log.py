@@ -27,13 +27,13 @@ def build_trade_log_event(
         "message": str(message),
         "source": str(source).lower(),
     }
-    normalized_details = _normalize_details(details)
+    normalized_details = normalize_trade_log_payload(details)
     if normalized_details:
         event["details"] = normalized_details
     return event
 
 
-def _normalize_details(details: Mapping[str, Any] | None) -> dict[str, Any]:
+def normalize_trade_log_payload(details: Mapping[str, Any] | None) -> dict[str, Any]:
     if not details:
         return {}
 
@@ -48,7 +48,7 @@ def _normalize_details(details: Mapping[str, Any] | None) -> dict[str, Any]:
         elif isinstance(value, bool | int | float | str):
             normalized[str(key)] = value
         elif isinstance(value, Mapping):
-            nested = _normalize_details(value)
+            nested = normalize_trade_log_payload(value)
             if nested:
                 normalized[str(key)] = nested
         elif isinstance(value, list | tuple):
@@ -109,12 +109,16 @@ def read_trade_log_events(
     *,
     window_seconds: int = MAX_TRADE_LOG_WINDOW_SECONDS,
     limit: int = MAX_TRADE_LOG_LIMIT,
+    symbol: str | None = None,
+    event_type: str | None = None,
     now: datetime | None = None,
 ) -> list[dict[str, Any]]:
     clamped_window = max(1, min(int(window_seconds), MAX_TRADE_LOG_WINDOW_SECONDS))
     clamped_limit = max(1, min(int(limit), MAX_TRADE_LOG_LIMIT))
     current_time = (now or datetime.now(UTC)).astimezone(UTC)
     min_score = (current_time - timedelta(seconds=clamped_window)).timestamp()
+    normalized_symbol = str(symbol or "").strip().upper()
+    normalized_event_type = str(event_type or "").strip().lower()
     rows = client.zrevrangebyscore(
         TRADE_LOG_REDIS_KEY,
         "+inf",
@@ -126,7 +130,7 @@ def read_trade_log_events(
     events: list[dict[str, Any]] = []
     for raw in reversed(rows):
         try:
-            payload = json.loads(raw)
+            payload = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
         except json.JSONDecodeError:
             continue
         if not isinstance(payload, dict):
@@ -137,6 +141,10 @@ def read_trade_log_events(
         message = str(payload.get("message") or "")
         source = str(payload.get("source") or "coinbase").lower()
         if not timestamp or not symbol or not event_type or not message:
+            continue
+        if normalized_symbol and symbol != normalized_symbol:
+            continue
+        if normalized_event_type and event_type.lower() != normalized_event_type:
             continue
         event: dict[str, Any] = {
             "timestamp": timestamp,
