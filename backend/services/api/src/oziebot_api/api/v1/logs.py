@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 import redis
 
 from oziebot_api.config import Settings
@@ -22,12 +22,22 @@ def get_trade_log(
     limit: int = Query(default=200, ge=1, le=MAX_TRADE_LOG_LIMIT),
     settings: Settings = Depends(settings_dep),
 ) -> dict[str, object]:
-    client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
-    events = read_trade_log_events(
-        client,
-        window_seconds=window_seconds,
-        limit=limit,
+    client = redis.Redis.from_url(
+        settings.redis_url,
+        decode_responses=True,
+        socket_connect_timeout=1,
+        socket_timeout=1,
     )
+    try:
+        events = read_trade_log_events(
+            client,
+            window_seconds=window_seconds,
+            limit=limit,
+        )
+    except redis.RedisError as exc:
+        raise HTTPException(
+            status_code=503, detail="Trade log temporarily unavailable"
+        ) from exc
     return {
         "window_seconds": window_seconds,
         "limit": limit,

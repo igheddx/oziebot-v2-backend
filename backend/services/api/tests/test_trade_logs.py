@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
+import redis
+
 from oziebot_common.trade_log import append_trade_log_event
 
 
@@ -110,3 +112,24 @@ def test_trade_log_endpoint_returns_recent_events(mock_from_url, client, regular
     assert payload["count"] == 2
     assert payload["events"][0]["symbol"] == "BTC-USD"
     assert payload["events"][1]["message"] == "ETH-USD BBO updated"
+
+
+@patch("oziebot_api.api.v1.logs.redis.Redis.from_url")
+def test_trade_log_endpoint_returns_503_when_redis_unavailable(
+    mock_from_url, client, regular_user_and_token
+):
+    _, token = regular_user_and_token
+
+    class UnavailableRedis:
+        def zrevrangebyscore(self, *args, **kwargs):
+            raise redis.TimeoutError("redis timed out")
+
+    mock_from_url.return_value = UnavailableRedis()
+
+    response = client.get(
+        "/v1/logs/trade?window_seconds=120&limit=200",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "Trade log temporarily unavailable"
