@@ -35,9 +35,7 @@ def get_trade_log(
             limit=limit,
         )
     except redis.RedisError as exc:
-        raise HTTPException(
-            status_code=503, detail="Trade log temporarily unavailable"
-        ) from exc
+        raise HTTPException(status_code=503, detail="Trade log temporarily unavailable") from exc
     return {
         "window_seconds": window_seconds,
         "limit": limit,
