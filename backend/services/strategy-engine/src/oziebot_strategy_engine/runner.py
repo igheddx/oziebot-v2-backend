@@ -176,7 +176,7 @@ class StrategyRunner:
                     trace_id = str(run_id)
                     try:
                         policy_reason = self._token_policy_suppression_reason(
-                            token_policy
+                            token_policy, trading_mode=mode
                         )
                         if policy_reason is not None:
                             self._record_signal_metric(
@@ -255,7 +255,9 @@ class StrategyRunner:
                             config=config,
                         )
                         signal = self._apply_token_policy_to_signal(
-                            signal=signal, token_policy=token_policy
+                            signal=signal,
+                            token_policy=token_policy,
+                            trading_mode=mode,
                         )
                         signal = self._annotate_fee_economics(
                             signal=signal,
@@ -972,9 +974,11 @@ class StrategyRunner:
         return dict(row) if row else None
 
     def _token_policy_suppression_reason(
-        self, token_policy: dict[str, Any] | None
+        self, token_policy: dict[str, Any] | None, *, trading_mode: TradingMode
     ) -> str | None:
-        effective = resolve_effective_token_policy(token_policy)
+        effective = resolve_effective_token_policy(
+            token_policy, trading_mode=trading_mode.value
+        )
         if not effective["admin_enabled"]:
             return "token strategy disabled by admin"
         if effective["effective_recommendation_status"] == "blocked":
@@ -990,10 +994,13 @@ class StrategyRunner:
         *,
         signal: StrategySignal,
         token_policy: dict[str, Any] | None,
+        trading_mode: TradingMode,
     ) -> StrategySignal:
         if token_policy is None:
             return signal
-        effective = resolve_effective_token_policy(token_policy)
+        effective = resolve_effective_token_policy(
+            token_policy, trading_mode=trading_mode.value
+        )
         metadata = dict(signal.metadata or {})
         metadata["token_policy"] = {
             "admin_enabled": effective["admin_enabled"],

@@ -328,7 +328,9 @@ def score_strategy_suitability(
     )
 
 
-def resolve_effective_token_policy(policy: Mapping[str, Any] | None) -> dict[str, Any]:
+def resolve_effective_token_policy(
+    policy: Mapping[str, Any] | None, *, trading_mode: str | None = None
+) -> dict[str, Any]:
     if not policy:
         return {
             "admin_enabled": True,
@@ -348,6 +350,13 @@ def resolve_effective_token_policy(policy: Mapping[str, Any] | None) -> dict[str
     effective_reason = policy.get("recommendation_reason_override") or policy.get(
         "recommendation_reason"
     )
+    if (
+        admin_enabled
+        and override_status is None
+        and effective_status == "blocked"
+        and str(trading_mode or "").lower() == "paper"
+    ):
+        effective_status = "discouraged"
     size_multiplier = Decimal("1")
     if not admin_enabled or effective_status == "blocked":
         size_multiplier = Decimal("0")

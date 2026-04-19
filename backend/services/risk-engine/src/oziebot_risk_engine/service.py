@@ -921,7 +921,8 @@ class RiskEngineService:
             )
         )
         effective_token_policy = resolve_effective_token_policy(
-            dict(token_policy_row) if token_policy_row else None
+            dict(token_policy_row) if token_policy_row else None,
+            trading_mode=signal.trading_mode.value,
         )
         total_capital_cents = int(total_capital.total if total_capital else 0)
         token_policy_max_position_cents = 0

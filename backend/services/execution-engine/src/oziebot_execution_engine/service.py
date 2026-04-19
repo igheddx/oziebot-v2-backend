@@ -312,7 +312,10 @@ class ExecutionService:
             symbol=request.symbol,
             strategy_id=request.strategy_id,
         )
-        effective = resolve_effective_token_policy(policy_row)
+        effective = resolve_effective_token_policy(
+            policy_row,
+            trading_mode=request.trading_mode.value,
+        )
         intent_payload = dict(request.intent_payload)
         metadata = dict(intent_payload.get("metadata") or {})
         metadata["token_policy_execution"] = {
