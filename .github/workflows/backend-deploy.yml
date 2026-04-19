@@ -281,26 +281,31 @@ jobs:
             task_definition: infrastructure/aws/backend/task-definitions/strategy-engine.json
             ecs_service: oziebot-strategy-engine
             container_name: strategy-engine
+            restart_before_deploy: false
           - dockerfile: backend/services/risk-engine/Dockerfile
             repository: oziebot/risk-engine
             task_definition: infrastructure/aws/backend/task-definitions/risk-engine.json
             ecs_service: oziebot-risk-engine
             container_name: risk-engine
+            restart_before_deploy: true
           - dockerfile: backend/services/execution-engine/Dockerfile
             repository: oziebot/execution-engine
             task_definition: infrastructure/aws/backend/task-definitions/execution-engine.json
             ecs_service: oziebot-execution-engine
             container_name: execution-engine
+            restart_before_deploy: true
           - dockerfile: backend/services/alerts-worker/Dockerfile
             repository: oziebot/alerts-worker
             task_definition: infrastructure/aws/backend/task-definitions/alerts-worker.json
             ecs_service: oziebot-alerts-worker
             container_name: alerts-worker
+            restart_before_deploy: true
           - dockerfile: backend/services/market-data-ingestor/Dockerfile
             repository: oziebot/market-data-ingestor
             task_definition: infrastructure/aws/backend/task-definitions/market-data-ingestor.json
             ecs_service: oziebot-market-data-ingestor
             container_name: market-data-ingestor
+            restart_before_deploy: false
 
     steps:
       - uses: actions/checkout@v4
@@ -375,6 +380,35 @@ jobs:
           task-definition: task-definition.json
           container-name: ${{ matrix.container_name }}
           image: ${{ env.ECR_REGISTRY }}/${{ matrix.repository }}:${{ github.sha }}
+
+      - name: Restart worker tasks before deploy
+        if: ${{ matrix.restart_before_deploy }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TASK_ARNS="$(aws ecs list-tasks \
+            --cluster "${ECS_CLUSTER}" \
+            --service-name "${{ matrix.ecs_service }}" \
+            --desired-status RUNNING \
+            --query 'taskArns' \
+            --output text)"
+
+          if [ -z "${TASK_ARNS}" ] || [ "${TASK_ARNS}" = "None" ]; then
+            echo "No running tasks to restart for ${{ matrix.ecs_service }}"
+            exit 0
+          fi
+
+          for task_arn in ${TASK_ARNS}; do
+            echo "Stopping ${task_arn} for ${{ matrix.ecs_service }}"
+            aws ecs stop-task \
+              --cluster "${ECS_CLUSTER}" \
+              --task "${task_arn}" \
+              --reason "Restarting worker before deploy to clear stuck draining tasks" \
+              >/dev/null
+          done
+
+          sleep 10
 
       - name: Deploy task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
