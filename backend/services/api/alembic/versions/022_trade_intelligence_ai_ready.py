@@ -270,10 +270,15 @@ def downgrade() -> None:
         table_name="strategy_signal_snapshots",
     )
     op.drop_index("ix_strategy_signal_snapshots_timestamp", table_name="strategy_signal_snapshots")
-    op.drop_index("ix_strategy_signal_snapshots_token_symbol", table_name="strategy_signal_snapshots")
-    op.drop_index("ix_strategy_signal_snapshots_strategy_name", table_name="strategy_signal_snapshots")
-    op.drop_index("ix_strategy_signal_snapshots_trading_mode", table_name="strategy_signal_snapshots")
+    op.drop_index(
+        "ix_strategy_signal_snapshots_token_symbol", table_name="strategy_signal_snapshots"
+    )
+    op.drop_index(
+        "ix_strategy_signal_snapshots_strategy_name", table_name="strategy_signal_snapshots"
+    )
+    op.drop_index(
+        "ix_strategy_signal_snapshots_trading_mode", table_name="strategy_signal_snapshots"
+    )
     op.drop_index("ix_strategy_signal_snapshots_tenant_id", table_name="strategy_signal_snapshots")
     op.drop_index("ix_strategy_signal_snapshots_user_id", table_name="strategy_signal_snapshots")
     op.drop_table("strategy_signal_snapshots")
-
