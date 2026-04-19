@@ -11,9 +11,9 @@ from sqlalchemy import select
 from oziebot_api.deps import DbSession
 from oziebot_api.deps.auth import CurrentUser
 from oziebot_api.models.platform_strategy import PlatformStrategy
+from oziebot_api.models.strategy_signal_pipeline import StrategySignalRecord
 from oziebot_api.models.user_strategy import (
     StrategyPerformance,
-    StrategySignalLog,
     UserStrategy,
     UserStrategyState,
 )
@@ -355,12 +355,12 @@ def get_strategy_signals(
 ) -> dict[str, Any]:
     """Get recent signals from a strategy."""
     signals = (
-        db.query(StrategySignalLog)
+        db.query(StrategySignalRecord)
         .filter(
-            StrategySignalLog.user_id == user.id,
-            StrategySignalLog.strategy_id == strategy_id,
+            StrategySignalRecord.user_id == user.id,
+            StrategySignalRecord.strategy_name == strategy_id,
         )
-        .order_by(StrategySignalLog.created_at.desc())
+        .order_by(StrategySignalRecord.timestamp.desc())
         .offset(offset)
         .limit(limit)
         .all()
@@ -371,7 +371,19 @@ def get_strategy_signals(
         "total_fetched": len(signals),
         "limit": limit,
         "offset": offset,
-        "signals": [StrategySignalResponse.model_validate(s) for s in signals],
+        "signals": [
+            StrategySignalResponse(
+                id=signal.signal_id,
+                strategy_id=signal.strategy_name,
+                signal_type=signal.action,
+                trading_mode=signal.trading_mode,
+                symbol=signal.symbol,
+                confidence=signal.confidence,
+                reason=str(signal.reasoning_metadata.get("reason") or ""),
+                created_at=signal.timestamp,
+            )
+            for signal in signals
+        ],
     }
 
 

@@ -7,6 +7,9 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
+from oziebot_api.models.user import User
+from oziebot_api.models.strategy_signal_pipeline import StrategySignalRecord
 from oziebot_domain.strategy import SignalType
 from oziebot_domain.trading_mode import TradingMode
 from oziebot_strategy_engine.registry import StrategyRegistry
@@ -525,6 +528,39 @@ class TestStrategyAPI:
         assert live.status_code == 200
         assert paper.json()["state"]["cycles_completed"] == 3
         assert live.json()["state"]["cycles_completed"] == 1
+
+    def test_get_strategy_signals_reads_current_signal_pipeline_table(
+        self, client, db_session, regular_user_and_token
+    ):
+        email, token = regular_user_and_token
+        user = db_session.scalars(select(User).where(User.email == email)).one()
+        row = StrategySignalRecord(
+            signal_id=uuid.uuid4(),
+            run_id=uuid.uuid4(),
+            user_id=user.id,
+            strategy_name="momentum",
+            symbol="BTC-USD",
+            action="buy",
+            confidence=0.81,
+            suggested_size="0.12",
+            reasoning_metadata={"reason": "bullish crossover"},
+            trading_mode="paper",
+            timestamp=datetime.now(UTC),
+        )
+        db_session.add(row)
+        db_session.commit()
+
+        response = client.get(
+            "/v1/me/strategies/momentum/signals",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total_fetched"] == 1
+        assert payload["signals"][0]["strategy_id"] == "momentum"
+        assert payload["signals"][0]["signal_type"] == "buy"
+        assert payload["signals"][0]["reason"] == "bullish crossover"
 
 
 # ============================================================================

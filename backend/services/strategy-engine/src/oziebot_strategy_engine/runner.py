@@ -6,11 +6,12 @@ import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from oziebot_common.queues import QueueNames, push_json, strategy_signal_to_json
 from oziebot_common.fee_model import (
@@ -580,70 +581,82 @@ class StrategyRunner:
     ) -> StrategySignal:
         if self._engine is None:
             return signal
-        raw_features = self._raw_feature_json(
-            strategy_name=strategy_name,
-            signal=signal,
-            market=market,
-            config=config,
-            runtime_state=runtime_state,
-        )
-        effective_policy = resolve_effective_token_policy(
-            token_policy, trading_mode=trading_mode.value
-        )
-        snapshot_id = persist_signal_snapshot(
-            self._engine,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            trading_mode=trading_mode.value,
-            strategy_name=strategy_name,
-            token_symbol=market.symbol,
-            timestamp=timestamp,
-            current_price=market.current_price,
-            best_bid=market.bid_price,
-            best_ask=market.ask_price,
-            spread_pct=self._spread_pct(market),
-            estimated_slippage_pct=self._estimated_slippage_pct(signal),
-            volume=market.volume_24h,
-            volatility=self._volatility_pct(market),
-            confidence_score=float(signal.confidence),
-            raw_feature_json=raw_features,
-            token_policy_status=effective_policy["effective_recommendation_status"],
-            token_policy_multiplier=Decimal(str(effective_policy["size_multiplier"])),
-        )
-        ai_result = self._ai_scorer.score(
-            {
-                "strategy_name": strategy_name,
-                "trading_mode": trading_mode.value,
-                "token_symbol": market.symbol,
-                "raw_feature_json": raw_features,
-                "token_policy_status": effective_policy[
-                    "effective_recommendation_status"
-                ],
-            }
-        )
-        inference_id = persist_ai_inference_record(
-            self._engine,
-            signal_snapshot_id=snapshot_id,
-            model_name=self._ai_scorer.model_name,
-            model_version=self._ai_scorer.model_version,
-            recommendation=ai_result.recommendation.value,
-            confidence_score=ai_result.confidence_score,
-            explanation_json=ai_result.explanation_json,
-            created_at=timestamp,
-        )
-        return signal.model_copy(
-            update={
-                "metadata": upsert_intelligence_metadata(
-                    signal.metadata,
-                    signal_snapshot_id=snapshot_id,
-                    ai_inference_id=inference_id,
-                    ai_recommendation=ai_result.recommendation.value,
-                    ai_confidence_score=ai_result.confidence_score,
-                    model_name=self._ai_scorer.model_name,
-                    model_version=self._ai_scorer.model_version,
-                )
-            }
-        )
+        try:
+            raw_features = self._raw_feature_json(
+                strategy_name=strategy_name,
+                signal=signal,
+                market=market,
+                config=config,
+                runtime_state=runtime_state,
+            )
+            effective_policy = resolve_effective_token_policy(
+                token_policy, trading_mode=trading_mode.value
+            )
+            snapshot_id = persist_signal_snapshot(
+                self._engine,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                trading_mode=trading_mode.value,
+                strategy_name=strategy_name,
+                token_symbol=market.symbol,
+                timestamp=timestamp,
+                current_price=market.current_price,
+                best_bid=market.bid_price,
+                best_ask=market.ask_price,
+                spread_pct=self._spread_pct(market),
+                estimated_slippage_pct=self._estimated_slippage_pct(signal),
+                volume=market.volume_24h,
+                volatility=self._volatility_pct(market),
+                confidence_score=float(signal.confidence),
+                raw_feature_json=raw_features,
+                token_policy_status=effective_policy["effective_recommendation_status"],
+                token_policy_multiplier=Decimal(
+                    str(effective_policy["size_multiplier"])
+                ),
+            )
+            ai_result = self._ai_scorer.score(
+                {
+                    "strategy_name": strategy_name,
+                    "trading_mode": trading_mode.value,
+                    "token_symbol": market.symbol,
+                    "raw_feature_json": raw_features,
+                    "token_policy_status": effective_policy[
+                        "effective_recommendation_status"
+                    ],
+                }
+            )
+            inference_id = persist_ai_inference_record(
+                self._engine,
+                signal_snapshot_id=snapshot_id,
+                model_name=self._ai_scorer.model_name,
+                model_version=self._ai_scorer.model_version,
+                recommendation=ai_result.recommendation.value,
+                confidence_score=ai_result.confidence_score,
+                explanation_json=ai_result.explanation_json,
+                created_at=timestamp,
+            )
+            return signal.model_copy(
+                update={
+                    "metadata": upsert_intelligence_metadata(
+                        signal.metadata,
+                        signal_snapshot_id=snapshot_id,
+                        ai_inference_id=inference_id,
+                        ai_recommendation=ai_result.recommendation.value,
+                        ai_confidence_score=ai_result.confidence_score,
+                        model_name=self._ai_scorer.model_name,
+                        model_version=self._ai_scorer.model_version,
+                    )
+                }
+            )
+        except (InvalidOperation, SQLAlchemyError, TypeError, ValueError):
+            log.exception(
+                "trade_intelligence_persist_failed user_id=%s strategy=%s mode=%s symbol=%s",
+                user_id,
+                strategy_name,
+                trading_mode.value,
+                market.symbol,
+            )
+            return signal
 
     def _persist_decision_audit_record(
         self,
@@ -659,17 +672,25 @@ class StrategyRunner:
     ) -> None:
         if self._engine is None:
             return
-        persist_decision_audit(
-            self._engine,
-            signal_snapshot_id=signal_snapshot_id,
-            stage=stage.value,
-            decision=decision.value,
-            reason_code=reason_code,
-            reason_detail=reason_detail,
-            size_before=size_before,
-            size_after=size_after,
-            created_at=created_at,
-        )
+        try:
+            persist_decision_audit(
+                self._engine,
+                signal_snapshot_id=signal_snapshot_id,
+                stage=stage.value,
+                decision=decision.value,
+                reason_code=reason_code,
+                reason_detail=reason_detail,
+                size_before=size_before,
+                size_after=size_after,
+                created_at=created_at,
+            )
+        except SQLAlchemyError:
+            log.exception(
+                "decision_audit_persist_failed stage=%s decision=%s snapshot_id=%s",
+                stage.value,
+                decision.value,
+                signal_snapshot_id,
+            )
 
     def _signal_snapshot_id(self, signal: StrategySignal) -> str | None:
         metadata = dict(signal.metadata or {})

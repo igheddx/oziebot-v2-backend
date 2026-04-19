@@ -7,6 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from oziebot_domain.signal_pipeline import StrategySignalEvent
 from oziebot_domain.strategy import SignalType, StrategySignal
@@ -493,6 +494,174 @@ def test_run_once_persists_signal_snapshots_and_ai_inference(tmp_path: Path):
     assert [row[0] for row in snapshot_rows] == ["live", "paper"]
     assert ai_count == 2
     assert "momentum_value" in json.loads(snapshot_rows[0][1])
+
+
+def test_run_once_continues_when_trade_intelligence_persistence_fails(
+    tmp_path: Path, monkeypatch
+):
+    db_path = tmp_path / "runner-intelligence-failure.sqlite"
+    _setup_intelligence_db(db_path)
+
+    class ResilientRunner(StrategyRunner):
+        def __init__(self):
+            super().__init__(
+                engine=create_engine(f"sqlite+pysqlite:///{db_path}"),
+                redis_client=DummyRedis(),
+            )
+
+        def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
+            return [
+                {
+                    "user_id": str(uuid.uuid4()),
+                    "strategy_id": "momentum",
+                    "tenant_id": uuid.uuid4(),
+                    "config": {},
+                }
+            ]
+
+        def _load_platform_strategy_config(self, strategy_id: str) -> dict[str, object]:
+            return {"strategy_params": {"short_window": 3, "long_window": 5}}
+
+        def _load_allowed_symbols(self, user_id: str) -> list[str]:
+            return ["BTC-USD"]
+
+        def _load_market_snapshot(self, symbol: str) -> MarketSnapshot | None:
+            return MarketSnapshot(
+                timestamp=datetime.now(UTC),
+                symbol=symbol,
+                current_price=Decimal("50000"),
+                bid_price=Decimal("49990"),
+                ask_price=Decimal("50010"),
+                volume_24h=Decimal("1000"),
+                open_price=Decimal("49000"),
+                high_price=Decimal("50100"),
+                low_price=Decimal("48900"),
+                close_price=Decimal("50000"),
+                candle_closes=[49000, 49200, 49500, 49800, 50000],
+            )
+
+        def _load_position_state(
+            self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str
+        ) -> PositionState:
+            return PositionState(symbol=symbol, quantity=Decimal("0"))
+
+        def _sync_position_runtime_state(self, **kwargs) -> PositionState:
+            return kwargs["position_state"]
+
+        def _generate_signal(self, **kwargs) -> StrategySignal:
+            return StrategySignal(
+                signal_id=uuid.uuid4(),
+                correlation_id=uuid.uuid4(),
+                tenant_id=uuid.uuid4(),
+                strategy_id="momentum",
+                trading_mode=kwargs["trading_mode"],
+                signal_type=SignalType.BUY,
+                confidence=0.82,
+                reason="bullish crossover",
+                quantity=Quantity(amount="0.12"),
+            )
+
+    monkeypatch.setattr(
+        "oziebot_strategy_engine.runner.persist_signal_snapshot",
+        lambda *args, **kwargs: (_ for _ in ()).throw(SQLAlchemyError("boom")),
+    )
+
+    runner = ResilientRunner()
+    processed = runner.run_once()
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        signal_count = conn.execute(
+            text("SELECT COUNT(*) FROM strategy_signals")
+        ).scalar_one()
+        ai_count = conn.execute(
+            text("SELECT COUNT(*) FROM ai_inference_records")
+        ).scalar_one()
+    assert processed == 2
+    assert signal_count == 2
+    assert ai_count == 0
+
+
+def test_run_once_continues_when_decision_audit_persistence_fails(
+    tmp_path: Path, monkeypatch
+):
+    db_path = tmp_path / "runner-audit-failure.sqlite"
+    _setup_intelligence_db(db_path)
+
+    class ResilientRunner(StrategyRunner):
+        def __init__(self):
+            super().__init__(
+                engine=create_engine(f"sqlite+pysqlite:///{db_path}"),
+                redis_client=DummyRedis(),
+            )
+
+        def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
+            return [
+                {
+                    "user_id": str(uuid.uuid4()),
+                    "strategy_id": "momentum",
+                    "tenant_id": uuid.uuid4(),
+                    "config": {},
+                }
+            ]
+
+        def _load_platform_strategy_config(self, strategy_id: str) -> dict[str, object]:
+            return {"strategy_params": {"short_window": 3, "long_window": 5}}
+
+        def _load_allowed_symbols(self, user_id: str) -> list[str]:
+            return ["BTC-USD"]
+
+        def _load_market_snapshot(self, symbol: str) -> MarketSnapshot | None:
+            return MarketSnapshot(
+                timestamp=datetime.now(UTC),
+                symbol=symbol,
+                current_price=Decimal("50000"),
+                bid_price=Decimal("49990"),
+                ask_price=Decimal("50010"),
+                volume_24h=Decimal("1000"),
+                open_price=Decimal("49000"),
+                high_price=Decimal("50100"),
+                low_price=Decimal("48900"),
+                close_price=Decimal("50000"),
+                candle_closes=[49000, 49200, 49500, 49800, 50000],
+            )
+
+        def _load_position_state(
+            self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str
+        ) -> PositionState:
+            return PositionState(symbol=symbol, quantity=Decimal("0"))
+
+        def _sync_position_runtime_state(self, **kwargs) -> PositionState:
+            return kwargs["position_state"]
+
+        def _generate_signal(self, **kwargs) -> StrategySignal:
+            return StrategySignal(
+                signal_id=uuid.uuid4(),
+                correlation_id=uuid.uuid4(),
+                tenant_id=uuid.uuid4(),
+                strategy_id="momentum",
+                trading_mode=kwargs["trading_mode"],
+                signal_type=SignalType.BUY,
+                confidence=0.82,
+                reason="bullish crossover",
+                quantity=Quantity(amount="0.12"),
+            )
+
+    monkeypatch.setattr(
+        "oziebot_strategy_engine.runner.persist_decision_audit",
+        lambda *args, **kwargs: (_ for _ in ()).throw(SQLAlchemyError("boom")),
+    )
+
+    runner = ResilientRunner()
+    processed = runner.run_once()
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        signal_count = conn.execute(
+            text("SELECT COUNT(*) FROM strategy_signals")
+        ).scalar_one()
+    assert processed == 2
+    assert signal_count == 2
 
 
 def test_run_once_persists_suppression_audit(tmp_path: Path):
