@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import os
+from datetime import UTC, datetime
+from unittest.mock import patch
+
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from oziebot_api.models.exchange_connection import ExchangeConnection
+from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.strategy_allocation import StrategyCapitalLedger
+from oziebot_api.models.user import User
+from oziebot_api.services.credential_crypto import CredentialCrypto
 
 
 def _create_enabled_strategy(client, token: str, strategy_id: str) -> None:
@@ -236,3 +245,118 @@ def test_ledger_audit_entries_written(client, regular_user_and_token, db_session
     assert len(rows) == 1
     assert rows[0].event_type == "reserve"
     assert rows[0].amount_cents == 2_000
+
+
+def _seed_valid_coinbase_connection(db_session: Session, *, email: str) -> None:
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+    now = datetime.now(UTC)
+    crypto = CredentialCrypto(os.environ["EXCHANGE_CREDENTIALS_ENCRYPTION_KEY"])
+    db_session.add(
+        ExchangeConnection(
+            tenant_id=membership.tenant_id,
+            provider="coinbase",
+            api_key_name="organizations/test/key",
+            encrypted_secret=crypto.encrypt(b"test-private-key"),
+            secret_ciphertext_version=1,
+            validation_status="valid",
+            health_status="healthy",
+            can_trade=True,
+            can_read_balances=True,
+            created_at=now,
+            updated_at=now,
+            last_validated_at=now,
+            last_health_check_at=now,
+        )
+    )
+    db_session.commit()
+
+
+@patch("oziebot_api.services.live_coinbase.list_coinbase_accounts")
+def test_live_plan_auto_syncs_from_coinbase_available_cash(
+    mock_list_coinbase_accounts,
+    client,
+    regular_user_and_token,
+    db_session: Session,
+):
+    email, token = regular_user_and_token
+    _seed_enabled_strategies(client, token)
+    _seed_valid_coinbase_connection(db_session, email=email)
+    mock_list_coinbase_accounts.return_value = [
+        {
+            "currency": "USD",
+            "available_balance": {"currency": "USD", "value": "120.50"},
+            "hold": {"currency": "USD", "value": "10.25"},
+        },
+        {
+            "currency": "USDC",
+            "available_balance": {"currency": "USDC", "value": "50.00"},
+            "hold": {"currency": "USDC", "value": "5.00"},
+        },
+    ]
+
+    plan = client.get(
+        "/v1/me/allocations/live",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert plan.status_code == 200, plan.text
+    payload = plan.json()
+    assert payload["total_capital_cents"] == 17_050
+    assert len(payload["items"]) == 4
+    assert sum(item["allocation_bps"] for item in payload["items"]) == 10_000
+
+    buckets = client.get(
+        "/v1/me/allocations/live/buckets",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert buckets.status_code == 200, buckets.text
+    bucket_rows = buckets.json()["buckets"]
+    assert len(bucket_rows) == 4
+    assert sum(item["assigned_capital_cents"] for item in bucket_rows) == 17_050
+    assert sum(item["available_cash_cents"] for item in bucket_rows) == 17_050
+
+
+@patch("oziebot_api.services.live_coinbase.list_coinbase_accounts")
+def test_live_manual_allocations_ignore_submitted_total_when_coinbase_is_available(
+    mock_list_coinbase_accounts,
+    client,
+    regular_user_and_token,
+    db_session: Session,
+):
+    email, token = regular_user_and_token
+    _seed_enabled_strategies(client, token)
+    _seed_valid_coinbase_connection(db_session, email=email)
+    mock_list_coinbase_accounts.return_value = [
+        {
+            "currency": "USD",
+            "available_balance": {"currency": "USD", "value": "80.00"},
+            "hold": {"currency": "USD", "value": "0"},
+        },
+        {
+            "currency": "USDC",
+            "available_balance": {"currency": "USDC", "value": "20.00"},
+            "hold": {"currency": "USDC", "value": "50.00"},
+        },
+    ]
+
+    response = client.put(
+        "/v1/me/allocations/live/manual",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "total_capital_cents": 999_999,
+            "allocations": [
+                {"strategy_id": "momentum", "allocation_bps": 6000},
+                {"strategy_id": "day_trading", "allocation_bps": 4000},
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["total_capital_cents"] == 10_000
+    by_strategy = {item["strategy_id"]: item for item in payload["items"]}
+    assert by_strategy["momentum"]["assigned_capital_cents"] == 6_000
+    assert by_strategy["day_trading"]["assigned_capital_cents"] == 4_000

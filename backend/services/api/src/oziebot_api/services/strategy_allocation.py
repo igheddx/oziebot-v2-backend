@@ -98,6 +98,16 @@ def _snapshot(bucket: StrategyCapitalBucket) -> dict[str, int]:
 
 class StrategyAllocationService:
     @staticmethod
+    def enabled_strategy_ids(db: Session, *, user_id: UUID) -> list[str]:
+        rows = (
+            db.query(UserStrategy)
+            .filter(UserStrategy.user_id == user_id, UserStrategy.is_enabled == True)  # noqa: E712
+            .order_by(UserStrategy.strategy_id)
+            .all()
+        )
+        return [row.strategy_id for row in rows]
+
+    @staticmethod
     def _allowed_strategy_ids(db: Session, *, user_id: UUID) -> set[str]:
         ensure_platform_strategy_catalog(db)
         configured_enabled = {
@@ -125,6 +135,69 @@ class StrategyAllocationService:
             if has_strategy_entitlement(db, tenant_id, row.slug):
                 allowed.add(row.slug)
         return allowed
+
+    @staticmethod
+    def derive_live_allocations(db: Session, *, user_id: UUID) -> list[AllocationInput]:
+        enabled = StrategyAllocationService.enabled_strategy_ids(db, user_id=user_id)
+        if not enabled:
+            raise StrategyAllocationError("No enabled strategies configured")
+
+        plan = StrategyAllocationService.get_plan(db, user_id=user_id, trading_mode="live")
+        if plan is None or not plan.items:
+            equal_bps = BPS_TOTAL // len(enabled)
+            remainder = BPS_TOTAL - (equal_bps * len(enabled))
+            allocations: list[AllocationInput] = []
+            for strategy_id in enabled:
+                allocation_bps = equal_bps + (1 if remainder > 0 else 0)
+                if remainder > 0:
+                    remainder -= 1
+                allocations.append(
+                    AllocationInput(strategy_id=strategy_id, allocation_bps=allocation_bps)
+                )
+            return allocations
+
+        current_bps = {
+            item.strategy_id: max(0, item.allocation_bps)
+            for item in plan.items
+            if item.strategy_id in enabled
+        }
+        total_bps = sum(current_bps.values())
+        if total_bps <= 0:
+            return StrategyAllocationService.derive_live_allocations_without_plan(enabled)
+
+        normalized = {
+            strategy_id: (current_bps.get(strategy_id, 0) * BPS_TOTAL) // total_bps
+            for strategy_id in enabled
+        }
+        assigned = sum(normalized.values())
+        remainder = BPS_TOTAL - assigned
+        order = sorted(
+            enabled, key=lambda strategy_id: current_bps.get(strategy_id, 0), reverse=True
+        )
+        idx = 0
+        while remainder > 0 and order:
+            normalized[order[idx % len(order)]] += 1
+            remainder -= 1
+            idx += 1
+
+        return [
+            AllocationInput(strategy_id=strategy_id, allocation_bps=normalized[strategy_id])
+            for strategy_id in enabled
+        ]
+
+    @staticmethod
+    def derive_live_allocations_without_plan(strategy_ids: list[str]) -> list[AllocationInput]:
+        equal_bps = BPS_TOTAL // len(strategy_ids)
+        remainder = BPS_TOTAL - (equal_bps * len(strategy_ids))
+        allocations: list[AllocationInput] = []
+        for strategy_id in strategy_ids:
+            allocation_bps = equal_bps + (1 if remainder > 0 else 0)
+            if remainder > 0:
+                remainder -= 1
+            allocations.append(
+                AllocationInput(strategy_id=strategy_id, allocation_bps=allocation_bps)
+            )
+        return allocations
 
     @staticmethod
     def guided_preset_allocations(

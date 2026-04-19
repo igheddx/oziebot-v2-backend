@@ -190,9 +190,9 @@ def test_dashboard_includes_fee_analytics(client, regular_user_and_token, db_ses
     assert analytics["skippedTradesDueToFees"] == 1
 
 
-@patch("oziebot_api.api.v1.me.list_coinbase_accounts")
+@patch("oziebot_api.api.v1.me.load_live_coinbase_accounts")
 def test_live_dashboard_uses_coinbase_balances_for_available_and_portfolio(
-    mock_list_coinbase_accounts,
+    mock_load_live_coinbase_accounts,
     client,
     regular_user_and_token,
     db_session: Session,
@@ -258,7 +258,7 @@ def test_live_dashboard_uses_coinbase_balances_for_available_and_portfolio(
     )
     db_session.commit()
 
-    mock_list_coinbase_accounts.return_value = [
+    mock_load_live_coinbase_accounts.return_value = [
         {
             "currency": "USD",
             "available_balance": {"currency": "USD", "value": "120.50"},

@@ -13,7 +13,6 @@ from sqlalchemy.orm import joinedload
 from oziebot_api.config import Settings
 from oziebot_api.deps import DbSession, settings_dep
 from oziebot_api.deps.auth import CurrentUser
-from oziebot_api.models.exchange_connection import ExchangeConnection
 from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.execution import ExecutionOrder, ExecutionPosition, ExecutionTradeRecord
@@ -23,9 +22,12 @@ from oziebot_api.models.tenant import Tenant
 from oziebot_api.models.user import User
 from oziebot_api.models.user_strategy import UserStrategy
 from oziebot_api.schemas.me import MeOut, TenantBrief, TradingModePatch
-from oziebot_api.services.coinbase_client import list_coinbase_accounts
-from oziebot_api.services.credential_crypto import CredentialCrypto
 from oziebot_api.services.entitlements import has_strategy_entitlement
+from oziebot_api.services.live_coinbase import (
+    CASH_EQUIVALENT_CURRENCIES,
+    load_live_coinbase_accounts,
+    sum_coinbase_cash_cents,
+)
 from oziebot_api.services.tenant_scope import primary_tenant_id
 from oziebot_api.services.trading_mode_policy import can_set_trading_mode
 from oziebot_domain.trading_mode import TradingMode
@@ -108,37 +110,12 @@ def _cents(amount: Decimal) -> int:
 
 def _live_coinbase_balance_snapshot(
     db: DbSession,
-    tenant_id: Any,
+    user: User,
     settings: Settings,
     positions_rows: list[ExecutionPosition],
 ) -> tuple[int, int] | None:
-    connection = db.scalar(
-        select(ExchangeConnection).where(
-            ExchangeConnection.tenant_id == tenant_id,
-            ExchangeConnection.provider == "coinbase",
-        )
-    )
-    if (
-        connection is None
-        or connection.validation_status != "valid"
-        or connection.health_status != "healthy"
-        or connection.can_read_balances is not True
-    ):
-        return None
-
-    crypto = CredentialCrypto(settings.exchange_credentials_encryption_key)
-    if not crypto.configured:
-        return None
-
-    try:
-        private_key_pem = crypto.decrypt(connection.encrypted_secret).decode("utf-8")
-        accounts = list_coinbase_accounts(
-            connection.api_key_name,
-            private_key_pem,
-            base_url=settings.coinbase_api_base_url,
-            force_ipv4=settings.coinbase_force_ipv4,
-        )
-    except Exception:
+    accounts = load_live_coinbase_accounts(db, user=user, settings=settings)
+    if accounts is None:
         return None
 
     mark_prices: dict[str, Decimal] = {}
@@ -150,8 +127,8 @@ def _live_coinbase_balance_snapshot(
         if base_currency and base_currency not in mark_prices:
             mark_prices[base_currency] = _to_decimal(row.avg_entry_price)
 
-    available_balance_cents = 0
-    portfolio_cents = 0
+    available_balance_cents = sum_coinbase_cash_cents(accounts, include_hold=False)
+    portfolio_cents = sum_coinbase_cash_cents(accounts, include_hold=True)
     for account in accounts:
         currency = str(
             account.get("currency")
@@ -163,9 +140,7 @@ def _live_coinbase_balance_snapshot(
         total = available + hold
         if total <= 0:
             continue
-        if currency in {"USD", "USDC", "USDT"}:
-            available_balance_cents += _cents(available)
-            portfolio_cents += _cents(total)
+        if currency in CASH_EQUIVALENT_CURRENCIES:
             continue
         mark_price = mark_prices.get(currency)
         if mark_price is None or mark_price <= 0:
@@ -265,7 +240,7 @@ def dashboard_summary(
         .all()
     )
     if mode == TradingMode.LIVE.value and tenant_id is not None:
-        live_balances = _live_coinbase_balance_snapshot(db, tenant_id, settings, positions_rows)
+        live_balances = _live_coinbase_balance_snapshot(db, user, settings, positions_rows)
         if live_balances is not None:
             available_balance_cents, portfolio_cents = live_balances
             portfolio_value = portfolio_cents / 100
