@@ -26,7 +26,9 @@ class Settings(BaseSettings):
     risk_max_slippage_pct: float = 0.02
 
     # Comma-separated rule names that can be relaxed for PAPER mode.
-    risk_relaxed_paper_rules: str = "max_daily_loss,cooldown_after_losses"
+    risk_relaxed_paper_rules: str = (
+        "max_daily_loss,cooldown_after_losses,fee_economics,execution_quality"
+    )
 
 
 def get_settings() -> Settings:

@@ -161,6 +161,21 @@ class StrategyRunner:
                     ):
                         continue
 
+                    mode_config = dict(config)
+                    mode_signal_rules = dict(signal_rules)
+                    mode_risk_caps = dict(risk_caps)
+                    if mode == TradingMode.PAPER:
+                        (
+                            mode_config,
+                            mode_signal_rules,
+                            mode_risk_caps,
+                        ) = self._paper_relaxed_controls(
+                            strategy_name=strategy_name,
+                            config=mode_config,
+                            signal_rules=mode_signal_rules,
+                            risk_caps=mode_risk_caps,
+                        )
+
                     position_state = self._load_position_state(
                         user_id=user_id,
                         strategy_name=strategy_name,
@@ -231,7 +246,7 @@ class StrategyRunner:
                             continue
                         schedule_reason = self._scheduler_reason(
                             strategy_name=strategy_name,
-                            config=config,
+                            config=mode_config,
                             trading_mode=mode,
                             symbol=symbol,
                             runtime_state=runtime_state,
@@ -282,7 +297,7 @@ class StrategyRunner:
                             trading_mode=mode,
                             market=market,
                             position_state=position_state,
-                            config=config,
+                            config=mode_config,
                         )
                         signal = self._apply_token_policy_to_signal(
                             signal=signal,
@@ -294,7 +309,7 @@ class StrategyRunner:
                             strategy_name=strategy_name,
                             trading_mode=mode,
                             symbol=symbol,
-                            config=config,
+                            config=mode_config,
                             fee_settings=fee_settings,
                         )
                         signal = self._attach_trade_intelligence(
@@ -304,7 +319,7 @@ class StrategyRunner:
                             trading_mode=mode,
                             signal=signal,
                             market=market,
-                            config=config,
+                            config=mode_config,
                             runtime_state=runtime_state,
                             token_policy=token_policy,
                             timestamp=now,
@@ -316,8 +331,8 @@ class StrategyRunner:
                             signal=signal,
                             market=market,
                             position_state=position_state,
-                            signal_rules=signal_rules,
-                            risk_caps=risk_caps,
+                            signal_rules=mode_signal_rules,
+                            risk_caps=mode_risk_caps,
                         )
                         if suppress_reason is not None:
                             self._record_signal_metric(
@@ -377,7 +392,7 @@ class StrategyRunner:
                             trading_mode=mode,
                             timestamp=now,
                             position_state=position_state,
-                            risk_caps=risk_caps,
+                            risk_caps=mode_risk_caps,
                             market=market,
                         )
                         self._persist_run(
@@ -1448,6 +1463,69 @@ class StrategyRunner:
             return [symbol] if symbol in allowed_symbols else []
 
         return allowed_symbols
+
+    @staticmethod
+    def _paper_relaxed_controls(
+        *,
+        strategy_name: str,
+        config: dict[str, Any],
+        signal_rules: dict[str, Any],
+        risk_caps: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        adjusted_config = dict(config)
+        adjusted_signal_rules = dict(signal_rules)
+        adjusted_risk_caps = dict(risk_caps)
+
+        adjusted_signal_rules["cooldown_seconds"] = 0
+        adjusted_signal_rules["max_signals_per_day"] = 0
+        adjusted_signal_rules["only_during_liquid_hours"] = False
+        adjusted_signal_rules["require_volume_confirmation"] = False
+
+        min_confidence = float(adjusted_signal_rules.get("min_confidence", 0) or 0)
+        if min_confidence <= 0 or min_confidence > 0.45:
+            adjusted_signal_rules["min_confidence"] = 0.45
+
+        adjusted_risk_caps["max_open_positions"] = 0
+        adjusted_risk_caps["max_daily_loss_pct"] = 0
+
+        if strategy_name == "momentum":
+            strength_threshold = float(
+                adjusted_config.get("strength_threshold", 0.012) or 0.012
+            )
+            adjusted_config["strength_threshold"] = min(strength_threshold, 0.006)
+        elif strategy_name == "day_trading":
+            entry_threshold = float(
+                adjusted_config.get("entry_threshold", 0.007) or 0.007
+            )
+            min_volume_multiplier = float(
+                adjusted_config.get("min_volume_multiplier", 1.3) or 1.3
+            )
+            min_volatility_pct = float(
+                adjusted_config.get("min_volatility_pct", 0.005) or 0.005
+            )
+            breakout_lookback = int(
+                adjusted_config.get("breakout_lookback_candles", 5) or 5
+            )
+            adjusted_config["entry_threshold"] = max(entry_threshold, 0.03)
+            adjusted_config["min_volume_multiplier"] = min(min_volume_multiplier, 1.0)
+            adjusted_config["min_volatility_pct"] = min(min_volatility_pct, 0.002)
+            adjusted_config["require_trend_alignment"] = False
+            adjusted_config["breakout_lookback_candles"] = min(breakout_lookback, 3)
+        elif strategy_name == "reversion":
+            entry_zscore = float(adjusted_config.get("zscore_entry", 1.6) or 1.6)
+            rsi_buy = float(adjusted_config.get("rsi_buy", 30) or 30)
+            min_bandwidth = float(adjusted_config.get("min_bandwidth", 0.012) or 0.012)
+            adjusted_config["zscore_entry"] = min(entry_zscore, 1.1)
+            adjusted_config["rsi_buy"] = max(rsi_buy, 38)
+            adjusted_config["min_bandwidth"] = min(min_bandwidth, 0.006)
+            adjusted_config["use_trend_filter"] = False
+        elif strategy_name == "dca":
+            buy_interval_hours = int(
+                adjusted_config.get("buy_interval_hours", 24) or 24
+            )
+            adjusted_config["buy_interval_hours"] = min(buy_interval_hours, 1)
+
+        return adjusted_config, adjusted_signal_rules, adjusted_risk_caps
 
     @staticmethod
     def _coerce_symbol_runtime_states(state: Any) -> dict[str, dict[str, Any]]:

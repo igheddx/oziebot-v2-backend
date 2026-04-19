@@ -221,6 +221,40 @@ def test_runner_resolves_all_allowed_symbols_by_default():
     ) == ["BTC-USD"]
 
 
+def test_runner_applies_more_permissive_paper_controls():
+    config, signal_rules, risk_caps = StrategyRunner._paper_relaxed_controls(
+        strategy_name="day_trading",
+        config={
+            "entry_threshold": 0.007,
+            "min_volume_multiplier": 1.3,
+            "min_volatility_pct": 0.005,
+            "require_trend_alignment": True,
+            "breakout_lookback_candles": 5,
+        },
+        signal_rules={
+            "min_confidence": 0.6,
+            "cooldown_seconds": 20,
+            "max_signals_per_day": 6,
+            "only_during_liquid_hours": True,
+            "require_volume_confirmation": True,
+        },
+        risk_caps={"max_open_positions": 1, "max_daily_loss_pct": 0.12},
+    )
+
+    assert config["entry_threshold"] == 0.03
+    assert config["min_volume_multiplier"] == 1.0
+    assert config["min_volatility_pct"] == 0.002
+    assert config["require_trend_alignment"] is False
+    assert config["breakout_lookback_candles"] == 3
+    assert signal_rules["min_confidence"] == 0.45
+    assert signal_rules["cooldown_seconds"] == 0
+    assert signal_rules["max_signals_per_day"] == 0
+    assert signal_rules["only_during_liquid_hours"] is False
+    assert signal_rules["require_volume_confirmation"] is False
+    assert risk_caps["max_open_positions"] == 0
+    assert risk_caps["max_daily_loss_pct"] == 0
+
+
 def test_runner_coerces_legacy_and_multi_symbol_runtime_state():
     assert StrategyRunner._coerce_symbol_runtime_states(
         {

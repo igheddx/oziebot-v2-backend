@@ -36,6 +36,13 @@ from oziebot_risk_engine.rules import RuleContext, RuleResult, default_rules
 
 log = logging.getLogger("risk-engine.service")
 
+DEFAULT_PAPER_RELAXED_RULES = {
+    "max_daily_loss",
+    "cooldown_after_losses",
+    "fee_economics",
+    "execution_quality",
+}
+
 
 class RiskEngineService:
     def __init__(self, settings: Settings, redis_client):
@@ -43,9 +50,10 @@ class RiskEngineService:
         self._redis = redis_client
         self._engine = create_engine(settings.database_url)
         self._rules = default_rules(settings)
-        self._paper_relaxed = {
+        configured_paper_relaxed = {
             x.strip() for x in settings.risk_relaxed_paper_rules.split(",") if x.strip()
         }
+        self._paper_relaxed = DEFAULT_PAPER_RELAXED_RULES | configured_paper_relaxed
         self._metrics: Counter[str] = Counter()
         self._rejection_reasons: Counter[str] = Counter()
 

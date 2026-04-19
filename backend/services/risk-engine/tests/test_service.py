@@ -440,6 +440,57 @@ def test_risk_rejects_trade_when_fee_drag_exceeds_expected_edge(tmp_path: Path):
     assert intent is None
 
 
+def test_paper_relaxes_fee_economics_even_with_legacy_relaxed_rule_config(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "risk-paper-fee.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{db_path}",
+        risk_relaxed_paper_rules="max_daily_loss,cooldown_after_losses",
+    )
+    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    signal = _signal(user_id, mode=TradingMode.PAPER).model_copy(
+        update={
+            "reasoning_metadata": {
+                "reason": "thin edge",
+                "fee_economics": {
+                    "expected_gross_edge_bps": 20,
+                    "estimated_fee_bps": 10,
+                    "estimated_slippage_bps": 20,
+                    "estimated_total_cost_bps": 40,
+                    "expected_net_edge_bps": -20,
+                    "execution_preference": "maker_preferred",
+                    "fallback_behavior": "convert_to_taker",
+                    "maker_timeout_seconds": 15,
+                    "limit_price_offset_bps": 2,
+                    "min_notional_per_trade": "25",
+                    "min_expected_edge_bps": 25,
+                    "min_expected_net_profit_dollars": "0.5",
+                    "max_fee_percent_of_expected_profit": "0.65",
+                    "max_slippage_bps": 35,
+                    "skip_trade_if_fee_too_high": True,
+                },
+            }
+        }
+    )
+
+    paper_decision, paper_intent = svc.evaluate(signal, trace_id="paper-fee-risk")
+    live_decision, live_intent = svc.evaluate(
+        signal.model_copy(update={"trading_mode": TradingMode.LIVE}),
+        trace_id="live-fee-risk",
+    )
+
+    assert paper_decision.outcome in (RiskOutcome.APPROVE, RiskOutcome.REDUCE_SIZE)
+    assert paper_intent is not None
+    assert live_decision.outcome == RiskOutcome.REJECT
+    assert live_intent is None
+
+
 def test_paper_can_trade_without_entitlement_when_allowed(tmp_path: Path):
     db_path = tmp_path / "risk-paper-entitlement.sqlite"
     _setup_db(db_path)
@@ -550,6 +601,59 @@ def test_risk_rejects_spread_from_strategy_quality_controls(tmp_path: Path):
     assert decision.outcome == RiskOutcome.REJECT
     assert intent is None
     assert "Spread too wide" in (decision.detail or "")
+
+
+def test_paper_relaxes_execution_quality_even_with_legacy_relaxed_rule_config(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "risk-paper-spread.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE platform_strategies SET config_schema = :config WHERE slug = 'momentum'"
+            ),
+            {
+                "config": json.dumps(
+                    {
+                        "strategy_params": {
+                            "max_spread_pct": 0.001,
+                            "max_slippage_pct": 0.005,
+                        }
+                    }
+                )
+            },
+        )
+
+    redis = _redis_with_fresh_market()
+    redis.set(
+        "oziebot:md:bbo:BTC-USD",
+        '{"best_bid_price":"50000","best_bid_size":"2","best_ask_price":"50120","best_ask_size":"2"}',
+    )
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{db_path}",
+        risk_relaxed_paper_rules="max_daily_loss,cooldown_after_losses",
+    )
+    svc = RiskEngineService(settings, redis)
+
+    paper_decision, paper_intent = svc.evaluate(
+        _signal(user_id, mode=TradingMode.PAPER, size="0.01"),
+        trace_id="paper-spread",
+    )
+    live_decision, live_intent = svc.evaluate(
+        _signal(user_id, mode=TradingMode.LIVE, size="0.01"),
+        trace_id="live-spread",
+    )
+
+    assert paper_decision.outcome in (RiskOutcome.APPROVE, RiskOutcome.REDUCE_SIZE)
+    assert paper_intent is not None
+    assert live_decision.outcome == RiskOutcome.REJECT
+    assert live_intent is None
 
 
 def test_risk_rejects_after_consecutive_strategy_losses(tmp_path: Path):
