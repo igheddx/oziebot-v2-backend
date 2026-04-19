@@ -232,6 +232,204 @@ class LiveCoinbaseExecutionAdapter:
 
     def submit(self, request: ExecutionRequest) -> ExecutionSubmission:
         api_key_name, private_key_pem = self._credential_loader(request.tenant_id)
-        return self._client.place_order(
+        funding_payload = self._ensure_usd_funding(
+            request,
+            api_key_name=api_key_name,
+            private_key_pem=private_key_pem,
+        )
+        if funding_payload is not None and funding_payload.get("status") == "failed":
+            return ExecutionSubmission(
+                status=ExecutionOrderStatus.FAILED,
+                venue=Venue.COINBASE,
+                raw_payload={"funding_conversion": funding_payload},
+                failure_code=str(
+                    funding_payload.get("failure_code") or "usd_funding_conversion_failed"
+                ),
+                failure_detail=str(
+                    funding_payload.get("failure_detail")
+                    or "Unable to secure USD funding for order"
+                ),
+            )
+        submission = self._client.place_order(
             request, api_key_name=api_key_name, private_key_pem=private_key_pem
         )
+        if funding_payload is None:
+            return submission
+        raw_payload = dict(submission.raw_payload or {})
+        raw_payload["funding_conversion"] = funding_payload
+        return submission.model_copy(update={"raw_payload": raw_payload})
+
+    def _ensure_usd_funding(
+        self,
+        request: ExecutionRequest,
+        *,
+        api_key_name: str,
+        private_key_pem: str,
+    ) -> dict | None:
+        if request.side != Side.BUY or not request.symbol.upper().endswith("-USD"):
+            return None
+
+        required_usd = self._required_usd_amount(request)
+        if required_usd <= 0:
+            return None
+
+        accounts = self._client.list_balances(
+            api_key_name=api_key_name,
+            private_key_pem=private_key_pem,
+        )
+        usd_account = self._find_account(accounts, "USD")
+        usdc_account = self._find_account(accounts, "USDC")
+        usd_available = self._available_balance(usd_account)
+        usdc_available = self._available_balance(usdc_account)
+        shortfall = _quantize_money(required_usd - usd_available)
+        if shortfall <= 0:
+            return None
+        if usd_account is None or usdc_account is None:
+            return {
+                "status": "failed",
+                "failure_code": "insufficient_quote_balance",
+                "failure_detail": (
+                    f"Need ${shortfall} more USD for {request.symbol}, but required Coinbase "
+                    "USD/USDC funding accounts were not available"
+                ),
+                "required_usd": str(required_usd),
+                "usd_available_before": str(usd_available),
+                "usdc_available_before": str(usdc_available),
+            }
+        if usdc_available < shortfall:
+            return {
+                "status": "failed",
+                "failure_code": "insufficient_quote_balance",
+                "failure_detail": (
+                    f"Need ${shortfall} more USD for {request.symbol}, but only ${usdc_available} "
+                    "USDC was available to convert"
+                ),
+                "required_usd": str(required_usd),
+                "usd_available_before": str(usd_available),
+                "usdc_available_before": str(usdc_available),
+            }
+
+        from_account = self._account_id(usdc_account)
+        to_account = self._account_id(usd_account)
+        if not from_account or not to_account:
+            return {
+                "status": "failed",
+                "failure_code": "usd_funding_conversion_failed",
+                "failure_detail": "Coinbase USD/USDC account identifiers were missing",
+                "required_usd": str(required_usd),
+                "usd_available_before": str(usd_available),
+                "usdc_available_before": str(usdc_available),
+            }
+
+        quote = self._client.create_convert_quote(
+            from_account=from_account,
+            to_account=to_account,
+            amount=str(shortfall),
+            api_key_name=api_key_name,
+            private_key_pem=private_key_pem,
+        )
+        trade_id = self._trade_id(quote)
+        if not trade_id:
+            return {
+                "status": "failed",
+                "failure_code": "usd_funding_conversion_failed",
+                "failure_detail": str(
+                    (quote.get("error_response", {}) or {}).get("message")
+                    or "Coinbase did not return a convert trade identifier"
+                ),
+                "required_usd": str(required_usd),
+                "usd_available_before": str(usd_available),
+                "usdc_available_before": str(usdc_available),
+                "quote_response": quote,
+            }
+        commit = self._client.commit_convert_trade(
+            trade_id,
+            from_account=from_account,
+            to_account=to_account,
+            api_key_name=api_key_name,
+            private_key_pem=private_key_pem,
+        )
+        commit_trade_id = self._trade_id(commit)
+        if not commit_trade_id:
+            return {
+                "status": "failed",
+                "failure_code": "usd_funding_conversion_failed",
+                "failure_detail": str(
+                    (commit.get("error_response", {}) or {}).get("message")
+                    or "Coinbase did not confirm the USD funding conversion"
+                ),
+                "required_usd": str(required_usd),
+                "usd_available_before": str(usd_available),
+                "usdc_available_before": str(usdc_available),
+                "quote_response": quote,
+                "commit_response": commit,
+            }
+        return {
+            "status": "converted",
+            "required_usd": str(required_usd),
+            "usd_available_before": str(usd_available),
+            "usdc_available_before": str(usdc_available),
+            "converted_amount": str(shortfall),
+            "from_currency": "USDC",
+            "to_currency": "USD",
+            "trade_id": commit_trade_id,
+            "quote_response": quote,
+            "commit_response": commit,
+        }
+
+    @staticmethod
+    def _required_usd_amount(request: ExecutionRequest) -> Decimal:
+        price = request.price_hint or Decimal("0")
+        if price <= 0:
+            return Decimal("0")
+        return _quantize_money(request.quantity * price)
+
+    @staticmethod
+    def _find_account(accounts: list[dict], currency: str) -> dict | None:
+        for account in accounts:
+            if LiveCoinbaseExecutionAdapter._account_currency(account) == currency:
+                return account
+        return None
+
+    @staticmethod
+    def _account_currency(account: dict | None) -> str:
+        if not account:
+            return ""
+        return str(
+            (account.get("available_balance") or {}).get("currency")
+            or account.get("currency")
+            or ""
+        ).upper()
+
+    @staticmethod
+    def _available_balance(account: dict | None) -> Decimal:
+        if not account:
+            return Decimal("0")
+        return _quantize_money(
+            Decimal(
+                str(
+                    (account.get("available_balance") or {}).get("value")
+                    or account.get("available")
+                    or "0"
+                )
+            )
+        )
+
+    @staticmethod
+    def _account_id(account: dict) -> str | None:
+        for field in ("uuid", "account_uuid", "id"):
+            value = account.get(field)
+            if value:
+                return str(value)
+        return None
+
+    @staticmethod
+    def _trade_id(payload: dict) -> str | None:
+        trade = payload.get("trade")
+        if isinstance(trade, dict) and trade.get("id"):
+            return str(trade["id"])
+        for field in ("trade_id", "quote_id", "id"):
+            value = payload.get(field)
+            if value:
+                return str(value)
+        return None

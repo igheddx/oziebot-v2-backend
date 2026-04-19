@@ -46,12 +46,66 @@ class FakeLiveClient:
     def __init__(self, submission: ExecutionSubmission) -> None:
         self._submission = submission
         self.place_calls = 0
+        self.balance_calls = 0
+        self.convert_quote_calls: list[dict] = []
+        self.convert_commit_calls: list[dict] = []
+        self.balances = [
+            {
+                "uuid": "usd-account",
+                "currency": "USD",
+                "available_balance": {"currency": "USD", "value": "100000.00"},
+            },
+            {
+                "uuid": "usdc-account",
+                "currency": "USDC",
+                "available_balance": {"currency": "USDC", "value": "100000.00"},
+            },
+        ]
 
     def place_order(
         self, request: ExecutionRequest, *, api_key_name: str, private_key_pem: str
     ) -> ExecutionSubmission:
         self.place_calls += 1
         return self._submission
+
+    def list_balances(self, *, api_key_name: str, private_key_pem: str) -> list[dict]:
+        self.balance_calls += 1
+        return list(self.balances)
+
+    def create_convert_quote(
+        self,
+        *,
+        from_account: str,
+        to_account: str,
+        amount: str,
+        api_key_name: str,
+        private_key_pem: str,
+    ) -> dict:
+        payload = {
+            "quote_id": f"quote-{len(self.convert_quote_calls) + 1}",
+            "from_account": from_account,
+            "to_account": to_account,
+            "amount": amount,
+        }
+        self.convert_quote_calls.append(payload)
+        return payload
+
+    def commit_convert_trade(
+        self,
+        trade_id: str,
+        *,
+        from_account: str,
+        to_account: str,
+        api_key_name: str,
+        private_key_pem: str,
+    ) -> dict:
+        payload = {
+            "trade_id": trade_id,
+            "from_account": from_account,
+            "to_account": to_account,
+        }
+        self.convert_commit_calls.append(payload)
+        return payload
 
     def cancel_order(
         self, venue_order_id: str, *, api_key_name: str, private_key_pem: str
@@ -563,6 +617,92 @@ def test_live_duplicate_does_not_resubmit_order(tmp_path: Path):
     assert second.duplicated is True
     assert live_client.place_calls == 1
     assert _count(db_path, "execution_orders") == 1
+
+
+def test_live_buy_auto_converts_usdc_when_usd_short(tmp_path: Path):
+    db_path = tmp_path / "execution-live-usdc-funding.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "momentum"
+    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.LIVE.value)
+    service, live_client = _service(db_path, redis)
+    live_client.balances = [
+        {
+            "uuid": "usd-account",
+            "currency": "USD",
+            "available_balance": {"currency": "USD", "value": "50.00"},
+        },
+        {
+            "uuid": "usdc-account",
+            "currency": "USDC",
+            "available_balance": {"currency": "USDC", "value": "600.00"},
+        },
+    ]
+    request = _request(
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.LIVE,
+        quantity=Decimal("0.01"),
+        price_hint=Decimal("50000"),
+    )
+
+    result = service.process_request(request)
+
+    assert result.state == ExecutionOrderStatus.PENDING
+    assert live_client.place_calls == 1
+    assert live_client.convert_quote_calls[0]["amount"] == "450.00"
+    assert live_client.convert_commit_calls[0]["trade_id"] == "quote-1"
+    order = _last_order(db_path)
+    assert '"status": "converted"' in str(order["adapter_payload"])
+    assert '"converted_amount": "450.00"' in str(order["adapter_payload"])
+
+
+def test_live_buy_rejects_when_usd_and_usdc_are_insufficient(tmp_path: Path):
+    db_path = tmp_path / "execution-live-insufficient-quote.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "momentum"
+    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.LIVE.value)
+    service, live_client = _service(db_path, redis)
+    live_client.balances = [
+        {
+            "uuid": "usd-account",
+            "currency": "USD",
+            "available_balance": {"currency": "USD", "value": "50.00"},
+        },
+        {
+            "uuid": "usdc-account",
+            "currency": "USDC",
+            "available_balance": {"currency": "USDC", "value": "25.00"},
+        },
+    ]
+    request = _request(
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.LIVE,
+        quantity=Decimal("0.01"),
+        price_hint=Decimal("50000"),
+    )
+
+    result = service.process_request(request)
+
+    assert result.state == ExecutionOrderStatus.FAILED
+    assert live_client.place_calls == 0
+    order = _last_order(db_path)
+    assert order["failure_code"] == "insufficient_quote_balance"
+    assert "USDC was available to convert" in str(order["failure_detail"])
 
 
 def test_paper_sell_closes_position_and_records_trade(tmp_path: Path):

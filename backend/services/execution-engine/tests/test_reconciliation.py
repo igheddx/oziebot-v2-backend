@@ -33,7 +33,6 @@ class FakeReconClient(FakeLiveClient):
         self.balance_calls = 0
         self.order_calls = 0
         self.fill_calls = 0
-        self.balances: list[dict] = []
         self.orders: list[dict] = []
         self.fills: list[dict] = []
         self.raise_error: str | None = None
@@ -234,6 +233,36 @@ def test_reconciliation_marks_connection_unhealthy_after_repeated_failures(
     assert "coinbase timeout" in row.last_error
     assert ti.coinbase_connected == 0
     assert ti.coinbase_health_status == "unhealthy"
+
+
+def test_reconciliation_treats_usdc_as_cash_equivalent(tmp_path: Path):
+    db_path = tmp_path / "recon-usdc-cash.sqlite"
+    _setup_db(db_path)
+    tenant_id = str(uuid4())
+    user_id = str(uuid4())
+    strategy_id = "momentum"
+    _setup_recon_tables(db_path, tenant_id)
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.LIVE.value,
+        available_cash_cents=50_000,
+    )
+    redis = FakeRedis()
+    client = FakeReconClient()
+    client.balances = [
+        {
+            "available_balance": {"currency": "USDC", "value": "500.00"},
+            "hold": {"value": "0.00"},
+        }
+    ]
+    _, reconciler = _service_with_reconciler(db_path, redis, client)
+
+    summary = reconciler.reconcile_tenant(uuid.UUID(tenant_id), TradingMode.LIVE)
+
+    assert summary.balance_drifts == 0
 
 
 def test_reconciliation_recovers_full_fill_after_interruption(tmp_path: Path):

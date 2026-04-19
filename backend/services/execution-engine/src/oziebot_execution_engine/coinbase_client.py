@@ -74,6 +74,26 @@ class CoinbaseExecutionClient(Protocol):
         self, *, api_key_name: str, private_key_pem: str, product_id: str | None = None
     ) -> list[dict[str, Any]]: ...
 
+    def create_convert_quote(
+        self,
+        *,
+        from_account: str,
+        to_account: str,
+        amount: str,
+        api_key_name: str,
+        private_key_pem: str,
+    ) -> dict[str, Any]: ...
+
+    def commit_convert_trade(
+        self,
+        trade_id: str,
+        *,
+        from_account: str,
+        to_account: str,
+        api_key_name: str,
+        private_key_pem: str,
+    ) -> dict[str, Any]: ...
+
 
 class HttpCoinbaseExecutionClient:
     def __init__(self, base_url: str, timeout: float = 20.0) -> None:
@@ -362,6 +382,45 @@ class HttpCoinbaseExecutionClient:
         )
         return list(payload.get("fills", []))
 
+    def create_convert_quote(
+        self,
+        *,
+        from_account: str,
+        to_account: str,
+        amount: str,
+        api_key_name: str,
+        private_key_pem: str,
+    ) -> dict[str, Any]:
+        return self._post(
+            "/api/v3/brokerage/convert/quote",
+            {
+                "from_account": from_account,
+                "to_account": to_account,
+                "amount": amount,
+            },
+            api_key_name=api_key_name,
+            private_key_pem=private_key_pem,
+        )
+
+    def commit_convert_trade(
+        self,
+        trade_id: str,
+        *,
+        from_account: str,
+        to_account: str,
+        api_key_name: str,
+        private_key_pem: str,
+    ) -> dict[str, Any]:
+        return self._post(
+            f"/api/v3/brokerage/convert/trade/{trade_id}",
+            {
+                "from_account": from_account,
+                "to_account": to_account,
+            },
+            api_key_name=api_key_name,
+            private_key_pem=private_key_pem,
+        )
+
     def cancel_order(
         self, venue_order_id: str, *, api_key_name: str, private_key_pem: str
     ) -> dict[str, Any]:
@@ -410,3 +469,37 @@ class HttpCoinbaseExecutionClient:
             )
         response.raise_for_status()
         return response.json() if response.content else {}
+
+    def _post(
+        self,
+        path: str,
+        body: dict[str, Any],
+        *,
+        api_key_name: str,
+        private_key_pem: str,
+    ) -> dict[str, Any]:
+        host = _host_from_base(self._base_url)
+        token = build_cdp_jwt(
+            method="POST",
+            request_path=path,
+            host=host,
+            api_key_name=api_key_name,
+            private_key_pem=private_key_pem,
+        )
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        with httpx.Client(timeout=self._timeout) as client:
+            response = client.post(f"{self._base_url}{path}", headers=headers, json=body)
+        payload = response.json() if response.content else {}
+        if response.status_code >= 400:
+            return {
+                "success": False,
+                "error_response": {
+                    "message": (payload.get("error_response", {}) or {}).get("message")
+                    or response.text[:400]
+                },
+                "status_code": response.status_code,
+            }
+        return payload

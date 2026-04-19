@@ -568,7 +568,7 @@ class ReconciliationService:
                 or row.get("currency")
                 or ""
             )
-            if currency != "USD":
+            if currency not in {"USD", "USDC", "USDT"}:
                 continue
             available = _to_decimal(
                 (row.get("available_balance") or {}).get("value")
@@ -609,11 +609,11 @@ class ReconciliationService:
             trading_mode=TradingMode.LIVE,
             scope="balances",
             status="drift_detected",
-            detail=f"Coinbase USD total differs by {usd_total_cents - internal_total} cents",
-            internal_snapshot={"internal_total_cents": internal_total},
-            external_snapshot={"coinbase_total_cents": usd_total_cents},
-            repair_applied=False,
-        )
+                detail=f"Coinbase cash total differs by {usd_total_cents - internal_total} cents",
+                internal_snapshot={"internal_total_cents": internal_total},
+                external_snapshot={"coinbase_total_cents": usd_total_cents},
+                repair_applied=False,
+            )
         return 1
 
     def _current_buy_cost_cents(self, order_id: str) -> int:
