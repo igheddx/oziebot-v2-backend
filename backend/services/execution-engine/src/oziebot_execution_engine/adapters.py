@@ -243,7 +243,8 @@ class LiveCoinbaseExecutionAdapter:
                 venue=Venue.COINBASE,
                 raw_payload={"funding_conversion": funding_payload},
                 failure_code=str(
-                    funding_payload.get("failure_code") or "usd_funding_conversion_failed"
+                    funding_payload.get("failure_code")
+                    or "usd_funding_conversion_failed"
                 ),
                 failure_detail=str(
                     funding_payload.get("failure_detail")

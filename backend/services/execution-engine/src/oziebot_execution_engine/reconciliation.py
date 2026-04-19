@@ -609,11 +609,11 @@ class ReconciliationService:
             trading_mode=TradingMode.LIVE,
             scope="balances",
             status="drift_detected",
-                detail=f"Coinbase cash total differs by {usd_total_cents - internal_total} cents",
-                internal_snapshot={"internal_total_cents": internal_total},
-                external_snapshot={"coinbase_total_cents": usd_total_cents},
-                repair_applied=False,
-            )
+            detail=f"Coinbase cash total differs by {usd_total_cents - internal_total} cents",
+            internal_snapshot={"internal_total_cents": internal_total},
+            external_snapshot={"coinbase_total_cents": usd_total_cents},
+            repair_applied=False,
+        )
         return 1
 
     def _current_buy_cost_cents(self, order_id: str) -> int:

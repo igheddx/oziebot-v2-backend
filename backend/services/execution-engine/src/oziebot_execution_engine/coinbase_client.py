@@ -491,7 +491,9 @@ class HttpCoinbaseExecutionClient:
             "Content-Type": "application/json",
         }
         with httpx.Client(timeout=self._timeout) as client:
-            response = client.post(f"{self._base_url}{path}", headers=headers, json=body)
+            response = client.post(
+                f"{self._base_url}{path}", headers=headers, json=body
+            )
         payload = response.json() if response.content else {}
         if response.status_code >= 400:
             return {
