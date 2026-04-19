@@ -80,11 +80,13 @@ class FakeRedis:
         return rows[start : start + num]
 
 
-@patch("oziebot_api.api.v1.logs.redis.Redis.from_url")
-def test_trade_log_endpoint_returns_recent_events(mock_from_url, client, regular_user_and_token):
+@patch("oziebot_api.api.v1.logs.redis_from_url")
+def test_trade_log_endpoint_returns_recent_events(
+    mock_redis_from_url, client, regular_user_and_token
+):
     _, token = regular_user_and_token
     fake_redis = FakeRedis()
-    mock_from_url.return_value = fake_redis
+    mock_redis_from_url.return_value = fake_redis
 
     now = datetime.now(UTC)
     append_trade_log_event(
@@ -114,17 +116,12 @@ def test_trade_log_endpoint_returns_recent_events(mock_from_url, client, regular
     assert payload["events"][1]["message"] == "ETH-USD BBO updated"
 
 
-@patch("oziebot_api.api.v1.logs.redis.Redis.from_url")
-def test_trade_log_endpoint_returns_503_when_redis_unavailable(
-    mock_from_url, client, regular_user_and_token
+@patch("oziebot_api.api.v1.logs.redis_from_url")
+def test_trade_log_endpoint_returns_503_when_trade_log_redis_unavailable(
+    mock_redis_from_url, client, regular_user_and_token
 ):
     _, token = regular_user_and_token
-
-    class UnavailableRedis:
-        def zrevrangebyscore(self, *args, **kwargs):
-            raise redis.TimeoutError("redis timed out")
-
-    mock_from_url.return_value = UnavailableRedis()
+    mock_redis_from_url.side_effect = redis.TimeoutError("redis timed out")
 
     response = client.get(
         "/v1/logs/trade?window_seconds=120&limit=200",

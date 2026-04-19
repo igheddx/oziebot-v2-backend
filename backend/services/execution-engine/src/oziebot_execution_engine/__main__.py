@@ -27,7 +27,9 @@ log = logging.getLogger("execution-engine")
 
 def main() -> None:
     settings = get_settings()
-    r = redis_from_url(settings.redis_url)
+    r = redis_from_url(
+        settings.redis_url, probe=True, socket_connect_timeout=3, socket_timeout=3
+    )
     coinbase_client = HttpCoinbaseExecutionClient(settings.coinbase_api_base_url)
     service = ExecutionService(
         settings,

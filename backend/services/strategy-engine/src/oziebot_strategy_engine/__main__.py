@@ -20,7 +20,12 @@ def main() -> None:
     )
     poll_interval = float(os.environ.get("OZIEBOT_STRATEGY_RUNNER_POLL_SEC", "1.0"))
 
-    redis_client = redis_from_url(redis_url)
+    redis_client = redis_from_url(
+        redis_url,
+        probe=True,
+        socket_connect_timeout=3,
+        socket_timeout=3,
+    )
     runner = build_runner(database_url=database_url, redis_client=redis_client)
     health = start_health_server("strategy-engine")
 

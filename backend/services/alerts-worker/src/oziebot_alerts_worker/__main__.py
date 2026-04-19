@@ -22,7 +22,9 @@ log = logging.getLogger("alerts-worker")
 
 def main() -> None:
     settings = get_settings()
-    r = redis_from_url(settings.redis_url)
+    r = redis_from_url(
+        settings.redis_url, probe=True, socket_connect_timeout=3, socket_timeout=3
+    )
     keys = QueueNames.all_alerts_keys() + QueueNames.all_alerts_retry_keys()
     service = NotificationService(
         settings,

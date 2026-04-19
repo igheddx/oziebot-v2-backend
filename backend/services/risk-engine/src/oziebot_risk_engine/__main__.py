@@ -22,7 +22,9 @@ log = logging.getLogger("risk-engine")
 
 def main() -> None:
     settings = get_settings()
-    r = redis_from_url(settings.redis_url)
+    r = redis_from_url(
+        settings.redis_url, probe=True, socket_connect_timeout=3, socket_timeout=3
+    )
     service = RiskEngineService(settings, r)
     health = start_health_server("risk-engine")
     keys = QueueNames.all_signal_generated_keys()

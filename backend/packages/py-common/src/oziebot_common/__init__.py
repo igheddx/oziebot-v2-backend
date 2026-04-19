@@ -12,7 +12,12 @@ from oziebot_common.fee_model import (
     normalize_fee_model_settings,
     resolve_fee_profile,
 )
-from oziebot_common.queues import QueueNames, brpop_json_any, redis_from_url
+from oziebot_common.queues import (
+    QueueNames,
+    brpop_json_any,
+    redis_from_url,
+    redis_url_candidates,
+)
 from oziebot_common.strategy_defaults import (
     GLOBAL_SIGNAL_RULE_DEFAULTS,
     normalize_platform_strategy_config,
@@ -69,6 +74,7 @@ __all__ = [
     "normalize_fee_model_settings",
     "normalize_platform_strategy_config",
     "redis_from_url",
+    "redis_url_candidates",
     "read_trade_log_events",
     "resolve_effective_token_policy",
     "resolve_fee_profile",

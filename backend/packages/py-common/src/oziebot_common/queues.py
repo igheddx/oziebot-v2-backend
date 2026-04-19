@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import SplitResult, urlsplit, urlunsplit
 from typing import Any
 
 import redis
@@ -74,8 +75,51 @@ class QueueNames:
         return [QueueNames.signal_generated(m) for m in TradingMode]
 
 
-def redis_from_url(url: str) -> redis.Redis:
-    return redis.Redis.from_url(url, decode_responses=True)
+def redis_url_candidates(url: str) -> list[str]:
+    stripped = url.strip()
+    if not stripped:
+        return [stripped]
+
+    parsed = urlsplit(stripped)
+    if parsed.scheme not in {"redis", "rediss"}:
+        return [stripped]
+
+    candidates = [stripped]
+    hostname = (parsed.hostname or "").lower()
+    if hostname.endswith(".cache.amazonaws.com"):
+        alternate_scheme = "rediss" if parsed.scheme == "redis" else "redis"
+        alternate = urlunsplit(
+            SplitResult(
+                scheme=alternate_scheme,
+                netloc=parsed.netloc,
+                path=parsed.path,
+                query=parsed.query,
+                fragment=parsed.fragment,
+            )
+        )
+        if alternate not in candidates:
+            candidates.append(alternate)
+    return candidates
+
+
+def redis_from_url(
+    url: str,
+    *,
+    probe: bool = False,
+    **kwargs: Any,
+) -> redis.Redis:
+    last_error: Exception | None = None
+    for candidate in redis_url_candidates(url):
+        try:
+            client = redis.Redis.from_url(candidate, decode_responses=True, **kwargs)
+            if probe:
+                client.ping()
+            return client
+        except (redis.RedisError, ValueError) as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise ValueError("Redis URL must not be empty")
 
 
 def push_json(r: redis.Redis, key: str, payload: dict[str, Any]) -> None:

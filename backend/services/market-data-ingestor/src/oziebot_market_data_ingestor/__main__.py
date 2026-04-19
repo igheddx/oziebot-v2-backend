@@ -4,9 +4,9 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
-import redis
 from sqlalchemy import create_engine
 
+from oziebot_common import redis_from_url
 from oziebot_common.health import start_health_server
 from oziebot_common.trade_log import append_trade_log_event
 from oziebot_market_data_ingestor.coinbase_client import (
@@ -114,7 +114,12 @@ async def _reconcile_bbo(
 async def main() -> None:
     s = get_settings()
     engine = create_engine(s.database_url)
-    r = redis.Redis.from_url(s.redis_url, decode_responses=True)
+    r = redis_from_url(
+        s.redis_url,
+        probe=True,
+        socket_connect_timeout=3,
+        socket_timeout=3,
+    )
 
     universe = SymbolUniverseProvider(engine)
     products = universe.list_active_product_ids()
