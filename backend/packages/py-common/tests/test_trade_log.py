@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from oziebot_common.trade_log import append_trade_log_event, read_trade_log_events
 
@@ -117,3 +118,32 @@ def test_trade_log_keeps_recent_events_in_chronological_order() -> None:
     assert [event["symbol"] for event in events] == ["ETH-USD", "SOL-USD"]
     assert events[0]["message"] == "ETH-USD BBO updated"
     assert events[1]["message"] == "SOL-USD candles refreshed"
+
+
+def test_trade_log_preserves_structured_details() -> None:
+    client = FakeRedis()
+    now = datetime.now(UTC)
+
+    append_trade_log_event(
+        client,
+        symbol="BTC-USD",
+        event_type="trade_tick",
+        message="BTC-USD trade tick sampled",
+        timestamp=now,
+        details={
+            "price": Decimal("64250.12"),
+            "size": Decimal("0.045"),
+            "event_time": now,
+            "nested": {"spread_pct": Decimal("0.0234")},
+        },
+    )
+
+    events = read_trade_log_events(client, now=now, window_seconds=120, limit=10)
+
+    assert events[0]["source"] == "coinbase"
+    assert events[0]["details"] == {
+        "price": "64250.12",
+        "size": "0.045",
+        "event_time": now.isoformat(),
+        "nested": {"spread_pct": "0.0234"},
+    }

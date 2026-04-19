@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 import redis
@@ -102,6 +103,11 @@ def test_trade_log_endpoint_returns_recent_events(
         event_type="bbo_update",
         message="ETH-USD BBO updated",
         timestamp=now - timedelta(seconds=5),
+        details={
+            "best_bid": Decimal("2450.10"),
+            "best_ask": Decimal("2451.25"),
+            "spread_pct": Decimal("0.0469"),
+        },
     )
 
     response = client.get(
@@ -114,6 +120,12 @@ def test_trade_log_endpoint_returns_recent_events(
     assert payload["count"] == 2
     assert payload["events"][0]["symbol"] == "BTC-USD"
     assert payload["events"][1]["message"] == "ETH-USD BBO updated"
+    assert payload["events"][1]["source"] == "coinbase"
+    assert payload["events"][1]["details"] == {
+        "best_bid": "2450.1",
+        "best_ask": "2451.25",
+        "spread_pct": "0.0469",
+    }
 
 
 @patch("oziebot_api.api.v1.logs.redis_from_url")
