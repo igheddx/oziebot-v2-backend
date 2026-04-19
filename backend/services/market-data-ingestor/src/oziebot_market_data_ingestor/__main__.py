@@ -8,6 +8,7 @@ import redis
 from sqlalchemy import create_engine
 
 from oziebot_common.health import start_health_server
+from oziebot_common.trade_log import append_trade_log_event
 from oziebot_market_data_ingestor.coinbase_client import (
     CoinbaseRestClient,
     CoinbaseWsClient,
@@ -33,6 +34,7 @@ async def _reconcile_candles(
     rest: CoinbaseRestClient,
     store: MarketDataStore,
     cache: RedisMarketCache,
+    log_client,
     stale: StaleDataDetector,
     products: list[str],
     granularity: int,
@@ -46,6 +48,13 @@ async def _reconcile_candles(
                 cache.put_candle(item)
                 store.insert_candle(item)
             stale.mark_candle(p, now)
+            append_trade_log_event(
+                log_client,
+                symbol=p,
+                event_type="candles_refresh",
+                message=f"{p} candles refreshed",
+                timestamp=now,
+            )
         except Exception as exc:
             log.warning("candle reconciliation failed product=%s err=%s", p, exc)
 
@@ -54,6 +63,7 @@ async def _reconcile_trades(
     rest: CoinbaseRestClient,
     store: MarketDataStore,
     cache: RedisMarketCache,
+    log_client,
     stale: StaleDataDetector,
     products: list[str],
     limit: int,
@@ -66,6 +76,12 @@ async def _reconcile_trades(
                 cache.put_trade(item)
                 store.insert_trade_snapshot(item)
                 stale.mark_trade(item.product_id, item.ingest_time)
+            append_trade_log_event(
+                log_client,
+                symbol=p,
+                event_type="market_snapshot",
+                message=f"{p} market snapshot pulled",
+            )
         except Exception as exc:
             log.warning("trade reconciliation failed product=%s err=%s", p, exc)
 
@@ -74,6 +90,7 @@ async def _reconcile_bbo(
     rest: CoinbaseRestClient,
     store: MarketDataStore,
     cache: RedisMarketCache,
+    log_client,
     stale: StaleDataDetector,
     products: list[str],
 ) -> None:
@@ -84,6 +101,12 @@ async def _reconcile_bbo(
             cache.put_bbo(item)
             store.insert_bbo_snapshot(item)
             stale.mark_bbo(item.product_id, item.ingest_time)
+            append_trade_log_event(
+                log_client,
+                symbol=p,
+                event_type="bbo_update",
+                message=f"{p} BBO updated",
+            )
         except Exception as exc:
             log.warning("bbo reconciliation failed product=%s err=%s", p, exc)
 
@@ -122,15 +145,16 @@ async def main() -> None:
         rest,
         store,
         cache,
+        r,
         stale,
         products,
         s.trade_recovery_limit,
     )
     health.touch()
-    await _reconcile_bbo(rest, store, cache, stale, products)
+    await _reconcile_bbo(rest, store, cache, r, stale, products)
     health.touch()
     await _reconcile_candles(
-        rest, store, cache, stale, products, s.candles_granularity_sec
+        rest, store, cache, r, stale, products, s.candles_granularity_sec
     )
     refresher.refresh_active_tokens()
     health.mark_ready()
@@ -171,15 +195,17 @@ async def main() -> None:
                     rest,
                     store,
                     cache,
+                    r,
                     stale,
                     stale_map["trade"],
                     s.trade_recovery_limit,
                 )
-                await _reconcile_bbo(rest, store, cache, stale, stale_map["bbo"])
+                await _reconcile_bbo(rest, store, cache, r, stale, stale_map["bbo"])
                 await _reconcile_candles(
                     rest,
                     store,
                     cache,
+                    r,
                     stale,
                     stale_map["candle"],
                     s.candles_granularity_sec,
@@ -190,7 +216,7 @@ async def main() -> None:
                 now - last_candle_reconcile
             ).total_seconds() >= s.candles_granularity_sec:
                 await _reconcile_candles(
-                    rest, store, cache, stale, products, s.candles_granularity_sec
+                    rest, store, cache, r, stale, products, s.candles_granularity_sec
                 )
                 last_candle_reconcile = now
                 health.touch()

@@ -10,6 +10,7 @@ from oziebot_api.api.v1 import (
     billing,
     health,
     integrations_coinbase,
+    logs,
     me,
     tenants,
     tokens,
@@ -25,6 +26,7 @@ api_router.include_router(alerts.router)
 api_router.include_router(backtests.router)
 api_router.include_router(billing.router)
 api_router.include_router(integrations_coinbase.router)
+api_router.include_router(logs.router)
 api_router.include_router(admin.router)
 api_router.include_router(admin_platform.router)
 api_router.include_router(tenants.router)

@@ -31,6 +31,14 @@ from oziebot_common.token_policy import (
     resolve_effective_token_policy,
     score_strategy_suitability,
 )
+from oziebot_common.trade_log import (
+    MAX_TRADE_LOG_LIMIT,
+    MAX_TRADE_LOG_WINDOW_SECONDS,
+    TRADE_LOG_REDIS_KEY,
+    append_trade_log_event,
+    build_trade_log_event,
+    read_trade_log_events,
+)
 
 __all__ = [
     "BboSample",
@@ -42,11 +50,16 @@ __all__ = [
     "QueueNames",
     "SETTING_EXECUTION_FEE_MODEL",
     "StrategySuitabilityResult",
+    "TRADE_LOG_REDIS_KEY",
     "TOKEN_POLICY_RECOMMENDATIONS",
     "TOKEN_POLICY_STRATEGIES",
     "TokenMarketProfileResult",
     "TradeSample",
+    "MAX_TRADE_LOG_LIMIT",
+    "MAX_TRADE_LOG_WINDOW_SECONDS",
+    "append_trade_log_event",
     "bps_to_decimal",
+    "build_trade_log_event",
     "calculate_round_trip_cost_bps",
     "default_fee_model_settings",
     "estimate_signal_expected_edge_bps",
@@ -56,6 +69,7 @@ __all__ = [
     "normalize_fee_model_settings",
     "normalize_platform_strategy_config",
     "redis_from_url",
+    "read_trade_log_events",
     "resolve_effective_token_policy",
     "resolve_fee_profile",
     "score_strategy_suitability",
