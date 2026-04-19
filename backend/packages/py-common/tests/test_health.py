@@ -24,3 +24,14 @@ def test_health_state_reports_stale_when_heartbeat_is_old() -> None:
 
     assert snapshot["status"] == "stale"
     assert snapshot["ready"] is False
+
+
+def test_health_state_mark_not_ready_clears_readiness() -> None:
+    state = HealthState(service_name="worker", stale_after_seconds=90)
+
+    state.mark_ready()
+    state.mark_not_ready()
+    snapshot = state.snapshot()
+
+    assert snapshot["status"] == "ok"
+    assert snapshot["ready"] is False

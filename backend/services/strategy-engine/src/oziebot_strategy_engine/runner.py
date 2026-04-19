@@ -21,6 +21,15 @@ from oziebot_common.fee_model import (
 )
 from oziebot_common.strategy_defaults import normalize_platform_strategy_config
 from oziebot_common.token_policy import resolve_effective_token_policy
+from oziebot_common.trade_intelligence import (
+    DecisionAuditDecision,
+    DecisionAuditStage,
+    PlaceholderTradeIntelligenceScorer,
+    persist_ai_inference_record,
+    persist_decision_audit,
+    persist_signal_snapshot,
+    upsert_intelligence_metadata,
+)
 from oziebot_domain.signal_pipeline import StrategySignalEvent
 from oziebot_domain.strategy import SignalType, StrategySignal
 from oziebot_domain.tenant import TenantId
@@ -73,6 +82,7 @@ class StrategyRunner:
         self._candle_granularity_sec = candle_granularity_sec
         self._metrics: Counter[str] = Counter()
         self._rejection_reasons: Counter[str] = Counter()
+        self._ai_scorer = PlaceholderTradeIntelligenceScorer()
 
     def run_once(self) -> int:
         rows = self._load_enabled_user_strategies()
@@ -182,6 +192,16 @@ class StrategyRunner:
                             self._record_signal_metric(
                                 rejected=True, rejection_reason=policy_reason
                             )
+                            self._persist_decision_audit_record(
+                                signal_snapshot_id=None,
+                                stage=DecisionAuditStage.SUPPRESSION,
+                                decision=DecisionAuditDecision.REJECTED,
+                                reason_code=policy_reason,
+                                reason_detail="Signal blocked before strategy evaluation",
+                                size_before=None,
+                                size_after=None,
+                                created_at=now,
+                            )
                             self._persist_run(
                                 run_id=run_id,
                                 user_id=user_id,
@@ -218,6 +238,16 @@ class StrategyRunner:
                             now=now,
                         )
                         if schedule_reason is not None:
+                            self._persist_decision_audit_record(
+                                signal_snapshot_id=None,
+                                stage=DecisionAuditStage.SUPPRESSION,
+                                decision=DecisionAuditDecision.REJECTED,
+                                reason_code=schedule_reason,
+                                reason_detail="Signal scheduled out before strategy evaluation",
+                                size_before=None,
+                                size_after=None,
+                                created_at=now,
+                            )
                             self._persist_run(
                                 run_id=run_id,
                                 user_id=user_id,
@@ -267,6 +297,18 @@ class StrategyRunner:
                             config=config,
                             fee_settings=fee_settings,
                         )
+                        signal = self._attach_trade_intelligence(
+                            user_id=user_id,
+                            tenant_id=str(tenant_id),
+                            strategy_name=strategy_name,
+                            trading_mode=mode,
+                            signal=signal,
+                            market=market,
+                            config=config,
+                            runtime_state=runtime_state,
+                            token_policy=token_policy,
+                            timestamp=now,
+                        )
                         suppress_reason = self._suppression_reason(
                             user_id=user_id,
                             strategy_name=strategy_name,
@@ -281,6 +323,16 @@ class StrategyRunner:
                             self._record_signal_metric(
                                 rejected=True,
                                 rejection_reason=suppress_reason,
+                            )
+                            self._persist_decision_audit_record(
+                                signal_snapshot_id=self._signal_snapshot_id(signal),
+                                stage=DecisionAuditStage.SUPPRESSION,
+                                decision=DecisionAuditDecision.REJECTED,
+                                reason_code=suppress_reason,
+                                reason_detail=signal.reason,
+                                size_before=self._signal_size(signal),
+                                size_after=Decimal("0"),
+                                created_at=now,
                             )
                             self._persist_run(
                                 run_id=run_id,
@@ -349,6 +401,16 @@ class StrategyRunner:
                             completed_at=datetime.now(UTC),
                         )
                         self._persist_signal(event)
+                        self._persist_decision_audit_record(
+                            signal_snapshot_id=self._signal_snapshot_id(signal),
+                            stage=DecisionAuditStage.STRATEGY,
+                            decision=DecisionAuditDecision.EMITTED,
+                            reason_code=event.action.value,
+                            reason_detail=signal.reason,
+                            size_before=event.suggested_size,
+                            size_after=event.suggested_size,
+                            created_at=now,
+                        )
                         q = QueueNames.signal_generated(mode)
                         push_json(
                             self._redis,
@@ -474,6 +536,11 @@ class StrategyRunner:
         val = getattr(raw, "value", raw)
         return str(val).lower()
 
+    def _signal_size(self, signal: StrategySignal) -> Decimal:
+        if signal.quantity is not None:
+            return Decimal(str(signal.quantity.amount))
+        return Decimal("0")
+
     def _to_decimal(self, value: Any, default: Decimal = Decimal("0")) -> Decimal:
         if value is None:
             return default
@@ -481,6 +548,315 @@ class StrategyRunner:
             return Decimal(str(value))
         except Exception:
             return default
+
+    def _attach_trade_intelligence(
+        self,
+        *,
+        user_id: str,
+        tenant_id: str,
+        strategy_name: str,
+        trading_mode: TradingMode,
+        signal: StrategySignal,
+        market: MarketSnapshot,
+        config: dict[str, Any],
+        runtime_state: dict[str, Any],
+        token_policy: dict[str, Any] | None,
+        timestamp: datetime,
+    ) -> StrategySignal:
+        if self._engine is None:
+            return signal
+        raw_features = self._raw_feature_json(
+            strategy_name=strategy_name,
+            signal=signal,
+            market=market,
+            config=config,
+            runtime_state=runtime_state,
+        )
+        effective_policy = resolve_effective_token_policy(
+            token_policy, trading_mode=trading_mode.value
+        )
+        snapshot_id = persist_signal_snapshot(
+            self._engine,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            trading_mode=trading_mode.value,
+            strategy_name=strategy_name,
+            token_symbol=market.symbol,
+            timestamp=timestamp,
+            current_price=market.current_price,
+            best_bid=market.bid_price,
+            best_ask=market.ask_price,
+            spread_pct=self._spread_pct(market),
+            estimated_slippage_pct=self._estimated_slippage_pct(signal),
+            volume=market.volume_24h,
+            volatility=self._volatility_pct(market),
+            confidence_score=float(signal.confidence),
+            raw_feature_json=raw_features,
+            token_policy_status=effective_policy["effective_recommendation_status"],
+            token_policy_multiplier=Decimal(str(effective_policy["size_multiplier"])),
+        )
+        ai_result = self._ai_scorer.score(
+            {
+                "strategy_name": strategy_name,
+                "trading_mode": trading_mode.value,
+                "token_symbol": market.symbol,
+                "raw_feature_json": raw_features,
+                "token_policy_status": effective_policy[
+                    "effective_recommendation_status"
+                ],
+            }
+        )
+        inference_id = persist_ai_inference_record(
+            self._engine,
+            signal_snapshot_id=snapshot_id,
+            model_name=self._ai_scorer.model_name,
+            model_version=self._ai_scorer.model_version,
+            recommendation=ai_result.recommendation.value,
+            confidence_score=ai_result.confidence_score,
+            explanation_json=ai_result.explanation_json,
+            created_at=timestamp,
+        )
+        return signal.model_copy(
+            update={
+                "metadata": upsert_intelligence_metadata(
+                    signal.metadata,
+                    signal_snapshot_id=snapshot_id,
+                    ai_inference_id=inference_id,
+                    ai_recommendation=ai_result.recommendation.value,
+                    ai_confidence_score=ai_result.confidence_score,
+                    model_name=self._ai_scorer.model_name,
+                    model_version=self._ai_scorer.model_version,
+                )
+            }
+        )
+
+    def _persist_decision_audit_record(
+        self,
+        *,
+        signal_snapshot_id: str | None,
+        stage: DecisionAuditStage,
+        decision: DecisionAuditDecision,
+        reason_code: str | None,
+        reason_detail: str | None,
+        size_before: Decimal | None,
+        size_after: Decimal | None,
+        created_at: datetime,
+    ) -> None:
+        if self._engine is None:
+            return
+        persist_decision_audit(
+            self._engine,
+            signal_snapshot_id=signal_snapshot_id,
+            stage=stage.value,
+            decision=decision.value,
+            reason_code=reason_code,
+            reason_detail=reason_detail,
+            size_before=size_before,
+            size_after=size_after,
+            created_at=created_at,
+        )
+
+    def _signal_snapshot_id(self, signal: StrategySignal) -> str | None:
+        metadata = dict(signal.metadata or {})
+        intelligence = metadata.get("intelligence")
+        if not isinstance(intelligence, dict):
+            return None
+        value = intelligence.get("signal_snapshot_id")
+        return str(value) if value else None
+
+    def _spread_pct(self, market: MarketSnapshot) -> Decimal:
+        mid = (market.bid_price + market.ask_price) / Decimal("2")
+        if mid <= 0:
+            return Decimal("0")
+        return (market.ask_price - market.bid_price) / mid
+
+    def _estimated_slippage_pct(self, signal: StrategySignal) -> Decimal:
+        fee_economics = dict((signal.metadata or {}).get("fee_economics") or {})
+        return Decimal(str(fee_economics.get("estimated_slippage_bps", 0))) / Decimal(
+            "10000"
+        )
+
+    def _volatility_pct(self, market: MarketSnapshot) -> Decimal | None:
+        closes = [Decimal(str(v)) for v in market.metadata.get("candle_closes", [])]
+        if len(closes) < 2:
+            return None
+        baseline = sum(closes) / Decimal(len(closes))
+        if baseline <= 0:
+            return None
+        return (max(closes) - min(closes)) / baseline
+
+    def _raw_feature_json(
+        self,
+        *,
+        strategy_name: str,
+        signal: StrategySignal,
+        market: MarketSnapshot,
+        config: dict[str, Any],
+        runtime_state: dict[str, Any],
+    ) -> dict[str, Any]:
+        features: dict[str, Any] = {
+            "signal_type": self._signal_action(signal),
+            "signal_reason": signal.reason,
+            "strategy_version": signal.strategy_version,
+        }
+        closes = [float(v) for v in market.metadata.get("candle_closes", [])]
+        volumes = [float(v) for v in market.metadata.get("candle_volumes", [])]
+        highs = [float(v) for v in market.metadata.get("candle_highs", [])]
+        if strategy_name == "momentum":
+            short_window = int(config.get("short_window", 8))
+            long_window = int(config.get("long_window", 34))
+            short_ma = (
+                sum(closes[-short_window:]) / short_window
+                if len(closes) >= short_window and short_window > 0
+                else None
+            )
+            long_ma = (
+                sum(closes[-long_window:]) / long_window
+                if len(closes) >= long_window and long_window > 0
+                else None
+            )
+            momentum_value = (
+                (short_ma - long_ma) / long_ma
+                if short_ma is not None and long_ma not in (None, 0)
+                else None
+            )
+            features.update(
+                {
+                    "short_ma": short_ma,
+                    "long_ma": long_ma,
+                    "momentum_value": momentum_value,
+                    "strength_threshold": config.get("strength_threshold", 0.012),
+                    "trailing_stop_pct": config.get("trailing_stop_pct", 0.03),
+                }
+            )
+        elif strategy_name == "reversion":
+            band_window = int(config.get("band_window", 20))
+            rolling = closes[-band_window:] if len(closes) >= band_window else closes
+            rolling_mean = (sum(rolling) / len(rolling)) if rolling else None
+            variance = (
+                sum((price - rolling_mean) ** 2 for price in rolling) / len(rolling)
+                if rolling and rolling_mean is not None
+                else None
+            )
+            stdev = variance**0.5 if variance is not None else None
+            price = float(market.current_price)
+            zscore = (
+                (price - rolling_mean) / stdev
+                if rolling_mean not in (None, 0) and stdev not in (None, 0)
+                else None
+            )
+            bandwidth = (
+                ((2 * stdev) / rolling_mean) * 2
+                if rolling_mean not in (None, 0) and stdev is not None
+                else None
+            )
+            ema_long_window = int(config.get("ema_long_window", 200))
+            ema_long = self._ema(closes[-ema_long_window:], ema_long_window)
+            trend_filter_state = "pass"
+            if ema_long is not None and price < ema_long:
+                trend_filter_state = "below_ema"
+            features.update(
+                {
+                    "zscore": zscore,
+                    "rsi": self._rsi(closes, int(config.get("rsi_period", 14))),
+                    "bandwidth": bandwidth,
+                    "trend_filter_state": trend_filter_state,
+                    "ema_long_window": ema_long_window,
+                }
+            )
+        elif strategy_name == "day_trading":
+            min_volume_multiplier = float(config.get("min_volume_multiplier", 1.3))
+            recent_volumes = volumes[-21:-1] if len(volumes) > 1 else []
+            avg_volume = (
+                sum(recent_volumes) / len(recent_volumes) if recent_volumes else 0.0
+            )
+            latest_volume = volumes[-1] if volumes else 0.0
+            volume_spike = (
+                avg_volume > 0 and latest_volume >= avg_volume * min_volume_multiplier
+            )
+            trend_alignment = None
+            if len(closes) >= 21:
+                ema_fast = self._ema(closes[-21:], 9)
+                ema_slow = self._ema(closes[-21:], 21)
+                trend_alignment = (
+                    None
+                    if ema_fast is None or ema_slow is None
+                    else ema_fast > ema_slow
+                )
+            volatility_pct = 0.0
+            if len(closes) >= 10:
+                baseline = sum(closes[-10:]) / 10
+                if baseline > 0:
+                    volatility_pct = (max(closes[-10:]) - min(closes[-10:])) / baseline
+            breakout = False
+            lookback = int(config.get("breakout_lookback_candles", 5))
+            if len(highs) > lookback:
+                breakout = float(market.current_price) >= max(
+                    highs[-(lookback + 1) : -1]
+                )
+            confirmation_count = sum(
+                1
+                for passed in (
+                    volume_spike,
+                    bool(trend_alignment),
+                    breakout,
+                    volatility_pct >= float(config.get("min_volatility_pct", 0.005)),
+                )
+                if passed
+            )
+            features.update(
+                {
+                    "entry_threshold": config.get("entry_threshold", 0.007),
+                    "exit_threshold": config.get("exit_threshold", 0.015),
+                    "volume_multiplier": min_volume_multiplier,
+                    "volatility_pct": volatility_pct,
+                    "confirmation_count": confirmation_count,
+                    "trend_alignment": trend_alignment,
+                }
+            )
+        elif strategy_name == "dca":
+            symbol_state = dict(runtime_state.get("symbols", {})).get(market.symbol, {})
+            features.update(
+                {
+                    "buy_interval_hours": config.get("buy_interval_hours", 24),
+                    "last_buy_at": symbol_state.get("last_buy_at"),
+                    "green_day_flag": market.close_price > market.open_price,
+                    "buy_amount_usd": config.get("buy_amount_usd", 50),
+                }
+            )
+        if signal.metadata:
+            features["signal_metadata"] = dict(signal.metadata)
+        return features
+
+    @staticmethod
+    def _ema(values: list[float], window: int) -> float | None:
+        if not values or window <= 0:
+            return None
+        k = 2 / (window + 1)
+        ema = values[0]
+        for value in values[1:]:
+            ema = (value * k) + (ema * (1 - k))
+        return ema
+
+    @staticmethod
+    def _rsi(values: list[float], period: int) -> float | None:
+        if len(values) < period + 1 or period <= 0:
+            return None
+        window = values[-(period + 1) :]
+        gains = 0.0
+        losses = 0.0
+        for prev, curr in zip(window, window[1:], strict=False):
+            delta = curr - prev
+            if delta >= 0:
+                gains += delta
+            else:
+                losses += abs(delta)
+        avg_gain = gains / period
+        avg_loss = losses / period
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return 100 - (100 / (1 + rs))
 
     def _load_platform_strategy_config(self, strategy_id: str) -> dict[str, Any]:
         stmt = text(
@@ -506,6 +882,8 @@ class StrategyRunner:
         return normalize_platform_strategy_config(strategy_id, payload)
 
     def _load_fee_settings(self) -> dict[str, Any]:
+        if self._engine is None:
+            return {}
         stmt = text(
             """
             SELECT value

@@ -18,6 +18,12 @@ from oziebot_common.fee_model import (
 from oziebot_common.queues import QueueNames, notification_event_to_json, push_json
 from oziebot_common.strategy_defaults import normalize_platform_strategy_config
 from oziebot_common.token_policy import resolve_effective_token_policy
+from oziebot_common.trade_intelligence import (
+    DecisionAuditDecision,
+    DecisionAuditStage,
+    extract_signal_snapshot_id,
+    persist_decision_audit,
+)
 from oziebot_domain.events import NotificationEvent, NotificationEventType
 from oziebot_domain.intents import TradeIntent
 from oziebot_domain.risk import RejectionReason, RiskDecision, RiskOutcome
@@ -74,6 +80,7 @@ class RiskEngineService:
                 },
             )
             self._persist_risk_event(signal, decision)
+            self._persist_decision_audit_record(signal, decision, created_at=now)
             self._record_metric()
             self._log_decision(signal, decision)
             return decision, None
@@ -96,6 +103,7 @@ class RiskEngineService:
                 metadata={"fee_economics": facts.get("fee_economics", {})},
             )
             self._persist_risk_event(signal, decision)
+            self._persist_decision_audit_record(signal, decision, created_at=now)
             self._record_metric(rejected=True, rejection_reason="signal_size_positive")
             self._log_decision(signal, decision)
             return decision, None
@@ -208,6 +216,7 @@ class RiskEngineService:
                 metadata={"fee_economics": facts.get("fee_economics", {})},
             )
             self._persist_risk_event(signal, decision)
+            self._persist_decision_audit_record(signal, decision, created_at=now)
             self._record_metric(
                 rejected=True,
                 rejection_reason=reject_result.rule_name,
@@ -237,6 +246,7 @@ class RiskEngineService:
 
         intent = self._to_intent(signal, final_size)
         self._persist_risk_event(signal, decision)
+        self._persist_decision_audit_record(signal, decision, created_at=now)
         self._record_metric()
         self._log_decision(signal, decision)
         return decision, intent
@@ -341,6 +351,9 @@ class RiskEngineService:
                     signal.reasoning_metadata.get("signal_metadata")
                 ),
                 "fee_economics": fee_economics,
+                "intelligence": self._json_dict(
+                    signal.reasoning_metadata.get("intelligence")
+                ),
             },
         )
 
@@ -370,6 +383,36 @@ class RiskEngineService:
             except Exception:
                 return {}
         return value if isinstance(value, dict) else {}
+
+    def _persist_decision_audit_record(
+        self,
+        signal: StrategySignalEvent,
+        decision: RiskDecision,
+        *,
+        created_at: datetime,
+    ) -> None:
+        snapshot_id = extract_signal_snapshot_id(signal.reasoning_metadata)
+        decision_kind = DecisionAuditDecision.EMITTED
+        if decision.outcome == RiskOutcome.REDUCE_SIZE:
+            decision_kind = DecisionAuditDecision.REDUCED
+        elif decision.outcome == RiskOutcome.REJECT:
+            decision_kind = DecisionAuditDecision.REJECTED
+        reason_code = (
+            decision.reason.value
+            if decision.reason is not None
+            else decision.outcome.value
+        )
+        persist_decision_audit(
+            self._engine,
+            signal_snapshot_id=snapshot_id,
+            stage=DecisionAuditStage.RISK.value,
+            decision=decision_kind.value,
+            reason_code=reason_code,
+            reason_detail=decision.detail,
+            size_before=Decimal(str(decision.original_size)),
+            size_after=Decimal(str(decision.final_size)),
+            created_at=created_at,
+        )
 
     def _strategy_quality_controls(
         self,

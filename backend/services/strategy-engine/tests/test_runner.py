@@ -4,6 +4,9 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
+
+from sqlalchemy import create_engine, text
 
 from oziebot_domain.signal_pipeline import StrategySignalEvent
 from oziebot_domain.strategy import SignalType, StrategySignal
@@ -30,6 +33,51 @@ class DummyRedis:
         existing = self.kv.setdefault(key, [])
         if isinstance(existing, list):
             existing.insert(0, value)
+
+
+def _setup_intelligence_db(db_path: Path) -> None:
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE strategy_runs (id TEXT PRIMARY KEY, run_id TEXT, user_id TEXT, strategy_name TEXT, symbol TEXT, trading_mode TEXT, status TEXT, trace_id TEXT, metadata TEXT, started_at TEXT, completed_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE strategy_signals (id TEXT PRIMARY KEY, signal_id TEXT, run_id TEXT, user_id TEXT, strategy_name TEXT, symbol TEXT, action TEXT, confidence REAL, suggested_size TEXT, reasoning_metadata TEXT, trading_mode TEXT, timestamp TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE strategy_signal_snapshots (id TEXT PRIMARY KEY, user_id TEXT, tenant_id TEXT, trading_mode TEXT, strategy_name TEXT, token_symbol TEXT, timestamp TEXT, current_price TEXT, best_bid TEXT, best_ask TEXT, spread_pct TEXT, estimated_slippage_pct TEXT, volume TEXT, volatility TEXT, confidence_score REAL, raw_feature_json TEXT, token_policy_status TEXT, token_policy_multiplier TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT, updated_by_user_id TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE platform_token_allowlist (id TEXT PRIMARY KEY, symbol TEXT, quote_currency TEXT, is_enabled BOOLEAN)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE token_strategy_policy (id TEXT PRIMARY KEY, token_id TEXT, strategy_id TEXT, admin_enabled BOOLEAN, recommendation_status TEXT, recommendation_reason TEXT, recommendation_status_override TEXT, recommendation_reason_override TEXT, max_position_pct_override REAL)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE strategy_decision_audits (id TEXT PRIMARY KEY, signal_snapshot_id TEXT, stage TEXT, decision TEXT, reason_code TEXT, reason_detail TEXT, size_before TEXT, size_after TEXT, created_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE ai_inference_records (id TEXT PRIMARY KEY, signal_snapshot_id TEXT, model_name TEXT, model_version TEXT, recommendation TEXT, confidence_score REAL, explanation_json TEXT, created_at TEXT)"
+            )
+        )
 
 
 def test_schedule_pattern_intervals():
@@ -331,6 +379,169 @@ def test_run_once_processes_all_allowed_symbols():
     }
 
 
+def test_run_once_persists_signal_snapshots_and_ai_inference(tmp_path: Path):
+    db_path = tmp_path / "runner-intelligence.sqlite"
+    _setup_intelligence_db(db_path)
+
+    class IntelligenceRunner(StrategyRunner):
+        def __init__(self):
+            super().__init__(
+                engine=create_engine(f"sqlite+pysqlite:///{db_path}"),
+                redis_client=DummyRedis(),
+            )
+
+        def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
+            return [
+                {
+                    "user_id": str(uuid.uuid4()),
+                    "strategy_id": "momentum",
+                    "tenant_id": uuid.uuid4(),
+                    "config": {},
+                }
+            ]
+
+        def _load_platform_strategy_config(self, strategy_id: str) -> dict[str, object]:
+            return {"strategy_params": {"short_window": 3, "long_window": 5}}
+
+        def _load_allowed_symbols(self, user_id: str) -> list[str]:
+            return ["BTC-USD"]
+
+        def _load_market_snapshot(self, symbol: str) -> MarketSnapshot | None:
+            return MarketSnapshot(
+                timestamp=datetime.now(UTC),
+                symbol=symbol,
+                current_price=Decimal("50000"),
+                bid_price=Decimal("49990"),
+                ask_price=Decimal("50010"),
+                volume_24h=Decimal("1000"),
+                open_price=Decimal("49000"),
+                high_price=Decimal("50100"),
+                low_price=Decimal("48900"),
+                close_price=Decimal("50000"),
+                candle_closes=[49000, 49200, 49500, 49800, 50000],
+            )
+
+        def _load_position_state(
+            self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str
+        ) -> PositionState:
+            return PositionState(symbol=symbol, quantity=Decimal("0"))
+
+        def _sync_position_runtime_state(self, **kwargs) -> PositionState:
+            return kwargs["position_state"]
+
+        def _generate_signal(self, **kwargs) -> StrategySignal:
+            return StrategySignal(
+                signal_id=uuid.uuid4(),
+                correlation_id=uuid.uuid4(),
+                tenant_id=uuid.uuid4(),
+                strategy_id="momentum",
+                trading_mode=kwargs["trading_mode"],
+                signal_type=SignalType.BUY,
+                confidence=0.82,
+                reason="bullish crossover",
+                quantity=Quantity(amount="0.12"),
+            )
+
+    runner = IntelligenceRunner()
+    processed = runner.run_once()
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        snapshot_rows = conn.execute(
+            text(
+                "SELECT trading_mode, raw_feature_json FROM strategy_signal_snapshots ORDER BY trading_mode"
+            )
+        ).all()
+        ai_count = conn.execute(
+            text("SELECT COUNT(*) FROM ai_inference_records")
+        ).scalar_one()
+    assert processed == 2
+    assert [row[0] for row in snapshot_rows] == ["live", "paper"]
+    assert ai_count == 2
+    assert "momentum_value" in json.loads(snapshot_rows[0][1])
+
+
+def test_run_once_persists_suppression_audit(tmp_path: Path):
+    db_path = tmp_path / "runner-suppression.sqlite"
+    _setup_intelligence_db(db_path)
+
+    class SuppressedRunner(StrategyRunner):
+        def __init__(self):
+            super().__init__(
+                engine=create_engine(f"sqlite+pysqlite:///{db_path}"),
+                redis_client=DummyRedis(),
+            )
+
+        def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
+            return [
+                {
+                    "user_id": str(uuid.uuid4()),
+                    "strategy_id": "momentum",
+                    "tenant_id": uuid.uuid4(),
+                    "config": {},
+                }
+            ]
+
+        def _load_platform_strategy_config(self, strategy_id: str) -> dict[str, object]:
+            return {}
+
+        def _load_allowed_symbols(self, user_id: str) -> list[str]:
+            return ["BTC-USD"]
+
+        def _load_market_snapshot(self, symbol: str) -> MarketSnapshot | None:
+            return MarketSnapshot(
+                timestamp=datetime.now(UTC),
+                symbol=symbol,
+                current_price=Decimal("50000"),
+                bid_price=Decimal("49990"),
+                ask_price=Decimal("50010"),
+                volume_24h=Decimal("1000"),
+                open_price=Decimal("49000"),
+                high_price=Decimal("50100"),
+                low_price=Decimal("48900"),
+                close_price=Decimal("50000"),
+            )
+
+        def _load_position_state(
+            self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str
+        ) -> PositionState:
+            return PositionState(symbol=symbol, quantity=Decimal("0"))
+
+        def _sync_position_runtime_state(self, **kwargs) -> PositionState:
+            return kwargs["position_state"]
+
+        def _generate_signal(self, **kwargs) -> StrategySignal:
+            return StrategySignal(
+                signal_id=uuid.uuid4(),
+                correlation_id=uuid.uuid4(),
+                tenant_id=uuid.uuid4(),
+                strategy_id="momentum",
+                trading_mode=kwargs["trading_mode"],
+                signal_type=SignalType.BUY,
+                confidence=0.4,
+                reason="weak signal",
+                quantity=Quantity(amount="0.10"),
+            )
+
+        def _suppression_reason(self, **kwargs) -> str | None:
+            return "min_confidence"
+
+    runner = SuppressedRunner()
+    runner.run_once()
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT stage, decision, reason_code FROM strategy_decision_audits ORDER BY created_at"
+            )
+        ).all()
+    assert rows
+    assert all(row[0] == "suppression" for row in rows)
+    assert all(row[1] == "rejected" for row in rows)
+    assert all(row[2] == "min_confidence" for row in rows)
+
+
 def test_dca_scheduler_enforces_buy_interval_from_runtime_state():
     class DcaRunner(StrategyRunner):
         def __init__(self):
@@ -484,8 +695,10 @@ def test_momentum_runner_skips_blocked_token_policy():
         ) -> dict[str, object] | None:
             return {
                 "admin_enabled": True,
-                "recommendation_status": "blocked",
-                "recommendation_reason": "blocked token",
+                "recommendation_status": "allowed",
+                "recommendation_reason": "computed allowed",
+                "recommendation_status_override": "blocked",
+                "recommendation_reason_override": "blocked token",
             }
 
         def _generate_signal(self, **kwargs) -> StrategySignal:

@@ -23,6 +23,13 @@ from oziebot_common.queues import (
 )
 from oziebot_common.strategy_defaults import normalize_platform_strategy_config
 from oziebot_common.token_policy import resolve_effective_token_policy
+from oziebot_common.trade_intelligence import (
+    DecisionAuditDecision,
+    DecisionAuditStage,
+    extract_signal_snapshot_id,
+    persist_decision_audit,
+    persist_trade_outcome_feature,
+)
 from oziebot_domain.events import NotificationEvent, NotificationEventType
 from oziebot_domain.execution import (
     ExecutionEvent,
@@ -138,6 +145,7 @@ class ExecutionService:
                 duplicated=True,
             )
 
+        original_quantity = request.quantity
         request, policy_failure = self._apply_token_strategy_policy(request)
         reserve_cents = self._estimate_reserve_cents(request)
         now = _utcnow()
@@ -234,7 +242,27 @@ class ExecutionService:
                 duplicated=True,
             )
 
+        if request.quantity != original_quantity:
+            self._persist_decision_audit_record(
+                request=request,
+                decision=DecisionAuditDecision.REDUCED,
+                reason_code="token_strategy_policy",
+                reason_detail="Execution quantity adjusted by token policy",
+                size_before=original_quantity,
+                size_after=request.quantity,
+                created_at=now,
+            )
+
         if policy_failure is not None:
+            self._persist_decision_audit_record(
+                request=request,
+                decision=DecisionAuditDecision.REJECTED,
+                reason_code="token_strategy_policy",
+                reason_detail=policy_failure,
+                size_before=original_quantity,
+                size_after=Decimal("0"),
+                created_at=now,
+            )
             self._record_metric(
                 rejected=True,
                 rejection_reason="token_strategy_policy",
@@ -252,6 +280,15 @@ class ExecutionService:
                 duplicated=False,
             )
 
+        self._persist_decision_audit_record(
+            request=request,
+            decision=DecisionAuditDecision.EMITTED,
+            reason_code="order_created",
+            reason_detail="Execution request persisted",
+            size_before=request.quantity,
+            size_after=request.quantity,
+            created_at=now,
+        )
         self._emit_event(
             order_id, request, ExecutionOrderStatus.CREATED, detail="Order created"
         )
@@ -644,6 +681,15 @@ class ExecutionService:
                 rejected=True,
                 rejection_reason="execution_cancelled",
             )
+            self._persist_decision_audit_record(
+                request=request,
+                decision=DecisionAuditDecision.REJECTED,
+                reason_code="execution_cancelled",
+                reason_detail=submission.failure_detail or "Order cancelled",
+                size_before=request.quantity,
+                size_after=Decimal("0"),
+                created_at=_utcnow(),
+            )
             self._emit_event(
                 order_id,
                 request,
@@ -675,6 +721,16 @@ class ExecutionService:
 
         if submission.fills:
             self._persist_fills_and_positions(order_id, request, submission)
+        if target == ExecutionOrderStatus.FILLED:
+            self._persist_decision_audit_record(
+                request=request,
+                decision=DecisionAuditDecision.EXECUTED,
+                reason_code="filled",
+                reason_detail="Execution filled",
+                size_before=request.quantity,
+                size_after=request.quantity,
+                created_at=_utcnow(),
+            )
         self._record_metric(executed=True)
 
         return ProcessResult(order_id=order_id, state=target, duplicated=False)
@@ -703,6 +759,15 @@ class ExecutionService:
         self._record_metric(
             rejected=True,
             rejection_reason=submission.failure_code or "execution_failed",
+        )
+        self._persist_decision_audit_record(
+            request=request,
+            decision=DecisionAuditDecision.REJECTED,
+            reason_code=submission.failure_code or "execution_failed",
+            reason_detail=submission.failure_detail or "Execution failed",
+            size_before=request.quantity,
+            size_after=Decimal("0"),
+            created_at=_utcnow(),
         )
         self._emit_event(
             order_id,
@@ -810,6 +875,7 @@ class ExecutionService:
         realized_pnl_cents = 0
         qty_after = qty_before
         avg_after = avg_before
+        close_qty = Decimal("0")
         if request.side == Side.BUY:
             qty_after = qty_before + fill.quantity
             total_cost = (
@@ -833,7 +899,7 @@ class ExecutionService:
             if qty_after == 0:
                 avg_after = Decimal("0")
         self._upsert_position(request, qty_after, avg_after, realized_pnl_cents)
-        self._insert_trade(
+        trade_id = self._insert_trade(
             order_id,
             fill_row_id,
             request,
@@ -843,6 +909,18 @@ class ExecutionService:
             realized_pnl_cents,
             fill_notional_cents,
             fill_fee_cents,
+        )
+        self._record_trade_outcome_feature(
+            trade_id=trade_id,
+            request=request,
+            fill=fill,
+            qty_before=qty_before,
+            qty_after=qty_after,
+            avg_before=avg_before,
+            avg_after=avg_after,
+            close_qty=close_qty,
+            realized_pnl_cents=realized_pnl_cents,
+            fill_fee_cents=fill_fee_cents,
         )
         self._record_strategy_runtime_activity(request, fill.occurred_at)
 
@@ -937,7 +1015,8 @@ class ExecutionService:
         realized_pnl_cents: int,
         fill_notional_cents: int,
         fill_fee_cents: int,
-    ) -> None:
+    ) -> str:
+        trade_id = str(uuid.uuid4())
         with self._engine.begin() as conn:
             conn.execute(
                 text(
@@ -954,7 +1033,7 @@ class ExecutionService:
                     """
                 ),
                 {
-                    "id": str(uuid.uuid4()),
+                    "id": trade_id,
                     "order_id": order_id,
                     "fill_id": fill_row_id,
                     "tenant_id": _to_hex(request.tenant_id),
@@ -974,6 +1053,7 @@ class ExecutionService:
                     "raw_payload": json.dumps(fill.raw_payload, default=str),
                 },
             )
+        return trade_id
 
     def _reserve_capital(
         self, request: ExecutionRequest, amount_cents: int, order_id: str
@@ -1205,6 +1285,185 @@ class ExecutionService:
             ),
         )
 
+    def _persist_decision_audit_record(
+        self,
+        *,
+        request: ExecutionRequest,
+        decision: DecisionAuditDecision,
+        reason_code: str | None,
+        reason_detail: str | None,
+        size_before: Decimal | None,
+        size_after: Decimal | None,
+        created_at: datetime,
+    ) -> None:
+        if self._engine is None:
+            return
+        metadata = dict(request.intent_payload.get("metadata") or {})
+        persist_decision_audit(
+            self._engine,
+            signal_snapshot_id=extract_signal_snapshot_id(metadata),
+            stage=DecisionAuditStage.EXECUTION.value,
+            decision=decision.value,
+            reason_code=reason_code,
+            reason_detail=reason_detail,
+            size_before=size_before,
+            size_after=size_after,
+            created_at=created_at,
+        )
+
+    def _record_trade_outcome_feature(
+        self,
+        *,
+        trade_id: str,
+        request: ExecutionRequest,
+        fill,
+        qty_before: Decimal,
+        qty_after: Decimal,
+        avg_before: Decimal,
+        avg_after: Decimal,
+        close_qty: Decimal,
+        realized_pnl_cents: int,
+        fill_fee_cents: int,
+    ) -> None:
+        state = self._load_trade_intelligence_state(request)
+        if request.side == Side.BUY:
+            opened_at = state.get("opened_at") or fill.occurred_at.isoformat()
+            entry_snapshot_id = state.get(
+                "entry_signal_snapshot_id"
+            ) or extract_signal_snapshot_id(
+                dict(request.intent_payload.get("metadata") or {})
+            )
+            self._store_trade_intelligence_state(
+                request,
+                {
+                    "opened_at": opened_at,
+                    "entry_price": str(avg_after if avg_after > 0 else fill.price),
+                    "entry_signal_snapshot_id": entry_snapshot_id,
+                },
+                fill.occurred_at,
+            )
+            return
+        if close_qty <= 0:
+            return
+        opened_at = self._parse_db_timestamp(state.get("opened_at")) or fill.occurred_at
+        metadata = dict(request.intent_payload.get("metadata") or {})
+        entry_signal_snapshot_id = state.get(
+            "entry_signal_snapshot_id"
+        ) or extract_signal_snapshot_id(metadata)
+        entry_price = (
+            avg_before
+            if avg_before > 0
+            else Decimal(str(state.get("entry_price") or fill.price))
+        )
+        hold_seconds = max(0, int((fill.occurred_at - opened_at).total_seconds()))
+        realized_pnl = Decimal(str(realized_pnl_cents)) / Decimal("100")
+        basis = close_qty * entry_price
+        realized_return_pct = realized_pnl / basis if basis > 0 else None
+        mfe_pct, mae_pct = self._load_excursion_pct(
+            symbol=request.symbol,
+            opened_at=opened_at,
+            closed_at=fill.occurred_at,
+            entry_price=entry_price,
+        )
+        persist_trade_outcome_feature(
+            self._engine,
+            trade_id=trade_id,
+            signal_snapshot_id=str(entry_signal_snapshot_id)
+            if entry_signal_snapshot_id
+            else None,
+            trading_mode=request.trading_mode.value,
+            strategy_name=request.strategy_id,
+            token_symbol=request.symbol,
+            entry_price=entry_price,
+            exit_price=fill.price,
+            filled_size=close_qty,
+            fee_paid=Decimal(str(fill_fee_cents)) / Decimal("100"),
+            slippage_realized=Decimal(str(getattr(fill, "slippage_bps", 0)))
+            / Decimal("10000"),
+            hold_seconds=hold_seconds,
+            realized_pnl=realized_pnl,
+            realized_return_pct=realized_return_pct,
+            max_favorable_excursion_pct=mfe_pct,
+            max_adverse_excursion_pct=mae_pct,
+            exit_reason=self._resolve_exit_reason(request),
+            win_loss_label="win" if realized_pnl >= 0 else "loss",
+            profitable_after_fees_label=(
+                "profitable" if realized_pnl > 0 else "not_profitable"
+            ),
+            created_at=fill.occurred_at,
+        )
+        if qty_after > 0:
+            self._store_trade_intelligence_state(
+                request,
+                {
+                    "opened_at": opened_at.isoformat(),
+                    "entry_price": str(avg_after if avg_after > 0 else entry_price),
+                    "entry_signal_snapshot_id": entry_signal_snapshot_id,
+                },
+                fill.occurred_at,
+            )
+        else:
+            self._store_trade_intelligence_state(request, None, fill.occurred_at)
+
+    def _resolve_exit_reason(self, request: ExecutionRequest) -> str | None:
+        metadata = dict(request.intent_payload.get("metadata") or {})
+        if metadata.get("guard"):
+            return str(metadata["guard"])
+        if metadata.get("reason"):
+            return str(metadata["reason"])
+        if request.risk.detail:
+            return str(request.risk.detail)
+        if request.risk.reason is not None:
+            return request.risk.reason.value
+        return None
+
+    def _load_excursion_pct(
+        self,
+        *,
+        symbol: str,
+        opened_at: datetime,
+        closed_at: datetime,
+        entry_price: Decimal,
+    ) -> tuple[Decimal | None, Decimal | None]:
+        if self._engine is None or entry_price <= 0:
+            return None, None
+        with self._engine.begin() as conn:
+            row = (
+                conn.execute(
+                    text(
+                        """
+                    SELECT MAX(high) AS max_high, MIN(low) AS min_low
+                    FROM market_data_candles
+                    WHERE product_id = :symbol
+                      AND bucket_start >= :opened_at
+                      AND bucket_start <= :closed_at
+                    """
+                    ),
+                    {
+                        "symbol": symbol,
+                        "opened_at": opened_at,
+                        "closed_at": closed_at,
+                    },
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None, None
+        max_high = row.get("max_high")
+        min_low = row.get("min_low")
+        mfe = (
+            (Decimal(str(max_high)) - entry_price) / entry_price
+            if max_high is not None
+            else None
+        )
+        mae = (
+            (Decimal(str(min_low)) - entry_price) / entry_price
+            if min_low is not None
+            else None
+        )
+        return mfe, mae
+
     def _set_order_reserved_locked(
         self, order_id: str, *, reserved_cash_cents: int, locked_cash_cents: int
     ) -> None:
@@ -1371,6 +1630,50 @@ class ExecutionService:
                     "updated_at": now,
                 },
             )
+
+    def _load_trade_intelligence_state(
+        self, request: ExecutionRequest
+    ) -> dict[str, Any]:
+        state = self._load_strategy_runtime_symbol_state(
+            user_id=_to_hex(request.user_id),
+            strategy_id=request.strategy_id,
+            trading_mode=request.trading_mode.value,
+            symbol=request.symbol,
+        )
+        intelligence = state.get("trade_intelligence")
+        return dict(intelligence) if isinstance(intelligence, dict) else {}
+
+    def _store_trade_intelligence_state(
+        self,
+        request: ExecutionRequest,
+        intelligence_state: dict[str, Any] | None,
+        now: datetime,
+    ) -> None:
+        user_id = _to_hex(request.user_id)
+        trading_mode = request.trading_mode.value
+        state = self._load_strategy_state(user_id, request.strategy_id, trading_mode)
+        symbols = state.get("symbols")
+        if not isinstance(symbols, dict):
+            symbols = {}
+        symbol_state = symbols.get(request.symbol)
+        if not isinstance(symbol_state, dict):
+            symbol_state = {}
+        if intelligence_state:
+            symbol_state["trade_intelligence"] = intelligence_state
+        else:
+            symbol_state.pop("trade_intelligence", None)
+        if symbol_state:
+            symbols[request.symbol] = symbol_state
+        else:
+            symbols.pop(request.symbol, None)
+        state["symbols"] = symbols
+        self._upsert_strategy_state(
+            user_id=user_id,
+            strategy_id=request.strategy_id,
+            trading_mode=trading_mode,
+            state=state,
+            now=now,
+        )
 
     def _record_strategy_runtime_activity(
         self, request: ExecutionRequest, occurred_at: datetime

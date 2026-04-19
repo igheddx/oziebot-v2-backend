@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import logging
 
-from oziebot_common.health import start_health_server
+from redis import RedisError
+
+from oziebot_common.health import install_shutdown_handlers, start_health_server
 from oziebot_common.queues import (
     QueueNames,
     brpop_json_any,
+    disconnect_redis,
     notification_event_from_json,
     redis_from_url,
 )
@@ -36,10 +39,20 @@ def main() -> None:
         },
     )
     health = start_health_server("alerts-worker")
+    stop_event = install_shutdown_handlers(
+        "alerts-worker",
+        health_state=health,
+        on_shutdown=lambda: disconnect_redis(r),
+    )
     log.info("alerts-worker listening on %s", keys)
     health.mark_ready()
-    while True:
-        got = brpop_json_any(r, keys, timeout=30)
+    while not stop_event.is_set():
+        try:
+            got = brpop_json_any(r, keys, timeout=5)
+        except RedisError:
+            if stop_event.is_set():
+                break
+            raise
         health.touch()
         if got is None:
             continue
@@ -63,6 +76,7 @@ def main() -> None:
             )
         service.route_event(event)
         health.touch()
+    log.info("alerts-worker shutdown complete")
 
 
 if __name__ == "__main__":

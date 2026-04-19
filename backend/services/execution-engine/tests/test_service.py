@@ -180,6 +180,29 @@ def _setup_db(db_path: Path) -> None:
         )
         conn.execute(
             text(
+                "CREATE TABLE strategy_decision_audits ("
+                "id TEXT PRIMARY KEY, signal_snapshot_id TEXT, stage TEXT, decision TEXT, reason_code TEXT, reason_detail TEXT,"
+                "size_before TEXT, size_after TEXT, created_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE trade_outcome_features ("
+                "id TEXT PRIMARY KEY, trade_id TEXT, signal_snapshot_id TEXT, trading_mode TEXT, strategy_name TEXT, token_symbol TEXT,"
+                "entry_price TEXT, exit_price TEXT, filled_size TEXT, fee_paid TEXT, slippage_realized TEXT, hold_seconds INTEGER,"
+                "realized_pnl TEXT, realized_return_pct TEXT, max_favorable_excursion_pct TEXT, max_adverse_excursion_pct TEXT,"
+                "exit_reason TEXT, win_loss_label TEXT, profitable_after_fees_label TEXT, created_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE market_data_candles ("
+                "id TEXT PRIMARY KEY, source TEXT, product_id TEXT, granularity_sec INTEGER, bucket_start TEXT,"
+                "open TEXT, high TEXT, low TEXT, close TEXT, volume TEXT, event_time TEXT, ingest_time TEXT)"
+            )
+        )
+        conn.execute(
+            text(
                 "CREATE TABLE platform_strategies ("
                 "id TEXT PRIMARY KEY, slug TEXT, config_schema TEXT)"
             )
@@ -257,6 +280,8 @@ def _insert_token_policy(
     admin_enabled: bool = True,
     recommendation_status: str = "allowed",
     recommendation_reason: str = "policy",
+    recommendation_status_override: str | None = None,
+    recommendation_reason_override: str | None = None,
     max_position_pct_override: float | None = None,
 ) -> None:
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
@@ -277,7 +302,7 @@ def _insert_token_policy(
                 "recommendation_status_override, recommendation_reason_override, max_position_pct_override, notes, computed_at, updated_at"
                 ") VALUES ("
                 ":id, :token_id, :strategy_id, :admin_enabled, 80, :recommendation_status, :recommendation_reason,"
-                "NULL, NULL, :max_position_pct_override, NULL, :computed_at, :updated_at)"
+                ":recommendation_status_override, :recommendation_reason_override, :max_position_pct_override, NULL, :computed_at, :updated_at)"
             ),
             {
                 "id": str(uuid4()),
@@ -286,6 +311,8 @@ def _insert_token_policy(
                 "admin_enabled": 1 if admin_enabled else 0,
                 "recommendation_status": recommendation_status,
                 "recommendation_reason": recommendation_reason,
+                "recommendation_status_override": recommendation_status_override,
+                "recommendation_reason_override": recommendation_reason_override,
                 "max_position_pct_override": max_position_pct_override,
                 "computed_at": now,
                 "updated_at": now,
@@ -374,7 +401,9 @@ def _request(
                     "estimated_slippage_bps": 8,
                     "estimated_total_cost_bps": 115,
                     "expected_net_edge_bps": 35,
-                }
+                },
+                "intelligence": {"signal_snapshot_id": "snapshot-1"},
+                "reason": "strategy signal",
             },
         },
     )
@@ -762,6 +791,73 @@ def test_paper_sell_closes_position_and_records_trade(tmp_path: Path):
     assert int(last_trade["realized_pnl_cents"]) == 15_660
 
 
+def test_execution_records_trade_outcome_and_decision_audits(tmp_path: Path):
+    db_path = tmp_path / "execution-intelligence.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "momentum"
+    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
+    service, _ = _service(db_path, redis)
+
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    service.process_request(
+        _request(user_id, tenant_id, strategy_id, TradingMode.PAPER)
+    )
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    now = datetime.now(UTC).isoformat()
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO market_data_candles (id, source, product_id, granularity_sec, bucket_start, open, high, low, close, volume, event_time, ingest_time) "
+                "VALUES (:id, 'coinbase', 'BTC-USD', 60, :bucket_start, '50000', '51200', '49800', '51000', '100', :event_time, :ingest_time)"
+            ),
+            {
+                "id": str(uuid4()),
+                "bucket_start": now,
+                "event_time": now,
+                "ingest_time": now,
+            },
+        )
+
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"51000","best_ask_price":"51010"}'
+    )
+    service.process_request(
+        _request(
+            user_id,
+            tenant_id,
+            strategy_id,
+            TradingMode.PAPER,
+            side=Side.SELL,
+            price_hint=Decimal("51000"),
+        )
+    )
+
+    with eng.begin() as conn:
+        outcome = conn.execute(
+            text(
+                "SELECT signal_snapshot_id, trading_mode, win_loss_label, profitable_after_fees_label, hold_seconds FROM trade_outcome_features LIMIT 1"
+            )
+        ).first()
+        decisions = conn.execute(
+            text(
+                "SELECT decision FROM strategy_decision_audits WHERE stage = 'execution' ORDER BY created_at"
+            )
+        ).all()
+    assert outcome is not None
+    assert outcome[0] == "snapshot-1"
+    assert outcome[1] == "paper"
+    assert outcome[2] == "win"
+    assert outcome[3] == "profitable"
+    assert outcome[4] is not None
+    assert {row[0] for row in decisions} >= {"emitted", "executed"}
+
+
 def test_day_trading_max_position_age_auto_closes_in_paper(tmp_path: Path):
     db_path = tmp_path / "execution-age.sqlite"
     _setup_db(db_path)
@@ -826,8 +922,8 @@ def test_execution_rejects_blocked_token_strategy_policy(tmp_path: Path):
     _insert_token_policy(
         db_path,
         strategy_id=strategy_id,
-        recommendation_status="blocked",
-        recommendation_reason="blocked for execution",
+        recommendation_status_override="blocked",
+        recommendation_reason_override="blocked for execution",
     )
     service, _ = _service(db_path, redis)
 

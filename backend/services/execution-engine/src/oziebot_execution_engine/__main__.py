@@ -3,10 +3,13 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from oziebot_common.health import start_health_server
+from redis import RedisError
+
+from oziebot_common.health import install_shutdown_handlers, start_health_server
 from oziebot_common.queues import (
     QueueNames,
     brpop_json_any,
+    disconnect_redis,
     redis_from_url,
     risk_decision_from_json,
     trade_intent_from_json,
@@ -49,12 +52,22 @@ def main() -> None:
     reconciler = ReconciliationService(settings, service, coinbase_client)
     health = start_health_server("execution-engine")
     reconciler.set_heartbeat(health.touch)
+    stop_event = install_shutdown_handlers(
+        "execution-engine",
+        health_state=health,
+        on_shutdown=lambda: disconnect_redis(r),
+    )
     keys = QueueNames.all_intent_approved_keys()
     log.info("execution-engine listening on %s", keys)
     last_reconcile = datetime.now(UTC)
     health.mark_ready()
-    while True:
-        got = brpop_json_any(r, keys, timeout=30)
+    while not stop_event.is_set():
+        try:
+            got = brpop_json_any(r, keys, timeout=5)
+        except RedisError:
+            if stop_event.is_set():
+                break
+            raise
         now = datetime.now(UTC)
         health.touch()
         if (
@@ -91,6 +104,7 @@ def main() -> None:
             result.duplicated,
         )
         health.touch()
+    log.info("execution-engine shutdown complete")
 
 
 if __name__ == "__main__":

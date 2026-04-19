@@ -147,6 +147,13 @@ def brpop_json_any(
     return key, json.loads(raw)
 
 
+def disconnect_redis(r: redis.Redis) -> None:
+    try:
+        r.close()
+    finally:
+        r.connection_pool.disconnect()
+
+
 _intent_adapter = TypeAdapter(TradeIntent)
 _risk_adapter = TypeAdapter(RiskDecision)
 _signal_adapter = TypeAdapter(StrategySignalEvent)

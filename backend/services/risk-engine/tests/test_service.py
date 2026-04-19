@@ -115,6 +115,13 @@ def _setup_db(db_path: Path) -> None:
         )
         conn.execute(
             text(
+                "CREATE TABLE strategy_decision_audits ("
+                "id TEXT PRIMARY KEY, signal_snapshot_id TEXT, stage TEXT, decision TEXT, reason_code TEXT, reason_detail TEXT,"
+                "size_before TEXT, size_after TEXT, created_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
                 "CREATE TABLE user_strategy_states ("
                 "id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, trading_mode TEXT, state TEXT, created_at TEXT, updated_at TEXT,"
                 "UNIQUE(user_id, strategy_id, trading_mode))"
@@ -234,7 +241,10 @@ def _signal(
         action=SignalType.BUY,
         confidence=0.9,
         suggested_size=Decimal(size),
-        reasoning_metadata={"reason": "test"},
+        reasoning_metadata={
+            "reason": "test",
+            "intelligence": {"signal_snapshot_id": "snapshot-1"},
+        },
         trading_mode=mode,
         timestamp=datetime.now(UTC),
     )
@@ -329,6 +339,30 @@ def test_risk_rejects_when_platform_paused(tmp_path: Path):
     decision, intent = svc.evaluate(_signal(user_id), trace_id="t2")
     assert decision.outcome == RiskOutcome.REJECT
     assert intent is None
+
+
+def test_risk_records_decision_audit(tmp_path: Path):
+    db_path = tmp_path / "risk-audit.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc.evaluate(_signal(user_id, mode=TradingMode.PAPER), trace_id="risk-audit")
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        row = conn.execute(
+            text(
+                "SELECT stage, decision, signal_snapshot_id FROM strategy_decision_audits LIMIT 1"
+            )
+        ).first()
+    assert row is not None
+    assert row[0] == "risk"
+    assert row[1] in {"emitted", "reduced"}
+    assert row[2] == "snapshot-1"
 
 
 def test_risk_reduces_size_by_buying_power(tmp_path: Path):

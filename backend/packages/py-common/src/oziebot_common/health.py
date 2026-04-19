@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import signal
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from http import HTTPStatus
@@ -28,6 +30,11 @@ class HealthState:
     def mark_ready(self) -> None:
         with self._lock:
             self.ready = True
+            self.last_heartbeat_at = datetime.now(UTC)
+
+    def mark_not_ready(self) -> None:
+        with self._lock:
+            self.ready = False
             self.last_heartbeat_at = datetime.now(UTC)
 
     def snapshot(self) -> dict[str, object]:
@@ -110,3 +117,42 @@ def start_health_server(service_name: str) -> HealthState:
         auto_touch_seconds,
     )
     return state
+
+
+def install_shutdown_handlers(
+    service_name: str,
+    *,
+    health_state: HealthState | None = None,
+    on_shutdown: Callable[[], None] | None = None,
+) -> threading.Event:
+    stop_event = threading.Event()
+
+    def _handler(signum: int, _frame: object) -> None:
+        if stop_event.is_set():
+            return
+        stop_event.set()
+        if health_state is not None:
+            health_state.mark_not_ready()
+        if on_shutdown is not None:
+            try:
+                on_shutdown()
+            except Exception:
+                log.exception(
+                    "shutdown hook failed service=%s signal=%s",
+                    service_name,
+                    signum,
+                )
+        signal_name = signal.Signals(signum).name
+        log.info("shutdown requested service=%s signal=%s", service_name, signal_name)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _handler)
+        except ValueError:
+            log.warning(
+                "unable to register shutdown handler service=%s signal=%s",
+                service_name,
+                sig,
+            )
+
+    return stop_event

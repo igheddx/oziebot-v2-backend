@@ -47,6 +47,12 @@ from oziebot_api.models.tenant_entitlement import TenantEntitlement
 from oziebot_api.models.tenant_integration import TenantIntegration
 from oziebot_api.models.token_market_profile import TokenMarketProfile
 from oziebot_api.models.token_strategy_policy import TokenStrategyPolicy
+from oziebot_api.models.trade_intelligence import (
+    AIInferenceRecord,
+    StrategyDecisionAudit,
+    StrategySignalSnapshot,
+    TradeOutcomeFeature,
+)
 from oziebot_api.models.user import User
 from oziebot_api.models.user_token_permission import UserTokenPermission
 from oziebot_api.models.user_strategy import (
@@ -58,6 +64,7 @@ from oziebot_api.models.user_strategy import (
 
 __all__ = [
     "AdminAuditLog",
+    "AIInferenceRecord",
     "AuthSession",
     "BacktestPerformanceSnapshot",
     "BacktestRun",
@@ -90,7 +97,9 @@ __all__ = [
     "StrategyAnalyticsArtifactRecord",
     "StrategyCapitalBucket",
     "StrategyCapitalLedger",
+    "StrategyDecisionAudit",
     "StrategyRun",
+    "StrategySignalSnapshot",
     "StrategySignalRecord",
     "SubscriptionPlan",
     "Tenant",
@@ -99,6 +108,7 @@ __all__ = [
     "TenantMembership",
     "TokenMarketProfile",
     "TokenStrategyPolicy",
+    "TradeOutcomeFeature",
     "User",
     "UserStrategy",
     "UserStrategyState",
