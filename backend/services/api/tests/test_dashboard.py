@@ -13,6 +13,10 @@ from oziebot_api.models.execution import ExecutionOrder, ExecutionPosition, Exec
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.strategy_allocation import StrategyCapitalBucket
+from oziebot_api.models.trade_intelligence import (
+    StrategyDecisionAudit,
+    StrategySignalSnapshot,
+)
 from oziebot_api.models.user import User
 from oziebot_api.services.credential_crypto import CredentialCrypto
 
@@ -188,6 +192,150 @@ def test_dashboard_includes_fee_analytics(client, regular_user_and_token, db_ses
     assert analytics["mixedCount"] == 1
     assert analytics["avgNetEdgeAtEntryBps"] == 35.0
     assert analytics["skippedTradesDueToFees"] == 1
+
+
+def test_dashboard_includes_rejection_diagnostics(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    snapshot_id = uuid.uuid4()
+    failed_order_id = uuid.uuid4()
+    db_session.add(
+        StrategySignalSnapshot(
+            id=snapshot_id,
+            user_id=user.id,
+            tenant_id=membership.tenant_id,
+            trading_mode="paper",
+            strategy_name="momentum",
+            token_symbol="BTC-USD",
+            timestamp=now,
+            current_price=65000,
+            best_bid=64990,
+            best_ask=65010,
+            spread_pct=0.0003,
+            estimated_slippage_pct=0.0008,
+            volume=1000000,
+            volatility=0.01,
+            confidence_score=0.72,
+            raw_feature_json={"momentum_value": 0.014},
+            token_policy_status="allowed",
+            token_policy_multiplier=1,
+        )
+    )
+    db_session.add(
+        StrategyDecisionAudit(
+            signal_snapshot_id=snapshot_id,
+            stage="suppression",
+            decision="rejected",
+            reason_code="max_open_positions reached",
+            reason_detail="Strategy suppression blocked new buy",
+            size_before=0.25,
+            size_after=0,
+            created_at=now,
+        )
+    )
+    db_session.add(
+        RiskEvent(
+            id=uuid.uuid4(),
+            signal_id=uuid.uuid4(),
+            run_id=uuid.uuid4(),
+            user_id=user.id,
+            strategy_name="reversion",
+            symbol="ETH-USD",
+            trading_mode="paper",
+            outcome="reject",
+            reason="policy",
+            detail="fee_economics: Expected net edge below threshold",
+            original_size="0.20",
+            final_size="0",
+            trace_id="risk-dashboard-rejection",
+            rules_evaluated={"rules": ["fee_economics"]},
+            signal_payload={},
+            created_at=now,
+        )
+    )
+    db_session.add(
+        ExecutionOrder(
+            id=failed_order_id,
+            intent_id=uuid.uuid4(),
+            correlation_id=uuid.uuid4(),
+            tenant_id=membership.tenant_id,
+            user_id=user.id,
+            strategy_id="dca",
+            symbol="SOL-USD",
+            side="buy",
+            order_type="market",
+            trading_mode="paper",
+            venue="coinbase",
+            state="failed",
+            quantity="1.00",
+            requested_notional_cents=2000,
+            reserved_cash_cents=0,
+            locked_cash_cents=0,
+            filled_quantity="0",
+            avg_fill_price=None,
+            fees_cents=0,
+            expected_gross_edge_bps=120,
+            estimated_fee_bps=120,
+            estimated_slippage_bps=8,
+            estimated_total_cost_bps=128,
+            expected_net_edge_bps=-8,
+            execution_preference="taker_allowed",
+            fallback_behavior="cancel",
+            maker_timeout_seconds=0,
+            limit_price_offset_bps=0,
+            actual_fill_type=None,
+            fallback_triggered=False,
+            idempotency_key="idem-dashboard-rejection",
+            client_order_id="client-dashboard-rejection",
+            venue_order_id=None,
+            failure_code="coinbase_connection",
+            failure_detail="Coinbase connection is not trade-enabled",
+            trace_id="execution-dashboard-rejection",
+            intent_payload={},
+            risk_payload={},
+            adapter_payload={},
+            created_at=now,
+            updated_at=now,
+            submitted_at=None,
+            completed_at=None,
+            cancelled_at=None,
+            failed_at=now,
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard?trading_mode=paper",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    diagnostics = response.json()["rejectionDiagnostics"]
+    assert diagnostics["totalRejected"] == 3
+    assert diagnostics["byStage"] == [
+        {"stage": "execution", "count": 1},
+        {"stage": "risk", "count": 1},
+        {"stage": "suppression", "count": 1},
+    ]
+    assert diagnostics["breakdown"][0]["count"] == 1
+    assert {row["stage"] for row in diagnostics["breakdown"]} == {
+        "suppression",
+        "risk",
+        "execution",
+    }
+    assert diagnostics["recent"][0]["reasonCode"] in {
+        "max_open_positions reached",
+        "policy",
+        "coinbase_connection",
+    }
 
 
 @patch("oziebot_api.api.v1.me.load_live_coinbase_accounts")

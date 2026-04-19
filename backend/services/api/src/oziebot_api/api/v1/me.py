@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -18,6 +19,10 @@ from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.execution import ExecutionOrder, ExecutionPosition, ExecutionTradeRecord
 from oziebot_api.models.platform_strategy import PlatformStrategy
 from oziebot_api.models.strategy_allocation import StrategyCapitalBucket
+from oziebot_api.models.trade_intelligence import (
+    StrategyDecisionAudit,
+    StrategySignalSnapshot,
+)
 from oziebot_api.models.tenant import Tenant
 from oziebot_api.models.user import User
 from oziebot_api.models.user_strategy import UserStrategy
@@ -106,6 +111,75 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 def _cents(amount: Decimal) -> int:
     return int((amount * Decimal("100")).quantize(Decimal("1")))
+
+
+def _format_rejection_record(
+    *,
+    stage: str,
+    reason_code: str | None,
+    reason_detail: str | None,
+    strategy: str | None,
+    symbol: str | None,
+    created_at: datetime | None,
+) -> dict[str, Any]:
+    return {
+        "stage": stage,
+        "reasonCode": reason_code or "unspecified",
+        "reasonDetail": reason_detail,
+        "strategy": strategy,
+        "symbol": symbol,
+        "createdAt": _as_utc(created_at).isoformat() if created_at else None,
+    }
+
+
+def _build_rejection_diagnostics(
+    *,
+    strategy_records: list[dict[str, Any]],
+    risk_records: list[dict[str, Any]],
+    execution_records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    all_records = [*strategy_records, *risk_records, *execution_records]
+    all_records.sort(key=lambda item: item["createdAt"] or "", reverse=True)
+
+    breakdown: dict[tuple[str, str], dict[str, Any]] = {}
+    stage_counts: defaultdict[str, int] = defaultdict(int)
+    for record in all_records:
+        stage = str(record["stage"])
+        reason_code = str(record["reasonCode"] or "unspecified")
+        stage_counts[stage] += 1
+        key = (stage, reason_code)
+        entry = breakdown.get(key)
+        if entry is None:
+            entry = {
+                "stage": stage,
+                "reasonCode": reason_code,
+                "count": 0,
+                "lastSeenAt": record["createdAt"],
+                "latestDetail": record["reasonDetail"],
+                "strategies": [],
+                "symbols": [],
+            }
+            breakdown[key] = entry
+        entry["count"] += 1
+        if record["strategy"] and record["strategy"] not in entry["strategies"]:
+            entry["strategies"].append(record["strategy"])
+        if record["symbol"] and record["symbol"] not in entry["symbols"]:
+            entry["symbols"].append(record["symbol"])
+
+    breakdown_rows = sorted(
+        breakdown.values(),
+        key=lambda item: (-int(item["count"]), str(item["stage"]), str(item["reasonCode"])),
+    )
+    by_stage = [
+        {"stage": stage, "count": count}
+        for stage, count in sorted(stage_counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    return {
+        "totalRejected": len(all_records),
+        "byStage": by_stage,
+        "breakdown": breakdown_rows[:8],
+        "recent": all_records[:8],
+    }
 
 
 def _live_coinbase_balance_snapshot(
@@ -349,6 +423,22 @@ def dashboard_summary(
         )
         .all()
     )
+    strategy_audits = (
+        db.query(StrategyDecisionAudit, StrategySignalSnapshot)
+        .join(
+            StrategySignalSnapshot,
+            StrategyDecisionAudit.signal_snapshot_id == StrategySignalSnapshot.id,
+        )
+        .filter(
+            StrategySignalSnapshot.user_id == user.id,
+            StrategySignalSnapshot.trading_mode == mode,
+            StrategyDecisionAudit.decision == "rejected",
+            StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
+        )
+        .order_by(StrategyDecisionAudit.created_at.desc())
+        .limit(100)
+        .all()
+    )
 
     def _fees_since(cutoff: datetime) -> float:
         return round(
@@ -388,6 +478,43 @@ def dashboard_summary(
     total_mode_fees_cents = sum(int(trade.fee_cents or 0) for trade in mode_trades)
     total_mode_net_pnl_cents = sum(int(trade.realized_pnl_cents or 0) for trade in mode_trades)
     total_mode_gross_pnl_cents = total_mode_net_pnl_cents + total_mode_fees_cents
+    rejection_diagnostics = _build_rejection_diagnostics(
+        strategy_records=[
+            _format_rejection_record(
+                stage=str(audit.stage),
+                reason_code=audit.reason_code,
+                reason_detail=audit.reason_detail,
+                strategy=snapshot.strategy_name,
+                symbol=snapshot.token_symbol,
+                created_at=audit.created_at,
+            )
+            for audit, snapshot in strategy_audits
+        ],
+        risk_records=[
+            _format_rejection_record(
+                stage="risk",
+                reason_code=event.reason,
+                reason_detail=event.detail,
+                strategy=event.strategy_name,
+                symbol=event.symbol,
+                created_at=event.created_at,
+            )
+            for event in mode_risk_events
+            if (event.outcome or "").lower() == "reject"
+        ],
+        execution_records=[
+            _format_rejection_record(
+                stage="execution",
+                reason_code=order.failure_code or order.state,
+                reason_detail=order.failure_detail or f"Order {order.state}",
+                strategy=order.strategy_id,
+                symbol=order.symbol,
+                created_at=order.failed_at or order.cancelled_at or order.updated_at,
+            )
+            for order in mode_orders
+            if order.state in {"failed", "cancelled"}
+        ],
+    )
 
     comparison: dict[str, dict[str, float]] = {}
     for compare_mode in ("paper", "live"):
@@ -465,6 +592,7 @@ def dashboard_summary(
             "skippedTradesDueToFees": skipped_due_to_fees,
             "paperLiveComparison": comparison,
         },
+        "rejectionDiagnostics": rejection_diagnostics,
     }
 
 
