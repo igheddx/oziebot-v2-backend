@@ -998,6 +998,46 @@ def test_mean_reversion_runner_skips_admin_disabled_token_policy():
     assert runner.generated == 0
 
 
+def test_apply_token_policy_to_signal_returns_updated_copy_for_frozen_signal():
+    runner = StrategyRunner(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+    signal = StrategySignal(
+        signal_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        strategy_id="momentum",
+        trading_mode=TradingMode.PAPER,
+        signal_type=SignalType.BUY,
+        confidence=0.8,
+        reason="entry",
+        metadata={"price": "50000"},
+    )
+
+    updated = runner._apply_token_policy_to_signal(
+        signal=signal,
+        token_policy={
+            "admin_enabled": True,
+            "recommendation_status": "allowed",
+            "recommendation_reason": "healthy market",
+            "size_multiplier": "0.75",
+            "max_position_pct_override": None,
+        },
+        trading_mode=TradingMode.PAPER,
+    )
+
+    assert updated is not signal
+    assert signal.metadata == {"price": "50000"}
+    assert updated.metadata is not None
+    assert updated.metadata["price"] == "50000"
+    assert updated.metadata["token_policy"] == {
+        "admin_enabled": True,
+        "computed_recommendation_status": "allowed",
+        "recommendation_status": "allowed",
+        "recommendation_reason": "healthy market",
+        "size_multiplier": "1",
+        "max_position_pct_override": None,
+    }
+
+
 def test_runner_requires_max_position_usd_for_fractional_sizing():
     class SizingRunner(StrategyRunner):
         def __init__(self):

@@ -1428,8 +1428,7 @@ class StrategyRunner:
             if effective["max_position_pct_override"] is not None
             else None,
         }
-        signal.metadata = metadata
-        return signal
+        return signal.model_copy(update={"metadata": metadata})
 
     def _load_enabled_user_strategies(self) -> list[dict[str, Any]]:
         stmt = text(
