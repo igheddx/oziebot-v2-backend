@@ -26,7 +26,7 @@ def test_universe_filters_platform_and_user_enabled_tokens():
         conn.execute(
             text(
                 "INSERT INTO platform_token_allowlist (id, symbol, quote_currency, is_enabled) VALUES "
-                "('t1','BTC','USD',1), ('t2','ETH','USD',1), ('t3','SOL','USD',0)"
+                "('t1','BTC-USD','USD',1), ('t2','ETH-USD','USD',1), ('t3','SOL-USD','USD',0)"
             )
         )
         conn.execute(

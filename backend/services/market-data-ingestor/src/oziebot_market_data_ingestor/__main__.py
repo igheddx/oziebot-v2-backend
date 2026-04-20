@@ -273,6 +273,40 @@ async def _reconcile_bbo(
             log.warning("bbo reconciliation failed product=%s err=%s", p, exc)
 
 
+async def _seed_market_cache(
+    *,
+    rest: CoinbaseRestClient,
+    store: MarketDataStore,
+    cache: RedisMarketCache,
+    log_client,
+    stale: StaleDataDetector,
+    products: list[str],
+    trade_limit: int,
+    granularity_sec: int,
+    signal_panel: SignalPanelEmitter,
+    health,
+) -> None:
+    # Seed longer-horizon candles first, then refresh trade/BBO last so the
+    # freshest short-horizon market data is present when the service becomes ready.
+    await _reconcile_candles(
+        rest, store, cache, log_client, stale, products, granularity_sec
+    )
+    health.touch()
+    await _reconcile_trades(
+        rest,
+        store,
+        cache,
+        log_client,
+        stale,
+        products,
+        trade_limit,
+        signal_panel,
+    )
+    health.touch()
+    await _reconcile_bbo(rest, store, cache, log_client, stale, products, signal_panel)
+    health.touch()
+
+
 async def main() -> None:
     s = get_settings()
     engine = create_engine(s.database_url)
@@ -309,21 +343,17 @@ async def main() -> None:
 
     # Seed candle history on startup with 50 candles so MAs can be computed immediately
     log.info("seeding market cache for products=%s", products)
-    await _reconcile_trades(
-        rest,
-        store,
-        cache,
-        r,
-        stale,
-        products,
-        s.trade_recovery_limit,
-        signal_panel,
-    )
-    health.touch()
-    await _reconcile_bbo(rest, store, cache, r, stale, products, signal_panel)
-    health.touch()
-    await _reconcile_candles(
-        rest, store, cache, r, stale, products, s.candles_granularity_sec
+    await _seed_market_cache(
+        rest=rest,
+        store=store,
+        cache=cache,
+        log_client=r,
+        stale=stale,
+        products=products,
+        trade_limit=s.trade_recovery_limit,
+        granularity_sec=s.candles_granularity_sec,
+        signal_panel=signal_panel,
+        health=health,
     )
     refresher.refresh_active_tokens()
     health.mark_ready()
