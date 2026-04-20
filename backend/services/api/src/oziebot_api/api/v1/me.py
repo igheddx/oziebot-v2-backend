@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import joinedload
 
 from oziebot_api.config import Settings
@@ -422,29 +422,122 @@ def dashboard_summary(
     today_cutoff = now - timedelta(days=1)
     week_cutoff = now - timedelta(days=7)
     month_cutoff = now - timedelta(days=30)
-    mode_orders = (
-        db.query(ExecutionOrder)
-        .filter(
-            ExecutionOrder.user_id == user.id,
-            ExecutionOrder.trading_mode == mode,
-        )
-        .all()
-    )
-    mode_trades = (
-        db.query(ExecutionTradeRecord)
-        .filter(
+    trade_stats = db.execute(
+        select(
+            func.coalesce(func.sum(ExecutionTradeRecord.fee_cents), 0).label("total_fees_cents"),
+            func.coalesce(func.sum(ExecutionTradeRecord.realized_pnl_cents), 0).label(
+                "total_net_pnl_cents"
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            ExecutionTradeRecord.executed_at >= today_cutoff,
+                            ExecutionTradeRecord.fee_cents,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("fees_today_cents"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            ExecutionTradeRecord.executed_at >= week_cutoff,
+                            ExecutionTradeRecord.fee_cents,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("fees_week_cents"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            ExecutionTradeRecord.executed_at >= month_cutoff,
+                            ExecutionTradeRecord.fee_cents,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("fees_month_cents"),
+        ).where(
             ExecutionTradeRecord.user_id == user.id,
             ExecutionTradeRecord.trading_mode == mode,
         )
-        .all()
-    )
-    mode_risk_events = (
-        db.query(RiskEvent)
-        .filter(
-            RiskEvent.user_id == user.id,
-            RiskEvent.trading_mode == mode,
+    ).one()
+    fees_by_strategy_rows = db.execute(
+        select(
+            ExecutionTradeRecord.strategy_id,
+            func.coalesce(func.sum(ExecutionTradeRecord.fee_cents), 0).label("fees_cents"),
         )
-        .all()
+        .where(
+            ExecutionTradeRecord.user_id == user.id,
+            ExecutionTradeRecord.trading_mode == mode,
+        )
+        .group_by(ExecutionTradeRecord.strategy_id)
+        .order_by(func.sum(ExecutionTradeRecord.fee_cents).desc())
+        .limit(12)
+    ).all()
+    fees_by_symbol_rows = db.execute(
+        select(
+            ExecutionTradeRecord.symbol,
+            func.coalesce(func.sum(ExecutionTradeRecord.fee_cents), 0).label("fees_cents"),
+        )
+        .where(
+            ExecutionTradeRecord.user_id == user.id,
+            ExecutionTradeRecord.trading_mode == mode,
+        )
+        .group_by(ExecutionTradeRecord.symbol)
+        .order_by(func.sum(ExecutionTradeRecord.fee_cents).desc())
+        .limit(12)
+    ).all()
+    fill_mix = db.execute(
+        select(
+            func.coalesce(
+                func.sum(case((ExecutionOrder.actual_fill_type == "maker", 1), else_=0)), 0
+            ).label("maker_count"),
+            func.coalesce(
+                func.sum(case((ExecutionOrder.actual_fill_type == "taker", 1), else_=0)), 0
+            ).label("taker_count"),
+            func.coalesce(
+                func.sum(case((ExecutionOrder.actual_fill_type == "mixed", 1), else_=0)), 0
+            ).label("mixed_count"),
+        ).where(
+            ExecutionOrder.user_id == user.id,
+            ExecutionOrder.trading_mode == mode,
+        )
+    ).one()
+    entry_order_stats = db.execute(
+        select(
+            func.coalesce(func.avg(ExecutionOrder.estimated_slippage_bps), 0).label(
+                "avg_slippage_bps"
+            ),
+            func.coalesce(func.avg(ExecutionOrder.expected_net_edge_bps), 0).label(
+                "avg_net_edge_bps"
+            ),
+        ).where(
+            ExecutionOrder.user_id == user.id,
+            ExecutionOrder.trading_mode == mode,
+            ExecutionOrder.side == "buy",
+            ExecutionOrder.state.in_(("submitted", "pending", "partially_filled", "filled")),
+        )
+    ).one()
+    skipped_due_to_fees = int(
+        db.scalar(
+            select(func.count())
+            .select_from(RiskEvent)
+            .where(
+                RiskEvent.user_id == user.id,
+                RiskEvent.trading_mode == mode,
+                RiskEvent.detail.is_not(None),
+                RiskEvent.detail.ilike("%fee_economics%"),
+            )
+        )
+        or 0
     )
     strategy_audits = (
         db.query(StrategyDecisionAudit, StrategySignalSnapshot)
@@ -462,44 +555,77 @@ def dashboard_summary(
         .limit(100)
         .all()
     )
-
-    def _fees_since(cutoff: datetime) -> float:
-        return round(
-            sum(
-                (trade.fee_cents or 0)
-                for trade in mode_trades
-                if _as_utc(trade.executed_at) and _as_utc(trade.executed_at) >= cutoff
-            )
-            / 100,
-            2,
+    recent_risk_rejects = (
+        db.query(RiskEvent)
+        .filter(
+            RiskEvent.user_id == user.id,
+            RiskEvent.trading_mode == mode,
+            RiskEvent.outcome == "reject",
         )
-
-    fees_by_strategy: dict[str, int] = {}
-    fees_by_symbol: dict[str, int] = {}
-    for trade in mode_trades:
-        fees_by_strategy[trade.strategy_id] = fees_by_strategy.get(trade.strategy_id, 0) + int(
-            trade.fee_cents or 0
-        )
-        fees_by_symbol[trade.symbol] = fees_by_symbol.get(trade.symbol, 0) + int(
-            trade.fee_cents or 0
-        )
-    executed_entry_orders = [
-        order
-        for order in mode_orders
-        if order.side.lower() == "buy"
-        and order.state in {"submitted", "pending", "partially_filled", "filled"}
-    ]
-    maker_count = sum(1 for order in mode_orders if (order.actual_fill_type or "") == "maker")
-    taker_count = sum(1 for order in mode_orders if (order.actual_fill_type or "") == "taker")
-    mixed_count = sum(1 for order in mode_orders if (order.actual_fill_type or "") == "mixed")
-    skipped_due_to_fees = sum(
-        1
-        for event in mode_risk_events
-        if (event.detail or "").startswith("fee_economics:")
-        or (event.detail or "").find("fee_economics") >= 0
+        .order_by(RiskEvent.created_at.desc())
+        .limit(100)
+        .all()
     )
-    total_mode_fees_cents = sum(int(trade.fee_cents or 0) for trade in mode_trades)
-    total_mode_net_pnl_cents = sum(int(trade.realized_pnl_cents or 0) for trade in mode_trades)
+    recent_failed_orders = (
+        db.query(ExecutionOrder)
+        .filter(
+            ExecutionOrder.user_id == user.id,
+            ExecutionOrder.trading_mode == mode,
+            ExecutionOrder.state.in_(("failed", "cancelled")),
+        )
+        .order_by(
+            func.coalesce(
+                ExecutionOrder.failed_at,
+                ExecutionOrder.cancelled_at,
+                ExecutionOrder.updated_at,
+            ).desc()
+        )
+        .limit(100)
+        .all()
+    )
+    strategy_reject_total = int(
+        db.scalar(
+            select(func.count())
+            .select_from(StrategyDecisionAudit)
+            .join(
+                StrategySignalSnapshot,
+                StrategyDecisionAudit.signal_snapshot_id == StrategySignalSnapshot.id,
+            )
+            .where(
+                StrategySignalSnapshot.user_id == user.id,
+                StrategySignalSnapshot.trading_mode == mode,
+                StrategyDecisionAudit.decision == "rejected",
+                StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
+            )
+        )
+        or 0
+    )
+    risk_reject_total = int(
+        db.scalar(
+            select(func.count())
+            .select_from(RiskEvent)
+            .where(
+                RiskEvent.user_id == user.id,
+                RiskEvent.trading_mode == mode,
+                RiskEvent.outcome == "reject",
+            )
+        )
+        or 0
+    )
+    execution_reject_total = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ExecutionOrder)
+            .where(
+                ExecutionOrder.user_id == user.id,
+                ExecutionOrder.trading_mode == mode,
+                ExecutionOrder.state.in_(("failed", "cancelled")),
+            )
+        )
+        or 0
+    )
+    total_mode_fees_cents = int(trade_stats.total_fees_cents or 0)
+    total_mode_net_pnl_cents = int(trade_stats.total_net_pnl_cents or 0)
     total_mode_gross_pnl_cents = total_mode_net_pnl_cents + total_mode_fees_cents
     rejection_diagnostics = _build_rejection_diagnostics(
         strategy_records=[
@@ -522,8 +648,7 @@ def dashboard_summary(
                 symbol=event.symbol,
                 created_at=event.created_at,
             )
-            for event in mode_risk_events
-            if (event.outcome or "").lower() == "reject"
+            for event in recent_risk_rejects
         ],
         execution_records=[
             _format_rejection_record(
@@ -534,26 +659,41 @@ def dashboard_summary(
                 symbol=order.symbol,
                 created_at=order.failed_at or order.cancelled_at or order.updated_at,
             )
-            for order in mode_orders
-            if order.state in {"failed", "cancelled"}
+            for order in recent_failed_orders
         ],
     )
+    rejection_diagnostics["byStage"] = [
+        {"stage": "risk", "count": risk_reject_total},
+        {"stage": "suppression", "count": strategy_reject_total},
+        {"stage": "execution", "count": execution_reject_total},
+    ]
+    rejection_diagnostics["byStage"] = [
+        row for row in rejection_diagnostics["byStage"] if int(row["count"]) > 0
+    ]
+    rejection_diagnostics["byStage"].sort(key=lambda row: (-int(row["count"]), str(row["stage"])))
+    rejection_diagnostics["totalRejected"] = (
+        strategy_reject_total + risk_reject_total + execution_reject_total
+    )
 
-    comparison: dict[str, dict[str, float]] = {}
-    for compare_mode in ("paper", "live"):
-        compare_trades = (
-            db.query(ExecutionTradeRecord)
-            .filter(
-                ExecutionTradeRecord.user_id == user.id,
-                ExecutionTradeRecord.trading_mode == compare_mode,
-            )
-            .all()
+    comparison: dict[str, dict[str, float]] = {
+        "paper": {"fees": 0.0, "netPnl": 0.0},
+        "live": {"fees": 0.0, "netPnl": 0.0},
+    }
+    comparison_rows = db.execute(
+        select(
+            ExecutionTradeRecord.trading_mode,
+            func.coalesce(func.sum(ExecutionTradeRecord.fee_cents), 0).label("fees_cents"),
+            func.coalesce(func.sum(ExecutionTradeRecord.realized_pnl_cents), 0).label(
+                "net_pnl_cents"
+            ),
         )
-        fees_cents = sum(int(trade.fee_cents or 0) for trade in compare_trades)
-        net_pnl_cents = sum(int(trade.realized_pnl_cents or 0) for trade in compare_trades)
-        comparison[compare_mode] = {
-            "fees": round(fees_cents / 100, 2),
-            "netPnl": round(net_pnl_cents / 100, 2),
+        .where(ExecutionTradeRecord.user_id == user.id)
+        .group_by(ExecutionTradeRecord.trading_mode)
+    ).all()
+    for row in comparison_rows:
+        comparison[str(row.trading_mode)] = {
+            "fees": round(int(row.fees_cents or 0) / 100, 2),
+            "netPnl": round(int(row.net_pnl_cents or 0) / 100, 2),
         }
 
     growth_points = 8
@@ -580,38 +720,22 @@ def dashboard_summary(
         "feeAnalytics": {
             "grossPnl": round(total_mode_gross_pnl_cents / 100, 2),
             "netPnl": round(total_mode_net_pnl_cents / 100, 2),
-            "totalFeesToday": _fees_since(today_cutoff),
-            "totalFeesWeek": _fees_since(week_cutoff),
-            "totalFeesMonth": _fees_since(month_cutoff),
+            "totalFeesToday": round(int(trade_stats.fees_today_cents or 0) / 100, 2),
+            "totalFeesWeek": round(int(trade_stats.fees_week_cents or 0) / 100, 2),
+            "totalFeesMonth": round(int(trade_stats.fees_month_cents or 0) / 100, 2),
             "feesByStrategy": [
-                {"strategy": strategy, "fees": round(cents / 100, 2)}
-                for strategy, cents in sorted(
-                    fees_by_strategy.items(), key=lambda item: item[1], reverse=True
-                )
+                {"strategy": str(strategy), "fees": round(int(cents or 0) / 100, 2)}
+                for strategy, cents in fees_by_strategy_rows
             ],
             "feesBySymbol": [
-                {"symbol": symbol, "fees": round(cents / 100, 2)}
-                for symbol, cents in sorted(
-                    fees_by_symbol.items(), key=lambda item: item[1], reverse=True
-                )
+                {"symbol": str(symbol), "fees": round(int(cents or 0) / 100, 2)}
+                for symbol, cents in fees_by_symbol_rows
             ],
-            "makerCount": maker_count,
-            "takerCount": taker_count,
-            "mixedCount": mixed_count,
-            "avgEstimatedSlippageBps": round(
-                (
-                    sum(order.estimated_slippage_bps or 0 for order in executed_entry_orders)
-                    / max(1, len(executed_entry_orders))
-                ),
-                2,
-            ),
-            "avgNetEdgeAtEntryBps": round(
-                (
-                    sum(order.expected_net_edge_bps or 0 for order in executed_entry_orders)
-                    / max(1, len(executed_entry_orders))
-                ),
-                2,
-            ),
+            "makerCount": int(fill_mix.maker_count or 0),
+            "takerCount": int(fill_mix.taker_count or 0),
+            "mixedCount": int(fill_mix.mixed_count or 0),
+            "avgEstimatedSlippageBps": round(float(entry_order_stats.avg_slippage_bps or 0), 2),
+            "avgNetEdgeAtEntryBps": round(float(entry_order_stats.avg_net_edge_bps or 0), 2),
             "skippedTradesDueToFees": skipped_due_to_fees,
             "paperLiveComparison": comparison,
         },
