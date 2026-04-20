@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
@@ -34,6 +34,10 @@ from oziebot_api.services.live_coinbase import (
     sum_coinbase_cash_cents,
 )
 from oziebot_api.services.tenant_scope import primary_tenant_id
+from oziebot_api.services.trade_review_analytics import (
+    AnalyticsFilters,
+    TradeReviewAnalyticsService,
+)
 from oziebot_api.services.trading_mode_policy import can_set_trading_mode
 from oziebot_domain.trading_mode import TradingMode
 
@@ -70,6 +74,25 @@ def _build_me(db: DbSession, user: User) -> MeOut:
         current_trading_mode=mode,
         email_verified_at=user.email_verified_at,
         tenants=tenants,
+    )
+
+
+def _analytics_filters(
+    *,
+    user: User,
+    trading_mode: TradingMode | None,
+    strategy_name: str | None,
+    symbol: str | None,
+    start_at: datetime | None,
+    end_at: datetime | None,
+) -> AnalyticsFilters:
+    return AnalyticsFilters(
+        user_id=user.id,
+        trading_mode=trading_mode.value if trading_mode is not None else None,
+        strategy_name=strategy_name,
+        symbol=symbol.upper() if symbol else None,
+        start_at=start_at,
+        end_at=end_at,
     )
 
 
@@ -594,6 +617,98 @@ def dashboard_summary(
         },
         "rejectionDiagnostics": rejection_diagnostics,
     }
+
+
+@router.get("/analytics")
+def read_trade_review_analytics(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    strategy_name: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    start_at: datetime | None = Query(default=None),
+    end_at: datetime | None = Query(default=None),
+) -> dict[str, Any]:
+    service = TradeReviewAnalyticsService(db)
+    return service.build_overview(
+        _analytics_filters(
+            user=user,
+            trading_mode=trading_mode,
+            strategy_name=strategy_name,
+            symbol=symbol,
+            start_at=start_at,
+            end_at=end_at,
+        )
+    )
+
+
+@router.get("/analytics/strategies")
+def read_trade_review_strategy_rows(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    strategy_name: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    start_at: datetime | None = Query(default=None),
+    end_at: datetime | None = Query(default=None),
+) -> dict[str, Any]:
+    service = TradeReviewAnalyticsService(db)
+    filters = _analytics_filters(
+        user=user,
+        trading_mode=trading_mode,
+        strategy_name=strategy_name,
+        symbol=symbol,
+        start_at=start_at,
+        end_at=end_at,
+    )
+    return {
+        "filters": service.filters_payload(filters),
+        "rows": service.build_strategy_rows(filters),
+    }
+
+
+@router.get("/analytics/tokens")
+def read_trade_review_token_rows(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    strategy_name: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    start_at: datetime | None = Query(default=None),
+    end_at: datetime | None = Query(default=None),
+) -> dict[str, Any]:
+    service = TradeReviewAnalyticsService(db)
+    filters = _analytics_filters(
+        user=user,
+        trading_mode=trading_mode,
+        strategy_name=strategy_name,
+        symbol=symbol,
+        start_at=start_at,
+        end_at=end_at,
+    )
+    return {"filters": service.filters_payload(filters), "rows": service.build_token_rows(filters)}
+
+
+@router.get("/analytics/pairs")
+def read_trade_review_pair_rows(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    strategy_name: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    start_at: datetime | None = Query(default=None),
+    end_at: datetime | None = Query(default=None),
+) -> dict[str, Any]:
+    service = TradeReviewAnalyticsService(db)
+    filters = _analytics_filters(
+        user=user,
+        trading_mode=trading_mode,
+        strategy_name=strategy_name,
+        symbol=symbol,
+        start_at=start_at,
+        end_at=end_at,
+    )
+    return {"filters": service.filters_payload(filters), "rows": service.build_pair_rows(filters)}
 
 
 @router.patch("/trading-mode", response_model=MeOut)
