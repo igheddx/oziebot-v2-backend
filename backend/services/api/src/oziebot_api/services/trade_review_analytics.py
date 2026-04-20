@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.execution import ExecutionOrder, ExecutionTradeRecord
@@ -173,19 +173,21 @@ class TradeReviewAnalyticsService:
         }
 
     def _load_runs(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
+        timestamp_expr = func.coalesce(StrategyRun.completed_at, StrategyRun.started_at)
         rows = self._db.scalars(
-            select(StrategyRun).where(StrategyRun.user_id == filters.user_id)
+            self._apply_filters(
+                select(StrategyRun),
+                filters=filters,
+                strategy_column=StrategyRun.strategy_name,
+                symbol_column=StrategyRun.symbol,
+                trading_mode_column=StrategyRun.trading_mode,
+                timestamp_column=timestamp_expr,
+                user_column=StrategyRun.user_id,
+            )
         ).all()
         payload: list[dict[str, Any]] = []
         for row in rows:
             timestamp = row.completed_at or row.started_at
-            if not filters.matches(
-                strategy_name=row.strategy_name,
-                symbol=row.symbol,
-                trading_mode=row.trading_mode,
-                timestamp=timestamp,
-            ):
-                continue
             metadata = _json_dict(row.run_metadata)
             payload.append(
                 {
@@ -202,17 +204,18 @@ class TradeReviewAnalyticsService:
 
     def _load_signals(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
         rows = self._db.scalars(
-            select(StrategySignalRecord).where(StrategySignalRecord.user_id == filters.user_id)
+            self._apply_filters(
+                select(StrategySignalRecord),
+                filters=filters,
+                strategy_column=StrategySignalRecord.strategy_name,
+                symbol_column=StrategySignalRecord.symbol,
+                trading_mode_column=StrategySignalRecord.trading_mode,
+                timestamp_column=StrategySignalRecord.timestamp,
+                user_column=StrategySignalRecord.user_id,
+            )
         ).all()
         payload: list[dict[str, Any]] = []
         for row in rows:
-            if not filters.matches(
-                strategy_name=row.strategy_name,
-                symbol=row.symbol,
-                trading_mode=row.trading_mode,
-                timestamp=row.timestamp,
-            ):
-                continue
             payload.append(
                 {
                     "strategy_name": row.strategy_name,
@@ -225,16 +228,19 @@ class TradeReviewAnalyticsService:
         return payload
 
     def _load_risk_events(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
-        rows = self._db.scalars(select(RiskEvent).where(RiskEvent.user_id == filters.user_id)).all()
+        rows = self._db.scalars(
+            self._apply_filters(
+                select(RiskEvent),
+                filters=filters,
+                strategy_column=RiskEvent.strategy_name,
+                symbol_column=RiskEvent.symbol,
+                trading_mode_column=RiskEvent.trading_mode,
+                timestamp_column=RiskEvent.created_at,
+                user_column=RiskEvent.user_id,
+            )
+        ).all()
         payload: list[dict[str, Any]] = []
         for row in rows:
-            if not filters.matches(
-                strategy_name=row.strategy_name,
-                symbol=row.symbol,
-                trading_mode=row.trading_mode,
-                timestamp=row.created_at,
-            ):
-                continue
             payload.append(
                 {
                     "strategy_name": row.strategy_name,
@@ -251,19 +257,26 @@ class TradeReviewAnalyticsService:
         return payload
 
     def _load_orders(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
+        timestamp_expr = func.coalesce(
+            ExecutionOrder.completed_at,
+            ExecutionOrder.failed_at,
+            ExecutionOrder.cancelled_at,
+            ExecutionOrder.created_at,
+        )
         rows = self._db.scalars(
-            select(ExecutionOrder).where(ExecutionOrder.user_id == filters.user_id)
+            self._apply_filters(
+                select(ExecutionOrder),
+                filters=filters,
+                strategy_column=ExecutionOrder.strategy_id,
+                symbol_column=ExecutionOrder.symbol,
+                trading_mode_column=ExecutionOrder.trading_mode,
+                timestamp_column=timestamp_expr,
+                user_column=ExecutionOrder.user_id,
+            )
         ).all()
         payload: list[dict[str, Any]] = []
         for row in rows:
             timestamp = row.completed_at or row.failed_at or row.cancelled_at or row.created_at
-            if not filters.matches(
-                strategy_name=row.strategy_id,
-                symbol=row.symbol,
-                trading_mode=row.trading_mode,
-                timestamp=timestamp,
-            ):
-                continue
             payload.append(
                 {
                     "strategy_name": row.strategy_id,
@@ -283,22 +296,21 @@ class TradeReviewAnalyticsService:
 
     def _load_outcomes(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
         rows = self._db.execute(
-            select(TradeOutcomeFeature, ExecutionTradeRecord)
-            .join(
-                ExecutionTradeRecord,
-                TradeOutcomeFeature.trade_id == ExecutionTradeRecord.id,
+            self._apply_filters(
+                select(TradeOutcomeFeature, ExecutionTradeRecord).join(
+                    ExecutionTradeRecord,
+                    TradeOutcomeFeature.trade_id == ExecutionTradeRecord.id,
+                ),
+                filters=filters,
+                strategy_column=TradeOutcomeFeature.strategy_name,
+                symbol_column=TradeOutcomeFeature.token_symbol,
+                trading_mode_column=TradeOutcomeFeature.trading_mode,
+                timestamp_column=TradeOutcomeFeature.created_at,
+                user_column=ExecutionTradeRecord.user_id,
             )
-            .where(ExecutionTradeRecord.user_id == filters.user_id)
         ).all()
         payload: list[dict[str, Any]] = []
         for outcome, _trade in rows:
-            if not filters.matches(
-                strategy_name=outcome.strategy_name,
-                symbol=outcome.token_symbol,
-                trading_mode=outcome.trading_mode,
-                timestamp=outcome.created_at,
-            ):
-                continue
             payload.append(
                 {
                     "strategy_name": outcome.strategy_name,
@@ -318,6 +330,34 @@ class TradeReviewAnalyticsService:
                 }
             )
         return payload
+
+    def _apply_filters(
+        self,
+        query: Select[Any],
+        *,
+        filters: AnalyticsFilters,
+        strategy_column,
+        symbol_column,
+        trading_mode_column,
+        timestamp_column,
+        user_column,
+    ) -> Select[Any]:
+        query = query.where(user_column == filters.user_id)
+        if filters.trading_mode:
+            query = query.where(trading_mode_column == filters.trading_mode)
+        if filters.strategy_name:
+            query = query.where(strategy_column == filters.strategy_name)
+        if filters.symbol:
+            query = query.where(symbol_column == filters.symbol)
+        if filters.start_at:
+            query = query.where(
+                (timestamp_column.is_(None)) | (timestamp_column >= _as_utc(filters.start_at))
+            )
+        if filters.end_at:
+            query = query.where(
+                (timestamp_column.is_(None)) | (timestamp_column <= _as_utc(filters.end_at))
+            )
+        return query
 
     def _summary_payload(self, dataset: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
         runs = dataset["runs"]
