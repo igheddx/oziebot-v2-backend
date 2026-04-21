@@ -33,6 +33,14 @@ class Settings(BaseSettings):
         default=False,
         description="Force Coinbase API calls to use IPv4 egress only",
     )
+    api_slow_request_ms: int = Field(
+        default=1000,
+        description="Log API requests at warning level when duration exceeds this threshold.",
+    )
+    api_slow_query_ms: int = Field(
+        default=250,
+        description="Log SQL queries at warning level when duration exceeds this threshold.",
+    )
 
 
 def get_settings() -> Settings:
