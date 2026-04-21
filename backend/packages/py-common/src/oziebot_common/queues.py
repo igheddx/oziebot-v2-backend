@@ -154,6 +154,10 @@ def disconnect_redis(r: redis.Redis) -> None:
         r.connection_pool.disconnect()
 
 
+def reset_redis_connection(r: redis.Redis) -> None:
+    r.connection_pool.disconnect()
+
+
 _intent_adapter = TypeAdapter(TradeIntent)
 _risk_adapter = TypeAdapter(RiskDecision)
 _signal_adapter = TypeAdapter(StrategySignalEvent)

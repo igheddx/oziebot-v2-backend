@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from redis import RedisError
 
@@ -11,6 +12,7 @@ from oziebot_common.queues import (
     disconnect_redis,
     notification_event_from_json,
     redis_from_url,
+    reset_redis_connection,
 )
 from oziebot_domain.events import NotificationEvent, NotificationEventType
 from oziebot_domain.trading_mode import TradingMode
@@ -22,11 +24,18 @@ from oziebot_alerts_worker.service import NotificationService
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("alerts-worker")
 
+QUEUE_POP_TIMEOUT_SECONDS = 5
+REDIS_SOCKET_TIMEOUT_SECONDS = QUEUE_POP_TIMEOUT_SECONDS + 5
+REDIS_RETRY_DELAY_SECONDS = 1
+
 
 def main() -> None:
     settings = get_settings()
     r = redis_from_url(
-        settings.redis_url, probe=True, socket_connect_timeout=3, socket_timeout=3
+        settings.redis_url,
+        probe=True,
+        socket_connect_timeout=3,
+        socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
     )
     keys = QueueNames.all_alerts_keys() + QueueNames.all_alerts_retry_keys()
     service = NotificationService(
@@ -48,12 +57,16 @@ def main() -> None:
     health.mark_ready()
     while not stop_event.is_set():
         try:
-            got = brpop_json_any(r, keys, timeout=5)
-        except RedisError:
+            got = brpop_json_any(r, keys, timeout=QUEUE_POP_TIMEOUT_SECONDS)
+        except RedisError as exc:
             if stop_event.is_set():
                 break
-            raise
-        health.touch()
+            health.mark_not_ready()
+            reset_redis_connection(r)
+            log.warning("redis_receive_failed error=%s", exc)
+            time.sleep(REDIS_RETRY_DELAY_SECONDS)
+            continue
+        health.mark_ready()
         if got is None:
             continue
         queue_key, raw = got

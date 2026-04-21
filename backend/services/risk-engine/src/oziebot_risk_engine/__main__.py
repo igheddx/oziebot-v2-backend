@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 
 from redis import RedisError
@@ -12,6 +13,7 @@ from oziebot_common.queues import (
     disconnect_redis,
     push_json,
     redis_from_url,
+    reset_redis_connection,
     strategy_signal_from_json,
     trade_intent_to_json,
 )
@@ -22,11 +24,18 @@ from oziebot_risk_engine.service import RiskEngineService
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("risk-engine")
 
+QUEUE_POP_TIMEOUT_SECONDS = 5
+REDIS_SOCKET_TIMEOUT_SECONDS = QUEUE_POP_TIMEOUT_SECONDS + 5
+REDIS_RETRY_DELAY_SECONDS = 1
+
 
 def main() -> None:
     settings = get_settings()
     r = redis_from_url(
-        settings.redis_url, probe=True, socket_connect_timeout=3, socket_timeout=3
+        settings.redis_url,
+        probe=True,
+        socket_connect_timeout=3,
+        socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
     )
     service = RiskEngineService(settings, r)
     health = start_health_server("risk-engine")
@@ -40,12 +49,16 @@ def main() -> None:
     health.mark_ready()
     while not stop_event.is_set():
         try:
-            got = brpop_json_any(r, keys, timeout=5)
-        except RedisError:
+            got = brpop_json_any(r, keys, timeout=QUEUE_POP_TIMEOUT_SECONDS)
+        except RedisError as exc:
             if stop_event.is_set():
                 break
-            raise
-        health.touch()
+            health.mark_not_ready()
+            reset_redis_connection(r)
+            log.warning("redis_receive_failed error=%s", exc)
+            time.sleep(REDIS_RETRY_DELAY_SECONDS)
+            continue
+        health.mark_ready()
         if got is None:
             continue
         _queue_key, raw = got
