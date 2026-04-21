@@ -321,7 +321,7 @@ def _dashboard_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
 
 
 def _dashboard_summary_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
-    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 1}
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 2}
 
 
 def _dashboard_details_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
@@ -667,55 +667,6 @@ def _build_dashboard_summary_payload(
             ExecutionOrder.created_at >= dashboard_cutoff,
         )
     ).one()
-    strategy_reject_total = int(
-        db.scalar(
-            select(func.count())
-            .select_from(StrategyDecisionAudit)
-            .join(
-                StrategySignalSnapshot,
-                StrategyDecisionAudit.signal_snapshot_id == StrategySignalSnapshot.id,
-            )
-            .where(
-                StrategySignalSnapshot.user_id == user.id,
-                StrategySignalSnapshot.trading_mode == mode,
-                StrategyDecisionAudit.decision == "rejected",
-                StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
-                StrategyDecisionAudit.created_at >= dashboard_cutoff,
-            )
-        )
-        or 0
-    )
-    risk_reject_total = int(
-        db.scalar(
-            select(func.count())
-            .select_from(RiskEvent)
-            .where(
-                RiskEvent.user_id == user.id,
-                RiskEvent.trading_mode == mode,
-                RiskEvent.outcome == "reject",
-                RiskEvent.created_at >= dashboard_cutoff,
-            )
-        )
-        or 0
-    )
-    execution_reject_total = int(
-        db.scalar(
-            select(func.count())
-            .select_from(ExecutionOrder)
-            .where(
-                ExecutionOrder.user_id == user.id,
-                ExecutionOrder.trading_mode == mode,
-                ExecutionOrder.state.in_(("failed", "cancelled")),
-                func.coalesce(
-                    ExecutionOrder.failed_at,
-                    ExecutionOrder.cancelled_at,
-                    ExecutionOrder.updated_at,
-                )
-                >= dashboard_cutoff,
-            )
-        )
-        or 0
-    )
     growth_points = 8
     start = max(0.0, portfolio_value - pnl_value)
     growth = [
@@ -737,7 +688,7 @@ def _build_dashboard_summary_payload(
             "avgNetEdgeAtEntryBps": round(float(entry_order_stats.avg_net_edge_bps or 0), 2),
         },
         "rejectionDiagnostics": {
-            "totalRejected": strategy_reject_total + risk_reject_total + execution_reject_total,
+            "totalRejected": 0,
         },
         "budget": {
             "historyLookbackDaysApplied": DASHBOARD_HISTORY_LOOKBACK_DAYS,
