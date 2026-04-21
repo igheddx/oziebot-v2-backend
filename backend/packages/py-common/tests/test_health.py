@@ -47,3 +47,12 @@ def test_health_state_mark_degraded_reports_alive_but_not_ready() -> None:
     assert snapshot["degraded"] is True
     assert snapshot["degraded_reason"] == "redis_receive_failed"
     assert snapshot["ready"] is False
+
+
+def test_health_state_details_are_exposed_in_snapshot() -> None:
+    state = HealthState(service_name="worker", stale_after_seconds=90)
+
+    state.set_detail("workerRuntime", {"redisReceiveFailuresTotal": 2})
+    snapshot = state.snapshot()
+
+    assert snapshot["details"]["workerRuntime"]["redisReceiveFailuresTotal"] == 2

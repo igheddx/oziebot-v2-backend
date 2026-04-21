@@ -65,3 +65,39 @@ def test_dashboard_response_preserves_incoming_request_id(
 
     assert response.status_code == 200, response.text
     assert response.headers["X-Oziebot-Request-Id"] == request_id
+
+
+def test_summary_response_exposes_slo_headers(
+    client: TestClient,
+    regular_user_and_token: tuple[str, str],
+) -> None:
+    _, token = regular_user_and_token
+
+    response = client.get(
+        "/v1/me/dashboard/summary?trading_mode=paper",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["X-Oziebot-SLO-Target-Ms"] == "2000"
+    assert response.headers["X-Oziebot-SLO-Status"]
+    assert response.headers["X-Oziebot-SLO-P95-Ms"]
+
+
+def test_health_slo_endpoint_reports_route_windows(
+    client: TestClient,
+    regular_user_and_token: tuple[str, str],
+) -> None:
+    _, token = regular_user_and_token
+    response = client.get(
+        "/v1/me/dashboard/summary?trading_mode=paper",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+
+    health = client.get("/health/slo")
+
+    assert health.status_code == 200, health.text
+    payload = health.json()
+    assert "dashboard_summary" in payload["routes"]
+    assert "analytics_summary" in payload["routes"]

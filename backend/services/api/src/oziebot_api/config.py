@@ -41,6 +41,18 @@ class Settings(BaseSettings):
         default=250,
         description="Log SQL queries at warning level when duration exceeds this threshold.",
     )
+    api_slo_sample_window: int = Field(
+        default=200,
+        description="Rolling sample window size for API SLO calculations.",
+    )
+    api_slo_min_samples: int = Field(
+        default=20,
+        description="Minimum requests before an API SLO window is considered meaningful.",
+    )
+    api_slo_breach_rate_warn_pct: float = Field(
+        default=10.0,
+        description="Warn when rolling API SLO breach rate exceeds this percentage.",
+    )
 
 
 def get_settings() -> Settings:

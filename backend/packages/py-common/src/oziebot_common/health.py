@@ -21,6 +21,7 @@ class HealthState:
     ready: bool = False
     degraded_reason: str | None = None
     degraded_since: datetime | None = None
+    details: dict[str, object] = field(default_factory=dict)
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_heartbeat_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -55,6 +56,11 @@ class HealthState:
             self.degraded_since = None
             self.last_heartbeat_at = datetime.now(UTC)
 
+    def set_detail(self, key: str, value: object) -> None:
+        with self._lock:
+            self.details[key] = value
+            self.last_heartbeat_at = datetime.now(UTC)
+
     def snapshot(self) -> dict[str, object]:
         with self._lock:
             now = datetime.now(UTC)
@@ -76,6 +82,7 @@ class HealthState:
                 "last_heartbeat_at": self.last_heartbeat_at.isoformat(),
                 "stale_after_seconds": self.stale_after_seconds,
                 "heartbeat_age_seconds": round(age_seconds, 3),
+                "details": dict(self.details),
             }
 
 

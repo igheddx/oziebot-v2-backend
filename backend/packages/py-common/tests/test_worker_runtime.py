@@ -69,7 +69,10 @@ def test_run_redis_queue_worker_recovers_from_redis_errors(monkeypatch) -> None:
     assert sleep_calls == [1]
     assert handled == [("queue:key", {"payload": 1})]
     assert iterations == ["tick", "tick"]
-    assert health.snapshot()["ready"] is True
+    snapshot = health.snapshot()
+    assert snapshot["ready"] is True
+    assert snapshot["details"]["workerRuntime"]["redisReceiveFailuresTotal"] == 1
+    assert snapshot["details"]["workerRuntime"]["redisReceiveRecoveriesTotal"] == 1
 
 
 def test_run_redis_queue_worker_opens_circuit_after_threshold(monkeypatch) -> None:
@@ -116,3 +119,4 @@ def test_run_redis_queue_worker_opens_circuit_after_threshold(monkeypatch) -> No
     snapshot = health.snapshot()
     assert snapshot["status"] == "ok"
     assert snapshot["degraded_reason"] is None
+    assert snapshot["details"]["workerRuntime"]["redisCircuitOpenTotal"] == 1
