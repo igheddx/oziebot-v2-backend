@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 import uuid
 
@@ -15,6 +16,8 @@ from oziebot_api.services.performance_observability import (
 )
 
 logger = logging.getLogger(__name__)
+REQUEST_ID_HEADER = "X-Oziebot-Request-Id"
+REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{8,64}$")
 
 
 def create_app() -> FastAPI:
@@ -41,7 +44,12 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def observe_request(request, call_next):
-        request_id = uuid.uuid4().hex[:12]
+        incoming_request_id = request.headers.get(REQUEST_ID_HEADER)
+        request_id = (
+            incoming_request_id.strip()
+            if incoming_request_id and REQUEST_ID_PATTERN.fullmatch(incoming_request_id.strip())
+            else uuid.uuid4().hex[:12]
+        )
         started_at = time.perf_counter()
         token = begin_request(request_id, request.method, request.url.path)
         try:
@@ -66,8 +74,9 @@ def create_app() -> FastAPI:
 
         duration_ms = (time.perf_counter() - started_at) * 1000
         stats = current_request_stats()
+        if stats:
+            response.headers[REQUEST_ID_HEADER] = stats.request_id
         if stats and stats.observed:
-            response.headers["X-Oziebot-Request-Id"] = stats.request_id
             response.headers["X-Oziebot-Request-Duration-Ms"] = f"{duration_ms:.1f}"
             response.headers["X-Oziebot-DB-Query-Count"] = str(stats.query_count)
             response.headers["X-Oziebot-DB-Time-Ms"] = f"{stats.query_duration_ms:.1f}"

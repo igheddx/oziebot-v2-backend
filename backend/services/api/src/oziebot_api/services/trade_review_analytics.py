@@ -14,6 +14,11 @@ from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.strategy_signal_pipeline import StrategyRun, StrategySignalRecord
 from oziebot_api.models.trade_intelligence import TradeOutcomeFeature
 
+ANALYTICS_DATASET_ROW_LIMIT = 1000
+ANALYTICS_GROUP_ROW_LIMIT = 50
+ANALYTICS_REJECTION_ROW_LIMIT = 25
+ANALYTICS_COMPARISON_STRATEGY_LIMIT = 25
+
 
 def _json_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
@@ -95,9 +100,27 @@ class AnalyticsFilters:
         return True
 
 
+@dataclass(slots=True)
+class AnalyticsBudgetState:
+    dataset_row_limit: int
+    group_row_limit: int
+    rejection_row_limit: int
+    comparison_strategy_limit: int
+    datasets: dict[str, dict[str, Any]]
+    sections: dict[str, dict[str, Any]]
+
+
 class TradeReviewAnalyticsService:
     def __init__(self, db: Session):
         self._db = db
+        self._budget = AnalyticsBudgetState(
+            dataset_row_limit=ANALYTICS_DATASET_ROW_LIMIT,
+            group_row_limit=ANALYTICS_GROUP_ROW_LIMIT,
+            rejection_row_limit=ANALYTICS_REJECTION_ROW_LIMIT,
+            comparison_strategy_limit=ANALYTICS_COMPARISON_STRATEGY_LIMIT,
+            datasets={},
+            sections={},
+        )
 
     def build_overview(self, filters: AnalyticsFilters) -> dict[str, Any]:
         dataset = self._load_dataset(filters)
@@ -117,6 +140,7 @@ class TradeReviewAnalyticsService:
         return {
             "filters": self.filters_payload(filters),
             "summary": self._summary_payload(dataset),
+            "budget": self.budget_payload(),
             "signalFunnel": [
                 {
                     "strategyName": row["strategyName"],
@@ -163,6 +187,25 @@ class TradeReviewAnalyticsService:
             "endAt": _as_utc(filters.end_at).isoformat() if filters.end_at else None,
         }
 
+    def budget_payload(self) -> dict[str, Any]:
+        truncated_datasets = sorted(
+            key for key, value in self._budget.datasets.items() if bool(value.get("truncated"))
+        )
+        degraded_sections = sorted(
+            key for key, value in self._budget.sections.items() if bool(value.get("degraded"))
+        )
+        return {
+            "datasetRowLimit": self._budget.dataset_row_limit,
+            "groupRowLimit": self._budget.group_row_limit,
+            "rejectionRowLimit": self._budget.rejection_row_limit,
+            "comparisonStrategyLimit": self._budget.comparison_strategy_limit,
+            "datasets": self._budget.datasets,
+            "sections": self._budget.sections,
+            "truncatedDatasets": truncated_datasets,
+            "degradedSections": degraded_sections,
+            "degraded": bool(truncated_datasets or degraded_sections),
+        }
+
     def _load_dataset(self, filters: AnalyticsFilters) -> dict[str, list[dict[str, Any]]]:
         return {
             "runs": self._load_runs(filters),
@@ -174,7 +217,7 @@ class TradeReviewAnalyticsService:
 
     def _load_runs(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
         timestamp_expr = func.coalesce(StrategyRun.completed_at, StrategyRun.started_at)
-        rows = self._db.scalars(
+        rows = self._limited_scalars(
             self._apply_filters(
                 select(StrategyRun),
                 filters=filters,
@@ -183,8 +226,9 @@ class TradeReviewAnalyticsService:
                 trading_mode_column=StrategyRun.trading_mode,
                 timestamp_column=timestamp_expr,
                 user_column=StrategyRun.user_id,
-            )
-        ).all()
+            ).order_by(timestamp_expr.desc()),
+            dataset_name="runs",
+        )
         payload: list[dict[str, Any]] = []
         for row in rows:
             timestamp = row.completed_at or row.started_at
@@ -203,7 +247,7 @@ class TradeReviewAnalyticsService:
         return payload
 
     def _load_signals(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
-        rows = self._db.scalars(
+        rows = self._limited_scalars(
             self._apply_filters(
                 select(StrategySignalRecord),
                 filters=filters,
@@ -212,8 +256,9 @@ class TradeReviewAnalyticsService:
                 trading_mode_column=StrategySignalRecord.trading_mode,
                 timestamp_column=StrategySignalRecord.timestamp,
                 user_column=StrategySignalRecord.user_id,
-            )
-        ).all()
+            ).order_by(StrategySignalRecord.timestamp.desc()),
+            dataset_name="signals",
+        )
         payload: list[dict[str, Any]] = []
         for row in rows:
             payload.append(
@@ -228,7 +273,7 @@ class TradeReviewAnalyticsService:
         return payload
 
     def _load_risk_events(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
-        rows = self._db.scalars(
+        rows = self._limited_scalars(
             self._apply_filters(
                 select(RiskEvent),
                 filters=filters,
@@ -237,8 +282,9 @@ class TradeReviewAnalyticsService:
                 trading_mode_column=RiskEvent.trading_mode,
                 timestamp_column=RiskEvent.created_at,
                 user_column=RiskEvent.user_id,
-            )
-        ).all()
+            ).order_by(RiskEvent.created_at.desc()),
+            dataset_name="risk_events",
+        )
         payload: list[dict[str, Any]] = []
         for row in rows:
             payload.append(
@@ -263,7 +309,7 @@ class TradeReviewAnalyticsService:
             ExecutionOrder.cancelled_at,
             ExecutionOrder.created_at,
         )
-        rows = self._db.scalars(
+        rows = self._limited_scalars(
             self._apply_filters(
                 select(ExecutionOrder),
                 filters=filters,
@@ -272,8 +318,9 @@ class TradeReviewAnalyticsService:
                 trading_mode_column=ExecutionOrder.trading_mode,
                 timestamp_column=timestamp_expr,
                 user_column=ExecutionOrder.user_id,
-            )
-        ).all()
+            ).order_by(timestamp_expr.desc()),
+            dataset_name="orders",
+        )
         payload: list[dict[str, Any]] = []
         for row in rows:
             timestamp = row.completed_at or row.failed_at or row.cancelled_at or row.created_at
@@ -295,7 +342,7 @@ class TradeReviewAnalyticsService:
         return payload
 
     def _load_outcomes(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
-        rows = self._db.execute(
+        rows = self._limited_execute(
             self._apply_filters(
                 select(TradeOutcomeFeature, ExecutionTradeRecord).join(
                     ExecutionTradeRecord,
@@ -307,8 +354,9 @@ class TradeReviewAnalyticsService:
                 trading_mode_column=TradeOutcomeFeature.trading_mode,
                 timestamp_column=TradeOutcomeFeature.created_at,
                 user_column=ExecutionTradeRecord.user_id,
-            )
-        ).all()
+            ).order_by(TradeOutcomeFeature.created_at.desc()),
+            dataset_name="outcomes",
+        )
         payload: list[dict[str, Any]] = []
         for outcome, _trade in rows:
             payload.append(
@@ -331,6 +379,24 @@ class TradeReviewAnalyticsService:
             )
         return payload
 
+    def _limited_scalars(self, query: Select[Any], *, dataset_name: str) -> list[Any]:
+        rows = self._db.scalars(query.limit(self._budget.dataset_row_limit + 1)).all()
+        return self._record_dataset_budget(dataset_name, rows)
+
+    def _limited_execute(self, query: Select[Any], *, dataset_name: str) -> list[Any]:
+        rows = self._db.execute(query.limit(self._budget.dataset_row_limit + 1)).all()
+        return self._record_dataset_budget(dataset_name, rows)
+
+    def _record_dataset_budget(self, dataset_name: str, rows: list[Any]) -> list[Any]:
+        truncated = len(rows) > self._budget.dataset_row_limit
+        limited_rows = rows[: self._budget.dataset_row_limit]
+        self._budget.datasets[dataset_name] = {
+            "limit": self._budget.dataset_row_limit,
+            "returned": len(limited_rows),
+            "truncated": truncated,
+        }
+        return limited_rows
+
     def _apply_filters(
         self,
         query: Select[Any],
@@ -351,11 +417,11 @@ class TradeReviewAnalyticsService:
             query = query.where(symbol_column == filters.symbol)
         if filters.start_at:
             query = query.where(
-                (timestamp_column.is_(None)) | (timestamp_column >= _as_utc(filters.start_at))
+                timestamp_column.is_not(None), timestamp_column >= _as_utc(filters.start_at)
             )
         if filters.end_at:
             query = query.where(
-                (timestamp_column.is_(None)) | (timestamp_column <= _as_utc(filters.end_at))
+                timestamp_column.is_not(None), timestamp_column <= _as_utc(filters.end_at)
             )
         return query
 
@@ -506,7 +572,7 @@ class TradeReviewAnalyticsService:
                     or (rejection_rate_pct >= 60.0 and evaluated >= 5),
                 }
             )
-        return sorted(
+        sorted_rows = sorted(
             rows,
             key=lambda row: (
                 row["tradingMode"],
@@ -514,6 +580,18 @@ class TradeReviewAnalyticsService:
                 row["symbol"] or "",
             ),
         )
+        section_name = {
+            "strategy": "strategyPerformance",
+            "token": "tokenPerformance",
+            "pair": "pairPerformance",
+        }[grouping]
+        limited_rows = sorted_rows[: self._budget.group_row_limit]
+        self._budget.sections[section_name] = {
+            "limit": self._budget.group_row_limit,
+            "returned": len(limited_rows),
+            "degraded": len(sorted_rows) > self._budget.group_row_limit,
+        }
+        return limited_rows
 
     def _group_key(
         self,
@@ -616,10 +694,16 @@ class TradeReviewAnalyticsService:
             {"stage": stage, "count": count}
             for stage, count in sorted(stage_counts.items(), key=lambda item: (-item[1], item[0]))
         ]
+        rows = breakdown_rows[: self._budget.rejection_row_limit]
+        self._budget.sections["rejectionBreakdown"] = {
+            "limit": self._budget.rejection_row_limit,
+            "returned": len(rows),
+            "degraded": len(breakdown_rows) > self._budget.rejection_row_limit,
+        }
         return {
             "totalRejected": sum(stage_counts.values()),
             "byStage": by_stage,
-            "rows": breakdown_rows,
+            "rows": rows,
         }
 
     def _paper_live_comparison(self, dataset: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
@@ -724,7 +808,13 @@ class TradeReviewAnalyticsService:
                     },
                 }
             )
+        strategies = strategy_comparison[: self._budget.comparison_strategy_limit]
+        self._budget.sections["paperLiveComparison"] = {
+            "limit": self._budget.comparison_strategy_limit,
+            "returned": len(strategies),
+            "degraded": len(strategy_comparison) > self._budget.comparison_strategy_limit,
+        }
         return {
             "overview": sorted(overview, key=lambda row: row["tradingMode"]),
-            "strategies": strategy_comparison,
+            "strategies": strategies,
         }

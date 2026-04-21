@@ -46,6 +46,14 @@ router = APIRouter(prefix="/me", tags=["me"])
 
 DASHBOARD_CACHE_TTL_SECONDS = 30
 ANALYTICS_CACHE_TTL_SECONDS = 120
+DASHBOARD_HISTORY_LOOKBACK_DAYS = 30
+DASHBOARD_POSITIONS_LIMIT = 50
+DASHBOARD_ACTIVE_TRADES_LIMIT = 20
+DASHBOARD_RECENT_ACTIVITY_LIMIT = 20
+DASHBOARD_FEE_BREAKDOWN_LIMIT = 12
+DASHBOARD_REJECTION_EVENT_LIMIT = 100
+ANALYTICS_DEFAULT_LOOKBACK_DAYS = 30
+ANALYTICS_MAX_LOOKBACK_DAYS = 90
 
 
 def _build_me(db: DbSession, user: User) -> MeOut:
@@ -89,14 +97,23 @@ def _analytics_filters(
     symbol: str | None,
     start_at: datetime | None,
     end_at: datetime | None,
-) -> AnalyticsFilters:
-    return AnalyticsFilters(
-        user_id=user.id,
-        trading_mode=trading_mode.value if trading_mode is not None else None,
-        strategy_name=strategy_name,
-        symbol=symbol.upper() if symbol else None,
+) -> tuple[AnalyticsFilters, dict[str, Any]]:
+    normalized_start_at, normalized_end_at, window_meta = _normalize_time_window(
         start_at=start_at,
         end_at=end_at,
+        default_lookback_days=ANALYTICS_DEFAULT_LOOKBACK_DAYS,
+        max_lookback_days=ANALYTICS_MAX_LOOKBACK_DAYS,
+    )
+    return (
+        AnalyticsFilters(
+            user_id=user.id,
+            trading_mode=trading_mode.value if trading_mode is not None else None,
+            strategy_name=strategy_name,
+            symbol=symbol.upper() if symbol else None,
+            start_at=normalized_start_at,
+            end_at=normalized_end_at,
+        ),
+        window_meta,
     )
 
 
@@ -134,6 +151,48 @@ def _as_utc(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _normalize_time_window(
+    *,
+    start_at: datetime | None,
+    end_at: datetime | None,
+    default_lookback_days: int,
+    max_lookback_days: int,
+) -> tuple[datetime, datetime, dict[str, Any]]:
+    now = datetime.now(UTC)
+    normalized_end = _as_utc(end_at) or now
+    if normalized_end > now:
+        normalized_end = now
+    requested_start = _as_utc(start_at)
+    max_start = normalized_end - timedelta(days=max_lookback_days)
+    default_start = normalized_end - timedelta(days=default_lookback_days)
+    if requested_start is None:
+        normalized_start = default_start
+        defaulted = True
+    else:
+        normalized_start = requested_start
+        defaulted = False
+    if normalized_start > normalized_end:
+        normalized_start = default_start
+        defaulted = True
+    window_clamped = normalized_start < max_start
+    if window_clamped:
+        normalized_start = max_start
+    applied_days = max(1, int((normalized_end - normalized_start).total_seconds() // 86400) or 1)
+    return (
+        normalized_start,
+        normalized_end,
+        {
+            "requestedStartAt": requested_start.isoformat() if requested_start else None,
+            "requestedEndAt": _as_utc(end_at).isoformat() if end_at else None,
+            "startAt": normalized_start.isoformat(),
+            "endAt": normalized_end.isoformat(),
+            "defaulted": defaulted,
+            "windowClamped": window_clamped,
+            "lookbackDaysApplied": min(applied_days, max_lookback_days),
+        },
+    )
 
 
 def _cents(amount: Decimal) -> int:
@@ -252,7 +311,7 @@ def _live_coinbase_balance_snapshot(
 
 
 def _dashboard_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
-    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 1}
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 2}
 
 
 def _dashboard_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -271,6 +330,7 @@ def _dashboard_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "totalFeesMonth": fee_analytics.get("totalFeesMonth", 0),
         "avgNetEdgeAtEntryBps": fee_analytics.get("avgNetEdgeAtEntryBps", 0),
         "totalRejected": rejection_diagnostics.get("totalRejected", 0),
+        "budget": payload.get("budget") or {},
     }
 
 
@@ -282,6 +342,7 @@ def _dashboard_details_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "recentActivity": payload.get("recentActivity") or [],
         "feeAnalytics": payload.get("feeAnalytics") or {},
         "rejectionDiagnostics": payload.get("rejectionDiagnostics") or {},
+        "budget": payload.get("budget") or {},
     }
 
 
@@ -293,7 +354,7 @@ def _analytics_cache_params(filters: AnalyticsFilters) -> dict[str, Any]:
         "symbol": filters.symbol,
         "start_at": _as_utc(filters.start_at).isoformat() if filters.start_at else None,
         "end_at": _as_utc(filters.end_at).isoformat() if filters.end_at else None,
-        "version": 1,
+        "version": 2,
     }
 
 
@@ -303,6 +364,7 @@ def _analytics_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "summary": payload.get("summary") or {},
         "availableStrategies": payload.get("availableStrategies") or [],
         "availableSymbols": payload.get("availableSymbols") or [],
+        "budget": payload.get("budget") or {},
     }
 
 
@@ -345,7 +407,7 @@ def _cached_analytics_payload(
     end_at: datetime | None,
     force_refresh: bool = False,
 ) -> dict[str, Any]:
-    filters = _analytics_filters(
+    filters, window_meta = _analytics_filters(
         user=user,
         trading_mode=trading_mode,
         strategy_name=strategy_name,
@@ -354,7 +416,7 @@ def _cached_analytics_payload(
         end_at=end_at,
     )
     cache = ReadModelCache(settings)
-    return cache.get_or_build(
+    payload = cache.get_or_build(
         namespace="analytics-v1",
         identity=str(user.id),
         params=_analytics_cache_params(filters),
@@ -362,6 +424,9 @@ def _cached_analytics_payload(
         force_refresh=force_refresh,
         builder=lambda: TradeReviewAnalyticsService(db).build_overview(filters),
     )
+    budget = dict(payload.get("budget") or {})
+    budget.update(window_meta)
+    return {**payload, "budget": budget}
 
 
 def _build_dashboard_payload(
@@ -449,7 +514,7 @@ def _build_dashboard_payload(
             ExecutionPosition.trading_mode == mode,
         )
         .order_by(ExecutionPosition.updated_at.desc())
-        .limit(50)
+        .limit(DASHBOARD_POSITIONS_LIMIT)
         .all()
     )
     if mode == TradingMode.LIVE.value and tenant_id is not None:
@@ -488,7 +553,7 @@ def _build_dashboard_payload(
             ExecutionOrder.state.in_(active_order_states),
         )
         .order_by(ExecutionOrder.created_at.desc())
-        .limit(20)
+        .limit(DASHBOARD_ACTIVE_TRADES_LIMIT)
         .all()
     )
 
@@ -511,14 +576,17 @@ def _build_dashboard_payload(
         for o in orders
     ]
 
+    now = datetime.now(UTC)
+    dashboard_cutoff = now - timedelta(days=DASHBOARD_HISTORY_LOOKBACK_DAYS)
     trades = (
         db.query(ExecutionTradeRecord)
         .filter(
             ExecutionTradeRecord.user_id == user.id,
             ExecutionTradeRecord.trading_mode == mode,
+            ExecutionTradeRecord.executed_at >= dashboard_cutoff,
         )
         .order_by(ExecutionTradeRecord.executed_at.desc())
-        .limit(20)
+        .limit(DASHBOARD_RECENT_ACTIVITY_LIMIT)
         .all()
     )
     recent_activity = [
@@ -534,7 +602,6 @@ def _build_dashboard_payload(
         for t in trades
     ]
 
-    now = datetime.now(UTC)
     today_cutoff = now - timedelta(days=1)
     week_cutoff = now - timedelta(days=7)
     month_cutoff = now - timedelta(days=30)
@@ -583,6 +650,7 @@ def _build_dashboard_payload(
         ).where(
             ExecutionTradeRecord.user_id == user.id,
             ExecutionTradeRecord.trading_mode == mode,
+            ExecutionTradeRecord.executed_at >= dashboard_cutoff,
         )
     ).one()
     fees_by_strategy_rows = db.execute(
@@ -593,10 +661,11 @@ def _build_dashboard_payload(
         .where(
             ExecutionTradeRecord.user_id == user.id,
             ExecutionTradeRecord.trading_mode == mode,
+            ExecutionTradeRecord.executed_at >= dashboard_cutoff,
         )
         .group_by(ExecutionTradeRecord.strategy_id)
         .order_by(func.sum(ExecutionTradeRecord.fee_cents).desc())
-        .limit(12)
+        .limit(DASHBOARD_FEE_BREAKDOWN_LIMIT)
     ).all()
     fees_by_symbol_rows = db.execute(
         select(
@@ -606,10 +675,11 @@ def _build_dashboard_payload(
         .where(
             ExecutionTradeRecord.user_id == user.id,
             ExecutionTradeRecord.trading_mode == mode,
+            ExecutionTradeRecord.executed_at >= dashboard_cutoff,
         )
         .group_by(ExecutionTradeRecord.symbol)
         .order_by(func.sum(ExecutionTradeRecord.fee_cents).desc())
-        .limit(12)
+        .limit(DASHBOARD_FEE_BREAKDOWN_LIMIT)
     ).all()
     fill_mix = db.execute(
         select(
@@ -625,6 +695,7 @@ def _build_dashboard_payload(
         ).where(
             ExecutionOrder.user_id == user.id,
             ExecutionOrder.trading_mode == mode,
+            ExecutionOrder.created_at >= dashboard_cutoff,
         )
     ).one()
     entry_order_stats = db.execute(
@@ -640,6 +711,7 @@ def _build_dashboard_payload(
             ExecutionOrder.trading_mode == mode,
             ExecutionOrder.side == "buy",
             ExecutionOrder.state.in_(("submitted", "pending", "partially_filled", "filled")),
+            ExecutionOrder.created_at >= dashboard_cutoff,
         )
     ).one()
     skipped_due_to_fees = int(
@@ -651,6 +723,7 @@ def _build_dashboard_payload(
                 RiskEvent.trading_mode == mode,
                 RiskEvent.detail.is_not(None),
                 RiskEvent.detail.ilike("%fee_economics%"),
+                RiskEvent.created_at >= dashboard_cutoff,
             )
         )
         or 0
@@ -666,9 +739,10 @@ def _build_dashboard_payload(
             StrategySignalSnapshot.trading_mode == mode,
             StrategyDecisionAudit.decision == "rejected",
             StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
+            StrategyDecisionAudit.created_at >= dashboard_cutoff,
         )
         .order_by(StrategyDecisionAudit.created_at.desc())
-        .limit(100)
+        .limit(DASHBOARD_REJECTION_EVENT_LIMIT)
         .all()
     )
     recent_risk_rejects = (
@@ -677,9 +751,10 @@ def _build_dashboard_payload(
             RiskEvent.user_id == user.id,
             RiskEvent.trading_mode == mode,
             RiskEvent.outcome == "reject",
+            RiskEvent.created_at >= dashboard_cutoff,
         )
         .order_by(RiskEvent.created_at.desc())
-        .limit(100)
+        .limit(DASHBOARD_REJECTION_EVENT_LIMIT)
         .all()
     )
     recent_failed_orders = (
@@ -688,6 +763,12 @@ def _build_dashboard_payload(
             ExecutionOrder.user_id == user.id,
             ExecutionOrder.trading_mode == mode,
             ExecutionOrder.state.in_(("failed", "cancelled")),
+            func.coalesce(
+                ExecutionOrder.failed_at,
+                ExecutionOrder.cancelled_at,
+                ExecutionOrder.updated_at,
+            )
+            >= dashboard_cutoff,
         )
         .order_by(
             func.coalesce(
@@ -696,7 +777,7 @@ def _build_dashboard_payload(
                 ExecutionOrder.updated_at,
             ).desc()
         )
-        .limit(100)
+        .limit(DASHBOARD_REJECTION_EVENT_LIMIT)
         .all()
     )
     strategy_reject_total = int(
@@ -712,6 +793,7 @@ def _build_dashboard_payload(
                 StrategySignalSnapshot.trading_mode == mode,
                 StrategyDecisionAudit.decision == "rejected",
                 StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
+                StrategyDecisionAudit.created_at >= dashboard_cutoff,
             )
         )
         or 0
@@ -724,6 +806,7 @@ def _build_dashboard_payload(
                 RiskEvent.user_id == user.id,
                 RiskEvent.trading_mode == mode,
                 RiskEvent.outcome == "reject",
+                RiskEvent.created_at >= dashboard_cutoff,
             )
         )
         or 0
@@ -736,6 +819,12 @@ def _build_dashboard_payload(
                 ExecutionOrder.user_id == user.id,
                 ExecutionOrder.trading_mode == mode,
                 ExecutionOrder.state.in_(("failed", "cancelled")),
+                func.coalesce(
+                    ExecutionOrder.failed_at,
+                    ExecutionOrder.cancelled_at,
+                    ExecutionOrder.updated_at,
+                )
+                >= dashboard_cutoff,
             )
         )
         or 0
@@ -803,7 +892,10 @@ def _build_dashboard_payload(
                 "net_pnl_cents"
             ),
         )
-        .where(ExecutionTradeRecord.user_id == user.id)
+        .where(
+            ExecutionTradeRecord.user_id == user.id,
+            ExecutionTradeRecord.executed_at >= dashboard_cutoff,
+        )
         .group_by(ExecutionTradeRecord.trading_mode)
     ).all()
     for row in comparison_rows:
@@ -833,6 +925,16 @@ def _build_dashboard_payload(
         "positions": positions,
         "activeTrades": active_trades,
         "recentActivity": recent_activity,
+        "budget": {
+            "historyLookbackDaysApplied": DASHBOARD_HISTORY_LOOKBACK_DAYS,
+            "positionLimit": DASHBOARD_POSITIONS_LIMIT,
+            "activeTradeLimit": DASHBOARD_ACTIVE_TRADES_LIMIT,
+            "recentActivityLimit": DASHBOARD_RECENT_ACTIVITY_LIMIT,
+            "feeBreakdownLimit": DASHBOARD_FEE_BREAKDOWN_LIMIT,
+            "rejectionEventLimit": DASHBOARD_REJECTION_EVENT_LIMIT,
+            "historyStartAt": dashboard_cutoff.isoformat(),
+            "historyEndAt": now.isoformat(),
+        },
         "feeAnalytics": {
             "grossPnl": round(total_mode_gross_pnl_cents / 100, 2),
             "netPnl": round(total_mode_net_pnl_cents / 100, 2),
@@ -988,6 +1090,7 @@ def read_trade_review_strategy_rows(
     )
     return {
         "filters": payload.get("filters") or {},
+        "budget": payload.get("budget") or {},
         "rows": payload.get("strategyPerformance") or [],
     }
 
@@ -1015,7 +1118,11 @@ def read_trade_review_token_rows(
         end_at=end_at,
         force_refresh=force_refresh,
     )
-    return {"filters": payload.get("filters") or {}, "rows": payload.get("tokenPerformance") or []}
+    return {
+        "filters": payload.get("filters") or {},
+        "budget": payload.get("budget") or {},
+        "rows": payload.get("tokenPerformance") or [],
+    }
 
 
 @router.get("/analytics/pairs")
@@ -1041,7 +1148,11 @@ def read_trade_review_pair_rows(
         end_at=end_at,
         force_refresh=force_refresh,
     )
-    return {"filters": payload.get("filters") or {}, "rows": payload.get("pairPerformance") or []}
+    return {
+        "filters": payload.get("filters") or {},
+        "budget": payload.get("budget") or {},
+        "rows": payload.get("pairPerformance") or [],
+    }
 
 
 @router.get("/analytics/rejections")
@@ -1069,6 +1180,7 @@ def read_trade_review_rejection_breakdown(
     )
     return {
         "filters": payload.get("filters") or {},
+        "budget": payload.get("budget") or {},
         "rejectionBreakdown": payload.get("rejectionBreakdown") or {},
     }
 
@@ -1098,6 +1210,7 @@ def read_trade_review_paper_live_comparison(
     )
     return {
         "filters": payload.get("filters") or {},
+        "budget": payload.get("budget") or {},
         "paperLiveComparison": payload.get("paperLiveComparison") or {},
     }
 

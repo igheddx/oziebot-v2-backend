@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import logging
-import time
 from datetime import UTC, datetime
-
-from redis import RedisError
 
 from oziebot_common.health import install_shutdown_handlers, start_health_server
 from oziebot_common.queues import (
     QueueNames,
-    brpop_json_any,
     disconnect_redis,
-    redis_from_url,
-    reset_redis_connection,
     risk_decision_from_json,
     trade_intent_from_json,
+)
+from oziebot_common.worker_runtime import (
+    DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
+    redis_client_for_worker,
+    run_redis_queue_worker,
 )
 
 from oziebot_execution_engine.adapters import (
@@ -29,18 +28,12 @@ from oziebot_execution_engine.service import ExecutionService
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("execution-engine")
 
-QUEUE_POP_TIMEOUT_SECONDS = 5
-REDIS_SOCKET_TIMEOUT_SECONDS = QUEUE_POP_TIMEOUT_SECONDS + 5
-REDIS_RETRY_DELAY_SECONDS = 1
-
 
 def main() -> None:
     settings = get_settings()
-    r = redis_from_url(
+    r = redis_client_for_worker(
         settings.redis_url,
-        probe=True,
-        socket_connect_timeout=3,
-        socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+        queue_pop_timeout_seconds=DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
     )
     coinbase_client = HttpCoinbaseExecutionClient(settings.coinbase_api_base_url)
     service = ExecutionService(
@@ -69,20 +62,10 @@ def main() -> None:
     keys = QueueNames.all_intent_approved_keys()
     log.info("execution-engine listening on %s", keys)
     last_reconcile = datetime.now(UTC)
-    health.mark_ready()
-    while not stop_event.is_set():
-        try:
-            got = brpop_json_any(r, keys, timeout=QUEUE_POP_TIMEOUT_SECONDS)
-        except RedisError as exc:
-            if stop_event.is_set():
-                break
-            health.mark_not_ready()
-            reset_redis_connection(r)
-            log.warning("redis_receive_failed error=%s", exc)
-            time.sleep(REDIS_RETRY_DELAY_SECONDS)
-            continue
+
+    def _reconcile_if_due() -> None:
+        nonlocal last_reconcile
         now = datetime.now(UTC)
-        health.mark_ready()
         if (
             now - last_reconcile
         ).total_seconds() >= settings.reconciliation_interval_seconds:
@@ -103,9 +86,8 @@ def main() -> None:
                 )
             last_reconcile = now
             health.touch()
-        if got is None:
-            continue
-        _queue_key, raw = got
+
+    def _handle_message(_queue_key: str, raw: dict[str, object]) -> None:
         intent = trade_intent_from_json(raw["intent"])
         risk = risk_decision_from_json(raw["risk"])
         result = service.process_queue_message(raw)
@@ -116,7 +98,18 @@ def main() -> None:
             risk.trading_mode.value,
             result.duplicated,
         )
-        health.touch()
+
+    run_redis_queue_worker(
+        worker_name="execution-engine",
+        redis_client=r,
+        queue_keys=keys,
+        stop_event=stop_event,
+        health=health,
+        handle_message=_handle_message,
+        logger=log,
+        on_iteration=_reconcile_if_due,
+        queue_pop_timeout_seconds=DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
+    )
     log.info("execution-engine shutdown complete")
 
 

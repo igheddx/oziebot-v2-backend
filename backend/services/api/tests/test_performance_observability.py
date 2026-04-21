@@ -46,3 +46,22 @@ def test_dashboard_response_exposes_timing_headers(
     assert float(response.headers["X-Oziebot-Request-Duration-Ms"]) >= 0
     assert int(response.headers["X-Oziebot-DB-Query-Count"]) >= 0
     assert float(response.headers["X-Oziebot-DB-Time-Ms"]) >= 0
+
+
+def test_dashboard_response_preserves_incoming_request_id(
+    client: TestClient,
+    regular_user_and_token: tuple[str, str],
+) -> None:
+    _, token = regular_user_and_token
+    request_id = "frontend-req-1234"
+
+    response = client.get(
+        "/v1/me/dashboard?trading_mode=paper",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-Oziebot-Request-Id": request_id,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["X-Oziebot-Request-Id"] == request_id

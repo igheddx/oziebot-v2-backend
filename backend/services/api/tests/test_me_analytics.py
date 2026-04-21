@@ -12,6 +12,7 @@ from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.strategy_signal_pipeline import StrategyRun, StrategySignalRecord
 from oziebot_api.models.trade_intelligence import TradeOutcomeFeature
 from oziebot_api.models.user import User
+from oziebot_api.services import trade_review_analytics
 
 
 def _seed_trade_review_data(db_session: Session, user: User, membership: TenantMembership) -> None:
@@ -414,3 +415,57 @@ def test_trade_review_analytics_pair_endpoint_honors_filters(
     assert payload["rows"][0]["strategyName"] == "momentum"
     assert payload["rows"][0]["symbol"] == "BTC-USD"
     assert payload["rows"][0]["tradingMode"] == "live"
+
+
+def test_trade_review_analytics_summary_clamps_lookback_window(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+    _seed_trade_review_data(db_session, user, membership)
+
+    requested_start_at = datetime.now(UTC) - timedelta(days=365)
+    requested_start_at_param = requested_start_at.isoformat().replace("+00:00", "Z")
+    response = client.get(
+        f"/v1/me/analytics/summary?trading_mode=paper&start_at={requested_start_at_param}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    budget = payload["budget"]
+    assert budget["windowClamped"] is True
+    assert budget["lookbackDaysApplied"] == 90
+    assert budget["requestedStartAt"] == requested_start_at.isoformat()
+    assert payload["filters"]["startAt"] == budget["startAt"]
+
+
+def test_trade_review_analytics_reports_budget_degradation(
+    client, regular_user_and_token, db_session: Session, monkeypatch
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+    _seed_trade_review_data(db_session, user, membership)
+    monkeypatch.setattr(trade_review_analytics, "ANALYTICS_DATASET_ROW_LIMIT", 1)
+    monkeypatch.setattr(trade_review_analytics, "ANALYTICS_GROUP_ROW_LIMIT", 1)
+
+    response = client.get(
+        "/v1/me/analytics/summary?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["budget"]["degraded"] is True
+    assert payload["budget"]["datasets"]["runs"]["truncated"] is True
+    assert "runs" in payload["budget"]["truncatedDatasets"]
