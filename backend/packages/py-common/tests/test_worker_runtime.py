@@ -70,3 +70,49 @@ def test_run_redis_queue_worker_recovers_from_redis_errors(monkeypatch) -> None:
     assert handled == [("queue:key", {"payload": 1})]
     assert iterations == ["tick", "tick"]
     assert health.snapshot()["ready"] is True
+
+
+def test_run_redis_queue_worker_opens_circuit_after_threshold(monkeypatch) -> None:
+    events: list[object] = [RedisError("boom-1"), RedisError("boom-2"), None]
+    reset_calls: list[str] = []
+    sleep_calls: list[int] = []
+    statuses_during_sleep: list[str] = []
+    stop_event = threading.Event()
+    health = HealthState("worker-runtime-circuit")
+
+    def fake_brpop_json_any(_redis, _keys, timeout: int):
+        item = events.pop(0)
+        if item is None:
+            stop_event.set()
+            return None
+        raise item
+
+    def fake_reset(_redis) -> None:
+        reset_calls.append("reset")
+
+    def fake_sleep(seconds: int) -> None:
+        sleep_calls.append(seconds)
+        statuses_during_sleep.append(str(health.snapshot()["status"]))
+
+    monkeypatch.setattr(worker_runtime, "brpop_json_any", fake_brpop_json_any)
+    monkeypatch.setattr(worker_runtime, "reset_redis_connection", fake_reset)
+    monkeypatch.setattr(worker_runtime.time, "sleep", fake_sleep)
+
+    run_redis_queue_worker(
+        worker_name="worker-runtime-circuit",
+        redis_client=_DummyRedis(),
+        queue_keys=["queue:key"],
+        stop_event=stop_event,
+        health=health,
+        handle_message=lambda _queue_key, _raw: None,
+        logger=logging.getLogger("worker-runtime-circuit"),
+        failure_threshold=2,
+        circuit_open_seconds=9,
+    )
+
+    assert reset_calls == ["reset", "reset"]
+    assert sleep_calls == [1, 9]
+    assert statuses_during_sleep == ["degraded", "degraded"]
+    snapshot = health.snapshot()
+    assert snapshot["status"] == "ok"
+    assert snapshot["degraded_reason"] is None

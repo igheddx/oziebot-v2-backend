@@ -14,6 +14,8 @@ from oziebot_common.queues import brpop_json_any, redis_from_url, reset_redis_co
 DEFAULT_QUEUE_POP_TIMEOUT_SECONDS = 5
 DEFAULT_REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS = 3
 DEFAULT_REDIS_RETRY_DELAY_SECONDS = 1
+DEFAULT_REDIS_FAILURE_THRESHOLD = 3
+DEFAULT_REDIS_CIRCUIT_OPEN_SECONDS = 15
 
 
 def redis_socket_timeout_seconds(queue_pop_timeout_seconds: int) -> int:
@@ -46,7 +48,10 @@ def run_redis_queue_worker(
     on_iteration: Callable[[], None] | None = None,
     queue_pop_timeout_seconds: int = DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
     retry_delay_seconds: int = DEFAULT_REDIS_RETRY_DELAY_SECONDS,
+    failure_threshold: int = DEFAULT_REDIS_FAILURE_THRESHOLD,
+    circuit_open_seconds: int = DEFAULT_REDIS_CIRCUIT_OPEN_SECONDS,
 ) -> None:
+    consecutive_failures = 0
     health.mark_ready()
     while not stop_event.is_set():
         try:
@@ -56,12 +61,36 @@ def run_redis_queue_worker(
         except RedisError as exc:
             if stop_event.is_set():
                 break
-            health.mark_not_ready()
+            consecutive_failures += 1
+            health.mark_degraded("redis_receive_failed")
             reset_redis_connection(redis_client)
-            logger.warning("%s redis_receive_failed error=%s", worker_name, exc)
-            time.sleep(retry_delay_seconds)
+            sleep_seconds = retry_delay_seconds
+            if consecutive_failures >= failure_threshold:
+                sleep_seconds = circuit_open_seconds
+                logger.warning(
+                    "%s redis_circuit_open consecutive_failures=%s sleep_seconds=%s error=%s",
+                    worker_name,
+                    consecutive_failures,
+                    sleep_seconds,
+                    exc,
+                )
+            else:
+                logger.warning(
+                    "%s redis_receive_failed consecutive_failures=%s error=%s",
+                    worker_name,
+                    consecutive_failures,
+                    exc,
+                )
+            time.sleep(sleep_seconds)
             continue
 
+        if consecutive_failures:
+            logger.info(
+                "%s redis_receive_recovered consecutive_failures=%s",
+                worker_name,
+                consecutive_failures,
+            )
+            consecutive_failures = 0
         health.mark_ready()
         if on_iteration is not None:
             on_iteration()

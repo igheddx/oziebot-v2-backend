@@ -19,6 +19,8 @@ class HealthState:
     service_name: str
     stale_after_seconds: int = 90
     ready: bool = False
+    degraded_reason: str | None = None
+    degraded_since: datetime | None = None
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_heartbeat_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -30,6 +32,8 @@ class HealthState:
     def mark_ready(self) -> None:
         with self._lock:
             self.ready = True
+            self.degraded_reason = None
+            self.degraded_since = None
             self.last_heartbeat_at = datetime.now(UTC)
 
     def mark_not_ready(self) -> None:
@@ -37,15 +41,37 @@ class HealthState:
             self.ready = False
             self.last_heartbeat_at = datetime.now(UTC)
 
+    def mark_degraded(self, reason: str) -> None:
+        with self._lock:
+            self.ready = False
+            if self.degraded_reason != reason:
+                self.degraded_since = datetime.now(UTC)
+            self.degraded_reason = reason
+            self.last_heartbeat_at = datetime.now(UTC)
+
+    def clear_degraded(self) -> None:
+        with self._lock:
+            self.degraded_reason = None
+            self.degraded_since = None
+            self.last_heartbeat_at = datetime.now(UTC)
+
     def snapshot(self) -> dict[str, object]:
         with self._lock:
             now = datetime.now(UTC)
             age_seconds = (now - self.last_heartbeat_at).total_seconds()
             healthy = age_seconds <= self.stale_after_seconds
+            status = "stale"
+            if healthy:
+                status = "degraded" if self.degraded_reason else "ok"
             return {
                 "service": self.service_name,
-                "status": "ok" if healthy else "stale",
-                "ready": self.ready and healthy,
+                "status": status,
+                "ready": self.ready and healthy and self.degraded_reason is None,
+                "degraded": self.degraded_reason is not None,
+                "degraded_reason": self.degraded_reason,
+                "degraded_since": self.degraded_since.isoformat()
+                if self.degraded_since
+                else None,
                 "started_at": self.started_at.isoformat(),
                 "last_heartbeat_at": self.last_heartbeat_at.isoformat(),
                 "stale_after_seconds": self.stale_after_seconds,
@@ -69,7 +95,7 @@ def start_health_server(service_name: str) -> HealthState:
             if self.path == "/health":
                 status_code = (
                     HTTPStatus.OK
-                    if snapshot["status"] == "ok"
+                    if snapshot["status"] in {"ok", "degraded"}
                     else HTTPStatus.SERVICE_UNAVAILABLE
                 )
             elif self.path == "/ready":

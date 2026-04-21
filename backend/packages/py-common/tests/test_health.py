@@ -35,3 +35,15 @@ def test_health_state_mark_not_ready_clears_readiness() -> None:
 
     assert snapshot["status"] == "ok"
     assert snapshot["ready"] is False
+
+
+def test_health_state_mark_degraded_reports_alive_but_not_ready() -> None:
+    state = HealthState(service_name="worker", stale_after_seconds=90)
+
+    state.mark_degraded("redis_receive_failed")
+    snapshot = state.snapshot()
+
+    assert snapshot["status"] == "degraded"
+    assert snapshot["degraded"] is True
+    assert snapshot["degraded_reason"] == "redis_receive_failed"
+    assert snapshot["ready"] is False
