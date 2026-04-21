@@ -569,6 +569,143 @@ def test_dashboard_details_does_not_fetch_live_coinbase_balances(
     payload = response.json()
     assert payload["positions"] == []
     assert payload["budget"]["historyLookbackDaysApplied"] == 30
+    assert payload["rejectionDiagnostics"]["totalRejected"] == 0
+    assert payload["feeAnalytics"]["skippedTradesDueToFees"] == 0
+
+
+def test_dashboard_details_ignores_rejection_history(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    snapshot_id = uuid.uuid4()
+    failed_order_id = uuid.uuid4()
+    db_session.add(
+        StrategySignalSnapshot(
+            id=snapshot_id,
+            user_id=user.id,
+            tenant_id=membership.tenant_id,
+            trading_mode="paper",
+            strategy_name="momentum",
+            token_symbol="BTC-USD",
+            timestamp=now,
+            current_price=65000,
+            best_bid=64990,
+            best_ask=65010,
+            spread_pct=0.0003,
+            estimated_slippage_pct=0.0008,
+            volume=1000000,
+            volatility=0.01,
+            confidence_score=0.72,
+            raw_feature_json={"momentum_value": 0.014},
+            token_policy_status="allowed",
+            token_policy_multiplier=1,
+        )
+    )
+    db_session.add(
+        StrategyDecisionAudit(
+            signal_snapshot_id=snapshot_id,
+            stage="suppression",
+            decision="rejected",
+            reason_code="max_open_positions reached",
+            reason_detail="Strategy suppression blocked new buy",
+            size_before=0.25,
+            size_after=0,
+            created_at=now,
+        )
+    )
+    db_session.add(
+        RiskEvent(
+            id=uuid.uuid4(),
+            signal_id=uuid.uuid4(),
+            run_id=uuid.uuid4(),
+            user_id=user.id,
+            strategy_name="momentum",
+            symbol="BTC-USD",
+            trading_mode="paper",
+            outcome="reject",
+            reason="policy",
+            detail="fee_economics: Expected net edge below threshold",
+            original_size="0.25",
+            final_size="0",
+            trace_id="risk-dashboard-details",
+            rules_evaluated={"rules": ["fee_economics"]},
+            signal_payload={},
+            created_at=now,
+        )
+    )
+    db_session.add(
+        ExecutionOrder(
+            id=failed_order_id,
+            intent_id=uuid.uuid4(),
+            correlation_id=uuid.uuid4(),
+            tenant_id=membership.tenant_id,
+            user_id=user.id,
+            strategy_id="momentum",
+            symbol="BTC-USD",
+            side="buy",
+            order_type="market",
+            trading_mode="paper",
+            venue="coinbase",
+            state="failed",
+            quantity="0.25",
+            requested_notional_cents=10_000,
+            reserved_cash_cents=0,
+            locked_cash_cents=0,
+            filled_quantity="0",
+            avg_fill_price=None,
+            fees_cents=0,
+            expected_gross_edge_bps=100,
+            estimated_fee_bps=90,
+            estimated_slippage_bps=8,
+            estimated_total_cost_bps=98,
+            expected_net_edge_bps=2,
+            execution_preference="taker_allowed",
+            fallback_behavior="cancel",
+            maker_timeout_seconds=0,
+            limit_price_offset_bps=0,
+            actual_fill_type=None,
+            fallback_triggered=False,
+            idempotency_key="idem-dashboard-details",
+            client_order_id="client-dashboard-details",
+            venue_order_id=None,
+            failure_code="venue_error",
+            failure_detail="Synthetic failed order for details regression",
+            trace_id="execution-dashboard-details",
+            intent_payload={},
+            risk_payload={},
+            adapter_payload={},
+            created_at=now,
+            updated_at=now,
+            submitted_at=None,
+            completed_at=None,
+            cancelled_at=None,
+            failed_at=now,
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/details?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["rejectionDiagnostics"] == {
+        "totalRejected": 0,
+        "byStage": [],
+        "breakdown": [],
+        "recent": [],
+    }
+    assert payload["feeAnalytics"]["skippedTradesDueToFees"] == 0
 
 
 @patch("oziebot_api.api.v1.me.load_live_coinbase_accounts")
