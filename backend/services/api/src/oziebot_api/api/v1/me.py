@@ -17,6 +17,7 @@ from oziebot_api.deps.auth import CurrentUser
 from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.execution import ExecutionOrder, ExecutionPosition, ExecutionTradeRecord
+from oziebot_api.models.market_data import MarketDataBboSnapshot
 from oziebot_api.models.platform_strategy import PlatformStrategy
 from oziebot_api.models.strategy_allocation import StrategyCapitalBucket
 from oziebot_api.models.trade_intelligence import (
@@ -52,6 +53,7 @@ DASHBOARD_ACTIVE_TRADES_LIMIT = 20
 DASHBOARD_RECENT_ACTIVITY_LIMIT = 20
 DASHBOARD_FEE_BREAKDOWN_LIMIT = 12
 DASHBOARD_REJECTION_EVENT_LIMIT = 100
+DASHBOARD_POSITION_DUST_NOTIONAL_USD = Decimal("1")
 ANALYTICS_DEFAULT_LOOKBACK_DAYS = 30
 ANALYTICS_MAX_LOOKBACK_DAYS = 90
 
@@ -274,6 +276,44 @@ def _build_rejection_diagnostics(
     }
 
 
+def _latest_symbol_marks(db: DbSession, symbols: list[str]) -> dict[str, Decimal]:
+    normalized_symbols = sorted({str(symbol or "").upper() for symbol in symbols if symbol})
+    if not normalized_symbols:
+        return {}
+
+    latest_bbo_times = (
+        select(
+            MarketDataBboSnapshot.product_id.label("product_id"),
+            func.max(MarketDataBboSnapshot.event_time).label("event_time"),
+        )
+        .where(MarketDataBboSnapshot.product_id.in_(normalized_symbols))
+        .group_by(MarketDataBboSnapshot.product_id)
+        .subquery()
+    )
+    rows = db.execute(
+        select(
+            MarketDataBboSnapshot.product_id,
+            MarketDataBboSnapshot.best_bid_price,
+            MarketDataBboSnapshot.best_ask_price,
+        ).join(
+            latest_bbo_times,
+            (MarketDataBboSnapshot.product_id == latest_bbo_times.c.product_id)
+            & (MarketDataBboSnapshot.event_time == latest_bbo_times.c.event_time),
+        )
+    ).all()
+    marks: dict[str, Decimal] = {}
+    for product_id, bid_price, ask_price in rows:
+        bid = _to_decimal(str(bid_price))
+        ask = _to_decimal(str(ask_price))
+        if bid > 0 and ask > 0:
+            marks[str(product_id).upper()] = (bid + ask) / Decimal("2")
+        elif bid > 0:
+            marks[str(product_id).upper()] = bid
+        elif ask > 0:
+            marks[str(product_id).upper()] = ask
+    return marks
+
+
 def _live_coinbase_balance_snapshot(
     db: DbSession,
     user: User,
@@ -284,6 +324,7 @@ def _live_coinbase_balance_snapshot(
     if accounts is None:
         return None
 
+    symbol_marks = _latest_symbol_marks(db, [row.symbol for row in positions_rows])
     mark_prices: dict[str, Decimal] = {}
     for row in positions_rows:
         symbol = (row.symbol or "").upper()
@@ -291,7 +332,9 @@ def _live_coinbase_balance_snapshot(
             continue
         base_currency = symbol.split("-", 1)[0]
         if base_currency and base_currency not in mark_prices:
-            mark_prices[base_currency] = _to_decimal(row.avg_entry_price)
+            mark_prices[base_currency] = symbol_marks.get(symbol) or _to_decimal(
+                row.avg_entry_price
+            )
 
     available_balance_cents = sum_coinbase_cash_cents(accounts, include_hold=False)
     portfolio_cents = sum_coinbase_cash_cents(accounts, include_hold=True)
@@ -345,6 +388,16 @@ def _dashboard_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "avgNetEdgeAtEntryBps": fee_analytics.get("avgNetEdgeAtEntryBps", 0),
         "totalRejected": rejection_diagnostics.get("totalRejected", 0),
         "budget": payload.get("budget") or {},
+    }
+
+
+def _dashboard_rejection_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "windowHours": payload.get("windowHours", 24),
+        "budget": payload.get("budget") or {},
+        "rejectionDiagnostics": payload.get("rejectionDiagnostics")
+        or {"totalRejected": 0, "byStage": [], "breakdown": [], "recent": []},
+        "skippedTradesDueToFees": payload.get("skippedTradesDueToFees", 0),
     }
 
 
@@ -494,6 +547,37 @@ def _cached_dashboard_details_payload(
             settings=settings,
             use_live_balances=False,
             include_rejection_diagnostics=False,
+        ),
+    )
+
+
+def _cached_dashboard_rejection_payload(
+    *,
+    user: User,
+    db: DbSession,
+    settings: Settings,
+    trading_mode: TradingMode | None,
+    window_hours: int,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    mode = _dashboard_mode(user, trading_mode)
+    cache = ReadModelCache(settings)
+    return cache.get_or_build(
+        namespace="dashboard-rejections-v1",
+        identity=str(user.id),
+        params={
+            "user_id": str(user.id),
+            "trading_mode": mode,
+            "window_hours": window_hours,
+            "version": 1,
+        },
+        ttl_seconds=DASHBOARD_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        builder=lambda: _build_dashboard_rejection_history_payload(
+            user=user,
+            db=db,
+            trading_mode=trading_mode,
+            window_hours=window_hours,
         ),
     )
 
@@ -703,6 +787,124 @@ def _build_dashboard_summary_payload(
     }
 
 
+def _build_dashboard_rejection_history_payload(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    *,
+    window_hours: int,
+) -> dict[str, Any]:
+    mode = _dashboard_mode(user, trading_mode)
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(hours=window_hours)
+
+    strategy_audits = (
+        db.query(StrategyDecisionAudit, StrategySignalSnapshot)
+        .join(
+            StrategySignalSnapshot,
+            StrategyDecisionAudit.signal_snapshot_id == StrategySignalSnapshot.id,
+        )
+        .filter(
+            StrategySignalSnapshot.user_id == user.id,
+            StrategySignalSnapshot.trading_mode == mode,
+            StrategyDecisionAudit.decision == "rejected",
+            StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
+            StrategyDecisionAudit.created_at >= cutoff,
+        )
+        .order_by(StrategyDecisionAudit.created_at.desc())
+        .limit(DASHBOARD_REJECTION_EVENT_LIMIT)
+        .all()
+    )
+    recent_risk_rejects = (
+        db.query(RiskEvent)
+        .filter(
+            RiskEvent.user_id == user.id,
+            RiskEvent.trading_mode == mode,
+            RiskEvent.outcome == "reject",
+            RiskEvent.created_at >= cutoff,
+        )
+        .order_by(RiskEvent.created_at.desc())
+        .limit(DASHBOARD_REJECTION_EVENT_LIMIT)
+        .all()
+    )
+    recent_failed_orders = (
+        db.query(ExecutionOrder)
+        .filter(
+            ExecutionOrder.user_id == user.id,
+            ExecutionOrder.trading_mode == mode,
+            ExecutionOrder.state.in_(("failed", "cancelled")),
+            func.coalesce(
+                ExecutionOrder.failed_at,
+                ExecutionOrder.cancelled_at,
+                ExecutionOrder.updated_at,
+            )
+            >= cutoff,
+        )
+        .order_by(
+            func.coalesce(
+                ExecutionOrder.failed_at,
+                ExecutionOrder.cancelled_at,
+                ExecutionOrder.updated_at,
+            ).desc()
+        )
+        .limit(DASHBOARD_REJECTION_EVENT_LIMIT)
+        .all()
+    )
+    rejection_diagnostics = _build_rejection_diagnostics(
+        strategy_records=[
+            _format_rejection_record(
+                stage=str(audit.stage),
+                reason_code=audit.reason_code,
+                reason_detail=audit.reason_detail,
+                strategy=snapshot.strategy_name,
+                symbol=snapshot.token_symbol,
+                created_at=audit.created_at,
+            )
+            for audit, snapshot in strategy_audits
+        ],
+        risk_records=[
+            _format_rejection_record(
+                stage="risk",
+                reason_code=event.reason,
+                reason_detail=event.detail,
+                strategy=event.strategy_name,
+                symbol=event.symbol,
+                created_at=event.created_at,
+            )
+            for event in recent_risk_rejects
+        ],
+        execution_records=[
+            _format_rejection_record(
+                stage="execution",
+                reason_code=order.failure_code or order.state,
+                reason_detail=order.failure_detail or f"Order {order.state}",
+                strategy=order.strategy_id,
+                symbol=order.symbol,
+                created_at=order.failed_at or order.cancelled_at or order.updated_at,
+            )
+            for order in recent_failed_orders
+        ],
+    )
+    skipped_trades_due_to_fees = sum(
+        1 for event in recent_risk_rejects if "fee_economics" in str(event.detail or "").lower()
+    )
+    return {
+        "windowHours": window_hours,
+        "budget": {
+            "windowHours": window_hours,
+            "eventLimit": DASHBOARD_REJECTION_EVENT_LIMIT,
+            "startAt": cutoff.isoformat(),
+            "endAt": now.isoformat(),
+            "capped": any(
+                len(items) >= DASHBOARD_REJECTION_EVENT_LIMIT
+                for items in (strategy_audits, recent_risk_rejects, recent_failed_orders)
+            ),
+        },
+        "rejectionDiagnostics": rejection_diagnostics,
+        "skippedTradesDueToFees": skipped_trades_due_to_fees,
+    }
+
+
 def _build_dashboard_payload(
     user: CurrentUser,
     db: DbSession,
@@ -799,13 +1001,18 @@ def _build_dashboard_payload(
             portfolio_value = portfolio_cents / 100
             base = max(1.0, portfolio_value - pnl_value)
             pnl_percent = (pnl_value / base) * 100
+    position_marks = _latest_symbol_marks(db, [row.symbol for row in positions_rows])
     positions: list[dict[str, Any]] = []
     for row in positions_rows:
         qty = _to_float(row.quantity)
         if abs(qty) <= 0.0:
             continue
-        mark = _to_float(row.avg_entry_price)
-        exposure = qty * mark
+        entry_price = _to_float(row.avg_entry_price)
+        mark = float(position_marks.get((row.symbol or "").upper()) or Decimal(str(entry_price)))
+        exposure = abs(qty) * mark
+        if exposure < float(DASHBOARD_POSITION_DUST_NOTIONAL_USD):
+            continue
+        unrealized_pnl = (mark - entry_price) * qty
         positions.append(
             {
                 "id": str(row.id),
@@ -813,8 +1020,9 @@ def _build_dashboard_payload(
                 "strategy": row.strategy_id,
                 "side": "long" if qty >= 0 else "short",
                 "quantity": row.quantity,
+                "entryPrice": entry_price,
                 "markPrice": mark,
-                "unrealizedPnl": 0,
+                "unrealizedPnl": unrealized_pnl,
                 "exposure": exposure,
             }
         )
@@ -1297,6 +1505,28 @@ def dashboard_summary_details(
         force_refresh=force_refresh,
     )
     return _dashboard_details_payload(payload)
+
+
+@router.get("/dashboard/rejections")
+def dashboard_rejection_history(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    window_hours: int = Query(default=24),
+    force_refresh: bool = Query(default=False),
+    settings: Settings = Depends(settings_dep),
+) -> dict[str, Any]:
+    if window_hours not in {1, 3, 6, 24, 48}:
+        raise HTTPException(status_code=422, detail="window_hours must be one of 1, 3, 6, 24, 48")
+    payload = _cached_dashboard_rejection_payload(
+        user=user,
+        db=db,
+        settings=settings,
+        trading_mode=trading_mode,
+        window_hours=window_hours,
+        force_refresh=force_refresh,
+    )
+    return _dashboard_rejection_payload(payload)
 
 
 @router.get("/analytics")

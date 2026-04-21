@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.models.exchange_connection import ExchangeConnection
 from oziebot_api.models.execution import ExecutionOrder, ExecutionPosition, ExecutionTradeRecord
+from oziebot_api.models.market_data import MarketDataBboSnapshot
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.strategy_allocation import StrategyCapitalBucket
@@ -706,6 +707,222 @@ def test_dashboard_details_ignores_rejection_history(
         "recent": [],
     }
     assert payload["feeAnalytics"]["skippedTradesDueToFees"] == 0
+
+
+def test_dashboard_rejections_are_loaded_from_bounded_endpoint(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    snapshot_id = uuid.uuid4()
+    failed_order_id = uuid.uuid4()
+    db_session.add(
+        StrategySignalSnapshot(
+            id=snapshot_id,
+            user_id=user.id,
+            tenant_id=membership.tenant_id,
+            trading_mode="paper",
+            strategy_name="momentum",
+            token_symbol="BTC-USD",
+            timestamp=now,
+            current_price=65000,
+            best_bid=64990,
+            best_ask=65010,
+            spread_pct=0.0003,
+            estimated_slippage_pct=0.0008,
+            volume=1000000,
+            volatility=0.01,
+            confidence_score=0.72,
+            raw_feature_json={"momentum_value": 0.014},
+            token_policy_status="allowed",
+            token_policy_multiplier=1,
+        )
+    )
+    db_session.add(
+        StrategyDecisionAudit(
+            signal_snapshot_id=snapshot_id,
+            stage="suppression",
+            decision="rejected",
+            reason_code="max_open_positions reached",
+            reason_detail="Strategy suppression blocked new buy",
+            size_before=0.25,
+            size_after=0,
+            created_at=now,
+        )
+    )
+    db_session.add(
+        RiskEvent(
+            id=uuid.uuid4(),
+            signal_id=uuid.uuid4(),
+            run_id=uuid.uuid4(),
+            user_id=user.id,
+            strategy_name="momentum",
+            symbol="BTC-USD",
+            trading_mode="paper",
+            outcome="reject",
+            reason="policy",
+            detail="fee_economics: Expected net edge below threshold",
+            original_size="0.25",
+            final_size="0",
+            trace_id="risk-dashboard-rejections",
+            rules_evaluated={"rules": ["fee_economics"]},
+            signal_payload={},
+            created_at=now,
+        )
+    )
+    db_session.add(
+        ExecutionOrder(
+            id=failed_order_id,
+            intent_id=uuid.uuid4(),
+            correlation_id=uuid.uuid4(),
+            tenant_id=membership.tenant_id,
+            user_id=user.id,
+            strategy_id="momentum",
+            symbol="BTC-USD",
+            side="buy",
+            order_type="market",
+            trading_mode="paper",
+            venue="coinbase",
+            state="failed",
+            quantity="0.25",
+            requested_notional_cents=10_000,
+            reserved_cash_cents=0,
+            locked_cash_cents=0,
+            filled_quantity="0",
+            avg_fill_price=None,
+            fees_cents=0,
+            expected_gross_edge_bps=100,
+            estimated_fee_bps=90,
+            estimated_slippage_bps=8,
+            estimated_total_cost_bps=98,
+            expected_net_edge_bps=2,
+            execution_preference="taker_allowed",
+            fallback_behavior="cancel",
+            maker_timeout_seconds=0,
+            limit_price_offset_bps=0,
+            actual_fill_type=None,
+            fallback_triggered=False,
+            idempotency_key="idem-dashboard-rejections",
+            client_order_id="client-dashboard-rejections",
+            venue_order_id=None,
+            failure_code="venue_error",
+            failure_detail="Synthetic failed order for rejections regression",
+            trace_id="execution-dashboard-rejections",
+            intent_payload={},
+            risk_payload={},
+            adapter_payload={},
+            created_at=now,
+            updated_at=now,
+            submitted_at=None,
+            completed_at=None,
+            cancelled_at=None,
+            failed_at=now,
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/rejections?trading_mode=paper&window_hours=24&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["windowHours"] == 24
+    assert payload["skippedTradesDueToFees"] == 1
+    assert payload["rejectionDiagnostics"]["totalRejected"] == 3
+    assert {row["stage"] for row in payload["rejectionDiagnostics"]["byStage"]} == {
+        "suppression",
+        "risk",
+        "execution",
+    }
+
+
+def test_dashboard_details_use_market_marks_and_hide_dust_positions(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    db_session.add_all(
+        [
+            ExecutionPosition(
+                id=uuid.uuid4(),
+                tenant_id=membership.tenant_id,
+                user_id=user.id,
+                strategy_id="momentum",
+                symbol="OP-USD",
+                trading_mode="paper",
+                quantity="24",
+                avg_entry_price="0.12",
+                realized_pnl_cents=0,
+                created_at=now,
+                updated_at=now,
+            ),
+            ExecutionPosition(
+                id=uuid.uuid4(),
+                tenant_id=membership.tenant_id,
+                user_id=user.id,
+                strategy_id="momentum",
+                symbol="ZORA-USD",
+                trading_mode="paper",
+                quantity="0.01",
+                avg_entry_price="0.50",
+                realized_pnl_cents=0,
+                created_at=now,
+                updated_at=now,
+            ),
+            MarketDataBboSnapshot(
+                source="coinbase",
+                product_id="OP-USD",
+                best_bid_price=0.99,
+                best_bid_size=100,
+                best_ask_price=1.01,
+                best_ask_size=100,
+                event_time=now,
+                ingest_time=now,
+            ),
+            MarketDataBboSnapshot(
+                source="coinbase",
+                product_id="ZORA-USD",
+                best_bid_price=0.49,
+                best_bid_size=100,
+                best_ask_price=0.51,
+                best_ask_size=100,
+                event_time=now,
+                ingest_time=now,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/details?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert len(payload["positions"]) == 1
+    position = payload["positions"][0]
+    assert position["symbol"] == "OP-USD"
+    assert position["entryPrice"] == 0.12
+    assert position["markPrice"] == 1.0
+    assert abs(position["unrealizedPnl"] - 21.12) < 1e-9
+    assert position["exposure"] == 24.0
 
 
 @patch("oziebot_api.api.v1.me.load_live_coinbase_accounts")
