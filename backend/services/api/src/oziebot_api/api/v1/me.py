@@ -39,9 +39,13 @@ from oziebot_api.services.trade_review_analytics import (
     TradeReviewAnalyticsService,
 )
 from oziebot_api.services.trading_mode_policy import can_set_trading_mode
+from oziebot_api.services.read_model_cache import ReadModelCache
 from oziebot_domain.trading_mode import TradingMode
 
 router = APIRouter(prefix="/me", tags=["me"])
+
+DASHBOARD_CACHE_TTL_SECONDS = 30
+ANALYTICS_CACHE_TTL_SECONDS = 120
 
 
 def _build_me(db: DbSession, user: User) -> MeOut:
@@ -247,12 +251,124 @@ def _live_coinbase_balance_snapshot(
     return available_balance_cents, portfolio_cents
 
 
-@router.get("/dashboard")
-def dashboard_summary(
+def _dashboard_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 1}
+
+
+def _dashboard_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    fee_analytics = payload.get("feeAnalytics") or {}
+    rejection_diagnostics = payload.get("rejectionDiagnostics") or {}
+    return {
+        "availableBalance": payload.get("availableBalance", 0),
+        "portfolioValue": payload.get("portfolioValue", 0),
+        "pnlValue": payload.get("pnlValue", 0),
+        "pnlPercent": payload.get("pnlPercent", 0),
+        "gainLossLabel": payload.get("gainLossLabel", "P&L"),
+        "growth": payload.get("growth") or [],
+        "positionsCount": len(payload.get("positions") or []),
+        "activeTradesCount": len(payload.get("activeTrades") or []),
+        "recentActivityCount": len(payload.get("recentActivity") or []),
+        "totalFeesMonth": fee_analytics.get("totalFeesMonth", 0),
+        "avgNetEdgeAtEntryBps": fee_analytics.get("avgNetEdgeAtEntryBps", 0),
+        "totalRejected": rejection_diagnostics.get("totalRejected", 0),
+    }
+
+
+def _dashboard_details_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "enabledStrategies": payload.get("enabledStrategies") or [],
+        "positions": payload.get("positions") or [],
+        "activeTrades": payload.get("activeTrades") or [],
+        "recentActivity": payload.get("recentActivity") or [],
+        "feeAnalytics": payload.get("feeAnalytics") or {},
+        "rejectionDiagnostics": payload.get("rejectionDiagnostics") or {},
+    }
+
+
+def _analytics_cache_params(filters: AnalyticsFilters) -> dict[str, Any]:
+    return {
+        "user_id": str(filters.user_id),
+        "trading_mode": filters.trading_mode,
+        "strategy_name": filters.strategy_name,
+        "symbol": filters.symbol,
+        "start_at": _as_utc(filters.start_at).isoformat() if filters.start_at else None,
+        "end_at": _as_utc(filters.end_at).isoformat() if filters.end_at else None,
+        "version": 1,
+    }
+
+
+def _analytics_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "filters": payload.get("filters") or {},
+        "summary": payload.get("summary") or {},
+        "availableStrategies": payload.get("availableStrategies") or [],
+        "availableSymbols": payload.get("availableSymbols") or [],
+    }
+
+
+def _cached_dashboard_payload(
+    *,
+    user: User,
+    db: DbSession,
+    settings: Settings,
+    trading_mode: TradingMode | None,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    mode = (
+        trading_mode.value if trading_mode is not None else (user.current_trading_mode or "paper")
+    )
+    cache = ReadModelCache(settings)
+    return cache.get_or_build(
+        namespace="dashboard-v1",
+        identity=str(user.id),
+        params=_dashboard_cache_params(user=user, trading_mode=mode),
+        ttl_seconds=DASHBOARD_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        builder=lambda: _build_dashboard_payload(
+            user=user,
+            db=db,
+            trading_mode=trading_mode,
+            settings=settings,
+        ),
+    )
+
+
+def _cached_analytics_payload(
+    *,
+    user: User,
+    db: DbSession,
+    settings: Settings,
+    trading_mode: TradingMode | None,
+    strategy_name: str | None,
+    symbol: str | None,
+    start_at: datetime | None,
+    end_at: datetime | None,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    filters = _analytics_filters(
+        user=user,
+        trading_mode=trading_mode,
+        strategy_name=strategy_name,
+        symbol=symbol,
+        start_at=start_at,
+        end_at=end_at,
+    )
+    cache = ReadModelCache(settings)
+    return cache.get_or_build(
+        namespace="analytics-v1",
+        identity=str(user.id),
+        params=_analytics_cache_params(filters),
+        ttl_seconds=ANALYTICS_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        builder=lambda: TradeReviewAnalyticsService(db).build_overview(filters),
+    )
+
+
+def _build_dashboard_payload(
     user: CurrentUser,
     db: DbSession,
+    settings: Settings,
     trading_mode: TradingMode | None = None,
-    settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
     mode = (
         trading_mode.value if trading_mode is not None else (user.current_trading_mode or "paper")
@@ -743,6 +859,59 @@ def dashboard_summary(
     }
 
 
+@router.get("/dashboard")
+def dashboard_summary(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    force_refresh: bool = Query(default=False),
+    settings: Settings = Depends(settings_dep),
+) -> dict[str, Any]:
+    return _cached_dashboard_payload(
+        user=user,
+        db=db,
+        settings=settings,
+        trading_mode=trading_mode,
+        force_refresh=force_refresh,
+    )
+
+
+@router.get("/dashboard/summary")
+def dashboard_summary_overview(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    force_refresh: bool = Query(default=False),
+    settings: Settings = Depends(settings_dep),
+) -> dict[str, Any]:
+    payload = _cached_dashboard_payload(
+        user=user,
+        db=db,
+        settings=settings,
+        trading_mode=trading_mode,
+        force_refresh=force_refresh,
+    )
+    return _dashboard_summary_payload(payload)
+
+
+@router.get("/dashboard/details")
+def dashboard_summary_details(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    force_refresh: bool = Query(default=False),
+    settings: Settings = Depends(settings_dep),
+) -> dict[str, Any]:
+    payload = _cached_dashboard_payload(
+        user=user,
+        db=db,
+        settings=settings,
+        trading_mode=trading_mode,
+        force_refresh=force_refresh,
+    )
+    return _dashboard_details_payload(payload)
+
+
 @router.get("/analytics")
 def read_trade_review_analytics(
     user: CurrentUser,
@@ -752,18 +921,46 @@ def read_trade_review_analytics(
     symbol: str | None = Query(default=None),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
-    service = TradeReviewAnalyticsService(db)
-    return service.build_overview(
-        _analytics_filters(
-            user=user,
-            trading_mode=trading_mode,
-            strategy_name=strategy_name,
-            symbol=symbol,
-            start_at=start_at,
-            end_at=end_at,
-        )
+    return _cached_analytics_payload(
+        user=user,
+        db=db,
+        settings=settings,
+        trading_mode=trading_mode,
+        strategy_name=strategy_name,
+        symbol=symbol,
+        start_at=start_at,
+        end_at=end_at,
+        force_refresh=force_refresh,
     )
+
+
+@router.get("/analytics/summary")
+def read_trade_review_analytics_summary(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    strategy_name: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    start_at: datetime | None = Query(default=None),
+    end_at: datetime | None = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    settings: Settings = Depends(settings_dep),
+) -> dict[str, Any]:
+    payload = _cached_analytics_payload(
+        user=user,
+        db=db,
+        settings=settings,
+        trading_mode=trading_mode,
+        strategy_name=strategy_name,
+        symbol=symbol,
+        start_at=start_at,
+        end_at=end_at,
+        force_refresh=force_refresh,
+    )
+    return _analytics_summary_payload(payload)
 
 
 @router.get("/analytics/strategies")
@@ -775,19 +972,23 @@ def read_trade_review_strategy_rows(
     symbol: str | None = Query(default=None),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
-    service = TradeReviewAnalyticsService(db)
-    filters = _analytics_filters(
+    payload = _cached_analytics_payload(
         user=user,
+        db=db,
+        settings=settings,
         trading_mode=trading_mode,
         strategy_name=strategy_name,
         symbol=symbol,
         start_at=start_at,
         end_at=end_at,
+        force_refresh=force_refresh,
     )
     return {
-        "filters": service.filters_payload(filters),
-        "rows": service.build_strategy_rows(filters),
+        "filters": payload.get("filters") or {},
+        "rows": payload.get("strategyPerformance") or [],
     }
 
 
@@ -800,17 +1001,21 @@ def read_trade_review_token_rows(
     symbol: str | None = Query(default=None),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
-    service = TradeReviewAnalyticsService(db)
-    filters = _analytics_filters(
+    payload = _cached_analytics_payload(
         user=user,
+        db=db,
+        settings=settings,
         trading_mode=trading_mode,
         strategy_name=strategy_name,
         symbol=symbol,
         start_at=start_at,
         end_at=end_at,
+        force_refresh=force_refresh,
     )
-    return {"filters": service.filters_payload(filters), "rows": service.build_token_rows(filters)}
+    return {"filters": payload.get("filters") or {}, "rows": payload.get("tokenPerformance") or []}
 
 
 @router.get("/analytics/pairs")
@@ -822,17 +1027,79 @@ def read_trade_review_pair_rows(
     symbol: str | None = Query(default=None),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
-    service = TradeReviewAnalyticsService(db)
-    filters = _analytics_filters(
+    payload = _cached_analytics_payload(
         user=user,
+        db=db,
+        settings=settings,
         trading_mode=trading_mode,
         strategy_name=strategy_name,
         symbol=symbol,
         start_at=start_at,
         end_at=end_at,
+        force_refresh=force_refresh,
     )
-    return {"filters": service.filters_payload(filters), "rows": service.build_pair_rows(filters)}
+    return {"filters": payload.get("filters") or {}, "rows": payload.get("pairPerformance") or []}
+
+
+@router.get("/analytics/rejections")
+def read_trade_review_rejection_breakdown(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    strategy_name: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    start_at: datetime | None = Query(default=None),
+    end_at: datetime | None = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    settings: Settings = Depends(settings_dep),
+) -> dict[str, Any]:
+    payload = _cached_analytics_payload(
+        user=user,
+        db=db,
+        settings=settings,
+        trading_mode=trading_mode,
+        strategy_name=strategy_name,
+        symbol=symbol,
+        start_at=start_at,
+        end_at=end_at,
+        force_refresh=force_refresh,
+    )
+    return {
+        "filters": payload.get("filters") or {},
+        "rejectionBreakdown": payload.get("rejectionBreakdown") or {},
+    }
+
+
+@router.get("/analytics/comparison")
+def read_trade_review_paper_live_comparison(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    strategy_name: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    start_at: datetime | None = Query(default=None),
+    end_at: datetime | None = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    settings: Settings = Depends(settings_dep),
+) -> dict[str, Any]:
+    payload = _cached_analytics_payload(
+        user=user,
+        db=db,
+        settings=settings,
+        trading_mode=trading_mode,
+        strategy_name=strategy_name,
+        symbol=symbol,
+        start_at=start_at,
+        end_at=end_at,
+        force_refresh=force_refresh,
+    )
+    return {
+        "filters": payload.get("filters") or {},
+        "paperLiveComparison": payload.get("paperLiveComparison") or {},
+    }
 
 
 @router.patch("/trading-mode", response_model=MeOut)
