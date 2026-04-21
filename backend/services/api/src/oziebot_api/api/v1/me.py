@@ -56,6 +56,10 @@ ANALYTICS_DEFAULT_LOOKBACK_DAYS = 30
 ANALYTICS_MAX_LOOKBACK_DAYS = 90
 
 
+def _dashboard_mode(user: User, trading_mode: TradingMode | None) -> str:
+    return trading_mode.value if trading_mode is not None else (user.current_trading_mode or "paper")
+
+
 def _build_me(db: DbSession, user: User) -> MeOut:
     rows = (
         db.scalars(
@@ -314,6 +318,10 @@ def _dashboard_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
     return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 2}
 
 
+def _dashboard_summary_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 1}
+
+
 def _dashboard_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
     fee_analytics = payload.get("feeAnalytics") or {}
     rejection_diagnostics = payload.get("rejectionDiagnostics") or {}
@@ -376,9 +384,7 @@ def _cached_dashboard_payload(
     trading_mode: TradingMode | None,
     force_refresh: bool = False,
 ) -> dict[str, Any]:
-    mode = (
-        trading_mode.value if trading_mode is not None else (user.current_trading_mode or "paper")
-    )
+    mode = _dashboard_mode(user, trading_mode)
     cache = ReadModelCache(settings)
     return cache.get_or_build(
         namespace="dashboard-v1",
@@ -391,6 +397,30 @@ def _cached_dashboard_payload(
             db=db,
             trading_mode=trading_mode,
             settings=settings,
+        ),
+    )
+
+
+def _cached_dashboard_summary_payload(
+    *,
+    user: User,
+    db: DbSession,
+    settings: Settings,
+    trading_mode: TradingMode | None,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    mode = _dashboard_mode(user, trading_mode)
+    cache = ReadModelCache(settings)
+    return cache.get_or_build(
+        namespace="dashboard-summary-v1",
+        identity=str(user.id),
+        params=_dashboard_summary_cache_params(user=user, trading_mode=mode),
+        ttl_seconds=DASHBOARD_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        builder=lambda: _build_dashboard_summary_payload(
+            user=user,
+            db=db,
+            trading_mode=trading_mode,
         ),
     )
 
@@ -429,15 +459,197 @@ def _cached_analytics_payload(
     return {**payload, "budget": budget}
 
 
+def _build_dashboard_summary_payload(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+) -> dict[str, Any]:
+    mode = _dashboard_mode(user, trading_mode)
+    buckets = (
+        db.query(StrategyCapitalBucket)
+        .filter(
+            StrategyCapitalBucket.user_id == user.id,
+            StrategyCapitalBucket.trading_mode == mode,
+        )
+        .all()
+    )
+    available_balance_cents = sum(max(0, b.available_cash_cents) for b in buckets)
+    portfolio_cents = sum(
+        b.available_cash_cents
+        + b.reserved_cash_cents
+        + b.locked_capital_cents
+        + b.unrealized_pnl_cents
+        for b in buckets
+    )
+    pnl_cents = sum(b.realized_pnl_cents + b.unrealized_pnl_cents for b in buckets)
+    portfolio_value = portfolio_cents / 100
+    pnl_value = pnl_cents / 100
+    base = max(1.0, portfolio_value - pnl_value)
+    pnl_percent = (pnl_value / base) * 100
+    now = datetime.now(UTC)
+    dashboard_cutoff = now - timedelta(days=DASHBOARD_HISTORY_LOOKBACK_DAYS)
+
+    positions_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ExecutionPosition)
+            .where(
+                ExecutionPosition.user_id == user.id,
+                ExecutionPosition.trading_mode == mode,
+            )
+        )
+        or 0
+    )
+    active_order_states = ("pending", "submitted", "open", "partially_filled")
+    active_trades_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ExecutionOrder)
+            .where(
+                ExecutionOrder.user_id == user.id,
+                ExecutionOrder.trading_mode == mode,
+                ExecutionOrder.state.in_(active_order_states),
+            )
+        )
+        or 0
+    )
+    recent_activity_total = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ExecutionTradeRecord)
+            .where(
+                ExecutionTradeRecord.user_id == user.id,
+                ExecutionTradeRecord.trading_mode == mode,
+                ExecutionTradeRecord.executed_at >= dashboard_cutoff,
+            )
+        )
+        or 0
+    )
+    month_cutoff = now - timedelta(days=30)
+    trade_stats = db.execute(
+        select(
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            ExecutionTradeRecord.executed_at >= month_cutoff,
+                            ExecutionTradeRecord.fee_cents,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("fees_month_cents"),
+        ).where(
+            ExecutionTradeRecord.user_id == user.id,
+            ExecutionTradeRecord.trading_mode == mode,
+            ExecutionTradeRecord.executed_at >= dashboard_cutoff,
+        )
+    ).one()
+    entry_order_stats = db.execute(
+        select(
+            func.coalesce(func.avg(ExecutionOrder.expected_net_edge_bps), 0).label(
+                "avg_net_edge_bps"
+            ),
+        ).where(
+            ExecutionOrder.user_id == user.id,
+            ExecutionOrder.trading_mode == mode,
+            ExecutionOrder.side == "buy",
+            ExecutionOrder.state.in_(("submitted", "pending", "partially_filled", "filled")),
+            ExecutionOrder.created_at >= dashboard_cutoff,
+        )
+    ).one()
+    strategy_reject_total = int(
+        db.scalar(
+            select(func.count())
+            .select_from(StrategyDecisionAudit)
+            .join(
+                StrategySignalSnapshot,
+                StrategyDecisionAudit.signal_snapshot_id == StrategySignalSnapshot.id,
+            )
+            .where(
+                StrategySignalSnapshot.user_id == user.id,
+                StrategySignalSnapshot.trading_mode == mode,
+                StrategyDecisionAudit.decision == "rejected",
+                StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
+                StrategyDecisionAudit.created_at >= dashboard_cutoff,
+            )
+        )
+        or 0
+    )
+    risk_reject_total = int(
+        db.scalar(
+            select(func.count())
+            .select_from(RiskEvent)
+            .where(
+                RiskEvent.user_id == user.id,
+                RiskEvent.trading_mode == mode,
+                RiskEvent.outcome == "reject",
+                RiskEvent.created_at >= dashboard_cutoff,
+            )
+        )
+        or 0
+    )
+    execution_reject_total = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ExecutionOrder)
+            .where(
+                ExecutionOrder.user_id == user.id,
+                ExecutionOrder.trading_mode == mode,
+                ExecutionOrder.state.in_(("failed", "cancelled")),
+                func.coalesce(
+                    ExecutionOrder.failed_at,
+                    ExecutionOrder.cancelled_at,
+                    ExecutionOrder.updated_at,
+                )
+                >= dashboard_cutoff,
+            )
+        )
+        or 0
+    )
+    growth_points = 8
+    start = max(0.0, portfolio_value - pnl_value)
+    growth = [
+        round(start + ((portfolio_value - start) * i / (growth_points - 1)), 2)
+        for i in range(growth_points)
+    ]
+    return {
+        "availableBalance": round(available_balance_cents / 100, 2),
+        "portfolioValue": round(portfolio_value, 2),
+        "pnlValue": round(pnl_value, 2),
+        "pnlPercent": round(pnl_percent, 4),
+        "gainLossLabel": "P&L",
+        "growth": growth,
+        "positions": [None] * min(positions_count, DASHBOARD_POSITIONS_LIMIT),
+        "activeTrades": [None] * min(active_trades_count, DASHBOARD_ACTIVE_TRADES_LIMIT),
+        "recentActivity": [None] * min(recent_activity_total, DASHBOARD_RECENT_ACTIVITY_LIMIT),
+        "feeAnalytics": {
+            "totalFeesMonth": round(int(trade_stats.fees_month_cents or 0) / 100, 2),
+            "avgNetEdgeAtEntryBps": round(float(entry_order_stats.avg_net_edge_bps or 0), 2),
+        },
+        "rejectionDiagnostics": {
+            "totalRejected": strategy_reject_total + risk_reject_total + execution_reject_total,
+        },
+        "budget": {
+            "historyLookbackDaysApplied": DASHBOARD_HISTORY_LOOKBACK_DAYS,
+            "summaryOnly": True,
+            "positionLimit": DASHBOARD_POSITIONS_LIMIT,
+            "activeTradeLimit": DASHBOARD_ACTIVE_TRADES_LIMIT,
+            "recentActivityLimit": DASHBOARD_RECENT_ACTIVITY_LIMIT,
+            "historyStartAt": dashboard_cutoff.isoformat(),
+            "historyEndAt": now.isoformat(),
+        },
+    }
+
+
 def _build_dashboard_payload(
     user: CurrentUser,
     db: DbSession,
     settings: Settings,
     trading_mode: TradingMode | None = None,
 ) -> dict[str, Any]:
-    mode = (
-        trading_mode.value if trading_mode is not None else (user.current_trading_mode or "paper")
-    )
+    mode = _dashboard_mode(user, trading_mode)
     tenant_id = primary_tenant_id(db, user)
     uses_tenant_scope = tenant_id is not None
 
@@ -986,7 +1198,7 @@ def dashboard_summary_overview(
     force_refresh: bool = Query(default=False),
     settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
-    payload = _cached_dashboard_payload(
+    payload = _cached_dashboard_summary_payload(
         user=user,
         db=db,
         settings=settings,

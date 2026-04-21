@@ -338,6 +338,49 @@ def test_dashboard_includes_rejection_diagnostics(
     }
 
 
+def test_dashboard_summary_does_not_fetch_live_coinbase_balances(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+
+    now = datetime.now(UTC)
+    db_session.add(
+        StrategyCapitalBucket(
+            user_id=user.id,
+            strategy_id="momentum",
+            trading_mode="live",
+            assigned_capital_cents=100_000,
+            available_cash_cents=95_000,
+            reserved_cash_cents=0,
+            locked_capital_cents=5_000,
+            realized_pnl_cents=0,
+            unrealized_pnl_cents=0,
+            available_buying_power_cents=95_000,
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.commit()
+
+    with patch(
+        "oziebot_api.api.v1.me.load_live_coinbase_accounts",
+        side_effect=AssertionError("summary path should not call live Coinbase"),
+    ):
+        response = client.get(
+            "/v1/me/dashboard/summary?trading_mode=live&force_refresh=true",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["availableBalance"] == 950.0
+    assert payload["portfolioValue"] == 1000.0
+    assert payload["budget"]["summaryOnly"] is True
+
+
 @patch("oziebot_api.api.v1.me.load_live_coinbase_accounts")
 def test_live_dashboard_uses_coinbase_balances_for_available_and_portfolio(
     mock_load_live_coinbase_accounts,
