@@ -57,7 +57,9 @@ ANALYTICS_MAX_LOOKBACK_DAYS = 90
 
 
 def _dashboard_mode(user: User, trading_mode: TradingMode | None) -> str:
-    return trading_mode.value if trading_mode is not None else (user.current_trading_mode or "paper")
+    return (
+        trading_mode.value if trading_mode is not None else (user.current_trading_mode or "paper")
+    )
 
 
 def _build_me(db: DbSession, user: User) -> MeOut:
