@@ -1470,9 +1470,7 @@ def read_trade_review_pair_rows(
         start_at=start_at,
         end_at=end_at,
         force_refresh=force_refresh,
-        builder=lambda service, filters: _analytics_rows_payload(
-            service, filters, grouping="pair"
-        ),
+        builder=lambda service, filters: _analytics_rows_payload(service, filters, grouping="pair"),
     )
 
 

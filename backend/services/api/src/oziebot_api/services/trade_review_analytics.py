@@ -473,10 +473,7 @@ class TradeReviewAnalyticsService:
 
     def _available_symbols(self, dataset: dict[str, list[dict[str, Any]]]) -> list[str]:
         symbols = {
-            str(row["symbol"])
-            for rows in dataset.values()
-            for row in rows
-            if row.get("symbol")
+            str(row["symbol"]) for rows in dataset.values() for row in rows if row.get("symbol")
         }
         return sorted(symbols)
 
