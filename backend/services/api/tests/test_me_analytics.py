@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -469,3 +470,57 @@ def test_trade_review_analytics_reports_budget_degradation(
     assert payload["budget"]["degraded"] is True
     assert payload["budget"]["datasets"]["runs"]["truncated"] is True
     assert "runs" in payload["budget"]["truncatedDatasets"]
+
+
+def test_trade_review_analytics_summary_does_not_build_full_overview(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+    _seed_trade_review_data(db_session, user, membership)
+
+    with patch(
+        "oziebot_api.api.v1.me.TradeReviewAnalyticsService.build_overview",
+        side_effect=AssertionError("summary route should not build full analytics overview"),
+    ):
+        response = client.get(
+            "/v1/me/analytics/summary?trading_mode=paper&force_refresh=true",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["summary"]["evaluated"] == 2
+    assert "momentum" in payload["availableStrategies"]
+    assert "BTC-USD" in payload["availableSymbols"]
+
+
+def test_trade_review_analytics_pair_endpoint_does_not_build_full_overview(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+    _seed_trade_review_data(db_session, user, membership)
+
+    with patch(
+        "oziebot_api.api.v1.me.TradeReviewAnalyticsService.build_overview",
+        side_effect=AssertionError("pair route should not build full analytics overview"),
+    ):
+        response = client.get(
+            "/v1/me/analytics/pairs?trading_mode=paper&force_refresh=true",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["rows"]

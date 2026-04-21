@@ -124,16 +124,6 @@ class TradeReviewAnalyticsService:
 
     def build_overview(self, filters: AnalyticsFilters) -> dict[str, Any]:
         dataset = self._load_dataset(filters)
-        comparison_dataset = self._load_dataset(
-            AnalyticsFilters(
-                user_id=filters.user_id,
-                trading_mode=None,
-                strategy_name=filters.strategy_name,
-                symbol=filters.symbol,
-                start_at=filters.start_at,
-                end_at=filters.end_at,
-            )
-        )
         strategy_rows = self._group_rows(dataset, grouping="strategy")
         token_rows = self._group_rows(dataset, grouping="token")
         pair_rows = self._group_rows(dataset, grouping="pair")
@@ -162,11 +152,19 @@ class TradeReviewAnalyticsService:
             "tokenPerformance": token_rows,
             "pairPerformance": pair_rows,
             "rejectionBreakdown": self._rejection_breakdown(dataset),
-            "paperLiveComparison": self._paper_live_comparison(comparison_dataset),
-            "availableStrategies": sorted(
-                {row["strategyName"] for row in strategy_rows if row["strategyName"]}
-            ),
-            "availableSymbols": sorted({row["symbol"] for row in pair_rows if row["symbol"]}),
+            "paperLiveComparison": self._paper_live_comparison(self._comparison_dataset(filters)),
+            "availableStrategies": self._available_strategies(dataset),
+            "availableSymbols": self._available_symbols(dataset),
+        }
+
+    def build_summary(self, filters: AnalyticsFilters) -> dict[str, Any]:
+        dataset = self._load_dataset(filters)
+        return {
+            "filters": self.filters_payload(filters),
+            "summary": self._summary_payload(dataset),
+            "budget": self.budget_payload(),
+            "availableStrategies": self._available_strategies(dataset),
+            "availableSymbols": self._available_symbols(dataset),
         }
 
     def build_strategy_rows(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
@@ -177,6 +175,12 @@ class TradeReviewAnalyticsService:
 
     def build_pair_rows(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
         return self._group_rows(self._load_dataset(filters), grouping="pair")
+
+    def build_rejection_breakdown(self, filters: AnalyticsFilters) -> dict[str, Any]:
+        return self._rejection_breakdown(self._load_dataset(filters))
+
+    def build_paper_live_comparison(self, filters: AnalyticsFilters) -> dict[str, Any]:
+        return self._paper_live_comparison(self._comparison_dataset(filters))
 
     def filters_payload(self, filters: AnalyticsFilters) -> dict[str, Any]:
         return {
@@ -457,6 +461,36 @@ class TradeReviewAnalyticsService:
             "avgHoldMinutes": _avg_seconds_to_minutes(holds),
             "overFilteringFlag": _percent(len(rejected), len(runs)) >= 55.0,
         }
+
+    def _available_strategies(self, dataset: dict[str, list[dict[str, Any]]]) -> list[str]:
+        strategies = {
+            str(row["strategy_name"])
+            for rows in dataset.values()
+            for row in rows
+            if row.get("strategy_name")
+        }
+        return sorted(strategies)
+
+    def _available_symbols(self, dataset: dict[str, list[dict[str, Any]]]) -> list[str]:
+        symbols = {
+            str(row["symbol"])
+            for rows in dataset.values()
+            for row in rows
+            if row.get("symbol")
+        }
+        return sorted(symbols)
+
+    def _comparison_dataset(self, filters: AnalyticsFilters) -> dict[str, list[dict[str, Any]]]:
+        return self._load_dataset(
+            AnalyticsFilters(
+                user_id=filters.user_id,
+                trading_mode=None,
+                strategy_name=filters.strategy_name,
+                symbol=filters.symbol,
+                start_at=filters.start_at,
+                end_at=filters.end_at,
+            )
+        )
 
     def _group_rows(
         self, dataset: dict[str, list[dict[str, Any]]], *, grouping: str

@@ -382,6 +382,46 @@ def _analytics_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _analytics_rows_payload(
+    service: TradeReviewAnalyticsService,
+    filters: AnalyticsFilters,
+    *,
+    grouping: str,
+) -> dict[str, Any]:
+    rows = {
+        "strategy": service.build_strategy_rows,
+        "token": service.build_token_rows,
+        "pair": service.build_pair_rows,
+    }[grouping](filters)
+    return {
+        "filters": service.filters_payload(filters),
+        "budget": service.budget_payload(),
+        "rows": rows,
+    }
+
+
+def _analytics_rejection_payload(
+    service: TradeReviewAnalyticsService, filters: AnalyticsFilters
+) -> dict[str, Any]:
+    rejection_breakdown = service.build_rejection_breakdown(filters)
+    return {
+        "filters": service.filters_payload(filters),
+        "budget": service.budget_payload(),
+        "rejectionBreakdown": rejection_breakdown,
+    }
+
+
+def _analytics_comparison_payload(
+    service: TradeReviewAnalyticsService, filters: AnalyticsFilters
+) -> dict[str, Any]:
+    comparison = service.build_paper_live_comparison(filters)
+    return {
+        "filters": service.filters_payload(filters),
+        "budget": service.budget_payload(),
+        "paperLiveComparison": comparison,
+    }
+
+
 def _cached_dashboard_payload(
     *,
     user: User,
@@ -485,6 +525,42 @@ def _cached_analytics_payload(
         ttl_seconds=ANALYTICS_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         builder=lambda: TradeReviewAnalyticsService(db).build_overview(filters),
+    )
+    budget = dict(payload.get("budget") or {})
+    budget.update(window_meta)
+    return {**payload, "budget": budget}
+
+
+def _cached_analytics_slice_payload(
+    *,
+    namespace: str,
+    user: User,
+    db: DbSession,
+    settings: Settings,
+    trading_mode: TradingMode | None,
+    strategy_name: str | None,
+    symbol: str | None,
+    start_at: datetime | None,
+    end_at: datetime | None,
+    force_refresh: bool = False,
+    builder,
+) -> dict[str, Any]:
+    filters, window_meta = _analytics_filters(
+        user=user,
+        trading_mode=trading_mode,
+        strategy_name=strategy_name,
+        symbol=symbol,
+        start_at=start_at,
+        end_at=end_at,
+    )
+    cache = ReadModelCache(settings)
+    payload = cache.get_or_build(
+        namespace=namespace,
+        identity=str(user.id),
+        params=_analytics_cache_params(filters),
+        ttl_seconds=ANALYTICS_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        builder=lambda: builder(TradeReviewAnalyticsService(db), filters),
     )
     budget = dict(payload.get("budget") or {})
     budget.update(window_meta)
@@ -1297,7 +1373,8 @@ def read_trade_review_analytics_summary(
     force_refresh: bool = Query(default=False),
     settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
-    payload = _cached_analytics_payload(
+    payload = _cached_analytics_slice_payload(
+        namespace="analytics-summary-v1",
         user=user,
         db=db,
         settings=settings,
@@ -1307,6 +1384,7 @@ def read_trade_review_analytics_summary(
         start_at=start_at,
         end_at=end_at,
         force_refresh=force_refresh,
+        builder=lambda service, filters: service.build_summary(filters),
     )
     return _analytics_summary_payload(payload)
 
@@ -1323,7 +1401,8 @@ def read_trade_review_strategy_rows(
     force_refresh: bool = Query(default=False),
     settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
-    payload = _cached_analytics_payload(
+    return _cached_analytics_slice_payload(
+        namespace="analytics-strategies-v1",
         user=user,
         db=db,
         settings=settings,
@@ -1333,12 +1412,10 @@ def read_trade_review_strategy_rows(
         start_at=start_at,
         end_at=end_at,
         force_refresh=force_refresh,
+        builder=lambda service, filters: _analytics_rows_payload(
+            service, filters, grouping="strategy"
+        ),
     )
-    return {
-        "filters": payload.get("filters") or {},
-        "budget": payload.get("budget") or {},
-        "rows": payload.get("strategyPerformance") or [],
-    }
 
 
 @router.get("/analytics/tokens")
@@ -1353,7 +1430,8 @@ def read_trade_review_token_rows(
     force_refresh: bool = Query(default=False),
     settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
-    payload = _cached_analytics_payload(
+    return _cached_analytics_slice_payload(
+        namespace="analytics-tokens-v1",
         user=user,
         db=db,
         settings=settings,
@@ -1363,12 +1441,10 @@ def read_trade_review_token_rows(
         start_at=start_at,
         end_at=end_at,
         force_refresh=force_refresh,
+        builder=lambda service, filters: _analytics_rows_payload(
+            service, filters, grouping="token"
+        ),
     )
-    return {
-        "filters": payload.get("filters") or {},
-        "budget": payload.get("budget") or {},
-        "rows": payload.get("tokenPerformance") or [],
-    }
 
 
 @router.get("/analytics/pairs")
@@ -1383,7 +1459,8 @@ def read_trade_review_pair_rows(
     force_refresh: bool = Query(default=False),
     settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
-    payload = _cached_analytics_payload(
+    return _cached_analytics_slice_payload(
+        namespace="analytics-pairs-v1",
         user=user,
         db=db,
         settings=settings,
@@ -1393,12 +1470,10 @@ def read_trade_review_pair_rows(
         start_at=start_at,
         end_at=end_at,
         force_refresh=force_refresh,
+        builder=lambda service, filters: _analytics_rows_payload(
+            service, filters, grouping="pair"
+        ),
     )
-    return {
-        "filters": payload.get("filters") or {},
-        "budget": payload.get("budget") or {},
-        "rows": payload.get("pairPerformance") or [],
-    }
 
 
 @router.get("/analytics/rejections")
@@ -1413,7 +1488,8 @@ def read_trade_review_rejection_breakdown(
     force_refresh: bool = Query(default=False),
     settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
-    payload = _cached_analytics_payload(
+    return _cached_analytics_slice_payload(
+        namespace="analytics-rejections-v1",
         user=user,
         db=db,
         settings=settings,
@@ -1423,12 +1499,8 @@ def read_trade_review_rejection_breakdown(
         start_at=start_at,
         end_at=end_at,
         force_refresh=force_refresh,
+        builder=_analytics_rejection_payload,
     )
-    return {
-        "filters": payload.get("filters") or {},
-        "budget": payload.get("budget") or {},
-        "rejectionBreakdown": payload.get("rejectionBreakdown") or {},
-    }
 
 
 @router.get("/analytics/comparison")
@@ -1443,7 +1515,8 @@ def read_trade_review_paper_live_comparison(
     force_refresh: bool = Query(default=False),
     settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
-    payload = _cached_analytics_payload(
+    return _cached_analytics_slice_payload(
+        namespace="analytics-comparison-v1",
         user=user,
         db=db,
         settings=settings,
@@ -1453,12 +1526,8 @@ def read_trade_review_paper_live_comparison(
         start_at=start_at,
         end_at=end_at,
         force_refresh=force_refresh,
+        builder=_analytics_comparison_payload,
     )
-    return {
-        "filters": payload.get("filters") or {},
-        "budget": payload.get("budget") or {},
-        "paperLiveComparison": payload.get("paperLiveComparison") or {},
-    }
 
 
 @router.patch("/trading-mode", response_model=MeOut)
