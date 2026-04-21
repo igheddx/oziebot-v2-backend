@@ -324,6 +324,10 @@ def _dashboard_summary_cache_params(*, user: User, trading_mode: str) -> dict[st
     return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 1}
 
 
+def _dashboard_details_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 1}
+
+
 def _dashboard_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
     fee_analytics = payload.get("feeAnalytics") or {}
     rejection_diagnostics = payload.get("rejectionDiagnostics") or {}
@@ -423,6 +427,32 @@ def _cached_dashboard_summary_payload(
             user=user,
             db=db,
             trading_mode=trading_mode,
+        ),
+    )
+
+
+def _cached_dashboard_details_payload(
+    *,
+    user: User,
+    db: DbSession,
+    settings: Settings,
+    trading_mode: TradingMode | None,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    mode = _dashboard_mode(user, trading_mode)
+    cache = ReadModelCache(settings)
+    return cache.get_or_build(
+        namespace="dashboard-details-v1",
+        identity=str(user.id),
+        params=_dashboard_details_cache_params(user=user, trading_mode=mode),
+        ttl_seconds=DASHBOARD_CACHE_TTL_SECONDS,
+        force_refresh=force_refresh,
+        builder=lambda: _build_dashboard_payload(
+            user=user,
+            db=db,
+            trading_mode=trading_mode,
+            settings=settings,
+            use_live_balances=False,
         ),
     )
 
@@ -650,6 +680,8 @@ def _build_dashboard_payload(
     db: DbSession,
     settings: Settings,
     trading_mode: TradingMode | None = None,
+    *,
+    use_live_balances: bool = True,
 ) -> dict[str, Any]:
     mode = _dashboard_mode(user, trading_mode)
     tenant_id = primary_tenant_id(db, user)
@@ -731,7 +763,7 @@ def _build_dashboard_payload(
         .limit(DASHBOARD_POSITIONS_LIMIT)
         .all()
     )
-    if mode == TradingMode.LIVE.value and tenant_id is not None:
+    if use_live_balances and mode == TradingMode.LIVE.value and tenant_id is not None:
         live_balances = _live_coinbase_balance_snapshot(db, user, settings, positions_rows)
         if live_balances is not None:
             available_balance_cents, portfolio_cents = live_balances
@@ -1218,7 +1250,7 @@ def dashboard_summary_details(
     force_refresh: bool = Query(default=False),
     settings: Settings = Depends(settings_dep),
 ) -> dict[str, Any]:
-    payload = _cached_dashboard_payload(
+    payload = _cached_dashboard_details_payload(
         user=user,
         db=db,
         settings=settings,
