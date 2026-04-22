@@ -132,25 +132,31 @@ class StrategyRunner:
             config = {**user_config, **strategy_params}
 
             allowed_symbols = self._load_allowed_symbols(user_id)
-            if not allowed_symbols:
-                continue
-
-            symbols = self._resolve_symbols(
+            entry_symbols = self._resolve_symbols(
                 config=config, allowed_symbols=allowed_symbols
             )
-            if not symbols:
-                continue
 
-            for symbol in symbols:
-                market = self._load_market_snapshot(symbol)
-                if market is None:
-                    continue
-                token_policy = self._load_token_strategy_policy(
-                    symbol=symbol,
-                    strategy_name=strategy_name,
+            for mode in (TradingMode.PAPER, TradingMode.LIVE):
+                symbols = self._merge_managed_symbols(
+                    entry_symbols=entry_symbols,
+                    open_position_symbols=self._load_open_position_symbols(
+                        user_id=user_id,
+                        strategy_name=strategy_name,
+                        trading_mode=mode.value,
+                    ),
                 )
+                if not symbols:
+                    continue
 
-                for mode in (TradingMode.PAPER, TradingMode.LIVE):
+                for symbol in symbols:
+                    market = self._load_market_snapshot(symbol)
+                    if market is None:
+                        continue
+                    token_policy = self._load_token_strategy_policy(
+                        symbol=symbol,
+                        strategy_name=strategy_name,
+                    )
+
                     interval = STRATEGY_INTERVAL_SECONDS.get(strategy_name, 60)
                     if not self._schedule.should_run(
                         user_id=user_id,
@@ -1478,6 +1484,46 @@ class StrategyRunner:
         with self._engine.begin() as conn:
             rows = conn.execute(stmt, {"user_id": user_id}).all()
         return [r.symbol for r in rows]
+
+    def _load_open_position_symbols(
+        self, *, user_id: str, strategy_name: str, trading_mode: str
+    ) -> list[str]:
+        if self._engine is None:
+            return []
+        stmt = text(
+            """
+            SELECT DISTINCT symbol
+            FROM execution_positions
+            WHERE user_id = :user_id
+              AND strategy_id = :strategy_name
+              AND trading_mode = :trading_mode
+              AND CAST(quantity AS NUMERIC) > 0
+            ORDER BY symbol
+            """
+        )
+        with self._engine.begin() as conn:
+            try:
+                rows = conn.execute(
+                    stmt,
+                    {
+                        "user_id": user_id,
+                        "strategy_name": strategy_name,
+                        "trading_mode": trading_mode,
+                    },
+                ).all()
+            except SQLAlchemyError:
+                return []
+        return [r.symbol for r in rows]
+
+    @staticmethod
+    def _merge_managed_symbols(
+        *, entry_symbols: list[str], open_position_symbols: list[str]
+    ) -> list[str]:
+        managed = list(entry_symbols)
+        for symbol in open_position_symbols:
+            if symbol not in managed:
+                managed.append(symbol)
+        return managed
 
     def _resolve_symbols(
         self, *, config: dict[str, Any], allowed_symbols: list[str]

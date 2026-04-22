@@ -135,6 +135,8 @@ class UserTokenRule(RiskRule):
     name = "user_token_enabled"
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
+        if ctx.action != "buy":
+            return None
         if not ctx.token_user_enabled:
             return RuleResult(
                 self.name,

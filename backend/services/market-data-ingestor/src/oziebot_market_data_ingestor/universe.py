@@ -14,16 +14,26 @@ class SymbolUniverseProvider:
     def list_active_product_ids(self) -> list[str]:
         user_sql = text(
             """
-            SELECT DISTINCT p.symbol, p.quote_currency
-            FROM platform_token_allowlist p
-            JOIN user_token_permissions ut
-              ON ut.platform_token_id = p.id
-             AND ut.is_enabled = true
-            JOIN users u
-              ON u.id = ut.user_id
-             AND u.is_active = true
-            WHERE p.is_enabled = true
-            ORDER BY p.symbol, p.quote_currency
+            SELECT DISTINCT symbol
+            FROM (
+              SELECT p.symbol AS symbol
+              FROM platform_token_allowlist p
+              JOIN user_token_permissions ut
+                ON ut.platform_token_id = p.id
+               AND ut.is_enabled = true
+              JOIN users u
+                ON u.id = ut.user_id
+               AND u.is_active = true
+              WHERE p.is_enabled = true
+              UNION
+              SELECT ep.symbol AS symbol
+              FROM execution_positions ep
+              JOIN users u
+                ON u.id = ep.user_id
+               AND u.is_active = true
+              WHERE CAST(ep.quantity AS NUMERIC) > 0
+            ) symbols
+            ORDER BY symbol
             """
         )
         fallback_sql = text(

@@ -414,6 +414,112 @@ def test_run_once_processes_all_allowed_symbols():
     }
 
 
+def test_run_once_keeps_open_position_symbols_when_entries_disabled():
+    class ExitAwareRunner(StrategyRunner):
+        def __init__(self):
+            super().__init__(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+            self.events: list[StrategySignalEvent] = []
+
+        def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
+            return [
+                {
+                    "user_id": str(uuid.uuid4()),
+                    "strategy_id": "momentum",
+                    "tenant_id": uuid.uuid4(),
+                    "config": {},
+                }
+            ]
+
+        def _load_platform_strategy_config(self, strategy_id: str) -> dict[str, object]:
+            return {}
+
+        def _load_allowed_symbols(self, user_id: str) -> list[str]:
+            return ["BTC-USD"]
+
+        def _load_open_position_symbols(
+            self, *, user_id: str, strategy_name: str, trading_mode: str
+        ) -> list[str]:
+            if trading_mode == "live":
+                return ["SOL-USD"]
+            return []
+
+        def _load_market_snapshot(self, symbol: str) -> MarketSnapshot | None:
+            return MarketSnapshot(
+                timestamp=datetime.now(UTC),
+                symbol=symbol,
+                current_price=Decimal("1"),
+                bid_price=Decimal("0.99"),
+                ask_price=Decimal("1.01"),
+                volume_24h=Decimal("100"),
+                open_price=Decimal("1"),
+                high_price=Decimal("1.1"),
+                low_price=Decimal("0.9"),
+                close_price=Decimal("1"),
+            )
+
+        def _load_position_state(
+            self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str
+        ) -> PositionState:
+            quantity = (
+                Decimal("1")
+                if symbol == "SOL-USD" and trading_mode == "live"
+                else Decimal("0")
+            )
+            return PositionState(
+                symbol=symbol, quantity=quantity, entry_price=Decimal("1")
+            )
+
+        def _sync_position_runtime_state(
+            self,
+            *,
+            user_id: str,
+            strategy_name: str,
+            trading_mode: str,
+            position_state: PositionState,
+            market: MarketSnapshot,
+            now: datetime,
+        ) -> PositionState:
+            return position_state
+
+        def _generate_signal(
+            self,
+            *,
+            tenant_id,
+            strategy_name: str,
+            trading_mode: TradingMode,
+            market: MarketSnapshot,
+            position_state: PositionState,
+            config: dict[str, object],
+        ) -> StrategySignal:
+            return StrategySignal(
+                signal_id=uuid.uuid4(),
+                correlation_id=uuid.uuid4(),
+                tenant_id=uuid.uuid4(),
+                strategy_id=strategy_name,
+                trading_mode=trading_mode,
+                signal_type=SignalType.HOLD,
+                confidence=0.5,
+                reason=f"checked {market.symbol}",
+            )
+
+        def _persist_run(self, **kwargs) -> None:
+            return None
+
+        def _persist_signal(self, event: StrategySignalEvent) -> None:
+            self.events.append(event)
+
+    runner = ExitAwareRunner()
+
+    processed = runner.run_once()
+
+    assert processed == 3
+    assert {(event.symbol, event.trading_mode.value) for event in runner.events} == {
+        ("BTC-USD", "paper"),
+        ("BTC-USD", "live"),
+        ("SOL-USD", "live"),
+    }
+
+
 def test_run_once_persists_signal_snapshots_and_ai_inference(tmp_path: Path):
     db_path = tmp_path / "runner-intelligence.sqlite"
     _setup_intelligence_db(db_path)

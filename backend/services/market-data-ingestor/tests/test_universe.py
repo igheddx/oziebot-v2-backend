@@ -19,6 +19,11 @@ def test_universe_filters_platform_and_user_enabled_tokens():
                 "CREATE TABLE user_token_permissions (user_id TEXT, platform_token_id TEXT, is_enabled BOOLEAN NOT NULL)"
             )
         )
+        conn.execute(
+            text(
+                "CREATE TABLE execution_positions (user_id TEXT, symbol TEXT, quantity TEXT NOT NULL)"
+            )
+        )
 
         conn.execute(
             text("INSERT INTO users (id, is_active) VALUES ('u1', 1), ('u2', 0)")
@@ -35,7 +40,13 @@ def test_universe_filters_platform_and_user_enabled_tokens():
                 "('u1','t1',1), ('u1','t2',0), ('u1','t3',1), ('u2','t1',1)"
             )
         )
+        conn.execute(
+            text(
+                "INSERT INTO execution_positions (user_id, symbol, quantity) VALUES "
+                "('u1','ETH-USD','2'), ('u1','SOL-USD','0')"
+            )
+        )
 
     provider = SymbolUniverseProvider(eng)
     out = provider.list_active_product_ids()
-    assert out == ["BTC-USD"]
+    assert out == ["BTC-USD", "ETH-USD"]

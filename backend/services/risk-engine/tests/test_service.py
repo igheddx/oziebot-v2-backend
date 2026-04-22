@@ -231,6 +231,7 @@ def _signal(
     strategy_name: str = "momentum",
     mode: TradingMode = TradingMode.LIVE,
     size: str = "0.5",
+    action: SignalType = SignalType.BUY,
 ) -> StrategySignalEvent:
     return StrategySignalEvent(
         signal_id=uuid4(),
@@ -238,7 +239,7 @@ def _signal(
         user_id=user_id,
         strategy_name=strategy_name,
         symbol="BTC-USD",
-        action=SignalType.BUY,
+        action=action,
         confidence=0.9,
         suggested_size=Decimal(size),
         reasoning_metadata={
@@ -834,6 +835,59 @@ def test_risk_applies_max_position_pct_override(tmp_path: Path):
     assert decision.outcome == RiskOutcome.REDUCE_SIZE
     assert intent is not None
     assert Decimal(decision.final_size) == Decimal("0.00399960")
+
+
+def test_risk_rejects_buy_when_user_token_disabled(tmp_path: Path):
+    db_path = tmp_path / "risk-user-token-disabled-buy.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        conn.execute(
+            text("UPDATE user_token_permissions SET is_enabled = 0 WHERE user_id = :u"),
+            {"u": user_id},
+        )
+
+    svc = RiskEngineService(
+        Settings(database_url=f"sqlite+pysqlite:///{db_path}"),
+        _redis_with_fresh_market(),
+    )
+
+    decision, intent = svc.evaluate(_signal(user_id), trace_id="t-token-disabled-buy")
+
+    assert decision.outcome == RiskOutcome.REJECT
+    assert decision.reason == "policy"
+    assert decision.detail == "user_token_enabled: Token not enabled for user"
+    assert intent is None
+
+
+def test_risk_allows_close_when_user_token_disabled(tmp_path: Path):
+    db_path = tmp_path / "risk-user-token-disabled-close.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        conn.execute(
+            text("UPDATE user_token_permissions SET is_enabled = 0 WHERE user_id = :u"),
+            {"u": user_id},
+        )
+
+    svc = RiskEngineService(
+        Settings(database_url=f"sqlite+pysqlite:///{db_path}"),
+        _redis_with_fresh_market(),
+    )
+
+    decision, intent = svc.evaluate(
+        _signal(user_id, action=SignalType.CLOSE),
+        trace_id="t-token-disabled-close",
+    )
+
+    assert decision.outcome in (RiskOutcome.APPROVE, RiskOutcome.REDUCE_SIZE)
+    assert intent is not None
 
 
 def test_stale_data_degrades_signal_without_full_rejection(tmp_path: Path):
