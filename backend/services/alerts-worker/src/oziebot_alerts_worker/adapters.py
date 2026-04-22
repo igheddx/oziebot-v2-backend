@@ -38,13 +38,28 @@ class SlackAdapter:
     def __init__(self, webhook_url: str | None) -> None:
         self._webhook_url = webhook_url
 
+    @staticmethod
+    def _is_webhook_url(value: str) -> bool:
+        normalized = value.strip().lower()
+        return normalized.startswith(
+            "https://hooks.slack.com/"
+        ) or normalized.startswith("https://hooks.slack-gov.com/")
+
     def send(self, destination: str, message: str, payload: dict) -> None:
-        if not self._webhook_url:
+        destination = destination.strip()
+        webhook_url = (
+            destination if self._is_webhook_url(destination) else self._webhook_url
+        )
+        if not webhook_url:
             log.info("slack noop destination=%s message=%s", destination, message)
             return
-        text = f"{message}\nDestination: {destination}"
+        text = (
+            message
+            if self._is_webhook_url(destination)
+            else f"{message}\nDestination: {destination}"
+        )
         with httpx.Client(timeout=10) as client:
-            r = client.post(self._webhook_url, json={"text": text, "metadata": payload})
+            r = client.post(webhook_url, json={"text": text, "metadata": payload})
             r.raise_for_status()
 
 
