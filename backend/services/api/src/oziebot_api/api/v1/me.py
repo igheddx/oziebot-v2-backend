@@ -53,10 +53,9 @@ DASHBOARD_ACTIVE_TRADES_LIMIT = 20
 DASHBOARD_RECENT_ACTIVITY_LIMIT = 20
 DASHBOARD_FEE_BREAKDOWN_LIMIT = 12
 DASHBOARD_REJECTION_EVENT_LIMIT = 100
-DASHBOARD_REJECTION_SIGNAL_LIMIT = 500
+DASHBOARD_REJECTION_AUDIT_SCAN_LIMIT = 1000
 DASHBOARD_POSITION_DUST_NOTIONAL_USD = Decimal("1")
 DASHBOARD_MARK_LOOKBACK_MINUTES = 30
-DASHBOARD_SUMMARY_ACTIVITY_SCAN_LIMIT = 1000
 ANALYTICS_DEFAULT_LOOKBACK_DAYS = 30
 ANALYTICS_MAX_LOOKBACK_DAYS = 90
 
@@ -324,50 +323,58 @@ def _recent_strategy_rejection_records(
     cutoff: datetime,
     limit: int,
 ) -> tuple[list[dict[str, Any]], bool]:
+    audits = (
+        db.query(StrategyDecisionAudit)
+        .filter(
+            StrategyDecisionAudit.decision == "rejected",
+            StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
+            StrategyDecisionAudit.created_at >= cutoff,
+            StrategyDecisionAudit.signal_snapshot_id.is_not(None),
+        )
+        .order_by(StrategyDecisionAudit.created_at.desc())
+        .limit(DASHBOARD_REJECTION_AUDIT_SCAN_LIMIT)
+        .all()
+    )
+    snapshot_ids = [
+        audit.signal_snapshot_id for audit in audits if audit.signal_snapshot_id is not None
+    ]
+    if not snapshot_ids:
+        return [], False
+
     snapshot_rows = db.execute(
         select(
             StrategySignalSnapshot.id,
             StrategySignalSnapshot.strategy_name,
             StrategySignalSnapshot.token_symbol,
-        )
-        .where(
+        ).where(
+            StrategySignalSnapshot.id.in_(snapshot_ids),
             StrategySignalSnapshot.user_id == user.id,
             StrategySignalSnapshot.trading_mode == trading_mode,
-            StrategySignalSnapshot.timestamp >= cutoff,
         )
-        .order_by(StrategySignalSnapshot.timestamp.desc())
-        .limit(DASHBOARD_REJECTION_SIGNAL_LIMIT)
     ).all()
-    if not snapshot_rows:
-        return [], False
-
     snapshot_meta = {
         row.id: {"strategy": row.strategy_name, "symbol": row.token_symbol} for row in snapshot_rows
     }
-    audits = (
-        db.query(StrategyDecisionAudit)
-        .filter(
-            StrategyDecisionAudit.signal_snapshot_id.in_(list(snapshot_meta)),
-            StrategyDecisionAudit.decision == "rejected",
-            StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
-            StrategyDecisionAudit.created_at >= cutoff,
+
+    records: list[dict[str, Any]] = []
+    for audit in audits:
+        if audit.signal_snapshot_id not in snapshot_meta:
+            continue
+        meta = snapshot_meta[audit.signal_snapshot_id]
+        records.append(
+            _format_rejection_record(
+                stage=str(audit.stage),
+                reason_code=audit.reason_code,
+                reason_detail=audit.reason_detail,
+                strategy=str(meta.get("strategy") or ""),
+                symbol=str(meta.get("symbol") or ""),
+                created_at=audit.created_at,
+            )
         )
-        .order_by(StrategyDecisionAudit.created_at.desc())
-        .limit(limit)
-        .all()
-    )
-    records = [
-        _format_rejection_record(
-            stage=str(audit.stage),
-            reason_code=audit.reason_code,
-            reason_detail=audit.reason_detail,
-            strategy=str(snapshot_meta.get(audit.signal_snapshot_id, {}).get("strategy") or ""),
-            symbol=str(snapshot_meta.get(audit.signal_snapshot_id, {}).get("symbol") or ""),
-            created_at=audit.created_at,
-        )
-        for audit in audits
-    ]
-    capped = len(snapshot_rows) >= DASHBOARD_REJECTION_SIGNAL_LIMIT or len(audits) >= limit
+        if len(records) >= limit:
+            break
+
+    capped = len(audits) >= DASHBOARD_REJECTION_AUDIT_SCAN_LIMIT or len(records) >= limit
     return records, capped
 
 
@@ -421,7 +428,7 @@ def _dashboard_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
 
 
 def _dashboard_summary_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
-    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 3}
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 4}
 
 
 def _dashboard_details_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
@@ -738,58 +745,6 @@ def _build_dashboard_summary_payload(
     pnl_percent = (pnl_value / base) * 100
     now = datetime.now(UTC)
     dashboard_cutoff = now - timedelta(days=DASHBOARD_HISTORY_LOOKBACK_DAYS)
-    active_order_states = ("pending", "submitted", "open", "partially_filled")
-    positions_count = len(
-        db.scalars(
-            select(ExecutionPosition.id)
-            .where(
-                ExecutionPosition.user_id == user.id,
-                ExecutionPosition.trading_mode == mode,
-            )
-            .order_by(ExecutionPosition.updated_at.desc())
-            .limit(DASHBOARD_POSITIONS_LIMIT)
-        ).all()
-    )
-    active_trades_count = len(
-        db.scalars(
-            select(ExecutionOrder.id)
-            .where(
-                ExecutionOrder.user_id == user.id,
-                ExecutionOrder.trading_mode == mode,
-                ExecutionOrder.state.in_(active_order_states),
-            )
-            .order_by(ExecutionOrder.created_at.desc())
-            .limit(DASHBOARD_ACTIVE_TRADES_LIMIT)
-        ).all()
-    )
-    recent_trade_rows = db.execute(
-        select(ExecutionTradeRecord.fee_cents)
-        .where(
-            ExecutionTradeRecord.user_id == user.id,
-            ExecutionTradeRecord.trading_mode == mode,
-            ExecutionTradeRecord.executed_at >= dashboard_cutoff,
-        )
-        .order_by(ExecutionTradeRecord.executed_at.desc())
-        .limit(DASHBOARD_SUMMARY_ACTIVITY_SCAN_LIMIT)
-    ).all()
-    recent_activity_total = min(len(recent_trade_rows), DASHBOARD_RECENT_ACTIVITY_LIMIT)
-    recent_entry_order_edges = db.scalars(
-        select(ExecutionOrder.expected_net_edge_bps)
-        .where(
-            ExecutionOrder.user_id == user.id,
-            ExecutionOrder.trading_mode == mode,
-            ExecutionOrder.side == "buy",
-            ExecutionOrder.state.in_(("submitted", "pending", "partially_filled", "filled")),
-            ExecutionOrder.created_at >= dashboard_cutoff,
-        )
-        .order_by(ExecutionOrder.created_at.desc())
-        .limit(DASHBOARD_SUMMARY_ACTIVITY_SCAN_LIMIT)
-    ).all()
-    avg_net_edge_bps = (
-        sum(float(value or 0) for value in recent_entry_order_edges) / len(recent_entry_order_edges)
-        if recent_entry_order_edges
-        else 0.0
-    )
     growth_points = 8
     start = max(0.0, portfolio_value - pnl_value)
     growth = [
@@ -803,15 +758,12 @@ def _build_dashboard_summary_payload(
         "pnlPercent": round(pnl_percent, 4),
         "gainLossLabel": "P&L",
         "growth": growth,
-        "positions": [None] * min(positions_count, DASHBOARD_POSITIONS_LIMIT),
-        "activeTrades": [None] * min(active_trades_count, DASHBOARD_ACTIVE_TRADES_LIMIT),
-        "recentActivity": [None] * min(recent_activity_total, DASHBOARD_RECENT_ACTIVITY_LIMIT),
+        "positions": [],
+        "activeTrades": [],
+        "recentActivity": [],
         "feeAnalytics": {
-            "totalFeesMonth": round(
-                sum(int(row.fee_cents or 0) for row in recent_trade_rows) / 100,
-                2,
-            ),
-            "avgNetEdgeAtEntryBps": round(avg_net_edge_bps, 2),
+            "totalFeesMonth": 0,
+            "avgNetEdgeAtEntryBps": 0,
         },
         "rejectionDiagnostics": {
             "totalRejected": 0,
@@ -819,10 +771,13 @@ def _build_dashboard_summary_payload(
         "budget": {
             "historyLookbackDaysApplied": DASHBOARD_HISTORY_LOOKBACK_DAYS,
             "summaryOnly": True,
-            "positionLimit": DASHBOARD_POSITIONS_LIMIT,
-            "activeTradeLimit": DASHBOARD_ACTIVE_TRADES_LIMIT,
-            "recentActivityLimit": DASHBOARD_RECENT_ACTIVITY_LIMIT,
-            "summaryActivityScanLimit": DASHBOARD_SUMMARY_ACTIVITY_SCAN_LIMIT,
+            "deferredMetrics": [
+                "positionsCount",
+                "activeTradesCount",
+                "recentActivityCount",
+                "totalFeesMonth",
+                "avgNetEdgeAtEntryBps",
+            ],
             "historyStartAt": dashboard_cutoff.isoformat(),
             "historyEndAt": now.isoformat(),
         },
@@ -917,7 +872,7 @@ def _build_dashboard_rejection_history_payload(
             "eventLimit": DASHBOARD_REJECTION_EVENT_LIMIT,
             "startAt": cutoff.isoformat(),
             "endAt": now.isoformat(),
-            "signalSnapshotLimit": DASHBOARD_REJECTION_SIGNAL_LIMIT,
+            "auditScanLimit": DASHBOARD_REJECTION_AUDIT_SCAN_LIMIT,
             "capped": strategy_capped
             or any(
                 len(items) >= DASHBOARD_REJECTION_EVENT_LIMIT
