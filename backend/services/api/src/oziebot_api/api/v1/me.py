@@ -550,7 +550,7 @@ def _cached_dashboard_payload(
     mode = _dashboard_mode(user, trading_mode)
     cache = ReadModelCache(settings)
     return cache.get_or_build(
-        namespace="dashboard-v1",
+        namespace="dashboard-v2",
         identity=str(user.id),
         params=_dashboard_cache_params(user=user, trading_mode=mode),
         ttl_seconds=DASHBOARD_CACHE_TTL_SECONDS,
@@ -599,7 +599,7 @@ def _cached_dashboard_details_payload(
     mode = _dashboard_mode(user, trading_mode)
     cache = ReadModelCache(settings)
     return cache.get_or_build(
-        namespace="dashboard-details-v1",
+        namespace="dashboard-details-v2",
         identity=str(user.id),
         params=_dashboard_details_cache_params(user=user, trading_mode=mode),
         ttl_seconds=DASHBOARD_CACHE_TTL_SECONDS,
@@ -896,6 +896,7 @@ def _build_dashboard_payload(
     mode = _dashboard_mode(user, trading_mode)
     tenant_id = primary_tenant_id(db, user)
     uses_tenant_scope = tenant_id is not None
+    now = datetime.now(UTC)
 
     platform_rows = db.scalars(
         select(PlatformStrategy).order_by(PlatformStrategy.sort_order, PlatformStrategy.slug)
@@ -992,6 +993,10 @@ def _build_dashboard_payload(
         if exposure < float(DASHBOARD_POSITION_DUST_NOTIONAL_USD):
             continue
         unrealized_pnl = (mark - entry_price) * qty
+        opened_at = _as_utc(row.opened_at)
+        last_trade_at = _as_utc(row.last_trade_at)
+        closed_at = _as_utc(row.closed_at)
+        age_seconds = max(0.0, (now - opened_at).total_seconds()) if opened_at is not None else None
         positions.append(
             {
                 "id": str(row.id),
@@ -1003,6 +1008,11 @@ def _build_dashboard_payload(
                 "markPrice": mark,
                 "unrealizedPnl": unrealized_pnl,
                 "exposure": exposure,
+                "openedAt": opened_at.isoformat() if opened_at is not None else None,
+                "lastTradeAt": (last_trade_at.isoformat() if last_trade_at is not None else None),
+                "closedAt": closed_at.isoformat() if closed_at is not None else None,
+                "ageMinutes": (round(age_seconds / 60, 2) if age_seconds is not None else None),
+                "ageHours": (round(age_seconds / 3600, 4) if age_seconds is not None else None),
             }
         )
 

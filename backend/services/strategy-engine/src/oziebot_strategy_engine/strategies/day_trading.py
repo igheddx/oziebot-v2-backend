@@ -1,5 +1,6 @@
 """Day trading strategy - intraday trading with same-day exit."""
 
+from datetime import timedelta
 from statistics import mean
 from decimal import Decimal
 from uuid import UUID
@@ -85,6 +86,7 @@ class DayTradingStrategy(TradingStrategy):
         min_entry_signals = int(
             config.get("min_entry_confirmations", config.get("min_entry_signals", 1))
         )
+        max_position_age_hours = int(config.get("max_position_age_hours", 3))
 
         market = context.market_snapshot
         position = context.position_state
@@ -104,6 +106,7 @@ class DayTradingStrategy(TradingStrategy):
                 market,
                 exit_threshold,
                 stop_loss,
+                max_position_age_hours,
             )
 
         # Need at least a few candles for a meaningful session range
@@ -216,6 +219,7 @@ class DayTradingStrategy(TradingStrategy):
         market,
         exit_threshold: float,
         stop_loss: float,
+        max_position_age_hours: int,
     ) -> StrategySignal:
         """Check if should exit position."""
         if position.entry_price is None or position.entry_price <= 0:
@@ -243,6 +247,23 @@ class DayTradingStrategy(TradingStrategy):
                 correlation_id,
                 f"Stop loss triggered: {pnl:.2%}",
             )
+
+        if position.opened_at is not None:
+            max_age = timedelta(hours=max_position_age_hours)
+            held_for = market.timestamp - position.opened_at
+            if held_for >= max_age:
+                return self._close_signal(
+                    context,
+                    signal_id,
+                    correlation_id,
+                    f"Max position age reached: held_for={held_for} limit={max_age}",
+                    reason_code="max_position_age_exceeded",
+                    metadata={
+                        "opened_at": position.opened_at.isoformat(),
+                        "max_position_age_hours": max_position_age_hours,
+                        "enforcement_source": "strategy_engine",
+                    },
+                )
 
         # Still holding
         return self._hold_signal(
@@ -423,7 +444,15 @@ class DayTradingStrategy(TradingStrategy):
         signal_id: UUID,
         correlation_id: UUID,
         reason: str,
+        *,
+        reason_code: str | None = None,
+        metadata: dict[str, str | int] | None = None,
     ) -> StrategySignal:
+        payload = {"exit_strategy": "day_trading"}
+        if reason_code:
+            payload["reason_code"] = reason_code
+        if metadata:
+            payload.update(metadata)
         return StrategySignal(
             signal_id=signal_id,
             correlation_id=correlation_id,
@@ -434,7 +463,7 @@ class DayTradingStrategy(TradingStrategy):
             signal_type=SignalType.CLOSE,
             confidence=0.8,
             reason=reason,
-            metadata={"exit_strategy": "day_trading"},
+            metadata=payload,
         )
 
     def _hold_signal(

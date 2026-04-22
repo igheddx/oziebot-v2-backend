@@ -421,7 +421,7 @@ class StrategyRunner:
                             signal_snapshot_id=self._signal_snapshot_id(signal),
                             stage=DecisionAuditStage.STRATEGY,
                             decision=DecisionAuditDecision.EMITTED,
-                            reason_code=event.action.value,
+                            reason_code=self._signal_reason_code(signal),
                             reason_detail=signal.reason,
                             size_before=event.suggested_size,
                             size_after=event.suggested_size,
@@ -450,6 +450,7 @@ class StrategyRunner:
                             confidence_score=event.confidence,
                             final_decision=event.action.value,
                             extra={
+                                "reason_code": self._signal_reason_code(signal),
                                 "suggested_size": str(event.suggested_size),
                                 "reason": event.reasoning_metadata.get("reason"),
                                 "metrics": self.metrics_snapshot(),
@@ -556,6 +557,15 @@ class StrategyRunner:
         if signal.quantity is not None:
             return Decimal(str(signal.quantity.amount))
         return Decimal("0")
+
+    @staticmethod
+    def _signal_reason_code(signal: StrategySignal) -> str:
+        metadata = dict(signal.metadata or {})
+        reason_code = metadata.get("reason_code")
+        if reason_code:
+            return str(reason_code)
+        raw = getattr(signal.signal_type, "value", signal.signal_type)
+        return str(raw)
 
     def _to_decimal(self, value: Any, default: Decimal = Decimal("0")) -> Decimal:
         if value is None:
@@ -1668,7 +1678,7 @@ class StrategyRunner:
         )
         position_stmt = text(
             """
-            SELECT quantity, avg_entry_price, last_trade_at
+            SELECT quantity, avg_entry_price, opened_at
             FROM execution_positions
             WHERE user_id = :user_id
               AND strategy_id = :strategy_name
@@ -1729,12 +1739,12 @@ class StrategyRunner:
                 if isinstance(opened_at_raw, str)
                 else opened_at_raw
             )
-        elif position_row and position_row.get("last_trade_at") is not None:
-            last_trade_at = position_row["last_trade_at"]
+        elif position_row and position_row.get("opened_at") is not None:
+            opened_at_db = position_row["opened_at"]
             opened_at = (
-                datetime.fromisoformat(last_trade_at.replace("Z", "+00:00"))
-                if isinstance(last_trade_at, str)
-                else last_trade_at
+                datetime.fromisoformat(opened_at_db.replace("Z", "+00:00"))
+                if isinstance(opened_at_db, str)
+                else opened_at_db
             )
 
         return PositionState(
@@ -1936,6 +1946,7 @@ class StrategyRunner:
             suggested_size=suggested_size,
             reasoning_metadata={
                 "reason": signal.reason,
+                "reason_code": StrategyRunner._signal_reason_code(signal),
                 "signal_metadata": signal.metadata or {},
                 "token_policy": (signal.metadata or {}).get("token_policy"),
                 "fee_economics": (signal.metadata or {}).get("fee_economics"),

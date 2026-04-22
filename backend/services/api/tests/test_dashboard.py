@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import os
 import uuid
 from unittest.mock import patch
@@ -871,6 +871,8 @@ def test_dashboard_details_use_market_marks_and_hide_dust_positions(
                 realized_pnl_cents=0,
                 created_at=now,
                 updated_at=now,
+                opened_at=now - timedelta(hours=4),
+                last_trade_at=now - timedelta(minutes=30),
             ),
             ExecutionPosition(
                 id=uuid.uuid4(),
@@ -884,6 +886,8 @@ def test_dashboard_details_use_market_marks_and_hide_dust_positions(
                 realized_pnl_cents=0,
                 created_at=now,
                 updated_at=now,
+                opened_at=now - timedelta(hours=1),
+                last_trade_at=now - timedelta(minutes=10),
             ),
             MarketDataBboSnapshot(
                 source="coinbase",
@@ -923,6 +927,67 @@ def test_dashboard_details_use_market_marks_and_hide_dust_positions(
     assert position["markPrice"] == 1.0
     assert abs(position["unrealizedPnl"] - 21.12) < 1e-9
     assert position["exposure"] == 24.0
+    assert position["openedAt"] is not None
+    assert position["lastTradeAt"] is not None
+    assert position["closedAt"] is None
+    assert 239 <= position["ageMinutes"] <= 241
+    assert 3.98 <= position["ageHours"] <= 4.02
+
+
+def test_dashboard_position_age_uses_opened_at_not_last_trade_at(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    db_session.add(
+        ExecutionPosition(
+            id=uuid.uuid4(),
+            tenant_id=membership.tenant_id,
+            user_id=user.id,
+            strategy_id="day_trading",
+            symbol="BTC-USD",
+            trading_mode="paper",
+            quantity="1",
+            avg_entry_price="100",
+            realized_pnl_cents=0,
+            created_at=now - timedelta(hours=6),
+            updated_at=now,
+            opened_at=now - timedelta(hours=6),
+            last_trade_at=now - timedelta(minutes=5),
+        )
+    )
+    db_session.add(
+        MarketDataBboSnapshot(
+            source="coinbase",
+            product_id="BTC-USD",
+            best_bid_price=101,
+            best_bid_size=10,
+            best_ask_price=101.5,
+            best_ask_size=10,
+            event_time=now,
+            ingest_time=now,
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/details?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert len(payload["positions"]) == 1
+    position = payload["positions"][0]
+    assert position["openedAt"] != position["lastTradeAt"]
+    assert 359 <= position["ageMinutes"] <= 361
 
 
 @patch("oziebot_api.api.v1.me.load_live_coinbase_accounts")

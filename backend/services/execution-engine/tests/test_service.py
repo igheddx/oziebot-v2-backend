@@ -174,7 +174,7 @@ def _setup_db(db_path: Path) -> None:
                 "CREATE TABLE execution_positions ("
                 "id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, strategy_id TEXT NOT NULL, symbol TEXT NOT NULL,"
                 "trading_mode TEXT NOT NULL, quantity TEXT NOT NULL, avg_entry_price TEXT NOT NULL, realized_pnl_cents INTEGER NOT NULL,"
-                "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_trade_at TEXT,"
+                "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, opened_at TEXT, last_trade_at TEXT, closed_at TEXT,"
                 "UNIQUE(tenant_id, user_id, strategy_id, symbol, trading_mode))"
             )
         )
@@ -881,10 +881,11 @@ def test_day_trading_max_position_age_auto_closes_in_paper(tmp_path: Path):
     with eng.begin() as conn:
         conn.execute(
             text(
-                "UPDATE execution_positions SET last_trade_at = :aged_at WHERE strategy_id = :strategy_id AND trading_mode = :trading_mode"
+                "UPDATE execution_positions SET opened_at = :aged_at, last_trade_at = :recent_at WHERE strategy_id = :strategy_id AND trading_mode = :trading_mode"
             ),
             {
                 "aged_at": aged_at,
+                "recent_at": datetime.now(UTC).isoformat(),
                 "strategy_id": strategy_id,
                 "trading_mode": TradingMode.PAPER.value,
             },
@@ -899,6 +900,120 @@ def test_day_trading_max_position_age_auto_closes_in_paper(tmp_path: Path):
     last_order = _last_order(db_path)
     assert last_order["strategy_id"] == strategy_id
     assert last_order["side"] == Side.SELL.value
+
+
+def test_day_trading_position_age_guard_ignores_last_trade_at_without_opened_at(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "execution-age-opened-at.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "day_trading"
+    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
+    service, _ = _service(db_path, redis)
+
+    buy = service.process_request(
+        _request(user_id, tenant_id, strategy_id, TradingMode.PAPER)
+    )
+    assert buy.state == ExecutionOrderStatus.FILLED
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE execution_positions SET opened_at = NULL, last_trade_at = :aged_at WHERE strategy_id = :strategy_id AND trading_mode = :trading_mode"
+            ),
+            {
+                "aged_at": (datetime.now(UTC) - timedelta(hours=5)).isoformat(),
+                "strategy_id": strategy_id,
+                "trading_mode": TradingMode.PAPER.value,
+            },
+        )
+
+    enforced = service.enforce_runtime_controls()
+
+    assert enforced == 0
+
+
+def test_position_opened_at_stays_stable_until_position_reopens(tmp_path: Path):
+    db_path = tmp_path / "execution-position-lifecycle.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "momentum"
+    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
+    service, _ = _service(db_path, redis)
+
+    service.process_request(
+        _request(
+            user_id,
+            tenant_id,
+            strategy_id,
+            TradingMode.PAPER,
+            quantity=Decimal("0.02"),
+        )
+    )
+    opened_position = _position(db_path)
+    assert opened_position is not None
+    first_opened_at = opened_position["opened_at"]
+    first_last_trade_at = opened_position["last_trade_at"]
+    assert first_opened_at is not None
+    assert first_last_trade_at is not None
+    assert opened_position["closed_at"] is None
+
+    service.process_request(
+        _request(
+            user_id,
+            tenant_id,
+            strategy_id,
+            TradingMode.PAPER,
+            quantity=Decimal("0.01"),
+        )
+    )
+    resized_position = _position(db_path)
+    assert resized_position is not None
+    assert resized_position["opened_at"] == first_opened_at
+    assert resized_position["last_trade_at"] != first_last_trade_at
+    assert resized_position["closed_at"] is None
+
+    service.process_request(
+        _request(
+            user_id,
+            tenant_id,
+            strategy_id,
+            TradingMode.PAPER,
+            side=Side.SELL,
+            quantity=Decimal("0.03"),
+        )
+    )
+    closed_position = _position(db_path)
+    assert closed_position is not None
+    assert Decimal(str(closed_position["quantity"])) == Decimal("0")
+    assert closed_position["opened_at"] == first_opened_at
+    assert closed_position["closed_at"] is not None
+
+    service.process_request(
+        _request(
+            user_id,
+            tenant_id,
+            strategy_id,
+            TradingMode.PAPER,
+            quantity=Decimal("0.01"),
+        )
+    )
+    reopened_position = _position(db_path)
+    assert reopened_position is not None
+    assert reopened_position["opened_at"] != first_opened_at
+    assert reopened_position["closed_at"] is None
 
 
 def test_execution_rejects_blocked_token_strategy_policy(tmp_path: Path):

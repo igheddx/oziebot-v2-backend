@@ -950,6 +950,11 @@ class ExecutionService:
     ) -> None:
         existing = self._get_position(request)
         now = _utcnow()
+        opened_at, closed_at, lifecycle_event = self._position_lifecycle_state(
+            existing=existing,
+            quantity=quantity,
+            now=now,
+        )
         if existing is None:
             with self._engine.begin() as conn:
                 conn.execute(
@@ -957,10 +962,10 @@ class ExecutionService:
                         """
                         INSERT INTO execution_positions (
                           id, tenant_id, user_id, strategy_id, symbol, trading_mode,
-                          quantity, avg_entry_price, realized_pnl_cents, created_at, updated_at, last_trade_at
+                          quantity, avg_entry_price, realized_pnl_cents, created_at, updated_at, opened_at, last_trade_at, closed_at
                         ) VALUES (
                           :id, :tenant_id, :user_id, :strategy_id, :symbol, :trading_mode,
-                          :quantity, :avg_entry_price, :realized_pnl_cents, :created_at, :updated_at, :last_trade_at
+                          :quantity, :avg_entry_price, :realized_pnl_cents, :created_at, :updated_at, :opened_at, :last_trade_at, :closed_at
                         )
                         """
                     ),
@@ -976,10 +981,22 @@ class ExecutionService:
                         "realized_pnl_cents": realized_pnl_delta_cents,
                         "created_at": now,
                         "updated_at": now,
+                        "opened_at": opened_at,
                         "last_trade_at": now,
+                        "closed_at": closed_at,
                     },
                 )
+            self._log_position_lifecycle(
+                request=request,
+                lifecycle_event=lifecycle_event,
+                quantity_before=Decimal("0"),
+                quantity_after=quantity,
+                opened_at=opened_at,
+                last_trade_at=now,
+                closed_at=closed_at,
+            )
             return
+        quantity_before = Decimal(str(existing["quantity"] or "0"))
         with self._engine.begin() as conn:
             conn.execute(
                 text(
@@ -989,7 +1006,9 @@ class ExecutionService:
                         avg_entry_price = :avg_entry_price,
                         realized_pnl_cents = :realized_pnl_cents,
                         updated_at = :updated_at,
-                        last_trade_at = :last_trade_at
+                        opened_at = :opened_at,
+                        last_trade_at = :last_trade_at,
+                        closed_at = :closed_at
                     WHERE id = :id
                     """
                 ),
@@ -1000,9 +1019,78 @@ class ExecutionService:
                     "realized_pnl_cents": int(existing["realized_pnl_cents"] or 0)
                     + realized_pnl_delta_cents,
                     "updated_at": now,
+                    "opened_at": opened_at,
                     "last_trade_at": now,
+                    "closed_at": closed_at,
                 },
             )
+        self._log_position_lifecycle(
+            request=request,
+            lifecycle_event=lifecycle_event,
+            quantity_before=quantity_before,
+            quantity_after=quantity,
+            opened_at=opened_at,
+            last_trade_at=now,
+            closed_at=closed_at,
+        )
+
+    def _position_lifecycle_state(
+        self,
+        *,
+        existing: dict[str, Any] | None,
+        quantity: Decimal,
+        now: datetime,
+    ) -> tuple[datetime | None, datetime | None, str]:
+        previous_quantity = (
+            Decimal(str(existing["quantity"] or "0"))
+            if existing is not None
+            else Decimal("0")
+        )
+        previous_opened_at = (
+            self._parse_db_timestamp(existing.get("opened_at"))
+            if existing is not None
+            else None
+        )
+        abs_previous = abs(previous_quantity)
+        abs_current = abs(quantity)
+
+        if abs_previous <= 0 and abs_current > 0:
+            return now, None, "position_opened"
+        if abs_current <= 0:
+            return previous_opened_at, now, "position_closed"
+        if abs_current < abs_previous:
+            return previous_opened_at or now, None, "position_reduced"
+        return previous_opened_at or now, None, "position_resized"
+
+    def _log_position_lifecycle(
+        self,
+        *,
+        request: ExecutionRequest,
+        lifecycle_event: str,
+        quantity_before: Decimal,
+        quantity_after: Decimal,
+        opened_at: datetime | None,
+        last_trade_at: datetime,
+        closed_at: datetime | None,
+    ) -> None:
+        log.info(
+            "position_lifecycle %s",
+            json.dumps(
+                {
+                    "event": lifecycle_event,
+                    "user_id": str(request.user_id),
+                    "strategy_id": request.strategy_id,
+                    "symbol": request.symbol,
+                    "trading_mode": request.trading_mode.value,
+                    "quantity_before": str(quantity_before),
+                    "quantity_after": str(quantity_after),
+                    "opened_at": opened_at.isoformat() if opened_at else None,
+                    "last_trade_at": last_trade_at.isoformat(),
+                    "closed_at": closed_at.isoformat() if closed_at else None,
+                },
+                default=str,
+            ),
+        )
 
     def _insert_trade(
         self,
@@ -1407,6 +1495,8 @@ class ExecutionService:
 
     def _resolve_exit_reason(self, request: ExecutionRequest) -> str | None:
         metadata = dict(request.intent_payload.get("metadata") or {})
+        if metadata.get("reason_code"):
+            return str(metadata["reason_code"])
         if metadata.get("guard"):
             return str(metadata["guard"])
         if metadata.get("reason"):
@@ -1784,11 +1874,8 @@ class ExecutionService:
     def _enforce_day_trading_position_age(self, position: dict[str, Any]) -> bool:
         user_id = str(position["user_id"])
         config = self._load_day_trading_config(user_id)
-        max_age_hours = int(config.get("max_position_age_hours", 4) or 4)
-        symbol_state = self._load_day_trading_runtime_symbol_state(position)
-        opened_at = self._parse_db_timestamp(
-            symbol_state.get("opened_at")
-        ) or self._parse_db_timestamp(position.get("last_trade_at"))
+        max_age_hours = int(config.get("max_position_age_hours", 3) or 3)
+        opened_at = self._parse_db_timestamp(position.get("opened_at"))
         if opened_at is None:
             return False
         now = _utcnow()
@@ -1806,23 +1893,13 @@ class ExecutionService:
         )
         result = self.process_request(request)
         log.info(
-            "position_age_guard order_id=%s mode=%s symbol=%s duplicated=%s",
+            "position_age_guard reason_code=max_position_age_exceeded order_id=%s mode=%s symbol=%s duplicated=%s",
             result.order_id,
             position["trading_mode"],
             position["symbol"],
             result.duplicated,
         )
         return True
-
-    def _load_day_trading_runtime_symbol_state(
-        self, position: dict[str, Any]
-    ) -> dict[str, Any]:
-        return self._load_strategy_runtime_symbol_state(
-            user_id=str(position["user_id"]),
-            strategy_id=str(position["strategy_id"]),
-            trading_mode=str(position["trading_mode"]),
-            symbol=str(position["symbol"]),
-        )
 
     def _build_day_trading_guard_close_request(
         self,
@@ -1848,10 +1925,10 @@ class ExecutionService:
             final_size=str(quantity),
             trading_mode=trading_mode,
             detail=(
-                f"execution_position_age_guard: opened_at={opened_at.isoformat()} "
+                f"max_position_age_exceeded: opened_at={opened_at.isoformat()} "
                 f"max_age_hours={max_age_hours}"
             ),
-            rules_evaluated=["execution_position_age_guard"],
+            rules_evaluated=["max_position_age_exceeded"],
             trace_id=trace_id,
         )
         return ExecutionRequest(
@@ -1881,9 +1958,11 @@ class ExecutionService:
                 "order_type": OrderType.MARKET.value,
                 "quantity": {"amount": str(quantity)},
                 "metadata": {
-                    "guard": "max_position_age_hours",
+                    "guard": "max_position_age_exceeded",
+                    "reason_code": "max_position_age_exceeded",
                     "opened_at": opened_at.isoformat(),
                     "max_age_hours": max_age_hours,
+                    "enforcement_source": "execution_engine_backstop",
                 },
             },
         )

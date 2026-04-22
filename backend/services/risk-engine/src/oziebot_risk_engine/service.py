@@ -355,6 +355,7 @@ class RiskEngineService:
             quantity=Quantity(amount=str(final_size)),
             metadata={
                 "reason": signal.reasoning_metadata.get("reason"),
+                "reason_code": signal.reasoning_metadata.get("reason_code"),
                 "signal_metadata": self._json_dict(
                     signal.reasoning_metadata.get("signal_metadata")
                 ),

@@ -424,7 +424,7 @@ class ReconciliationService:
             trades = (
                 conn.execute(
                     text(
-                        "SELECT user_id, strategy_id, symbol, trading_mode, side, quantity, price, realized_pnl_cents FROM execution_trades WHERE tenant_id = :tenant_id AND trading_mode = 'live' ORDER BY executed_at ASC"
+                        "SELECT user_id, strategy_id, symbol, trading_mode, side, quantity, price, realized_pnl_cents, executed_at FROM execution_trades WHERE tenant_id = :tenant_id AND trading_mode = 'live' ORDER BY executed_at ASC"
                     ),
                     {"tenant_id": _to_hex(tenant_id)},
                 )
@@ -442,7 +442,9 @@ class ReconciliationService:
                 .all()
             )
 
-        grouped: dict[tuple[str, str, str, str], dict[str, Decimal | int]] = {}
+        grouped: dict[
+            tuple[str, str, str, str], dict[str, Decimal | int | datetime | None]
+        ] = {}
         for trade in trades:
             key = (
                 str(trade["user_id"]),
@@ -456,11 +458,18 @@ class ReconciliationService:
                     "quantity": Decimal("0"),
                     "avg_entry_price": Decimal("0"),
                     "realized_pnl_cents": 0,
+                    "opened_at": None,
+                    "last_trade_at": None,
+                    "closed_at": None,
                 },
             )
             qty = _to_decimal(trade["quantity"])
             price = _to_decimal(trade["price"])
+            executed_at = trade["executed_at"]
             if str(trade["side"]) == Side.BUY.value:
+                if item["quantity"] <= 0:  # type: ignore[operator]
+                    item["opened_at"] = executed_at
+                    item["closed_at"] = None
                 new_qty = item["quantity"] + qty  # type: ignore[operator]
                 total_cost = (item["quantity"] * item["avg_entry_price"]) + (
                     qty * price
@@ -473,6 +482,10 @@ class ReconciliationService:
                 item["quantity"] = max(Decimal("0"), item["quantity"] - qty)  # type: ignore[operator]
                 if item["quantity"] == 0:
                     item["avg_entry_price"] = Decimal("0")
+                    item["closed_at"] = executed_at
+                else:
+                    item["closed_at"] = None
+            item["last_trade_at"] = executed_at
             item["realized_pnl_cents"] = int(item["realized_pnl_cents"]) + int(
                 trade["realized_pnl_cents"]
             )
@@ -494,7 +507,7 @@ class ReconciliationService:
                 if row is None:
                     conn.execute(
                         text(
-                            "INSERT INTO execution_positions (id, tenant_id, user_id, strategy_id, symbol, trading_mode, quantity, avg_entry_price, realized_pnl_cents, created_at, updated_at, last_trade_at) VALUES (:id, :tenant_id, :user_id, :strategy_id, :symbol, :trading_mode, :quantity, :avg_entry_price, :realized_pnl_cents, :created_at, :updated_at, :last_trade_at)"
+                            "INSERT INTO execution_positions (id, tenant_id, user_id, strategy_id, symbol, trading_mode, quantity, avg_entry_price, realized_pnl_cents, created_at, updated_at, opened_at, last_trade_at, closed_at) VALUES (:id, :tenant_id, :user_id, :strategy_id, :symbol, :trading_mode, :quantity, :avg_entry_price, :realized_pnl_cents, :created_at, :updated_at, :opened_at, :last_trade_at, :closed_at)"
                         ),
                         {
                             "id": str(uuid.uuid4()),
@@ -510,9 +523,11 @@ class ReconciliationService:
                                 )
                             ),
                             "realized_pnl_cents": int(rebuilt["realized_pnl_cents"]),
-                            "created_at": now,
+                            "created_at": rebuilt["opened_at"] or now,
                             "updated_at": now,
-                            "last_trade_at": now,
+                            "opened_at": rebuilt["opened_at"],
+                            "last_trade_at": rebuilt["last_trade_at"],
+                            "closed_at": rebuilt["closed_at"],
                         },
                     )
                     repaired += 1
@@ -527,10 +542,13 @@ class ReconciliationService:
                     )
                     or int(row["realized_pnl_cents"] or 0)
                     != int(rebuilt["realized_pnl_cents"])
+                    or row.get("opened_at") != rebuilt["opened_at"]
+                    or row.get("last_trade_at") != rebuilt["last_trade_at"]
+                    or row.get("closed_at") != rebuilt["closed_at"]
                 ):
                     conn.execute(
                         text(
-                            "UPDATE execution_positions SET quantity = :quantity, avg_entry_price = :avg_entry_price, realized_pnl_cents = :realized_pnl_cents, updated_at = :updated_at WHERE id = :id"
+                            "UPDATE execution_positions SET quantity = :quantity, avg_entry_price = :avg_entry_price, realized_pnl_cents = :realized_pnl_cents, updated_at = :updated_at, opened_at = :opened_at, last_trade_at = :last_trade_at, closed_at = :closed_at WHERE id = :id"
                         ),
                         {
                             "id": str(row["id"]),
@@ -542,6 +560,9 @@ class ReconciliationService:
                             ),
                             "realized_pnl_cents": int(rebuilt["realized_pnl_cents"]),
                             "updated_at": now,
+                            "opened_at": rebuilt["opened_at"],
+                            "last_trade_at": rebuilt["last_trade_at"],
+                            "closed_at": rebuilt["closed_at"],
                         },
                     )
                     repaired += 1

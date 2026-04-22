@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -21,6 +21,8 @@ def _context(
     highs: list[float],
     lows: list[float],
     volumes: list[float],
+    trading_mode: TradingMode = TradingMode.PAPER,
+    position_state: PositionState | None = None,
 ) -> StrategyContext:
     now = datetime.now(UTC)
     price = Decimal(current_price)
@@ -42,9 +44,10 @@ def _context(
     )
     return StrategyContext(
         tenant_id=uuid4(),
-        trading_mode=TradingMode.PAPER,
+        trading_mode=trading_mode,
         market_snapshot=market,
-        position_state=PositionState(symbol="BTC-USD", quantity=Decimal("0")),
+        position_state=position_state
+        or PositionState(symbol="BTC-USD", quantity=Decimal("0")),
     )
 
 
@@ -71,3 +74,117 @@ def test_day_trading_can_enter_with_single_confirmation():
 
     assert signal.signal_type == SignalType.BUY
     assert "Near session low with confirmations" in signal.reason
+
+
+def test_day_trading_holds_before_max_age_in_paper():
+    strategy = DayTradingStrategy()
+    now = datetime.now(UTC)
+    context = _context(
+        current_price="101",
+        closes=[100.0] * 25,
+        highs=[101.0] * 25,
+        lows=[99.0] * 25,
+        volumes=[100.0] * 25,
+        position_state=PositionState(
+            symbol="BTC-USD",
+            quantity=Decimal("1"),
+            entry_price=Decimal("100"),
+            opened_at=now - timedelta(hours=2, minutes=30),
+        ),
+    )
+
+    signal = strategy.generate_signal(
+        context,
+        {"max_position_age_hours": 3},
+        uuid4(),
+        uuid4(),
+    )
+
+    assert signal.signal_type == SignalType.HOLD
+
+
+def test_day_trading_force_closes_after_max_age_in_paper():
+    strategy = DayTradingStrategy()
+    now = datetime.now(UTC)
+    context = _context(
+        current_price="101",
+        closes=[100.0] * 25,
+        highs=[101.0] * 25,
+        lows=[99.0] * 25,
+        volumes=[100.0] * 25,
+        position_state=PositionState(
+            symbol="BTC-USD",
+            quantity=Decimal("1"),
+            entry_price=Decimal("100"),
+            opened_at=now - timedelta(hours=4),
+        ),
+    )
+
+    signal = strategy.generate_signal(
+        context,
+        {"max_position_age_hours": 3},
+        uuid4(),
+        uuid4(),
+    )
+
+    assert signal.signal_type == SignalType.CLOSE
+    assert signal.metadata is not None
+    assert signal.metadata["reason_code"] == "max_position_age_exceeded"
+
+
+def test_day_trading_holds_before_max_age_in_live():
+    strategy = DayTradingStrategy()
+    now = datetime.now(UTC)
+    context = _context(
+        current_price="101",
+        closes=[100.0] * 25,
+        highs=[101.0] * 25,
+        lows=[99.0] * 25,
+        volumes=[100.0] * 25,
+        trading_mode=TradingMode.LIVE,
+        position_state=PositionState(
+            symbol="BTC-USD",
+            quantity=Decimal("1"),
+            entry_price=Decimal("100"),
+            opened_at=now - timedelta(hours=2, minutes=30),
+        ),
+    )
+
+    signal = strategy.generate_signal(
+        context,
+        {"max_position_age_hours": 3},
+        uuid4(),
+        uuid4(),
+    )
+
+    assert signal.signal_type == SignalType.HOLD
+
+
+def test_day_trading_force_closes_after_max_age_in_live():
+    strategy = DayTradingStrategy()
+    now = datetime.now(UTC)
+    context = _context(
+        current_price="101",
+        closes=[100.0] * 25,
+        highs=[101.0] * 25,
+        lows=[99.0] * 25,
+        volumes=[100.0] * 25,
+        trading_mode=TradingMode.LIVE,
+        position_state=PositionState(
+            symbol="BTC-USD",
+            quantity=Decimal("1"),
+            entry_price=Decimal("100"),
+            opened_at=now - timedelta(hours=4),
+        ),
+    )
+
+    signal = strategy.generate_signal(
+        context,
+        {"max_position_age_hours": 3},
+        uuid4(),
+        uuid4(),
+    )
+
+    assert signal.signal_type == SignalType.CLOSE
+    assert signal.metadata is not None
+    assert signal.metadata["reason_code"] == "max_position_age_exceeded"
