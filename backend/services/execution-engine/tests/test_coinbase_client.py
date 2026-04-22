@@ -54,11 +54,15 @@ class _StubResponse:
     def json(self) -> dict:
         return self._payload
 
+    def raise_for_status(self) -> None:
+        return None
+
 
 class _StubClient:
     def __init__(self, response: _StubResponse):
         self._response = response
         self.last_json: dict | None = None
+        self.last_request: dict | None = None
 
     def __enter__(self):
         return self
@@ -68,6 +72,17 @@ class _StubClient:
 
     def post(self, url: str, *, headers: dict, json: dict) -> _StubResponse:
         self.last_json = json
+        return self._response
+
+    def request(
+        self, method: str, url: str, *, headers: dict, params: dict | None = None
+    ) -> _StubResponse:
+        self.last_request = {
+            "method": method,
+            "url": url,
+            "headers": headers,
+            "params": params,
+        }
         return self._response
 
 
@@ -171,3 +186,69 @@ def test_coinbase_client_builds_limit_body_for_maker_preference(monkeypatch):
     limit_body = stub_client.last_json["order_configuration"]["limit_limit_gtc"]
     assert limit_body["post_only"] is True
     assert limit_body["limit_price"] == "49990.00"
+
+
+def test_coinbase_client_signs_open_orders_without_query_string(monkeypatch):
+    stub_client = _StubClient(_StubResponse({"orders": []}))
+    jwt_calls: list[dict] = []
+
+    def _fake_jwt(**kwargs):
+        jwt_calls.append(kwargs)
+        return "token"
+
+    monkeypatch.setattr(
+        "oziebot_execution_engine.coinbase_client.build_cdp_jwt",
+        _fake_jwt,
+    )
+    monkeypatch.setattr(httpx, "Client", lambda timeout: stub_client)
+
+    client = HttpCoinbaseExecutionClient("https://api.coinbase.com")
+    result = client.list_open_orders(api_key_name="api-key", private_key_pem="pem")
+
+    assert result == []
+    assert jwt_calls == [
+        {
+            "method": "GET",
+            "request_path": "/api/v3/brokerage/orders/historical/batch",
+            "host": "api.coinbase.com",
+            "api_key_name": "api-key",
+            "private_key_pem": "pem",
+        }
+    ]
+    assert stub_client.last_request is not None
+    assert stub_client.last_request["params"] == {"order_status": "OPEN"}
+
+
+def test_coinbase_client_signs_fills_without_query_string(monkeypatch):
+    stub_client = _StubClient(_StubResponse({"fills": []}))
+    jwt_calls: list[dict] = []
+
+    def _fake_jwt(**kwargs):
+        jwt_calls.append(kwargs)
+        return "token"
+
+    monkeypatch.setattr(
+        "oziebot_execution_engine.coinbase_client.build_cdp_jwt",
+        _fake_jwt,
+    )
+    monkeypatch.setattr(httpx, "Client", lambda timeout: stub_client)
+
+    client = HttpCoinbaseExecutionClient("https://api.coinbase.com")
+    result = client.list_fills(
+        api_key_name="api-key",
+        private_key_pem="pem",
+        product_id="BTC-USD",
+    )
+
+    assert result == []
+    assert jwt_calls == [
+        {
+            "method": "GET",
+            "request_path": "/api/v3/brokerage/orders/historical/fills",
+            "host": "api.coinbase.com",
+            "api_key_name": "api-key",
+            "private_key_pem": "pem",
+        }
+    ]
+    assert stub_client.last_request is not None
+    assert stub_client.last_request["params"] == {"product_id": "BTC-USD"}

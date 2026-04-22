@@ -365,7 +365,8 @@ class HttpCoinbaseExecutionClient:
     ) -> list[dict[str, Any]]:
         payload = self._request(
             "GET",
-            f"{ORDERS_PATH}/historical/batch?order_status=OPEN",
+            f"{ORDERS_PATH}/historical/batch",
+            params={"order_status": "OPEN"},
             api_key_name=api_key_name,
             private_key_pem=private_key_pem,
         )
@@ -375,10 +376,12 @@ class HttpCoinbaseExecutionClient:
         self, *, api_key_name: str, private_key_pem: str, product_id: str | None = None
     ) -> list[dict[str, Any]]:
         path = "/api/v3/brokerage/orders/historical/fills"
-        if product_id:
-            path = f"{path}?product_id={product_id}"
         payload = self._request(
-            "GET", path, api_key_name=api_key_name, private_key_pem=private_key_pem
+            "GET",
+            path,
+            params={"product_id": product_id} if product_id else None,
+            api_key_name=api_key_name,
+            private_key_pem=private_key_pem,
         )
         return list(payload.get("fills", []))
 
@@ -449,7 +452,13 @@ class HttpCoinbaseExecutionClient:
         )
 
     def _request(
-        self, method: str, path: str, *, api_key_name: str, private_key_pem: str
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        api_key_name: str,
+        private_key_pem: str,
     ) -> dict[str, Any]:
         host = _host_from_base(self._base_url)
         token = build_cdp_jwt(
@@ -465,7 +474,7 @@ class HttpCoinbaseExecutionClient:
         }
         with httpx.Client(timeout=self._timeout) as client:
             response = client.request(
-                method, f"{self._base_url}{path}", headers=headers
+                method, f"{self._base_url}{path}", headers=headers, params=params
             )
         response.raise_for_status()
         return response.json() if response.content else {}
