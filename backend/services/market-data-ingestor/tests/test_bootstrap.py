@@ -42,3 +42,16 @@ async def test_seed_market_cache_refreshes_trades_and_bbo_after_candles(monkeypa
 
     assert calls == ["candles", "trades", "bbo"]
     assert touches == ["touch", "touch", "touch"]
+
+
+def test_refresh_targets_prefers_stale_subset() -> None:
+    assert ingestor_main._refresh_targets(["BTC-USD"], ["BTC-USD", "ETH-USD"]) == [
+        "BTC-USD"
+    ]
+
+
+def test_refresh_targets_uses_all_products_when_none_are_stale() -> None:
+    assert ingestor_main._refresh_targets([], ["BTC-USD", "ETH-USD"]) == [
+        "BTC-USD",
+        "ETH-USD",
+    ]

@@ -53,6 +53,10 @@ class TradeLogSampler:
         return True
 
 
+def _refresh_targets(stale_products: list[str], all_products: list[str]) -> list[str]:
+    return stale_products or all_products
+
+
 def _format_decimal(value: Decimal, *, places: int = 6) -> str:
     quantized = value.quantize(Decimal(f"1e-{places}"))
     text = format(quantized.normalize(), "f")
@@ -360,6 +364,8 @@ async def main() -> None:
 
     channels = ["ticker", "matches", "level2"]
     last_candle_reconcile = datetime.now(UTC)
+    last_trade_reconcile = datetime.now(UTC)
+    last_bbo_reconcile = datetime.now(UTC)
     last_policy_refresh = datetime.now(UTC)
     trade_log_sampler = TradeLogSampler()
     try:
@@ -421,34 +427,40 @@ async def main() -> None:
                 cache.publish_stale(
                     "oziebot:md:stale", {"at": now.isoformat(), "stale": stale_map}
                 )
+                log.warning(
+                    "market_data_stale trade=%s bbo=%s candle=%s",
+                    stale_map["trade"],
+                    stale_map["bbo"],
+                    stale_map["candle"],
+                )
+            if (
+                now - last_trade_reconcile
+            ).total_seconds() >= s.trade_reconcile_interval_seconds:
                 await _reconcile_trades(
                     rest,
                     store,
                     cache,
                     r,
                     stale,
-                    stale_map["trade"],
+                    _refresh_targets(stale_map["trade"], products),
                     s.trade_recovery_limit,
                     signal_panel,
                 )
+                last_trade_reconcile = now
+                health.touch()
+            if (
+                now - last_bbo_reconcile
+            ).total_seconds() >= s.bbo_reconcile_interval_seconds:
                 await _reconcile_bbo(
                     rest,
                     store,
                     cache,
                     r,
                     stale,
-                    stale_map["bbo"],
+                    _refresh_targets(stale_map["bbo"], products),
                     signal_panel,
                 )
-                await _reconcile_candles(
-                    rest,
-                    store,
-                    cache,
-                    r,
-                    stale,
-                    stale_map["candle"],
-                    s.candles_granularity_sec,
-                )
+                last_bbo_reconcile = now
                 health.touch()
 
             if (

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import ssl
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -9,6 +10,8 @@ from datetime import UTC, datetime
 import certifi
 import httpx
 import websockets
+
+log = logging.getLogger("market-data-ingestor.coinbase")
 
 
 class CoinbaseRestClient:
@@ -92,6 +95,12 @@ class CoinbaseWsClient:
         backoff = 1.0
         while True:
             try:
+                log.info(
+                    "coinbase_ws_connecting url=%s product_count=%s channels=%s",
+                    self._url,
+                    len(product_ids),
+                    channels,
+                )
                 async with websockets.connect(
                     self._url, ssl=ssl_ctx, ping_interval=20, ping_timeout=20
                 ) as ws:
@@ -101,6 +110,12 @@ class CoinbaseWsClient:
                         "channels": channels,
                     }
                     await ws.send(json.dumps(payload))
+                    log.info(
+                        "coinbase_ws_subscribed url=%s product_count=%s channels=%s",
+                        self._url,
+                        len(product_ids),
+                        channels,
+                    )
                     backoff = 1.0
                     while True:
                         try:
@@ -111,6 +126,12 @@ class CoinbaseWsClient:
                         msg = json.loads(raw)
                         if isinstance(msg, dict):
                             yield msg
-            except Exception:
+            except Exception as exc:
+                log.warning(
+                    "coinbase_ws_stream_failed url=%s err=%s reconnect_backoff_seconds=%.1f",
+                    self._url,
+                    exc,
+                    backoff,
+                )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30.0)
