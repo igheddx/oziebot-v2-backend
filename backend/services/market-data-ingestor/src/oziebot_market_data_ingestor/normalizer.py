@@ -16,7 +16,10 @@ def _parse_dt(ts: str | int | float | None) -> datetime:
         return datetime.now(UTC)
     if isinstance(ts, (int, float)):
         return datetime.fromtimestamp(ts, tz=UTC)
-    return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    normalized = str(ts).strip()
+    if normalized.isdigit():
+        return datetime.fromtimestamp(int(normalized), tz=UTC)
+    return datetime.fromisoformat(normalized.replace("Z", "+00:00"))
 
 
 def normalize_trade(msg: dict) -> NormalizedTrade:

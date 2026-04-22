@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from oziebot_market_data_ingestor.normalizer import (
     normalize_bbo,
+    normalize_candle,
     normalize_orderbook_top,
     normalize_trade,
 )
@@ -82,3 +83,19 @@ def test_normalize_orderbook_top_depth_limit():
     out = normalize_orderbook_top(msg, depth=2)
     assert len(out.bids) == 2
     assert len(out.asks) == 2
+
+
+def test_normalize_candle_accepts_epoch_string_start():
+    msg = {
+        "product_id": "BTC-USD",
+        "start": "1776865080",
+        "open": "93000.00",
+        "high": "93100.00",
+        "low": "92950.00",
+        "close": "93050.00",
+        "volume": "12.34",
+    }
+    out = normalize_candle(msg, granularity_sec=60)
+    assert out.product_id == "BTC-USD"
+    assert out.bucket_start.timestamp() == 1776865080
+    assert out.close == Decimal("93050.00")
