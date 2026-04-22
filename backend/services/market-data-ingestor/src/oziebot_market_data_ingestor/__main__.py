@@ -362,7 +362,7 @@ async def main() -> None:
     refresher.refresh_active_tokens()
     health.mark_ready()
 
-    channels = ["ticker", "matches", "level2"]
+    channels = ["ticker", "market_trades", "heartbeats"]
     last_candle_reconcile = datetime.now(UTC)
     last_trade_reconcile = datetime.now(UTC)
     last_bbo_reconcile = datetime.now(UTC)

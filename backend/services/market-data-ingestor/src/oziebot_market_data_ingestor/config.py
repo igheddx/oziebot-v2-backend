@@ -7,8 +7,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://oziebot:oziebot@localhost:5432/oziebot"
     redis_url: str = "redis://localhost:6379/0"
 
-    coinbase_ws_url: str = "wss://ws-feed.exchange.coinbase.com"
-    coinbase_rest_url: str = "https://api.exchange.coinbase.com"
+    coinbase_ws_url: str = "wss://advanced-trade-ws.coinbase.com"
+    coinbase_rest_url: str = "https://api.coinbase.com/api/v3/brokerage"
 
     orderbook_depth: int = 10
     stale_trade_seconds: int = 15

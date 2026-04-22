@@ -6,12 +6,115 @@ import logging
 import ssl
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from typing import Any
 
 import certifi
 import httpx
 import websockets
 
 log = logging.getLogger("market-data-ingestor.coinbase")
+
+GRANULARITY_MAP = {
+    60: "ONE_MINUTE",
+    300: "FIVE_MINUTE",
+    900: "FIFTEEN_MINUTE",
+    1800: "THIRTY_MINUTE",
+    3600: "ONE_HOUR",
+    7200: "TWO_HOUR",
+    14400: "FOUR_HOUR",
+    21600: "SIX_HOUR",
+    86400: "ONE_DAY",
+}
+
+
+def _flatten_ws_message(msg: dict[str, Any]) -> list[dict[str, Any]]:
+    channel = str(msg.get("channel") or "")
+    timestamp = msg.get("timestamp")
+    events = msg.get("events") or []
+    if channel in {"subscriptions", "heartbeats"}:
+        return []
+
+    flattened: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if channel == "market_trades":
+            for trade in event.get("trades") or []:
+                if not isinstance(trade, dict):
+                    continue
+                flattened.append(
+                    {
+                        "type": "match",
+                        "product_id": trade.get("product_id"),
+                        "trade_id": trade.get("trade_id"),
+                        "side": trade.get("side"),
+                        "price": trade.get("price"),
+                        "size": trade.get("size"),
+                        "time": trade.get("time") or timestamp,
+                    }
+                )
+        elif channel == "ticker":
+            for ticker in event.get("tickers") or []:
+                if not isinstance(ticker, dict):
+                    continue
+                flattened.append(
+                    {
+                        "type": "ticker",
+                        "product_id": ticker.get("product_id"),
+                        "best_bid": ticker.get("best_bid"),
+                        "best_bid_quantity": ticker.get("best_bid_quantity"),
+                        "best_ask": ticker.get("best_ask"),
+                        "best_ask_quantity": ticker.get("best_ask_quantity"),
+                        "time": timestamp,
+                    }
+                )
+        elif channel in {"level2", "l2_data"}:
+            updates = event.get("updates") or []
+            bids = [
+                [
+                    str(update.get("price_level") or "0"),
+                    str(update.get("new_quantity") or "0"),
+                ]
+                for update in updates
+                if isinstance(update, dict)
+                and str(update.get("side") or "").lower() == "bid"
+            ]
+            asks = [
+                [
+                    str(update.get("price_level") or "0"),
+                    str(update.get("new_quantity") or "0"),
+                ]
+                for update in updates
+                if isinstance(update, dict)
+                and str(update.get("side") or "").lower() == "offer"
+            ]
+            flattened.append(
+                {
+                    "type": str(event.get("type") or "snapshot"),
+                    "product_id": event.get("product_id"),
+                    "bids": bids,
+                    "asks": asks,
+                    "time": timestamp,
+                }
+            )
+        elif channel == "candles":
+            for candle in event.get("candles") or []:
+                if not isinstance(candle, dict):
+                    continue
+                flattened.append(
+                    {
+                        "type": "candle",
+                        "product_id": candle.get("product_id"),
+                        "start": candle.get("start"),
+                        "high": candle.get("high"),
+                        "low": candle.get("low"),
+                        "open": candle.get("open"),
+                        "close": candle.get("close"),
+                        "volume": candle.get("volume"),
+                        "time": timestamp,
+                    }
+                )
+    return flattened
 
 
 class CoinbaseRestClient:
@@ -27,31 +130,44 @@ class CoinbaseRestClient:
     async def get_candles(
         self, product_id: str, granularity_sec: int, limit: int = 50
     ) -> list[dict]:
+        granularity = GRANULARITY_MAP.get(granularity_sec)
+        if granularity is None:
+            raise ValueError(f"Unsupported candle granularity: {granularity_sec}")
+        end = int(datetime.now(UTC).timestamp())
+        start = end - (granularity_sec * max(limit, 1))
         resp = await self._client.get(
-            f"{self._base}/products/{product_id}/candles",
-            params={"granularity": granularity_sec, "limit": limit},
+            f"{self._base}/market/products/{product_id}/candles",
+            params={
+                "start": start,
+                "end": end,
+                "granularity": granularity,
+                "limit": limit,
+            },
         )
         resp.raise_for_status()
-        rows = resp.json()
+        rows = resp.json().get("candles") or []
         out: list[dict] = []
         for r in rows:
             out.append(
                 {
                     "product_id": product_id,
-                    "start": r[0],  # Unix timestamp int
-                    "low": str(r[1]),
-                    "high": str(r[2]),
-                    "open": str(r[3]),
-                    "close": str(r[4]),
-                    "volume": str(r[5]),
+                    "start": r["start"],
+                    "low": str(r["low"]),
+                    "high": str(r["high"]),
+                    "open": str(r["open"]),
+                    "close": str(r["close"]),
+                    "volume": str(r["volume"]),
                 }
             )
         return out
 
     async def get_recent_trades(self, product_id: str, limit: int = 20) -> list[dict]:
-        resp = await self._client.get(f"{self._base}/products/{product_id}/trades")
+        resp = await self._client.get(
+            f"{self._base}/market/products/{product_id}/ticker",
+            params={"limit": limit},
+        )
         resp.raise_for_status()
-        rows = resp.json()
+        rows = resp.json().get("trades") or []
         out: list[dict] = []
         for r in rows[:limit]:
             out.append(
@@ -67,16 +183,17 @@ class CoinbaseRestClient:
         return out
 
     async def get_ticker(self, product_id: str) -> dict:
-        resp = await self._client.get(f"{self._base}/products/{product_id}/ticker")
+        resp = await self._client.get(
+            f"{self._base}/market/product_book",
+            params={"product_id": product_id, "limit": 1},
+        )
         resp.raise_for_status()
         row = resp.json()
         return {
             "product_id": product_id,
-            "best_bid": str(row.get("bid") or "0"),
-            "best_bid_size": str(row.get("bid_size") or "0"),
-            "best_ask": str(row.get("ask") or "0"),
-            "best_ask_size": str(row.get("ask_size") or "0"),
-            "time": datetime.now(UTC).isoformat(),
+            "pricebook": row.get("pricebook") or {},
+            "time": ((row.get("pricebook") or {}).get("time"))
+            or datetime.now(UTC).isoformat(),
         }
 
 
@@ -102,14 +219,17 @@ class CoinbaseWsClient:
                     channels,
                 )
                 async with websockets.connect(
-                    self._url, ssl=ssl_ctx, ping_interval=20, ping_timeout=20
+                    self._url,
+                    ssl=ssl_ctx,
+                    ping_interval=20,
+                    ping_timeout=20,
+                    max_size=None,
                 ) as ws:
-                    payload = {
-                        "type": "subscribe",
-                        "product_ids": product_ids,
-                        "channels": channels,
-                    }
-                    await ws.send(json.dumps(payload))
+                    for channel in channels:
+                        payload = {"type": "subscribe", "channel": channel}
+                        if channel != "heartbeats":
+                            payload["product_ids"] = product_ids
+                        await ws.send(json.dumps(payload))
                     log.info(
                         "coinbase_ws_subscribed url=%s product_count=%s channels=%s",
                         self._url,
@@ -125,7 +245,11 @@ class CoinbaseWsClient:
                             continue
                         msg = json.loads(raw)
                         if isinstance(msg, dict):
-                            yield msg
+                            flattened = _flatten_ws_message(msg)
+                            if not flattened:
+                                continue
+                            for item in flattened:
+                                yield item
             except Exception as exc:
                 log.warning(
                     "coinbase_ws_stream_failed url=%s err=%s reconnect_backoff_seconds=%.1f",

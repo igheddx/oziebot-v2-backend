@@ -39,6 +39,38 @@ def test_normalize_bbo_basic_fields():
     assert out.best_ask_price == Decimal("3000.10")
 
 
+def test_normalize_bbo_accepts_advanced_ticker_fields():
+    msg = {
+        "type": "ticker",
+        "product_id": "ETH-USD",
+        "best_bid": "2999.50",
+        "best_bid_quantity": "1.2",
+        "best_ask": "3000.10",
+        "best_ask_quantity": "1.1",
+        "time": "2026-04-12T10:00:00Z",
+    }
+    out = normalize_bbo(msg)
+    assert out.product_id == "ETH-USD"
+    assert out.best_bid_size == Decimal("1.2")
+    assert out.best_ask_size == Decimal("1.1")
+
+
+def test_normalize_bbo_accepts_advanced_product_book_fields():
+    msg = {
+        "product_id": "ETH-USD",
+        "pricebook": {
+            "product_id": "ETH-USD",
+            "bids": [{"price": "2999.50", "size": "1.2"}],
+            "asks": [{"price": "3000.10", "size": "1.1"}],
+            "time": "2026-04-12T10:00:00Z",
+        },
+    }
+    out = normalize_bbo(msg)
+    assert out.product_id == "ETH-USD"
+    assert out.best_bid_price == Decimal("2999.50")
+    assert out.best_ask_price == Decimal("3000.10")
+
+
 def test_normalize_orderbook_top_depth_limit():
     msg = {
         "type": "snapshot",

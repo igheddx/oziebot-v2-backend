@@ -32,13 +32,28 @@ def normalize_trade(msg: dict) -> NormalizedTrade:
 
 
 def normalize_bbo(msg: dict) -> NormalizedBestBidAsk:
+    pricebook = msg.get("pricebook") if isinstance(msg.get("pricebook"), dict) else None
+    bids = pricebook.get("bids") if pricebook is not None else None
+    asks = pricebook.get("asks") if pricebook is not None else None
+    best_bid = msg.get("best_bid")
+    best_ask = msg.get("best_ask")
+    best_bid_size = msg.get("best_bid_size") or msg.get("best_bid_quantity")
+    best_ask_size = msg.get("best_ask_size") or msg.get("best_ask_quantity")
+    product_id = msg.get("product_id") or (pricebook or {}).get("product_id")
+    if pricebook is not None:
+        if bids:
+            best_bid = bids[0].get("price") or best_bid
+            best_bid_size = bids[0].get("size") or best_bid_size
+        if asks:
+            best_ask = asks[0].get("price") or best_ask
+            best_ask_size = asks[0].get("size") or best_ask_size
     return NormalizedBestBidAsk(
-        product_id=msg["product_id"],
-        best_bid_price=Decimal(str(msg["best_bid"])),
-        best_bid_size=Decimal(str(msg.get("best_bid_size") or "0")),
-        best_ask_price=Decimal(str(msg["best_ask"])),
-        best_ask_size=Decimal(str(msg.get("best_ask_size") or "0")),
-        event_time=_parse_dt(msg.get("time")),
+        product_id=str(product_id),
+        best_bid_price=Decimal(str(best_bid or "0")),
+        best_bid_size=Decimal(str(best_bid_size or "0")),
+        best_ask_price=Decimal(str(best_ask or "0")),
+        best_ask_size=Decimal(str(best_ask_size or "0")),
+        event_time=_parse_dt(msg.get("time") or (pricebook or {}).get("time")),
         ingest_time=datetime.now(UTC),
     )
 
