@@ -12,6 +12,7 @@ def test_register_login_me(client):
         "/v1/auth/register",
         json={
             "email": "User@Example.com",
+            "full_name": "User Example",
             "password": "password-123",
             "tenant_name": "Acme Trading",
         },
@@ -25,6 +26,7 @@ def test_register_login_me(client):
     assert me.status_code == 200
     body = me.json()
     assert body["email"] == "user@example.com"
+    assert body["full_name"] == "User Example"
     assert body["role"] == "user"
     assert body["is_root_admin"] is False
     assert body["current_trading_mode"] == "paper"
@@ -191,6 +193,7 @@ def test_root_admin_login_bootstraps_strategy_access(client, db_session):
         "/v1/auth/register",
         json={
             "email": email,
+            "full_name": "Dominic Ighedosa",
             "password": password,
             "tenant_name": "Oziebot Admin",
         },

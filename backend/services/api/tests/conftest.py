@@ -87,6 +87,7 @@ def root_user_and_token(client: TestClient, db_session: Session) -> tuple[str, s
     u = User(
         id=uuid.uuid4(),
         email=email,
+        full_name="Root Example",
         password_hash=hash_password(password),
         is_root_admin=True,
         is_active=True,
@@ -111,6 +112,7 @@ def regular_user_and_token(client: TestClient) -> tuple[str, str]:
         "/v1/auth/register",
         json={
             "email": email,
+            "full_name": "User Example",
             "password": password,
             "tenant_name": "User Tenant",
         },
@@ -128,6 +130,7 @@ def tenant_root_user_and_token(client: TestClient, db_session: Session) -> tuple
         "/v1/auth/register",
         json={
             "email": email,
+            "full_name": "Tenant Root",
             "password": password,
             "tenant_name": "Tenant Root",
         },

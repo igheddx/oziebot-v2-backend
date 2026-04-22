@@ -37,6 +37,13 @@ from oziebot_api.services.tokens import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _normalized_full_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
 def _issue_token_pair(db: DbSession, settings: Settings, user: User) -> TokenResponse:
     ensure_root_admin_strategy_access(db, user)
     tenant_id = primary_tenant_id(db, user)
@@ -80,6 +87,7 @@ def register(
     )
     user = User(
         email=email,
+        full_name=_normalized_full_name(body.full_name),
         password_hash=hash_password(body.password),
         is_root_admin=False,
         is_active=True,

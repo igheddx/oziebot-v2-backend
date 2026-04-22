@@ -91,6 +91,7 @@ def _build_me(db: DbSession, user: User) -> MeOut:
     return MeOut(
         id=user.id,
         email=user.email,
+        full_name=user.full_name,
         role="root_admin" if user.is_root_admin else "user",
         is_root_admin=user.is_root_admin,
         current_trading_mode=mode,

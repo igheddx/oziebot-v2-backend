@@ -15,6 +15,7 @@ class TenantBrief(BaseModel):
 class MeOut(BaseModel):
     id: uuid.UUID
     email: str
+    full_name: str | None = None
     role: str
     is_root_admin: bool
     current_trading_mode: TradingMode

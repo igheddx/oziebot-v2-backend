@@ -29,6 +29,7 @@ def admin_user_and_token(client, db_session: Session) -> tuple[str, str]:
     u = User(
         id=uuid.uuid4(),
         email=email,
+        full_name="Admin Example",
         password_hash=hash_password(password),
         is_root_admin=True,
         is_active=True,

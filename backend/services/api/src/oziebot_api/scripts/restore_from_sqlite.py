@@ -26,18 +26,20 @@ STEPS = [
         "users",
         """
         INSERT INTO users
-          (id, email, password_hash, is_active, is_root_admin, created_at, updated_at)
+          (id, email, full_name, password_hash, is_active, is_root_admin, created_at, updated_at)
         VALUES
           ('899e8cb8-4937-40cb-aa4b-8f2e51af58b9',
-           'trader@example.com',
-           '$pbkdf2-sha256$390000$FKIUQkiplRKidI6RsnbOmQ$P7tTVAQnUjOc03bZt9yYMtEeKw3nUww6E5Yn1W/FKx8',
-           true, false,
-           '2026-04-13 01:43:57.254761', '2026-04-13 01:43:57.254761'),
+            'trader@example.com',
+           NULL,
+            '$pbkdf2-sha256$390000$FKIUQkiplRKidI6RsnbOmQ$P7tTVAQnUjOc03bZt9yYMtEeKw3nUww6E5Yn1W/FKx8',
+            true, false,
+            '2026-04-13 01:43:57.254761', '2026-04-13 01:43:57.254761'),
           ('a6953388-1b93-4c39-bace-e750f5f97431',
-           'dominic@oziebot.com',
-           '$pbkdf2-sha256$390000$ybn33htjrPU.55yTco5RCg$Vx4NasZK6EUT3/5UCoHlAHfOpNGdl0A8PCUxl0aYYXk',
-           true, true,
-           '2026-04-13 01:46:05.552225', '2026-04-13 03:03:22.462462')
+            'dominic@oziebot.com',
+           'Dominic Ighedosa',
+            '$pbkdf2-sha256$390000$ybn33htjrPU.55yTco5RCg$Vx4NasZK6EUT3/5UCoHlAHfOpNGdl0A8PCUxl0aYYXk',
+            true, true,
+            '2026-04-13 01:46:05.552225', '2026-04-13 03:03:22.462462')
         ON CONFLICT (id) DO NOTHING
     """,
     ),

@@ -21,6 +21,7 @@ def run() -> None:
     if not settings.database_url:
         raise SystemExit("DATABASE_URL is required")
     email = os.environ.get("SEED_ROOT_EMAIL", "root@localhost").lower().strip()
+    full_name = os.environ.get("SEED_ROOT_FULL_NAME")
     password = os.environ.get("SEED_ROOT_PASSWORD")
     if not password:
         raise SystemExit("SEED_ROOT_PASSWORD is required")
@@ -37,6 +38,9 @@ def run() -> None:
         ).one_or_none()
         now = datetime.now(UTC)
         if existing:
+            existing.full_name = (
+                full_name.strip() if full_name and full_name.strip() else existing.full_name
+            )
             existing.password_hash = hash_password(password)
             existing.is_root_admin = True
             existing.is_active = True
@@ -47,6 +51,7 @@ def run() -> None:
                 User(
                     id=uuid.uuid4(),
                     email=email,
+                    full_name=full_name.strip() if full_name and full_name.strip() else None,
                     password_hash=hash_password(password),
                     is_root_admin=True,
                     is_active=True,
