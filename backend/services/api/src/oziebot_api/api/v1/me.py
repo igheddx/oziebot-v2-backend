@@ -53,7 +53,10 @@ DASHBOARD_ACTIVE_TRADES_LIMIT = 20
 DASHBOARD_RECENT_ACTIVITY_LIMIT = 20
 DASHBOARD_FEE_BREAKDOWN_LIMIT = 12
 DASHBOARD_REJECTION_EVENT_LIMIT = 100
+DASHBOARD_REJECTION_SIGNAL_LIMIT = 500
 DASHBOARD_POSITION_DUST_NOTIONAL_USD = Decimal("1")
+DASHBOARD_MARK_LOOKBACK_MINUTES = 30
+DASHBOARD_SUMMARY_ACTIVITY_SCAN_LIMIT = 1000
 ANALYTICS_DEFAULT_LOOKBACK_DAYS = 30
 ANALYTICS_MAX_LOOKBACK_DAYS = 90
 
@@ -281,37 +284,91 @@ def _latest_symbol_marks(db: DbSession, symbols: list[str]) -> dict[str, Decimal
     if not normalized_symbols:
         return {}
 
-    latest_bbo_times = (
-        select(
-            MarketDataBboSnapshot.product_id.label("product_id"),
-            func.max(MarketDataBboSnapshot.event_time).label("event_time"),
-        )
-        .where(MarketDataBboSnapshot.product_id.in_(normalized_symbols))
-        .group_by(MarketDataBboSnapshot.product_id)
-        .subquery()
-    )
+    recent_cutoff = datetime.now(UTC) - timedelta(minutes=DASHBOARD_MARK_LOOKBACK_MINUTES)
     rows = db.execute(
         select(
             MarketDataBboSnapshot.product_id,
             MarketDataBboSnapshot.best_bid_price,
             MarketDataBboSnapshot.best_ask_price,
-        ).join(
-            latest_bbo_times,
-            (MarketDataBboSnapshot.product_id == latest_bbo_times.c.product_id)
-            & (MarketDataBboSnapshot.event_time == latest_bbo_times.c.event_time),
         )
+        .where(
+            MarketDataBboSnapshot.product_id.in_(normalized_symbols),
+            MarketDataBboSnapshot.event_time >= recent_cutoff,
+        )
+        .order_by(MarketDataBboSnapshot.event_time.desc())
+        .limit(max(len(normalized_symbols) * 20, 100))
     ).all()
     marks: dict[str, Decimal] = {}
     for product_id, bid_price, ask_price in rows:
+        key = str(product_id).upper()
+        if key in marks:
+            continue
         bid = _to_decimal(str(bid_price))
         ask = _to_decimal(str(ask_price))
         if bid > 0 and ask > 0:
-            marks[str(product_id).upper()] = (bid + ask) / Decimal("2")
+            marks[key] = (bid + ask) / Decimal("2")
         elif bid > 0:
-            marks[str(product_id).upper()] = bid
+            marks[key] = bid
         elif ask > 0:
-            marks[str(product_id).upper()] = ask
+            marks[key] = ask
+        if len(marks) >= len(normalized_symbols):
+            break
     return marks
+
+
+def _recent_strategy_rejection_records(
+    *,
+    user: User,
+    db: DbSession,
+    trading_mode: str,
+    cutoff: datetime,
+    limit: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    snapshot_rows = db.execute(
+        select(
+            StrategySignalSnapshot.id,
+            StrategySignalSnapshot.strategy_name,
+            StrategySignalSnapshot.token_symbol,
+        )
+        .where(
+            StrategySignalSnapshot.user_id == user.id,
+            StrategySignalSnapshot.trading_mode == trading_mode,
+            StrategySignalSnapshot.timestamp >= cutoff,
+        )
+        .order_by(StrategySignalSnapshot.timestamp.desc())
+        .limit(DASHBOARD_REJECTION_SIGNAL_LIMIT)
+    ).all()
+    if not snapshot_rows:
+        return [], False
+
+    snapshot_meta = {
+        row.id: {"strategy": row.strategy_name, "symbol": row.token_symbol} for row in snapshot_rows
+    }
+    audits = (
+        db.query(StrategyDecisionAudit)
+        .filter(
+            StrategyDecisionAudit.signal_snapshot_id.in_(list(snapshot_meta)),
+            StrategyDecisionAudit.decision == "rejected",
+            StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
+            StrategyDecisionAudit.created_at >= cutoff,
+        )
+        .order_by(StrategyDecisionAudit.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    records = [
+        _format_rejection_record(
+            stage=str(audit.stage),
+            reason_code=audit.reason_code,
+            reason_detail=audit.reason_detail,
+            strategy=str(snapshot_meta.get(audit.signal_snapshot_id, {}).get("strategy") or ""),
+            symbol=str(snapshot_meta.get(audit.signal_snapshot_id, {}).get("symbol") or ""),
+            created_at=audit.created_at,
+        )
+        for audit in audits
+    ]
+    capped = len(snapshot_rows) >= DASHBOARD_REJECTION_SIGNAL_LIMIT or len(audits) >= limit
+    return records, capped
 
 
 def _live_coinbase_balance_snapshot(
@@ -364,11 +421,11 @@ def _dashboard_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
 
 
 def _dashboard_summary_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
-    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 2}
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 3}
 
 
 def _dashboard_details_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
-    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 2}
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 3}
 
 
 def _dashboard_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -569,7 +626,7 @@ def _cached_dashboard_rejection_payload(
             "user_id": str(user.id),
             "trading_mode": mode,
             "window_hours": window_hours,
-            "version": 1,
+            "version": 2,
         },
         ttl_seconds=DASHBOARD_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
@@ -681,77 +738,58 @@ def _build_dashboard_summary_payload(
     pnl_percent = (pnl_value / base) * 100
     now = datetime.now(UTC)
     dashboard_cutoff = now - timedelta(days=DASHBOARD_HISTORY_LOOKBACK_DAYS)
-
-    positions_count = int(
-        db.scalar(
-            select(func.count())
-            .select_from(ExecutionPosition)
+    active_order_states = ("pending", "submitted", "open", "partially_filled")
+    positions_count = len(
+        db.scalars(
+            select(ExecutionPosition.id)
             .where(
                 ExecutionPosition.user_id == user.id,
                 ExecutionPosition.trading_mode == mode,
             )
-        )
-        or 0
+            .order_by(ExecutionPosition.updated_at.desc())
+            .limit(DASHBOARD_POSITIONS_LIMIT)
+        ).all()
     )
-    active_order_states = ("pending", "submitted", "open", "partially_filled")
-    active_trades_count = int(
-        db.scalar(
-            select(func.count())
-            .select_from(ExecutionOrder)
+    active_trades_count = len(
+        db.scalars(
+            select(ExecutionOrder.id)
             .where(
                 ExecutionOrder.user_id == user.id,
                 ExecutionOrder.trading_mode == mode,
                 ExecutionOrder.state.in_(active_order_states),
             )
-        )
-        or 0
+            .order_by(ExecutionOrder.created_at.desc())
+            .limit(DASHBOARD_ACTIVE_TRADES_LIMIT)
+        ).all()
     )
-    recent_activity_total = int(
-        db.scalar(
-            select(func.count())
-            .select_from(ExecutionTradeRecord)
-            .where(
-                ExecutionTradeRecord.user_id == user.id,
-                ExecutionTradeRecord.trading_mode == mode,
-                ExecutionTradeRecord.executed_at >= dashboard_cutoff,
-            )
-        )
-        or 0
-    )
-    month_cutoff = now - timedelta(days=30)
-    trade_stats = db.execute(
-        select(
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            ExecutionTradeRecord.executed_at >= month_cutoff,
-                            ExecutionTradeRecord.fee_cents,
-                        ),
-                        else_=0,
-                    )
-                ),
-                0,
-            ).label("fees_month_cents"),
-        ).where(
+    recent_trade_rows = db.execute(
+        select(ExecutionTradeRecord.fee_cents)
+        .where(
             ExecutionTradeRecord.user_id == user.id,
             ExecutionTradeRecord.trading_mode == mode,
             ExecutionTradeRecord.executed_at >= dashboard_cutoff,
         )
-    ).one()
-    entry_order_stats = db.execute(
-        select(
-            func.coalesce(func.avg(ExecutionOrder.expected_net_edge_bps), 0).label(
-                "avg_net_edge_bps"
-            ),
-        ).where(
+        .order_by(ExecutionTradeRecord.executed_at.desc())
+        .limit(DASHBOARD_SUMMARY_ACTIVITY_SCAN_LIMIT)
+    ).all()
+    recent_activity_total = min(len(recent_trade_rows), DASHBOARD_RECENT_ACTIVITY_LIMIT)
+    recent_entry_order_edges = db.scalars(
+        select(ExecutionOrder.expected_net_edge_bps)
+        .where(
             ExecutionOrder.user_id == user.id,
             ExecutionOrder.trading_mode == mode,
             ExecutionOrder.side == "buy",
             ExecutionOrder.state.in_(("submitted", "pending", "partially_filled", "filled")),
             ExecutionOrder.created_at >= dashboard_cutoff,
         )
-    ).one()
+        .order_by(ExecutionOrder.created_at.desc())
+        .limit(DASHBOARD_SUMMARY_ACTIVITY_SCAN_LIMIT)
+    ).all()
+    avg_net_edge_bps = (
+        sum(float(value or 0) for value in recent_entry_order_edges) / len(recent_entry_order_edges)
+        if recent_entry_order_edges
+        else 0.0
+    )
     growth_points = 8
     start = max(0.0, portfolio_value - pnl_value)
     growth = [
@@ -769,8 +807,11 @@ def _build_dashboard_summary_payload(
         "activeTrades": [None] * min(active_trades_count, DASHBOARD_ACTIVE_TRADES_LIMIT),
         "recentActivity": [None] * min(recent_activity_total, DASHBOARD_RECENT_ACTIVITY_LIMIT),
         "feeAnalytics": {
-            "totalFeesMonth": round(int(trade_stats.fees_month_cents or 0) / 100, 2),
-            "avgNetEdgeAtEntryBps": round(float(entry_order_stats.avg_net_edge_bps or 0), 2),
+            "totalFeesMonth": round(
+                sum(int(row.fee_cents or 0) for row in recent_trade_rows) / 100,
+                2,
+            ),
+            "avgNetEdgeAtEntryBps": round(avg_net_edge_bps, 2),
         },
         "rejectionDiagnostics": {
             "totalRejected": 0,
@@ -781,6 +822,7 @@ def _build_dashboard_summary_payload(
             "positionLimit": DASHBOARD_POSITIONS_LIMIT,
             "activeTradeLimit": DASHBOARD_ACTIVE_TRADES_LIMIT,
             "recentActivityLimit": DASHBOARD_RECENT_ACTIVITY_LIMIT,
+            "summaryActivityScanLimit": DASHBOARD_SUMMARY_ACTIVITY_SCAN_LIMIT,
             "historyStartAt": dashboard_cutoff.isoformat(),
             "historyEndAt": now.isoformat(),
         },
@@ -798,22 +840,12 @@ def _build_dashboard_rejection_history_payload(
     now = datetime.now(UTC)
     cutoff = now - timedelta(hours=window_hours)
 
-    strategy_audits = (
-        db.query(StrategyDecisionAudit, StrategySignalSnapshot)
-        .join(
-            StrategySignalSnapshot,
-            StrategyDecisionAudit.signal_snapshot_id == StrategySignalSnapshot.id,
-        )
-        .filter(
-            StrategySignalSnapshot.user_id == user.id,
-            StrategySignalSnapshot.trading_mode == mode,
-            StrategyDecisionAudit.decision == "rejected",
-            StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
-            StrategyDecisionAudit.created_at >= cutoff,
-        )
-        .order_by(StrategyDecisionAudit.created_at.desc())
-        .limit(DASHBOARD_REJECTION_EVENT_LIMIT)
-        .all()
+    strategy_records, strategy_capped = _recent_strategy_rejection_records(
+        user=user,
+        db=db,
+        trading_mode=mode,
+        cutoff=cutoff,
+        limit=DASHBOARD_REJECTION_EVENT_LIMIT,
     )
     recent_risk_rejects = (
         db.query(RiskEvent)
@@ -851,17 +883,7 @@ def _build_dashboard_rejection_history_payload(
         .all()
     )
     rejection_diagnostics = _build_rejection_diagnostics(
-        strategy_records=[
-            _format_rejection_record(
-                stage=str(audit.stage),
-                reason_code=audit.reason_code,
-                reason_detail=audit.reason_detail,
-                strategy=snapshot.strategy_name,
-                symbol=snapshot.token_symbol,
-                created_at=audit.created_at,
-            )
-            for audit, snapshot in strategy_audits
-        ],
+        strategy_records=strategy_records,
         risk_records=[
             _format_rejection_record(
                 stage="risk",
@@ -895,9 +917,11 @@ def _build_dashboard_rejection_history_payload(
             "eventLimit": DASHBOARD_REJECTION_EVENT_LIMIT,
             "startAt": cutoff.isoformat(),
             "endAt": now.isoformat(),
-            "capped": any(
+            "signalSnapshotLimit": DASHBOARD_REJECTION_SIGNAL_LIMIT,
+            "capped": strategy_capped
+            or any(
                 len(items) >= DASHBOARD_REJECTION_EVENT_LIMIT
-                for items in (strategy_audits, recent_risk_rejects, recent_failed_orders)
+                for items in (recent_risk_rejects, recent_failed_orders)
             ),
         },
         "rejectionDiagnostics": rejection_diagnostics,
@@ -1208,36 +1232,12 @@ def _build_dashboard_payload(
         "recent": [],
     }
     if include_rejection_diagnostics:
-        skipped_due_to_fees = int(
-            db.scalar(
-                select(func.count())
-                .select_from(RiskEvent)
-                .where(
-                    RiskEvent.user_id == user.id,
-                    RiskEvent.trading_mode == mode,
-                    RiskEvent.detail.is_not(None),
-                    RiskEvent.detail.ilike("%fee_economics%"),
-                    RiskEvent.created_at >= dashboard_cutoff,
-                )
-            )
-            or 0
-        )
-        strategy_audits = (
-            db.query(StrategyDecisionAudit, StrategySignalSnapshot)
-            .join(
-                StrategySignalSnapshot,
-                StrategyDecisionAudit.signal_snapshot_id == StrategySignalSnapshot.id,
-            )
-            .filter(
-                StrategySignalSnapshot.user_id == user.id,
-                StrategySignalSnapshot.trading_mode == mode,
-                StrategyDecisionAudit.decision == "rejected",
-                StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
-                StrategyDecisionAudit.created_at >= dashboard_cutoff,
-            )
-            .order_by(StrategyDecisionAudit.created_at.desc())
-            .limit(DASHBOARD_REJECTION_EVENT_LIMIT)
-            .all()
+        strategy_records, _ = _recent_strategy_rejection_records(
+            user=user,
+            db=db,
+            trading_mode=mode,
+            cutoff=dashboard_cutoff,
+            limit=DASHBOARD_REJECTION_EVENT_LIMIT,
         )
         recent_risk_rejects = (
             db.query(RiskEvent)
@@ -1250,6 +1250,9 @@ def _build_dashboard_payload(
             .order_by(RiskEvent.created_at.desc())
             .limit(DASHBOARD_REJECTION_EVENT_LIMIT)
             .all()
+        )
+        skipped_due_to_fees = sum(
+            1 for event in recent_risk_rejects if "fee_economics" in str(event.detail or "").lower()
         )
         recent_failed_orders = (
             db.query(ExecutionOrder)
@@ -1274,67 +1277,8 @@ def _build_dashboard_payload(
             .limit(DASHBOARD_REJECTION_EVENT_LIMIT)
             .all()
         )
-        strategy_reject_total = int(
-            db.scalar(
-                select(func.count())
-                .select_from(StrategyDecisionAudit)
-                .join(
-                    StrategySignalSnapshot,
-                    StrategyDecisionAudit.signal_snapshot_id == StrategySignalSnapshot.id,
-                )
-                .where(
-                    StrategySignalSnapshot.user_id == user.id,
-                    StrategySignalSnapshot.trading_mode == mode,
-                    StrategyDecisionAudit.decision == "rejected",
-                    StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
-                    StrategyDecisionAudit.created_at >= dashboard_cutoff,
-                )
-            )
-            or 0
-        )
-        risk_reject_total = int(
-            db.scalar(
-                select(func.count())
-                .select_from(RiskEvent)
-                .where(
-                    RiskEvent.user_id == user.id,
-                    RiskEvent.trading_mode == mode,
-                    RiskEvent.outcome == "reject",
-                    RiskEvent.created_at >= dashboard_cutoff,
-                )
-            )
-            or 0
-        )
-        execution_reject_total = int(
-            db.scalar(
-                select(func.count())
-                .select_from(ExecutionOrder)
-                .where(
-                    ExecutionOrder.user_id == user.id,
-                    ExecutionOrder.trading_mode == mode,
-                    ExecutionOrder.state.in_(("failed", "cancelled")),
-                    func.coalesce(
-                        ExecutionOrder.failed_at,
-                        ExecutionOrder.cancelled_at,
-                        ExecutionOrder.updated_at,
-                    )
-                    >= dashboard_cutoff,
-                )
-            )
-            or 0
-        )
         rejection_diagnostics = _build_rejection_diagnostics(
-            strategy_records=[
-                _format_rejection_record(
-                    stage=str(audit.stage),
-                    reason_code=audit.reason_code,
-                    reason_detail=audit.reason_detail,
-                    strategy=snapshot.strategy_name,
-                    symbol=snapshot.token_symbol,
-                    created_at=audit.created_at,
-                )
-                for audit, snapshot in strategy_audits
-            ],
+            strategy_records=strategy_records,
             risk_records=[
                 _format_rejection_record(
                     stage="risk",
@@ -1358,6 +1302,9 @@ def _build_dashboard_payload(
                 for order in recent_failed_orders
             ],
         )
+        strategy_reject_total = len(strategy_records)
+        risk_reject_total = len(recent_risk_rejects)
+        execution_reject_total = len(recent_failed_orders)
         rejection_diagnostics["byStage"] = [
             {"stage": "risk", "count": risk_reject_total},
             {"stage": "suppression", "count": strategy_reject_total},

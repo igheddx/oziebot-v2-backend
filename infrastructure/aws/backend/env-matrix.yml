@@ -134,16 +134,16 @@ services:
 
   market-data-ingestor:
     local:
-      COINBASE_WS_URL: wss://ws-feed.exchange.coinbase.com
-      COINBASE_REST_URL: https://api.exchange.coinbase.com
+      COINBASE_WS_URL: wss://advanced-trade-ws.coinbase.com
+      COINBASE_REST_URL: https://api.coinbase.com/api/v3/brokerage
       CANDLES_GRANULARITY_SEC: "60"
     production:
       COINBASE_WS_URL:
         source: env
-        value: wss://ws-feed.exchange.coinbase.com
+        value: wss://advanced-trade-ws.coinbase.com
       COINBASE_REST_URL:
         source: env
-        value: https://api.exchange.coinbase.com
+        value: https://api.coinbase.com/api/v3/brokerage
       CANDLES_GRANULARITY_SEC:
         source: env
         value: "60"

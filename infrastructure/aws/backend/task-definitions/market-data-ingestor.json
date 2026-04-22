@@ -17,8 +17,8 @@
         { "name": "OZIEBOT_HEALTH_PORT", "value": "8080" },
         { "name": "OZIEBOT_HEALTH_STALE_SECONDS", "value": "300" },
         { "name": "OZIEBOT_HEALTH_AUTO_TOUCH_SECONDS", "value": "30" },
-        { "name": "COINBASE_WS_URL", "value": "wss://ws-feed.exchange.coinbase.com" },
-        { "name": "COINBASE_REST_URL", "value": "https://api.exchange.coinbase.com" },
+        { "name": "COINBASE_WS_URL", "value": "wss://advanced-trade-ws.coinbase.com" },
+        { "name": "COINBASE_REST_URL", "value": "https://api.coinbase.com/api/v3/brokerage" },
         { "name": "CANDLES_GRANULARITY_SEC", "value": "60" }
       ],
       "secrets": [
