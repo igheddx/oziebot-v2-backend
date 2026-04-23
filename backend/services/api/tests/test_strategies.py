@@ -145,7 +145,7 @@ class TestDayTradingStrategy:
         assert "entry_threshold" in config
         assert "exit_threshold" in config
         assert "stop_loss_pct" in config
-        assert config["position_size_fraction"] == 0.08
+        assert config["position_size_fraction"] == 0.15
 
     def test_day_trading_entry_signal_near_low(self):
         """Generate entry signal when price is near daily low."""
@@ -215,7 +215,7 @@ class TestDCAStrategy:
         """DCA has sensible defaults."""
         strategy = DCAStrategy()
         config = strategy.get_default_config()
-        assert config["buy_amount_usd"] == 50
+        assert config["buy_amount_usd"] == 100
         assert config["buy_interval_hours"] == 24
 
     def test_dca_always_buys_on_green_day(self):

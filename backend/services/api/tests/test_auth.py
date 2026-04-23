@@ -222,7 +222,7 @@ def test_root_admin_login_bootstraps_strategy_access(client, db_session):
     }
     assert set(strategy_rows) == {"momentum", "day_trading", "dca", "reversion"}
     assert all(row["is_assigned"] is True for row in strategy_rows.values())
-    assert strategy_rows["momentum"]["config_schema"]["risk_caps"]["max_position_usd"] == 120
+    assert strategy_rows["momentum"]["config_schema"]["risk_caps"]["max_position_usd"] == 300
     assert strategy_rows["day_trading"]["config_schema"]["signal_rules"]["cooldown_seconds"] == 20
     assert (
         strategy_rows["reversion"]["config_schema"]["strategy_params"]["use_trend_filter"] is True
