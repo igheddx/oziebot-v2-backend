@@ -16,7 +16,11 @@ class Settings(BaseSettings):
     stale_candle_seconds: int = 120
 
     candles_granularity_sec: int = 60  # poll REST every 60s for candles
-    cache_ttl_seconds: int = 300
+    cache_ttl_seconds: int = 120
+    candle_history_ttl_seconds: int = 1800
+    signal_panel_retention_seconds: int = 60
+    signal_panel_sample_interval_seconds: int = 5
+    signal_panel_snapshot_event_interval_seconds: int = 15
     trade_recovery_limit: int = 20
     trade_reconcile_interval_seconds: int = 15
     bbo_reconcile_interval_seconds: int = 10

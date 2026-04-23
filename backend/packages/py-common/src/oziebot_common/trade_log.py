@@ -8,6 +8,7 @@ from typing import Any, Mapping
 TRADE_LOG_REDIS_KEY = "oziebot:logs:trade"
 MAX_TRADE_LOG_WINDOW_SECONDS = 120
 MAX_TRADE_LOG_LIMIT = 200
+DEFAULT_TRADE_LOG_RETENTION_SECONDS = 60
 
 
 def build_trade_log_event(
@@ -78,7 +79,7 @@ def append_trade_log_event(
     timestamp: datetime | None = None,
     source: str = "coinbase",
     details: Mapping[str, Any] | None = None,
-    retention_seconds: int = MAX_TRADE_LOG_WINDOW_SECONDS,
+    retention_seconds: int = DEFAULT_TRADE_LOG_RETENTION_SECONDS,
 ) -> dict[str, Any]:
     clamped_retention = max(
         1, min(int(retention_seconds), MAX_TRADE_LOG_WINDOW_SECONDS)

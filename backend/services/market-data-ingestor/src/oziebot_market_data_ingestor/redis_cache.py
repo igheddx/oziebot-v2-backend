@@ -16,9 +16,18 @@ from oziebot_domain.market_data import (
 class RedisMarketCache:
     """Caches latest market snapshots for low-latency reads by other services."""
 
-    def __init__(self, client: redis.Redis, ttl_seconds: int = 300):
+    def __init__(
+        self,
+        client: redis.Redis,
+        ttl_seconds: int = 120,
+        *,
+        candle_history_ttl_seconds: int = 1800,
+        candle_history_limit: int = 50,
+    ):
         self._r = client
         self._ttl_seconds = ttl_seconds
+        self._candle_history_ttl_seconds = candle_history_ttl_seconds
+        self._candle_history_limit = candle_history_limit
 
     @staticmethod
     def key_trade(product_id: str) -> str:
@@ -75,8 +84,8 @@ class RedisMarketCache:
         history_key = f"oziebot:md:candles:{item.granularity_sec}:{item.product_id}"
         payload = json.dumps(item.model_dump(mode="json"))
         self._r.lpush(history_key, payload)
-        self._r.ltrim(history_key, 0, 49)  # keep last 50
-        self._r.expire(history_key, 7200)  # 2hr TTL
+        self._r.ltrim(history_key, 0, self._candle_history_limit - 1)
+        self._r.expire(history_key, self._candle_history_ttl_seconds)
 
     def put_orderbook(self, item: NormalizedOrderBookTop) -> None:
         self._r.setex(

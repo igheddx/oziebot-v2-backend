@@ -7,6 +7,7 @@ from math import sqrt
 from typing import Any, Mapping
 
 from oziebot_common.trade_log import (
+    DEFAULT_TRADE_LOG_RETENTION_SECONDS,
     MAX_TRADE_LOG_WINDOW_SECONDS,
     normalize_trade_log_payload,
 )
@@ -30,7 +31,7 @@ def append_trade_log_sample(
     symbol: str,
     sample: Mapping[str, Any],
     timestamp: datetime | None = None,
-    retention_seconds: int = MAX_TRADE_LOG_WINDOW_SECONDS,
+    retention_seconds: int = DEFAULT_TRADE_LOG_RETENTION_SECONDS,
 ) -> dict[str, Any]:
     event_time = (timestamp or datetime.now(UTC)).astimezone(UTC)
     normalized_symbol = str(symbol).upper()
@@ -100,7 +101,7 @@ def write_trade_log_summary(
     *,
     symbol: str,
     summary: Mapping[str, Any],
-    retention_seconds: int = MAX_TRADE_LOG_WINDOW_SECONDS,
+    retention_seconds: int = DEFAULT_TRADE_LOG_RETENTION_SECONDS,
 ) -> dict[str, Any]:
     normalized_symbol = str(symbol).upper()
     clamped_retention = max(

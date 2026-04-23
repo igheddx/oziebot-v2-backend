@@ -14,9 +14,6 @@ from oziebot_common.trade_log_intelligence import (
 )
 from oziebot_domain.market_data import NormalizedBestBidAsk, NormalizedTrade
 
-SAMPLE_INTERVAL_SECONDS = 2
-SNAPSHOT_EVENT_INTERVAL_SECONDS = 6
-
 
 @dataclass
 class SymbolPanelState:
@@ -54,17 +51,15 @@ class SymbolPanelState:
     def record_bbo(self, bbo: NormalizedBestBidAsk) -> None:
         self.latest_bbo = bbo
 
-    def sample_due(self, now: datetime) -> bool:
+    def sample_due(self, now: datetime, *, interval_seconds: int) -> bool:
         if self.last_sample_at is None:
             return True
-        return (now - self.last_sample_at).total_seconds() >= SAMPLE_INTERVAL_SECONDS
+        return (now - self.last_sample_at).total_seconds() >= interval_seconds
 
-    def snapshot_event_due(self, now: datetime) -> bool:
+    def snapshot_event_due(self, now: datetime, *, interval_seconds: int) -> bool:
         if self.last_snapshot_event_at is None:
             return True
-        return (
-            now - self.last_snapshot_event_at
-        ).total_seconds() >= SNAPSHOT_EVENT_INTERVAL_SECONDS
+        return (now - self.last_snapshot_event_at).total_seconds() >= interval_seconds
 
     def reset_interval(self) -> None:
         self.trade_count = 0
@@ -79,7 +74,9 @@ class SymbolPanelState:
 @dataclass
 class SignalPanelEmitter:
     client: Any
-    retention_seconds: int = 120
+    retention_seconds: int = 60
+    sample_interval_seconds: int = 5
+    snapshot_event_interval_seconds: int = 15
     _states: dict[str, SymbolPanelState] = field(default_factory=dict)
 
     def observe_trade(self, trade: NormalizedTrade) -> dict[str, Any] | None:
@@ -108,7 +105,9 @@ class SignalPanelEmitter:
         if state is None or state.latest_bbo is None:
             return None
         current = now.astimezone(UTC)
-        if not force_event and not state.sample_due(current):
+        if not force_event and not state.sample_due(
+            current, interval_seconds=self.sample_interval_seconds
+        ):
             return None
 
         sample = self._build_sample(symbol, state, current)
@@ -140,7 +139,13 @@ class SignalPanelEmitter:
 
         signature = self._signature(snapshot)
         state_changed = signature != state.last_derived_signature
-        if force_event or state.snapshot_event_due(current) or state_changed:
+        if (
+            force_event
+            or state.snapshot_event_due(
+                current, interval_seconds=self.snapshot_event_interval_seconds
+            )
+            or state_changed
+        ):
             append_trade_log_event(
                 self.client,
                 symbol=symbol,

@@ -327,10 +327,19 @@ async def main() -> None:
         log.info("no enabled products found (platform + user token filters)")
         return
 
-    cache = RedisMarketCache(r, ttl_seconds=s.cache_ttl_seconds)
+    cache = RedisMarketCache(
+        r,
+        ttl_seconds=s.cache_ttl_seconds,
+        candle_history_ttl_seconds=s.candle_history_ttl_seconds,
+    )
     store = MarketDataStore(engine)
     refresher = TokenPolicyRefresher(engine)
-    signal_panel = SignalPanelEmitter(r)
+    signal_panel = SignalPanelEmitter(
+        r,
+        retention_seconds=s.signal_panel_retention_seconds,
+        sample_interval_seconds=s.signal_panel_sample_interval_seconds,
+        snapshot_event_interval_seconds=s.signal_panel_snapshot_event_interval_seconds,
+    )
     stale = StaleDataDetector(
         thresholds=StaleThresholds(
             trade=s.stale_trade_seconds,

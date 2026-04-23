@@ -37,6 +37,7 @@ from oziebot_common.token_policy import (
     score_strategy_suitability,
 )
 from oziebot_common.trade_log import (
+    DEFAULT_TRADE_LOG_RETENTION_SECONDS,
     MAX_TRADE_LOG_LIMIT,
     MAX_TRADE_LOG_WINDOW_SECONDS,
     TRADE_LOG_REDIS_KEY,
@@ -96,6 +97,7 @@ __all__ = [
     "MAX_TRADE_LOG_WINDOW_SECONDS",
     "AIInferenceResult",
     "AIRecommendation",
+    "DEFAULT_TRADE_LOG_RETENTION_SECONDS",
     "PlaceholderTradeIntelligenceScorer",
     "TradeIntelligenceScorer",
     "append_trade_log_event",
