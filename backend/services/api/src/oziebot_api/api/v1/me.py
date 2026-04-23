@@ -472,6 +472,7 @@ def _dashboard_details_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "positions": payload.get("positions") or [],
         "activeTrades": payload.get("activeTrades") or [],
         "recentActivity": payload.get("recentActivity") or [],
+        "capitalUtilization": payload.get("capitalUtilization") or {},
         "feeAnalytics": payload.get("feeAnalytics") or {},
         "rejectionDiagnostics": payload.get("rejectionDiagnostics") or {},
         "budget": payload.get("budget") or {},
@@ -952,6 +953,10 @@ def _build_dashboard_payload(
         )
 
     available_balance_cents = sum(max(0, b.available_cash_cents) for b in buckets)
+    total_assigned_capital_cents = sum(max(0, b.assigned_capital_cents) for b in buckets)
+    total_reserved_cents = sum(max(0, b.reserved_cash_cents) for b in buckets)
+    total_locked_cents = sum(max(0, b.locked_capital_cents) for b in buckets)
+    total_deployed_cents = total_reserved_cents + total_locked_cents
     portfolio_cents = sum(
         b.available_cash_cents
         + b.reserved_cash_cents
@@ -1074,6 +1079,66 @@ def _build_dashboard_payload(
         }
         for t in trades
     ]
+    avg_trade_size_rows = db.execute(
+        select(
+            ExecutionTradeRecord.strategy_id,
+            func.coalesce(func.avg(ExecutionTradeRecord.gross_notional_cents), 0).label(
+                "avg_notional_cents"
+            ),
+        )
+        .where(
+            ExecutionTradeRecord.user_id == user.id,
+            ExecutionTradeRecord.trading_mode == mode,
+            ExecutionTradeRecord.executed_at >= dashboard_cutoff,
+        )
+        .group_by(ExecutionTradeRecord.strategy_id)
+        .order_by(ExecutionTradeRecord.strategy_id.asc())
+    ).all()
+    capital_utilization = {
+        "totalCapital": round(total_assigned_capital_cents / 100, 2),
+        "availableCash": round(available_balance_cents / 100, 2),
+        "reservedCash": round(total_reserved_cents / 100, 2),
+        "lockedCapital": round(total_locked_cents / 100, 2),
+        "deployedCapital": round(total_deployed_cents / 100, 2),
+        "totalDeployedPct": (
+            round((total_deployed_cents / total_assigned_capital_cents) * 100, 2)
+            if total_assigned_capital_cents > 0
+            else 0.0
+        ),
+        "byStrategy": [
+            {
+                "strategy": bucket.strategy_id,
+                "assignedCapital": round(bucket.assigned_capital_cents / 100, 2),
+                "availableCash": round(bucket.available_cash_cents / 100, 2),
+                "reservedCash": round(bucket.reserved_cash_cents / 100, 2),
+                "lockedCapital": round(bucket.locked_capital_cents / 100, 2),
+                "deployedCapital": round(
+                    (bucket.reserved_cash_cents + bucket.locked_capital_cents) / 100,
+                    2,
+                ),
+                "utilizationPct": (
+                    round(
+                        (
+                            (bucket.reserved_cash_cents + bucket.locked_capital_cents)
+                            / max(bucket.assigned_capital_cents, 1)
+                        )
+                        * 100,
+                        2,
+                    )
+                    if bucket.assigned_capital_cents > 0
+                    else 0.0
+                ),
+            }
+            for bucket in sorted(buckets, key=lambda item: item.strategy_id)
+        ],
+        "avgTradeSizeByStrategy": [
+            {
+                "strategy": str(strategy_id),
+                "avgTradeSize": round(int(avg_notional_cents or 0) / 100, 2),
+            }
+            for strategy_id, avg_notional_cents in avg_trade_size_rows
+        ],
+    }
 
     today_cutoff = now - timedelta(days=1)
     week_cutoff = now - timedelta(days=7)
@@ -1331,6 +1396,7 @@ def _build_dashboard_payload(
         "positions": positions,
         "activeTrades": active_trades,
         "recentActivity": recent_activity,
+        "capitalUtilization": capital_utilization,
         "budget": {
             "historyLookbackDaysApplied": DASHBOARD_HISTORY_LOOKBACK_DAYS,
             "positionLimit": DASHBOARD_POSITIONS_LIMIT,

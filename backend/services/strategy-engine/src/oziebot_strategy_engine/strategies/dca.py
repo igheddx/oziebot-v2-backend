@@ -15,7 +15,7 @@ class DCAStrategy(TradingStrategy):
     regularly regardless of price.
 
     Configuration:
-    - buy_amount_usd: Fixed USD amount to buy each cycle (default: 50)
+    - buy_amount_usd: Fixed USD amount to buy each cycle (default: 100)
     - buy_interval_hours: Hours between buys (default: 24 = daily)
     - only_on_green_days: Skip buy if price is down today (default: false)
     """
@@ -27,13 +27,35 @@ class DCAStrategy(TradingStrategy):
 
     def validate_config(self, config: dict) -> bool:
         """Validate DCA config."""
-        buy_amount = config.get("buy_amount_usd", 50)
+        buy_amount = config.get("buy_amount_usd", 100)
         buy_interval = config.get("buy_interval_hours", 24)
+        min_trade_usd = float(config.get("min_trade_usd", 100))
+        max_trade_usd = float(config.get("max_trade_usd", 150))
+        target_bucket_utilization_pct = float(
+            config.get("target_bucket_utilization_pct", 0.50)
+        )
+        drawdown_reduction_multiplier = float(
+            config.get("drawdown_reduction_multiplier", 0.75)
+        )
 
         if not (1 <= buy_amount <= 1000000):
             raise ValueError(f"buy_amount_usd must be 1-1000000, got {buy_amount}")
         if not (1 <= buy_interval <= 720):  # Max 30 days
             raise ValueError(f"buy_interval_hours must be 1-720, got {buy_interval}")
+        if not (0.0 <= min_trade_usd <= max_trade_usd):
+            raise ValueError(
+                f"min_trade_usd must be >=0 and <= max_trade_usd ({max_trade_usd}), got {min_trade_usd}"
+            )
+        if not (0.0 <= target_bucket_utilization_pct <= 1.0):
+            raise ValueError(
+                "target_bucket_utilization_pct must be 0-1, "
+                f"got {target_bucket_utilization_pct}"
+            )
+        if not (0.0 <= drawdown_reduction_multiplier <= 1.0):
+            raise ValueError(
+                "drawdown_reduction_multiplier must be 0-1, "
+                f"got {drawdown_reduction_multiplier}"
+            )
 
         return True
 
@@ -45,7 +67,7 @@ class DCAStrategy(TradingStrategy):
         correlation_id: UUID,
     ) -> StrategySignal:
         """Generate DCA signal."""
-        buy_amount_usd = config.get("buy_amount_usd", 50)
+        buy_amount_usd = config.get("buy_amount_usd", 100)
         only_on_green = config.get("only_on_green_days", False)
 
         market = context.market_snapshot
@@ -73,9 +95,15 @@ class DCAStrategy(TradingStrategy):
     def get_default_config(self) -> dict:
         """Return default configuration."""
         return {
-            "buy_amount_usd": 50,
+            "buy_amount_usd": 100,
             "buy_interval_hours": 24,
             "only_on_green_days": False,
+            "dynamic_sizing_enabled": True,
+            "min_trade_usd": 100,
+            "max_trade_usd": 150,
+            "target_bucket_utilization_pct": 0.50,
+            "drawdown_size_reduction_enabled": True,
+            "drawdown_reduction_multiplier": 0.75,
         }
 
     def get_config_schema(self) -> dict:
@@ -87,7 +115,7 @@ class DCAStrategy(TradingStrategy):
                     "type": "number",
                     "minimum": 1,
                     "maximum": 1000000,
-                    "default": 50,
+                    "default": 100,
                     "description": "USD amount to buy each cycle",
                 },
                 "buy_interval_hours": {
@@ -101,6 +129,42 @@ class DCAStrategy(TradingStrategy):
                     "type": "boolean",
                     "default": False,
                     "description": "Skip buy if price is down today",
+                },
+                "dynamic_sizing_enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Scale buy amount toward bucket utilization targets",
+                },
+                "min_trade_usd": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 100,
+                    "description": "Minimum dynamic DCA trade notional floor in USD",
+                },
+                "max_trade_usd": {
+                    "type": "number",
+                    "minimum": 1,
+                    "default": 150,
+                    "description": "Dynamic DCA trade notional ceiling before risk caps",
+                },
+                "target_bucket_utilization_pct": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.50,
+                    "description": "Target fraction of assigned bucket capital to keep deployed",
+                },
+                "drawdown_size_reduction_enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Reduce DCA size automatically during elevated drawdown",
+                },
+                "drawdown_reduction_multiplier": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.75,
+                    "description": "Multiplier applied when drawdown-aware sizing is active",
                 },
             },
         }

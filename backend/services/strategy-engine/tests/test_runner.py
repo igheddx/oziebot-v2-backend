@@ -79,6 +79,16 @@ def _setup_intelligence_db(db_path: Path) -> None:
                 "CREATE TABLE ai_inference_records (id TEXT PRIMARY KEY, signal_snapshot_id TEXT, model_name TEXT, model_version TEXT, recommendation TEXT, confidence_score REAL, explanation_json TEXT, created_at TEXT)"
             )
         )
+        conn.execute(
+            text(
+                "CREATE TABLE strategy_capital_buckets (id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, trading_mode TEXT, assigned_capital_cents INTEGER, available_buying_power_cents INTEGER, reserved_cash_cents INTEGER, locked_capital_cents INTEGER, realized_pnl_cents INTEGER)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE strategy_capital_ledger (id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, trading_mode TEXT, event_type TEXT, metadata TEXT, created_at TEXT)"
+            )
+        )
 
 
 def test_schedule_pattern_intervals():
@@ -205,6 +215,80 @@ def test_close_signal_event_uses_open_position_size():
 
     assert event.action == SignalType.CLOSE
     assert event.suggested_size == Decimal("46.56468999557635445042024633")
+
+
+def test_runner_applies_dynamic_bucket_sizing_to_buy_signal(tmp_path: Path):
+    db_path = tmp_path / "runner-dynamic-sizing.sqlite"
+    _setup_intelligence_db(db_path)
+    engine = create_engine(f"sqlite+pysqlite:///{db_path}")
+    user_id = "4f095c5a-34c1-4dbc-bf09-8c35b3601ea1"
+    now = datetime.now(UTC)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO strategy_capital_buckets (id, user_id, strategy_id, trading_mode, assigned_capital_cents, available_buying_power_cents, reserved_cash_cents, locked_capital_cents, realized_pnl_cents) "
+                "VALUES (:id, :user_id, 'momentum', 'paper', 200000, 200000, 0, 0, 0)"
+            ),
+            {"id": uuid.uuid4().hex, "user_id": user_id},
+        )
+
+    runner = StrategyRunner(engine=engine, redis_client=DummyRedis())
+    market = MarketSnapshot(
+        timestamp=now,
+        symbol="BTC-USD",
+        current_price=Decimal("100"),
+        bid_price=Decimal("99.5"),
+        ask_price=Decimal("100.5"),
+        volume_24h=Decimal("1000"),
+        open_price=Decimal("95"),
+        high_price=Decimal("101"),
+        low_price=Decimal("94"),
+        close_price=Decimal("100"),
+    )
+    signal = StrategySignal(
+        signal_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        strategy_id="momentum",
+        trading_mode=TradingMode.PAPER,
+        signal_type=SignalType.BUY,
+        confidence=0.8,
+        reason="dynamic sizing",
+        metadata={"position_size_fraction": 0.25},
+    )
+    sized = runner._apply_dynamic_position_sizing(
+        user_id=user_id,
+        strategy_name="momentum",
+        trading_mode="paper",
+        signal=signal,
+        market=market,
+        position_state=PositionState(symbol="BTC-USD", quantity=Decimal("0")),
+        config={
+            "dynamic_sizing_enabled": True,
+            "min_trade_usd": 75,
+            "max_trade_usd": 300,
+            "target_bucket_utilization_pct": 0.65,
+            "drawdown_size_reduction_enabled": True,
+            "drawdown_reduction_multiplier": 0.75,
+        },
+        risk_caps={"max_position_usd": 300},
+    )
+
+    assert sized.metadata is not None
+    assert sized.metadata["sizing"]["final_trade_usd"] == "300.00"
+
+    event = StrategyRunner._to_signal_event(
+        run_id=uuid.uuid4(),
+        user_id=uuid.UUID(user_id),
+        strategy_name="momentum",
+        symbol="BTC-USD",
+        signal=sized,
+        trading_mode=TradingMode.PAPER,
+        timestamp=now,
+        market=market,
+    )
+
+    assert event.suggested_size == Decimal("3")
 
 
 def test_runner_resolves_all_allowed_symbols_by_default():

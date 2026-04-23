@@ -13,6 +13,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
+from oziebot_common.dynamic_sizing import (
+    DynamicSizingInput,
+    calculate_dynamic_trade_size,
+)
 from oziebot_common.queues import QueueNames, push_json, strategy_signal_to_json
 from oziebot_common.fee_model import (
     SETTING_EXECUTION_FEE_MODEL,
@@ -331,6 +335,16 @@ class StrategyRunner:
                             token_policy=token_policy,
                             timestamp=now,
                         )
+                        signal = self._apply_dynamic_position_sizing(
+                            user_id=user_id,
+                            strategy_name=strategy_name,
+                            trading_mode=mode.value,
+                            signal=signal,
+                            market=market,
+                            position_state=position_state,
+                            config=mode_config,
+                            risk_caps=mode_risk_caps,
+                        )
                         suppress_reason = self._suppression_reason(
                             user_id=user_id,
                             strategy_name=strategy_name,
@@ -374,6 +388,7 @@ class StrategyRunner:
                                     "fee_economics": (signal.metadata or {}).get(
                                         "fee_economics"
                                     ),
+                                    "sizing": (signal.metadata or {}).get("sizing"),
                                 },
                                 started_at=now,
                                 completed_at=datetime.now(UTC),
@@ -418,6 +433,7 @@ class StrategyRunner:
                                 "fee_economics": (signal.metadata or {}).get(
                                     "fee_economics"
                                 ),
+                                "sizing": (signal.metadata or {}).get("sizing"),
                             },
                             started_at=now,
                             completed_at=datetime.now(UTC),
@@ -459,6 +475,7 @@ class StrategyRunner:
                                 "reason_code": self._signal_reason_code(signal),
                                 "suggested_size": str(event.suggested_size),
                                 "reason": event.reasoning_metadata.get("reason"),
+                                "sizing": event.reasoning_metadata.get("sizing"),
                                 "metrics": self.metrics_snapshot(),
                             },
                         )
@@ -580,6 +597,244 @@ class StrategyRunner:
             return Decimal(str(value))
         except Exception:
             return default
+
+    @staticmethod
+    def _dict_value(data: Any, key: str) -> Any:
+        if isinstance(data, dict):
+            return data.get(key)
+        return None
+
+    def _load_dynamic_sizing_context(
+        self,
+        *,
+        user_id: str,
+        strategy_name: str,
+        trading_mode: str,
+    ) -> dict[str, Decimal] | None:
+        if self._engine is None:
+            return None
+        bucket_stmt = text(
+            """
+            SELECT
+              assigned_capital_cents,
+              available_buying_power_cents,
+              reserved_cash_cents,
+              locked_capital_cents,
+              realized_pnl_cents
+            FROM strategy_capital_buckets
+            WHERE user_id = :user_id
+              AND strategy_id = :strategy_name
+              AND trading_mode = :trading_mode
+            LIMIT 1
+            """
+        )
+        total_stmt = text(
+            """
+            SELECT COALESCE(SUM(assigned_capital_cents), 0) AS total_assigned_cents
+            FROM strategy_capital_buckets
+            WHERE user_id = :user_id
+              AND trading_mode = :trading_mode
+            """
+        )
+        ledger_stmt = text(
+            """
+            SELECT metadata
+            FROM strategy_capital_ledger
+            WHERE user_id = :user_id
+              AND strategy_id = :strategy_name
+              AND trading_mode = :trading_mode
+              AND event_type = 'settle'
+              AND created_at >= :cutoff
+            ORDER BY created_at DESC
+            """
+        )
+        start_of_day = datetime.now(UTC).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        try:
+            with self._engine.begin() as conn:
+                bucket_row = (
+                    conn.execute(
+                        bucket_stmt,
+                        {
+                            "user_id": user_id,
+                            "strategy_name": strategy_name,
+                            "trading_mode": trading_mode,
+                        },
+                    )
+                    .mappings()
+                    .first()
+                )
+                if bucket_row is None:
+                    return None
+                total_row = (
+                    conn.execute(
+                        total_stmt,
+                        {"user_id": user_id, "trading_mode": trading_mode},
+                    )
+                    .mappings()
+                    .first()
+                )
+                ledger_rows = conn.execute(
+                    ledger_stmt,
+                    {
+                        "user_id": user_id,
+                        "strategy_name": strategy_name,
+                        "trading_mode": trading_mode,
+                        "cutoff": start_of_day,
+                    },
+                ).mappings().all()
+        except SQLAlchemyError:
+            return None
+
+        daily_loss_cents = Decimal("0")
+        for row in ledger_rows:
+            metadata = row.get("metadata") or {}
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except Exception:
+                    metadata = {}
+            pnl = self._to_decimal(
+                self._dict_value(metadata, "realized_pnl_delta_cents")
+            )
+            if pnl < 0:
+                daily_loss_cents += abs(pnl)
+
+        assigned_capital_cents = self._to_decimal(bucket_row["assigned_capital_cents"])
+        total_assigned_cents = self._to_decimal(
+            total_row["total_assigned_cents"] if total_row else 0
+        )
+        realized_pnl_cents = self._to_decimal(bucket_row["realized_pnl_cents"])
+        realized_drawdown_pct = Decimal("0")
+        if assigned_capital_cents > 0 and realized_pnl_cents < 0:
+            realized_drawdown_pct = abs(realized_pnl_cents) / assigned_capital_cents
+        daily_loss_pct = Decimal("0")
+        if assigned_capital_cents > 0 and daily_loss_cents > 0:
+            daily_loss_pct = daily_loss_cents / assigned_capital_cents
+
+        return {
+            "assigned_capital_usd": assigned_capital_cents / Decimal("100"),
+            "available_buying_power_usd": self._to_decimal(
+                bucket_row["available_buying_power_cents"]
+            )
+            / Decimal("100"),
+            "reserved_capital_usd": self._to_decimal(bucket_row["reserved_cash_cents"])
+            / Decimal("100"),
+            "locked_capital_usd": self._to_decimal(bucket_row["locked_capital_cents"])
+            / Decimal("100"),
+            "total_capital_usd": total_assigned_cents / Decimal("100"),
+            "realized_drawdown_pct": realized_drawdown_pct,
+            "daily_loss_pct": daily_loss_pct,
+        }
+
+    def _apply_dynamic_position_sizing(
+        self,
+        *,
+        user_id: str,
+        strategy_name: str,
+        trading_mode: str,
+        signal: StrategySignal,
+        market: MarketSnapshot,
+        position_state: PositionState,
+        config: dict[str, Any],
+        risk_caps: dict[str, Any],
+    ) -> StrategySignal:
+        if self._signal_action(signal) != "buy":
+            return signal
+        if market.current_price <= 0:
+            return signal
+
+        metadata = dict(signal.metadata or {})
+        position_size_fraction = self._to_decimal(metadata.get("position_size_fraction"))
+        buy_amount_usd = self._to_decimal(metadata.get("buy_amount_usd"))
+        if position_size_fraction <= 0 and buy_amount_usd <= 0:
+            return signal
+
+        dynamic_context = self._load_dynamic_sizing_context(
+            user_id=user_id,
+            strategy_name=strategy_name,
+            trading_mode=trading_mode,
+        )
+        if dynamic_context is None:
+            return signal
+
+        token_policy = metadata.get("token_policy") or {}
+        override_raw = self._dict_value(token_policy, "max_position_pct_override")
+        max_position_pct_override = (
+            self._to_decimal(override_raw) if override_raw is not None else None
+        )
+        current_position_usd = abs(position_state.quantity * market.current_price)
+        sizing = calculate_dynamic_trade_size(
+            DynamicSizingInput(
+                confidence=Decimal(str(signal.confidence)),
+                total_capital_usd=dynamic_context["total_capital_usd"],
+                assigned_capital_usd=dynamic_context["assigned_capital_usd"],
+                available_buying_power_usd=dynamic_context["available_buying_power_usd"],
+                reserved_capital_usd=dynamic_context["reserved_capital_usd"],
+                locked_capital_usd=dynamic_context["locked_capital_usd"],
+                current_position_usd=current_position_usd,
+                position_size_fraction=position_size_fraction,
+                buy_amount_usd=buy_amount_usd,
+                min_trade_usd=self._to_decimal(config.get("min_trade_usd")),
+                max_trade_usd=self._to_decimal(config.get("max_trade_usd")),
+                max_position_usd=self._to_decimal(risk_caps.get("max_position_usd")),
+                target_bucket_utilization_pct=self._to_decimal(
+                    config.get("target_bucket_utilization_pct")
+                ),
+                dynamic_sizing_enabled=bool(config.get("dynamic_sizing_enabled", True)),
+                drawdown_size_reduction_enabled=bool(
+                    config.get("drawdown_size_reduction_enabled", True)
+                ),
+                drawdown_reduction_multiplier=self._to_decimal(
+                    config.get("drawdown_reduction_multiplier", Decimal("0.75"))
+                ),
+                realized_drawdown_pct=dynamic_context["realized_drawdown_pct"],
+                daily_loss_pct=dynamic_context["daily_loss_pct"],
+                token_policy_size_multiplier=self._to_decimal(
+                    self._dict_value(token_policy, "size_multiplier"), Decimal("1")
+                ),
+                token_policy_max_position_pct_override=max_position_pct_override,
+            )
+        )
+        metadata["sizing"] = {
+            "strategy_base_trade_usd": str(sizing.strategy_base_trade_usd),
+            "target_bucket_trade_gap_usd": str(sizing.target_bucket_trade_gap_usd),
+            "target_bucket_utilization_pct": str(sizing.target_bucket_utilization_pct),
+            "current_bucket_utilization_pct": str(
+                sizing.current_bucket_utilization_pct
+            ),
+            "confidence_scaled_trade_usd": str(sizing.confidence_scaled_trade_usd),
+            "drawdown_state": sizing.drawdown_state,
+            "drawdown_multiplier_applied": str(sizing.drawdown_multiplier_applied),
+            "token_policy_size_multiplier": str(sizing.token_policy_size_multiplier),
+            "pre_cap_trade_usd": str(sizing.pre_cap_trade_usd),
+            "max_allowed_trade_usd": str(sizing.max_allowed_trade_usd),
+            "max_position_remaining_usd": (
+                str(sizing.max_position_remaining_usd)
+                if sizing.max_position_remaining_usd is not None
+                else None
+            ),
+            "token_policy_max_position_remaining_usd": (
+                str(sizing.token_policy_max_position_remaining_usd)
+                if sizing.token_policy_max_position_remaining_usd is not None
+                else None
+            ),
+            "final_trade_usd": str(sizing.final_trade_usd),
+            "reduction_reasons": list(sizing.reduction_reasons),
+            "total_capital_usd": str(dynamic_context["total_capital_usd"]),
+            "assigned_capital_usd": str(dynamic_context["assigned_capital_usd"]),
+            "available_buying_power_usd": str(
+                dynamic_context["available_buying_power_usd"]
+            ),
+            "reserved_capital_usd": str(dynamic_context["reserved_capital_usd"]),
+            "locked_capital_usd": str(dynamic_context["locked_capital_usd"]),
+            "current_position_usd": str(current_position_usd.quantize(Decimal("0.01"))),
+            "realized_drawdown_pct": str(dynamic_context["realized_drawdown_pct"]),
+            "daily_loss_pct": str(dynamic_context["daily_loss_pct"]),
+            "dynamic_sizing_enabled": bool(config.get("dynamic_sizing_enabled", True)),
+        }
+        return signal.model_copy(update={"metadata": metadata})
 
     def _attach_trade_intelligence(
         self,
@@ -1198,6 +1453,12 @@ class StrategyRunner:
             return abs(qty * market.current_price)
 
         metadata = signal.metadata or {}
+        sizing = metadata.get("sizing") or {}
+        final_trade_usd = self._to_decimal(
+            self._dict_value(sizing, "final_trade_usd"), Decimal("-1")
+        )
+        if final_trade_usd >= 0:
+            return final_trade_usd
         if "buy_amount_usd" in metadata:
             return self._to_decimal(metadata.get("buy_amount_usd"))
 
@@ -1253,6 +1514,16 @@ class StrategyRunner:
         )
         if sizing_reason is not None:
             return sizing_reason
+        sizing_metadata = dict((signal.metadata or {}).get("sizing") or {})
+        if (
+            action == "buy"
+            and sizing_metadata
+            and self._to_decimal(sizing_metadata.get("final_trade_usd")) <= 0
+        ):
+            reasons = sizing_metadata.get("reduction_reasons") or []
+            if reasons:
+                return f"sizing blocked: {', '.join(str(reason) for reason in reasons)}"
+            return "sizing blocked"
 
         cooldown_seconds = int(signal_rules.get("cooldown_seconds") or 0)
         if cooldown_seconds > 0:
@@ -1959,6 +2230,7 @@ class StrategyRunner:
     ) -> StrategySignalEvent:
         confidence = Decimal(str(signal.confidence))
         suggested_size = Decimal("0")
+        sizing = dict((signal.metadata or {}).get("sizing") or {})
         if signal.quantity is not None:
             suggested_size = Decimal(str(signal.quantity.amount))
         elif (
@@ -1966,6 +2238,11 @@ class StrategyRunner:
             and position_state is not None
         ):
             suggested_size = abs(position_state.quantity)
+        elif sizing and market is not None:
+            price = market.current_price
+            final_trade_usd = Decimal(str(sizing.get("final_trade_usd", "0")))
+            if price > 0 and final_trade_usd > 0:
+                suggested_size = final_trade_usd / price
         elif signal.metadata and "buy_amount_usd" in signal.metadata:
             price = market.current_price if market is not None else Decimal("0")
             usd_amount = Decimal(str(signal.metadata["buy_amount_usd"])) * confidence
@@ -1996,6 +2273,7 @@ class StrategyRunner:
                 "signal_metadata": signal.metadata or {},
                 "token_policy": (signal.metadata or {}).get("token_policy"),
                 "fee_economics": (signal.metadata or {}).get("fee_economics"),
+                "sizing": (signal.metadata or {}).get("sizing"),
             },
             trading_mode=trading_mode,
             timestamp=timestamp,

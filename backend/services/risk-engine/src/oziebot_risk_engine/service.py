@@ -82,6 +82,7 @@ class RiskEngineService:
                 rules_evaluated=[],
                 trace_id=trace_id,
                 metadata={
+                    "sizing": self._json_dict(signal.reasoning_metadata.get("sizing")),
                     "fee_economics": self._json_dict(
                         signal.reasoning_metadata.get("fee_economics")
                     ),
@@ -108,7 +109,10 @@ class RiskEngineService:
                 detail="Signal size must be positive",
                 rules_evaluated=["signal_size_positive"],
                 trace_id=trace_id,
-                metadata={"fee_economics": facts.get("fee_economics", {})},
+                metadata={
+                    "sizing": self._json_dict(signal.reasoning_metadata.get("sizing")),
+                    "fee_economics": facts.get("fee_economics", {}),
+                },
             )
             self._persist_risk_event(signal, decision)
             self._persist_decision_audit_record(signal, decision, created_at=now)
@@ -221,7 +225,10 @@ class RiskEngineService:
                 detail=f"{reject_result.rule_name}: {reject_result.detail}",
                 rules_evaluated=rules_evaluated,
                 trace_id=trace_id,
-                metadata={"fee_economics": facts.get("fee_economics", {})},
+                metadata={
+                    "sizing": self._json_dict(signal.reasoning_metadata.get("sizing")),
+                    "fee_economics": facts.get("fee_economics", {}),
+                },
             )
             self._persist_risk_event(signal, decision)
             self._persist_decision_audit_record(signal, decision, created_at=now)
@@ -249,7 +256,10 @@ class RiskEngineService:
             detail=None,
             rules_evaluated=rules_evaluated,
             trace_id=trace_id,
-            metadata={"fee_economics": facts.get("fee_economics", {})},
+            metadata={
+                "sizing": self._json_dict(signal.reasoning_metadata.get("sizing")),
+                "fee_economics": facts.get("fee_economics", {}),
+            },
         )
 
         intent = self._to_intent(signal, final_size)
@@ -359,6 +369,7 @@ class RiskEngineService:
                 "signal_metadata": self._json_dict(
                     signal.reasoning_metadata.get("signal_metadata")
                 ),
+                "sizing": self._json_dict(signal.reasoning_metadata.get("sizing")),
                 "fee_economics": fee_economics,
                 "intelligence": self._json_dict(
                     signal.reasoning_metadata.get("intelligence")
@@ -1292,6 +1303,7 @@ class RiskEngineService:
                     "market_data_quality": signal.reasoning_metadata.get(
                         "market_data_quality"
                     ),
+                    "sizing": decision.metadata.get("sizing"),
                     "fee_economics": decision.metadata.get("fee_economics"),
                     "metrics": self.metrics_snapshot(),
                 },

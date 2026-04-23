@@ -78,6 +78,115 @@ def test_dashboard_reports_available_balance_separately_from_portfolio(
     assert payload["portfolioValue"] == 1000.0
 
 
+def test_dashboard_exposes_capital_utilization_metrics(
+    client,
+    regular_user_and_token,
+    db_session: Session,
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    order_id = uuid.uuid4()
+    db_session.add_all(
+        [
+            StrategyCapitalBucket(
+                user_id=user.id,
+                strategy_id="momentum",
+                trading_mode="paper",
+                assigned_capital_cents=60_000,
+                available_cash_cents=30_000,
+                reserved_cash_cents=5_000,
+                locked_capital_cents=25_000,
+                realized_pnl_cents=0,
+                unrealized_pnl_cents=0,
+                available_buying_power_cents=30_000,
+                version=1,
+                created_at=now,
+                updated_at=now,
+            ),
+            StrategyCapitalBucket(
+                user_id=user.id,
+                strategy_id="day_trading",
+                trading_mode="paper",
+                assigned_capital_cents=40_000,
+                available_cash_cents=28_000,
+                reserved_cash_cents=2_000,
+                locked_capital_cents=10_000,
+                realized_pnl_cents=0,
+                unrealized_pnl_cents=0,
+                available_buying_power_cents=28_000,
+                version=1,
+                created_at=now,
+                updated_at=now,
+            ),
+            ExecutionTradeRecord(
+                id=uuid.uuid4(),
+                order_id=order_id,
+                fill_id=None,
+                tenant_id=membership.tenant_id,
+                user_id=user.id,
+                strategy_id="momentum",
+                symbol="BTC-USD",
+                trading_mode="paper",
+                side="buy",
+                quantity="0.50",
+                price="50000",
+                gross_notional_cents=25_000,
+                fee_cents=100,
+                realized_pnl_cents=0,
+                position_quantity_after="0.50",
+                avg_entry_price_after="50000",
+                executed_at=now,
+                raw_payload={},
+            ),
+            ExecutionTradeRecord(
+                id=uuid.uuid4(),
+                order_id=order_id,
+                fill_id=None,
+                tenant_id=membership.tenant_id,
+                user_id=user.id,
+                strategy_id="day_trading",
+                symbol="ETH-USD",
+                trading_mode="paper",
+                side="buy",
+                quantity="1.00",
+                price="2500",
+                gross_notional_cents=10_000,
+                fee_cents=50,
+                realized_pnl_cents=0,
+                position_quantity_after="1.00",
+                avg_entry_price_after="2500",
+                executed_at=now,
+                raw_payload={},
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/details?trading_mode=paper",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()["capitalUtilization"]
+    assert payload["totalCapital"] == 1000.0
+    assert payload["availableCash"] == 580.0
+    assert payload["reservedCash"] == 70.0
+    assert payload["lockedCapital"] == 350.0
+    assert payload["deployedCapital"] == 420.0
+    assert payload["totalDeployedPct"] == 42.0
+    assert payload["avgTradeSizeByStrategy"] == [
+        {"strategy": "day_trading", "avgTradeSize": 100.0},
+        {"strategy": "momentum", "avgTradeSize": 250.0},
+    ]
+
+
 def test_dashboard_includes_fee_analytics(client, regular_user_and_token, db_session: Session):
     email, token = regular_user_and_token
     user = db_session.scalar(select(User).where(User.email == email))

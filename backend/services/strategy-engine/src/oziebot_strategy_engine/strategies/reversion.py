@@ -59,6 +59,14 @@ class ReversionStrategy(TradingStrategy):
         )
         max_hold_minutes = int(config.get("max_hold_minutes", 120))
         ema_long_window = int(config.get("ema_long_window", 200))
+        min_trade_usd = float(config.get("min_trade_usd", 30))
+        max_trade_usd = float(config.get("max_trade_usd", 100))
+        target_bucket_utilization_pct = float(
+            config.get("target_bucket_utilization_pct", 0.45)
+        )
+        drawdown_reduction_multiplier = float(
+            config.get("drawdown_reduction_multiplier", 0.75)
+        )
 
         if not (5 <= band_window <= 200):
             raise ValueError(f"band_window must be 5-200, got {band_window}")
@@ -94,6 +102,20 @@ class ReversionStrategy(TradingStrategy):
         if not (5 <= ema_long_window <= 500):
             raise ValueError(
                 f"ema_long_window must be between 5 and 500, got {ema_long_window}"
+            )
+        if not (0.0 <= min_trade_usd <= max_trade_usd):
+            raise ValueError(
+                f"min_trade_usd must be >=0 and <= max_trade_usd ({max_trade_usd}), got {min_trade_usd}"
+            )
+        if not (0.0 <= target_bucket_utilization_pct <= 1.0):
+            raise ValueError(
+                "target_bucket_utilization_pct must be 0-1, "
+                f"got {target_bucket_utilization_pct}"
+            )
+        if not (0.0 <= drawdown_reduction_multiplier <= 1.0):
+            raise ValueError(
+                "drawdown_reduction_multiplier must be 0-1, "
+                f"got {drawdown_reduction_multiplier}"
             )
 
         return True
@@ -288,7 +310,7 @@ class ReversionStrategy(TradingStrategy):
             "rsi_buy": 30,
             "rsi_exit": 50,
             "rsi_sell": 65,
-            "position_size_fraction": 0.05,
+            "position_size_fraction": 0.10,
             "stop_loss_pct": 0.025,
             "take_profit_pct": 0.04,
             "min_bandwidth": 0.012,
@@ -298,6 +320,12 @@ class ReversionStrategy(TradingStrategy):
             "fear_index_sell_min": 60,
             "use_trend_filter": True,
             "ema_long_window": 200,
+            "dynamic_sizing_enabled": True,
+            "min_trade_usd": 30,
+            "max_trade_usd": 100,
+            "target_bucket_utilization_pct": 0.45,
+            "drawdown_size_reduction_enabled": True,
+            "drawdown_reduction_multiplier": 0.75,
         }
 
     def get_config_schema(self) -> dict:
@@ -357,7 +385,7 @@ class ReversionStrategy(TradingStrategy):
                     "type": "number",
                     "minimum": 0.01,
                     "maximum": 1.0,
-                    "default": 0.05,
+                    "default": 0.10,
                     "description": "Fraction of capital to deploy per entry",
                 },
                 "stop_loss_pct": {
@@ -418,6 +446,42 @@ class ReversionStrategy(TradingStrategy):
                     "maximum": 500,
                     "default": 200,
                     "description": "Long lookback window used for the hard trend filter",
+                },
+                "dynamic_sizing_enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Scale trade size using bucket capital and utilization",
+                },
+                "min_trade_usd": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 30,
+                    "description": "Minimum dynamic trade notional floor in USD",
+                },
+                "max_trade_usd": {
+                    "type": "number",
+                    "minimum": 1,
+                    "default": 100,
+                    "description": "Dynamic trade notional ceiling before risk caps",
+                },
+                "target_bucket_utilization_pct": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.45,
+                    "description": "Target fraction of assigned bucket capital to keep deployed",
+                },
+                "drawdown_size_reduction_enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Reduce trade size automatically during elevated drawdown",
+                },
+                "drawdown_reduction_multiplier": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.75,
+                    "description": "Multiplier applied when drawdown-aware sizing is active",
                 },
             },
             "required": ["band_window", "rsi_period", "zscore_entry", "zscore_exit"],

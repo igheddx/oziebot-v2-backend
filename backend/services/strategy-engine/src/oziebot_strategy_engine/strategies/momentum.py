@@ -41,6 +41,14 @@ class MomentumStrategy(TradingStrategy):
         take_profit_pct = config.get("take_profit_pct", 0.08)
         trailing_stop_pct = config.get("trailing_stop_pct", 0.03)
         max_hold_minutes = config.get("max_hold_minutes", 300)
+        min_trade_usd = float(config.get("min_trade_usd", 75))
+        max_trade_usd = float(config.get("max_trade_usd", 300))
+        target_bucket_utilization_pct = float(
+            config.get("target_bucket_utilization_pct", 0.65)
+        )
+        drawdown_reduction_multiplier = float(
+            config.get("drawdown_reduction_multiplier", 0.75)
+        )
 
         if not (1 <= short_window < long_window):
             raise ValueError(
@@ -65,6 +73,20 @@ class MomentumStrategy(TradingStrategy):
         if not (1 <= max_hold_minutes <= 10_080):
             raise ValueError(
                 f"max_hold_minutes must be between 1 and 10080, got {max_hold_minutes}"
+            )
+        if not (0.0 <= min_trade_usd <= max_trade_usd):
+            raise ValueError(
+                f"min_trade_usd must be >=0 and <= max_trade_usd ({max_trade_usd}), got {min_trade_usd}"
+            )
+        if not (0.0 <= target_bucket_utilization_pct <= 1.0):
+            raise ValueError(
+                "target_bucket_utilization_pct must be 0-1, "
+                f"got {target_bucket_utilization_pct}"
+            )
+        if not (0.0 <= drawdown_reduction_multiplier <= 1.0):
+            raise ValueError(
+                "drawdown_reduction_multiplier must be 0-1, "
+                f"got {drawdown_reduction_multiplier}"
             )
 
         return True
@@ -165,11 +187,17 @@ class MomentumStrategy(TradingStrategy):
             "short_window": 8,
             "long_window": 34,
             "strength_threshold": 0.012,
-            "position_size_fraction": 0.12,
+            "position_size_fraction": 0.25,
             "stop_loss_pct": 0.035,
             "take_profit_pct": 0.08,
             "trailing_stop_pct": 0.03,
             "max_hold_minutes": 300,
+            "dynamic_sizing_enabled": True,
+            "min_trade_usd": 75,
+            "max_trade_usd": 300,
+            "target_bucket_utilization_pct": 0.65,
+            "drawdown_size_reduction_enabled": True,
+            "drawdown_reduction_multiplier": 0.75,
         }
 
     def get_config_schema(self) -> dict:
@@ -200,7 +228,7 @@ class MomentumStrategy(TradingStrategy):
                     "type": "number",
                     "minimum": 0.01,
                     "maximum": 1.0,
-                    "default": 0.12,
+                    "default": 0.25,
                     "description": "Fraction of capital to use per trade",
                 },
                 "stop_loss_pct": {
@@ -230,6 +258,42 @@ class MomentumStrategy(TradingStrategy):
                     "maximum": 10080,
                     "default": 300,
                     "description": "Maximum time to hold an open position",
+                },
+                "dynamic_sizing_enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Scale trade size using bucket capital and utilization",
+                },
+                "min_trade_usd": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 75,
+                    "description": "Minimum dynamic trade notional floor in USD",
+                },
+                "max_trade_usd": {
+                    "type": "number",
+                    "minimum": 1,
+                    "default": 300,
+                    "description": "Dynamic trade notional ceiling before risk caps",
+                },
+                "target_bucket_utilization_pct": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.65,
+                    "description": "Target fraction of assigned bucket capital to keep deployed",
+                },
+                "drawdown_size_reduction_enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Reduce trade size automatically during elevated drawdown",
+                },
+                "drawdown_reduction_multiplier": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.75,
+                    "description": "Multiplier applied when drawdown-aware sizing is active",
                 },
             },
             "required": ["short_window", "long_window"],

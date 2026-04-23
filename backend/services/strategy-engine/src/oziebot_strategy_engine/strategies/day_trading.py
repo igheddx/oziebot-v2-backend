@@ -39,6 +39,14 @@ class DayTradingStrategy(TradingStrategy):
             config.get("min_entry_confirmations", config.get("min_entry_signals", 1))
         )
         max_position_age_hours = int(config.get("max_position_age_hours", 3))
+        min_trade_usd = float(config.get("min_trade_usd", 50))
+        max_trade_usd = float(config.get("max_trade_usd", 200))
+        target_bucket_utilization_pct = float(
+            config.get("target_bucket_utilization_pct", 0.55)
+        )
+        drawdown_reduction_multiplier = float(
+            config.get("drawdown_reduction_multiplier", 0.75)
+        )
 
         if not (0.0 <= entry_threshold <= 0.5):
             raise ValueError(f"entry_threshold must be 0-0.5, got {entry_threshold}")
@@ -63,6 +71,20 @@ class DayTradingStrategy(TradingStrategy):
         if not (1 <= max_position_age_hours <= 24):
             raise ValueError(
                 f"max_position_age_hours must be 1-24, got {max_position_age_hours}"
+            )
+        if not (0.0 <= min_trade_usd <= max_trade_usd):
+            raise ValueError(
+                f"min_trade_usd must be >=0 and <= max_trade_usd ({max_trade_usd}), got {min_trade_usd}"
+            )
+        if not (0.0 <= target_bucket_utilization_pct <= 1.0):
+            raise ValueError(
+                "target_bucket_utilization_pct must be 0-1, "
+                f"got {target_bucket_utilization_pct}"
+            )
+        if not (0.0 <= drawdown_reduction_multiplier <= 1.0):
+            raise ValueError(
+                "drawdown_reduction_multiplier must be 0-1, "
+                f"got {drawdown_reduction_multiplier}"
             )
 
         return True
@@ -322,13 +344,19 @@ class DayTradingStrategy(TradingStrategy):
             "entry_threshold": 0.007,
             "exit_threshold": 0.015,
             "stop_loss_pct": 0.008,
-            "position_size_fraction": 0.08,
+            "position_size_fraction": 0.15,
             "max_position_age_hours": 3,
             "min_volume_multiplier": 1.3,
             "min_volatility_pct": 0.005,
             "require_trend_alignment": True,
             "breakout_lookback_candles": 5,
             "min_entry_confirmations": 1,
+            "dynamic_sizing_enabled": True,
+            "min_trade_usd": 50,
+            "max_trade_usd": 200,
+            "target_bucket_utilization_pct": 0.55,
+            "drawdown_size_reduction_enabled": True,
+            "drawdown_reduction_multiplier": 0.75,
         }
 
     def get_config_schema(self) -> dict:
@@ -361,7 +389,7 @@ class DayTradingStrategy(TradingStrategy):
                     "type": "number",
                     "minimum": 0.01,
                     "maximum": 1.0,
-                    "default": 0.08,
+                    "default": 0.15,
                     "description": "Fraction of capital to deploy per entry",
                 },
                 "max_position_age_hours": {
@@ -403,6 +431,42 @@ class DayTradingStrategy(TradingStrategy):
                     "maximum": 4,
                     "default": 1,
                     "description": "Minimum number of entry confirmation signals required",
+                },
+                "dynamic_sizing_enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Scale trade size using bucket capital and utilization",
+                },
+                "min_trade_usd": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 50,
+                    "description": "Minimum dynamic trade notional floor in USD",
+                },
+                "max_trade_usd": {
+                    "type": "number",
+                    "minimum": 1,
+                    "default": 200,
+                    "description": "Dynamic trade notional ceiling before risk caps",
+                },
+                "target_bucket_utilization_pct": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.55,
+                    "description": "Target fraction of assigned bucket capital to keep deployed",
+                },
+                "drawdown_size_reduction_enabled": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Reduce trade size automatically during elevated drawdown",
+                },
+                "drawdown_reduction_multiplier": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.75,
+                    "description": "Multiplier applied when drawdown-aware sizing is active",
                 },
             },
         }
