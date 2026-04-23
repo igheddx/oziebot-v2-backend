@@ -108,7 +108,11 @@ def calculate_dynamic_trade_size(ctx: DynamicSizingInput) -> DynamicSizingResult
         reduction_reasons.append("target_bucket_utilization_gap")
 
     confidence_scaled_trade_usd = desired_trade_usd * confidence
-    if ctx.dynamic_sizing_enabled and confidence_scaled_trade_usd > 0 and min_trade_usd > 0:
+    if (
+        ctx.dynamic_sizing_enabled
+        and confidence_scaled_trade_usd > 0
+        and min_trade_usd > 0
+    ):
         if confidence_scaled_trade_usd < min_trade_usd:
             confidence_scaled_trade_usd = min_trade_usd
             reduction_reasons.append("min_trade_floor")
@@ -154,8 +158,8 @@ def calculate_dynamic_trade_size(ctx: DynamicSizingInput) -> DynamicSizingResult
         and ctx.token_policy_max_position_pct_override > 0
         and total_capital_usd > 0
     ):
-        token_position_cap_usd = (
-            total_capital_usd * _clamp_pct(ctx.token_policy_max_position_pct_override)
+        token_position_cap_usd = total_capital_usd * _clamp_pct(
+            ctx.token_policy_max_position_pct_override
         )
         token_policy_max_position_remaining_usd = _clamp_non_negative(
             token_position_cap_usd - current_position_usd

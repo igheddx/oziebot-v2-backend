@@ -675,15 +675,19 @@ class StrategyRunner:
                     .mappings()
                     .first()
                 )
-                ledger_rows = conn.execute(
-                    ledger_stmt,
-                    {
-                        "user_id": user_id,
-                        "strategy_name": strategy_name,
-                        "trading_mode": trading_mode,
-                        "cutoff": start_of_day,
-                    },
-                ).mappings().all()
+                ledger_rows = (
+                    conn.execute(
+                        ledger_stmt,
+                        {
+                            "user_id": user_id,
+                            "strategy_name": strategy_name,
+                            "trading_mode": trading_mode,
+                            "cutoff": start_of_day,
+                        },
+                    )
+                    .mappings()
+                    .all()
+                )
         except SQLAlchemyError:
             return None
 
@@ -746,7 +750,9 @@ class StrategyRunner:
             return signal
 
         metadata = dict(signal.metadata or {})
-        position_size_fraction = self._to_decimal(metadata.get("position_size_fraction"))
+        position_size_fraction = self._to_decimal(
+            metadata.get("position_size_fraction")
+        )
         buy_amount_usd = self._to_decimal(metadata.get("buy_amount_usd"))
         if position_size_fraction <= 0 and buy_amount_usd <= 0:
             return signal
@@ -770,7 +776,9 @@ class StrategyRunner:
                 confidence=Decimal(str(signal.confidence)),
                 total_capital_usd=dynamic_context["total_capital_usd"],
                 assigned_capital_usd=dynamic_context["assigned_capital_usd"],
-                available_buying_power_usd=dynamic_context["available_buying_power_usd"],
+                available_buying_power_usd=dynamic_context[
+                    "available_buying_power_usd"
+                ],
                 reserved_capital_usd=dynamic_context["reserved_capital_usd"],
                 locked_capital_usd=dynamic_context["locked_capital_usd"],
                 current_position_usd=current_position_usd,

@@ -208,9 +208,7 @@ def downgrade() -> None:
     pass
 
 
-def _normalize_platform_config(
-    strategy_id: str, raw_config: Any
-) -> dict[str, dict[str, Any]]:
+def _normalize_platform_config(strategy_id: str, raw_config: Any) -> dict[str, dict[str, Any]]:
     normalized = deepcopy(BASELINE_PLATFORM_CONFIGS[strategy_id])
     raw = _as_dict(raw_config)
     if not raw:
