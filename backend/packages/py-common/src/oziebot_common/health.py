@@ -5,6 +5,7 @@ import logging
 import os
 import signal
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -12,6 +13,60 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 log = logging.getLogger("oziebot-health")
+
+
+def _start_runtime_status_publisher(
+    *,
+    service_name: str,
+    state: "HealthState",
+    redis_url: str,
+    publish_interval_seconds: int,
+    ttl_seconds: int,
+) -> None:
+    def _publisher() -> None:
+        from oziebot_common.queues import disconnect_redis, redis_from_url
+        from oziebot_common.runtime_status import publish_runtime_status
+
+        client = None
+        while True:
+            try:
+                if client is None:
+                    client = redis_from_url(
+                        redis_url,
+                        probe=True,
+                        socket_connect_timeout=1,
+                        socket_timeout=1,
+                    )
+                publish_runtime_status(
+                    client,
+                    state.snapshot(),
+                    ttl_seconds=ttl_seconds,
+                )
+            except Exception:
+                log.warning(
+                    "runtime status publish failed service=%s redis_url=%s",
+                    service_name,
+                    redis_url,
+                    exc_info=True,
+                )
+                if client is not None:
+                    try:
+                        disconnect_redis(client)
+                    except Exception:
+                        log.debug(
+                            "runtime status redis disconnect failed service=%s",
+                            service_name,
+                            exc_info=True,
+                        )
+                    client = None
+            time.sleep(publish_interval_seconds)
+
+    thread = threading.Thread(
+        target=_publisher,
+        daemon=True,
+        name=f"{service_name}-runtime-status",
+    )
+    thread.start()
 
 
 @dataclass(slots=True)
@@ -91,6 +146,13 @@ def start_health_server(service_name: str) -> HealthState:
     host = os.environ.get("OZIEBOT_HEALTH_HOST", "0.0.0.0")
     stale_after_seconds = int(os.environ.get("OZIEBOT_HEALTH_STALE_SECONDS", "90"))
     auto_touch_seconds = int(os.environ.get("OZIEBOT_HEALTH_AUTO_TOUCH_SECONDS", "0"))
+    redis_url = str(os.environ.get("REDIS_URL") or "").strip()
+    publish_interval_seconds = int(
+        os.environ.get("OZIEBOT_HEALTH_PUBLISH_SECONDS", "5")
+    )
+    publish_ttl_seconds = int(
+        os.environ.get("OZIEBOT_HEALTH_PUBLISH_TTL_SECONDS", "30")
+    )
 
     state = HealthState(
         service_name=service_name, stale_after_seconds=stale_after_seconds
@@ -141,13 +203,22 @@ def start_health_server(service_name: str) -> HealthState:
             target=_auto_touch, daemon=True, name=f"{service_name}-health-ticker"
         )
         ticker.start()
+    if redis_url and publish_interval_seconds > 0:
+        _start_runtime_status_publisher(
+            service_name=service_name,
+            state=state,
+            redis_url=redis_url,
+            publish_interval_seconds=publish_interval_seconds,
+            ttl_seconds=publish_ttl_seconds,
+        )
     log.info(
-        "health server started service=%s host=%s port=%s stale_after_seconds=%s auto_touch_seconds=%s",
+        "health server started service=%s host=%s port=%s stale_after_seconds=%s auto_touch_seconds=%s runtime_publish=%s",
         service_name,
         host,
         port,
         stale_after_seconds,
         auto_touch_seconds,
+        bool(redis_url and publish_interval_seconds > 0),
     )
     return state
 

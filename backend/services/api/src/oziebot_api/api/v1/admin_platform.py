@@ -49,6 +49,7 @@ from oziebot_api.services.platform_management import (
     set_global_trading_pause,
     upsert_setting,
 )
+from oziebot_api.services.runtime_status import build_runtime_status_payload
 from oziebot_api.services.token_policy import TokenPolicyService
 from oziebot_api.services.token_policy_verification import (
     TokenPolicyVerificationService,
@@ -101,6 +102,15 @@ def list_settings(_admin: RootAdminUser, db: DbSession) -> dict[str, Any]:
 @router.get("/fee-settings")
 def read_fee_settings(_admin: RootAdminUser, db: DbSession) -> dict[str, Any]:
     return get_fee_settings(db)
+
+
+@router.get("/runtime")
+def read_runtime_status(
+    _admin: RootAdminUser,
+    db: DbSession,
+    app_settings: Settings = Depends(settings_dep),
+) -> dict[str, Any]:
+    return build_runtime_status_payload(app_settings, db)
 
 
 @router.put("/fee-settings")
