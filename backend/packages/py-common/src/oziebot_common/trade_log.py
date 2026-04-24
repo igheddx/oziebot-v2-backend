@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import logging
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Mapping
 
+import redis
+
 TRADE_LOG_REDIS_KEY = "oziebot:logs:trade"
 MAX_TRADE_LOG_WINDOW_SECONDS = 120
 MAX_TRADE_LOG_LIMIT = 200
 DEFAULT_TRADE_LOG_RETENTION_SECONDS = 60
+log = logging.getLogger("oziebot-trade-log")
 
 
 def build_trade_log_event(
@@ -101,7 +105,15 @@ def append_trade_log_event(
     pipeline.zadd(TRADE_LOG_REDIS_KEY, {payload: score})
     pipeline.zremrangebyscore(TRADE_LOG_REDIS_KEY, "-inf", cutoff)
     pipeline.expire(TRADE_LOG_REDIS_KEY, clamped_retention + 30)
-    pipeline.execute()
+    try:
+        pipeline.execute()
+    except redis.RedisError as exc:
+        log.warning(
+            "trade log write failed symbol=%s event_type=%s err=%s",
+            event["symbol"],
+            event["event_type"],
+            exc,
+        )
     return event
 
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import redis
+
 from oziebot_common.trade_log import append_trade_log_event, read_trade_log_events
 from oziebot_common.trade_log_intelligence import (
     append_trade_log_sample,
@@ -47,6 +49,13 @@ class FakePipeline:
         for name, args, kwargs in self._ops:
             results.append(getattr(self._client, name)(*args, **kwargs))
         return results
+
+
+class FailingPipeline(FakePipeline):
+    def execute(self):
+        raise redis.exceptions.OutOfMemoryError(
+            "command not allowed when used memory > 'maxmemory'"
+        )
 
 
 class FakeRedis:
@@ -120,6 +129,11 @@ class FakeRedis:
         if num is None:
             return rows[start:]
         return rows[start : start + num]
+
+
+class FailingRedis(FakeRedis):
+    def pipeline(self) -> FailingPipeline:
+        return FailingPipeline(self)
 
 
 def test_trade_log_keeps_recent_events_in_chronological_order() -> None:
@@ -262,3 +276,37 @@ def test_trade_log_summary_round_trip_and_snapshot_build() -> None:
     summaries = read_trade_log_summaries(client)
     assert len(summaries) == 1
     assert summaries[0]["symbol"] == "BTC-USD"
+
+
+def test_trade_log_writes_degrade_when_redis_is_full(caplog) -> None:
+    client = FailingRedis()
+    now = datetime.now(UTC)
+
+    event = append_trade_log_event(
+        client,
+        symbol="BTC-USD",
+        event_type="trade_tick",
+        message="test",
+        timestamp=now,
+    )
+    sample = append_trade_log_sample(
+        client,
+        symbol="BTC-USD",
+        sample={"mid_price": Decimal("62000")},
+        timestamp=now,
+    )
+    summary = write_trade_log_summary(
+        client,
+        symbol="BTC-USD",
+        summary={"symbol": "BTC-USD", "signal_quality_score": 80},
+    )
+
+    assert event["symbol"] == "BTC-USD"
+    assert sample["symbol"] == "BTC-USD"
+    assert summary["symbol"] == "BTC-USD"
+    warnings = [
+        record.message for record in caplog.records if record.levelname == "WARNING"
+    ]
+    assert any("trade log write failed" in message for message in warnings)
+    assert any("trade log sample write failed" in message for message in warnings)
+    assert any("trade log summary write failed" in message for message in warnings)

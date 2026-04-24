@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from math import sqrt
 from typing import Any, Mapping
+
+import redis
 
 from oziebot_common.trade_log import (
     DEFAULT_TRADE_LOG_RETENTION_SECONDS,
@@ -15,6 +18,7 @@ from oziebot_common.trade_log import (
 TRADE_LOG_SAMPLE_KEY_PREFIX = "oziebot:logs:trade:samples:"
 TRADE_LOG_SUMMARY_KEY_PREFIX = "oziebot:logs:trade:summary:"
 TRADE_LOG_SYMBOLS_KEY = "oziebot:logs:trade:symbols"
+log = logging.getLogger("oziebot-trade-log-intelligence")
 
 
 def trade_log_sample_key(symbol: str) -> str:
@@ -53,7 +57,14 @@ def append_trade_log_sample(
     pipeline.expire(sample_key, clamped_retention + 30)
     pipeline.sadd(TRADE_LOG_SYMBOLS_KEY, normalized_symbol)
     pipeline.expire(TRADE_LOG_SYMBOLS_KEY, clamped_retention + 30)
-    pipeline.execute()
+    try:
+        pipeline.execute()
+    except redis.RedisError as exc:
+        log.warning(
+            "trade log sample write failed symbol=%s err=%s",
+            normalized_symbol,
+            exc,
+        )
     return payload
 
 
@@ -116,7 +127,14 @@ def write_trade_log_summary(
     )
     pipeline.sadd(TRADE_LOG_SYMBOLS_KEY, normalized_symbol)
     pipeline.expire(TRADE_LOG_SYMBOLS_KEY, clamped_retention + 30)
-    pipeline.execute()
+    try:
+        pipeline.execute()
+    except redis.RedisError as exc:
+        log.warning(
+            "trade log summary write failed symbol=%s err=%s",
+            normalized_symbol,
+            exc,
+        )
     return normalized_summary
 
 
