@@ -98,6 +98,11 @@ class StrategyRunner:
         for row in rows:
             user_id = str(row["user_id"])
             strategy_name = str(row["strategy_id"])
+            current_mode_raw = str(row.get("current_trading_mode") or "paper").lower()
+            try:
+                active_mode = TradingMode(current_mode_raw)
+            except ValueError:
+                active_mode = TradingMode.PAPER
             tenant_id_raw = row.get("tenant_id")
             if tenant_id_raw is None:
                 continue
@@ -140,14 +145,27 @@ class StrategyRunner:
                 config=config, allowed_symbols=allowed_symbols
             )
 
-            for mode in (TradingMode.PAPER, TradingMode.LIVE):
+            modes_to_run = [active_mode]
+            for candidate_mode in TradingMode:
+                if candidate_mode == active_mode:
+                    continue
+                open_position_symbols = self._load_open_position_symbols(
+                    user_id=user_id,
+                    strategy_name=strategy_name,
+                    trading_mode=candidate_mode.value,
+                )
+                if open_position_symbols:
+                    modes_to_run.append(candidate_mode)
+
+            for mode in modes_to_run:
+                open_position_symbols = self._load_open_position_symbols(
+                    user_id=user_id,
+                    strategy_name=strategy_name,
+                    trading_mode=mode.value,
+                )
                 symbols = self._merge_managed_symbols(
-                    entry_symbols=entry_symbols,
-                    open_position_symbols=self._load_open_position_symbols(
-                        user_id=user_id,
-                        strategy_name=strategy_name,
-                        trading_mode=mode.value,
-                    ),
+                    entry_symbols=entry_symbols if mode == active_mode else [],
+                    open_position_symbols=open_position_symbols,
                 )
                 if not symbols:
                     continue
@@ -1732,6 +1750,7 @@ class StrategyRunner:
               us.user_id,
               us.strategy_id,
               us.config,
+              u.current_trading_mode,
               (
                 SELECT tm.tenant_id
                 FROM tenant_memberships tm

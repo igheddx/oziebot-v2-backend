@@ -403,7 +403,7 @@ def test_merge_symbol_runtime_state_preserves_other_symbols():
     assert set(cleared.keys()) == {"ETH-USD"}
 
 
-def test_run_once_processes_all_allowed_symbols():
+def test_run_once_processes_only_current_trading_mode_symbols():
     class FanoutRunner(StrategyRunner):
         def __init__(self):
             super().__init__(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
@@ -415,6 +415,7 @@ def test_run_once_processes_all_allowed_symbols():
                     "user_id": str(uuid.uuid4()),
                     "strategy_id": "day_trading",
                     "tenant_id": uuid.uuid4(),
+                    "current_trading_mode": "paper",
                     "config": {},
                 }
             ]
@@ -487,14 +488,11 @@ def test_run_once_processes_all_allowed_symbols():
 
     processed = runner.run_once()
 
-    assert processed == 6
+    assert processed == 3
     assert {(event.symbol, event.trading_mode.value) for event in runner.events} == {
         ("AERO-USD", "paper"),
-        ("AERO-USD", "live"),
         ("BTC-USD", "paper"),
-        ("BTC-USD", "live"),
         ("ETH-USD", "paper"),
-        ("ETH-USD", "live"),
     }
 
 
@@ -596,10 +594,9 @@ def test_run_once_keeps_open_position_symbols_when_entries_disabled():
 
     processed = runner.run_once()
 
-    assert processed == 3
+    assert processed == 2
     assert {(event.symbol, event.trading_mode.value) for event in runner.events} == {
         ("BTC-USD", "paper"),
-        ("BTC-USD", "live"),
         ("SOL-USD", "live"),
     }
 
@@ -680,9 +677,9 @@ def test_run_once_persists_signal_snapshots_and_ai_inference(tmp_path: Path):
         ai_count = conn.execute(
             text("SELECT COUNT(*) FROM ai_inference_records")
         ).scalar_one()
-    assert processed == 2
-    assert [row[0] for row in snapshot_rows] == ["live", "paper"]
-    assert ai_count == 2
+    assert processed == 1
+    assert [row[0] for row in snapshot_rows] == ["paper"]
+    assert ai_count == 1
     assert "momentum_value" in json.loads(snapshot_rows[0][1])
 
 
@@ -767,8 +764,8 @@ def test_run_once_continues_when_trade_intelligence_persistence_fails(
         ai_count = conn.execute(
             text("SELECT COUNT(*) FROM ai_inference_records")
         ).scalar_one()
-    assert processed == 2
-    assert signal_count == 2
+    assert processed == 1
+    assert signal_count == 1
     assert ai_count == 0
 
 
@@ -850,8 +847,8 @@ def test_run_once_continues_when_decision_audit_persistence_fails(
         signal_count = conn.execute(
             text("SELECT COUNT(*) FROM strategy_signals")
         ).scalar_one()
-    assert processed == 2
-    assert signal_count == 2
+    assert processed == 1
+    assert signal_count == 1
 
 
 def test_run_once_persists_suppression_audit(tmp_path: Path):
@@ -1306,11 +1303,11 @@ def test_runner_requires_max_position_usd_for_fractional_sizing():
     runner = SizingRunner()
 
     assert runner.run_once() == 0
-    assert runner.generated == 2
-    assert runner.metrics_snapshot()["signals_rejected"] == 2
+    assert runner.generated == 1
+    assert runner.metrics_snapshot()["signals_rejected"] == 1
     assert (
         runner.metrics_snapshot()["rejection_reasons"][
             "max_position_usd required for usd-normalized sizing"
         ]
-        == 2
+        == 1
     )
