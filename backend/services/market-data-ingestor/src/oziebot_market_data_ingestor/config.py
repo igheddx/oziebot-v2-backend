@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     signal_panel_retention_seconds: int = 60
     signal_panel_sample_interval_seconds: int = 5
     signal_panel_snapshot_event_interval_seconds: int = 15
+    redis_pressure_check_interval_seconds: int = 30
+    redis_pressure_warning_pct: float = 70.0
+    redis_pressure_critical_pct: float = 85.0
+    operational_alert_cooldown_seconds: int = 300
+    stale_alert_after_seconds: int = 90
     trade_recovery_limit: int = 20
     trade_reconcile_interval_seconds: int = 15
     bbo_reconcile_interval_seconds: int = 10

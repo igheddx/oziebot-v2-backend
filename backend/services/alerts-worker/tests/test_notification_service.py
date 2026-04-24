@@ -7,7 +7,12 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, text
 
-from oziebot_domain.events import NotificationEvent, NotificationEventType
+from oziebot_domain.events import (
+    NotificationEvent,
+    NotificationEventType,
+    OperationalAlert,
+    OperationalAlertSeverity,
+)
 from oziebot_domain.trading_mode import TradingMode
 
 from oziebot_alerts_worker.service import NotificationService
@@ -36,6 +41,7 @@ class CapturingAdapter:
 class _Settings:
     database_url: str
     notify_max_retries: int = 2
+    slack_webhook_url: str | None = "https://hooks.slack.com/services/test/test/test"
 
 
 def _create_tables(db_url: str) -> None:
@@ -250,3 +256,34 @@ def test_retry_delivery_stops_at_max_retries(tmp_path: Path):
     statuses = [r["status"] for r in rows]
     assert statuses == ["retry_scheduled", "failed"]
     assert redis.pushed == []
+
+
+def test_route_operational_alert_uses_slack_adapter(tmp_path: Path):
+    db_path = tmp_path / "alerts_ops.db"
+    db_url = f"sqlite+pysqlite:///{db_path}"
+    _create_tables(db_url)
+
+    redis = FakeRedis()
+    slack = CapturingAdapter(should_fail=False)
+    service = NotificationService(
+        _Settings(database_url=db_url, notify_max_retries=2),
+        redis,
+        {"slack": slack},
+    )
+
+    alert = OperationalAlert(
+        alert_id=uuid.uuid4(),
+        source_service="market-data-ingestor",
+        alert_type="redis_memory_pressure",
+        severity=OperationalAlertSeverity.CRITICAL,
+        title="Redis memory pressure detected",
+        message="Redis memory usage is 91.2%.",
+        payload={"usage_pct": 91.2},
+    )
+    service.route_operational_alert(alert)
+
+    assert len(slack.calls) == 1
+    destination, message, payload = slack.calls[0]
+    assert destination == "https://hooks.slack.com/services/test/test/test"
+    assert "[OPS][CRITICAL] Redis memory pressure detected" in message
+    assert payload["usage_pct"] == 91.2

@@ -46,6 +46,12 @@ class NotificationChannel(StrEnum):
     TELEGRAM = "telegram"
 
 
+class OperationalAlertSeverity(StrEnum):
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
 class NotificationEventType(StrEnum):
     TRADE_OPENED = "trade_opened"
     TRADE_CLOSED = "trade_closed"
@@ -69,4 +75,18 @@ class NotificationEvent(OziebotModel):
     title: str | None = None
     message: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class OperationalAlert(OziebotModel):
+    """Internal operational alert consumed by alerts worker."""
+
+    alert_id: UUID
+    source_service: str
+    alert_type: str
+    severity: OperationalAlertSeverity
+    title: str
+    message: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    resolved: bool = False
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

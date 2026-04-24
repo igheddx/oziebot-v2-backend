@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -8,9 +9,11 @@ from typing import Any
 from sqlalchemy import create_engine, text
 
 from oziebot_common.queues import QueueNames, notification_event_to_json, push_json
-from oziebot_domain.events import NotificationEvent
+from oziebot_domain.events import NotificationEvent, OperationalAlert
 
 from oziebot_alerts_worker.templates import render_message
+
+log = logging.getLogger("alerts-worker.service")
 
 
 class NotificationService:
@@ -39,6 +42,42 @@ class NotificationService:
         message = str(envelope.get("message") or render_message(event))
         self._attempt_delivery(
             event=event, channel_row=channel_row, message=message, attempt=attempt
+        )
+
+    def route_operational_alert(self, alert: OperationalAlert) -> None:
+        adapter = self._adapters.get("slack")
+        if adapter is None:
+            return
+        webhook_url = getattr(self._settings, "slack_webhook_url", None)
+        if not webhook_url:
+            return
+        try:
+            adapter.send(
+                webhook_url,
+                self._render_operational_message(alert),
+                {
+                    "severity": alert.severity.value,
+                    "source_service": alert.source_service,
+                    "alert_type": alert.alert_type,
+                    "resolved": alert.resolved,
+                    **alert.payload,
+                },
+            )
+        except Exception:
+            log.exception(
+                "operational alert delivery failed source=%s alert_type=%s severity=%s",
+                alert.source_service,
+                alert.alert_type,
+                alert.severity.value,
+            )
+
+    @staticmethod
+    def _render_operational_message(alert: OperationalAlert) -> str:
+        status = "RESOLVED" if alert.resolved else alert.severity.value.upper()
+        return (
+            f"[OPS][{status}] {alert.title}\n"
+            f"Source: {alert.source_service}\n"
+            f"{alert.message}"
         )
 
     def _attempt_delivery(

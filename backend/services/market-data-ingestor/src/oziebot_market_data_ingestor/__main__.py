@@ -7,14 +7,19 @@ from decimal import Decimal
 
 from sqlalchemy import create_engine
 
-from oziebot_common import redis_from_url
+from oziebot_common import QueueNames, redis_from_url
 from oziebot_common.health import start_health_server
+from oziebot_common.queues import operational_alert_to_json, push_json
 from oziebot_common.trade_log import append_trade_log_event
 from oziebot_market_data_ingestor.coinbase_client import (
     CoinbaseRestClient,
     CoinbaseWsClient,
 )
 from oziebot_market_data_ingestor.config import get_settings
+from oziebot_market_data_ingestor.monitoring import (
+    PersistentStaleMonitor,
+    RedisPressureMonitor,
+)
 from oziebot_market_data_ingestor.normalizer import (
     normalize_bbo,
     normalize_candle,
@@ -351,6 +356,16 @@ async def main() -> None:
     ws = CoinbaseWsClient(s.coinbase_ws_url)
     rest = CoinbaseRestClient(s.coinbase_rest_url)
     health = start_health_server("market-data-ingestor")
+    redis_monitor = RedisPressureMonitor(
+        warning_pct=s.redis_pressure_warning_pct,
+        critical_pct=s.redis_pressure_critical_pct,
+        check_interval_seconds=s.redis_pressure_check_interval_seconds,
+        alert_cooldown_seconds=s.operational_alert_cooldown_seconds,
+    )
+    stale_monitor = PersistentStaleMonitor(
+        alert_after_seconds=s.stale_alert_after_seconds,
+        alert_cooldown_seconds=s.operational_alert_cooldown_seconds,
+    )
 
     log.info("subscribing to products=%s", products)
 
@@ -432,6 +447,28 @@ async def main() -> None:
 
             now = datetime.now(UTC)
             stale_map = stale.stale_products(now, products)
+            stale_details, stale_alert = stale_monitor.evaluate(stale_map, now=now)
+            health.set_detail("marketDataStale", stale_details)
+            redis_details = {}
+            redis_alert = None
+            try:
+                redis_details, redis_alert = redis_monitor.sample(r, now=now)
+            except Exception as exc:
+                redis_details = {"status": "unavailable", "error": str(exc)}
+                log.warning("redis pressure sampling failed err=%s", exc)
+            health.set_detail("redisPressure", redis_details)
+            if redis_alert is not None:
+                push_json(
+                    r,
+                    QueueNames.ops_alerts(),
+                    operational_alert_to_json(redis_alert),
+                )
+            if stale_alert is not None:
+                push_json(
+                    r,
+                    QueueNames.ops_alerts(),
+                    operational_alert_to_json(stale_alert),
+                )
             if any(stale_map.values()):
                 cache.publish_stale(
                     "oziebot:md:stale", {"at": now.isoformat(), "stale": stale_map}
@@ -442,6 +479,14 @@ async def main() -> None:
                     stale_map["bbo"],
                     stale_map["candle"],
                 )
+            stale_alert_active = (
+                stale_details.get("activeForSeconds", 0) >= s.stale_alert_after_seconds
+                and stale_details.get("alertSymbolCount", 0) > 0
+            )
+            if redis_details.get("severity") == "critical" or stale_alert_active:
+                health.mark_degraded("market_data_monitoring_alert")
+            else:
+                health.mark_ready()
             if (
                 now - last_trade_reconcile
             ).total_seconds() >= s.trade_reconcile_interval_seconds:

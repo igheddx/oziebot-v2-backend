@@ -7,6 +7,7 @@ from oziebot_common.queues import (
     QueueNames,
     disconnect_redis,
     notification_event_from_json,
+    operational_alert_from_json,
 )
 from oziebot_common.worker_runtime import (
     DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
@@ -30,7 +31,11 @@ def main() -> None:
         settings.redis_url,
         queue_pop_timeout_seconds=DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
     )
-    keys = QueueNames.all_alerts_keys() + QueueNames.all_alerts_retry_keys()
+    keys = (
+        QueueNames.all_alerts_keys()
+        + QueueNames.all_alerts_retry_keys()
+        + QueueNames.all_ops_alert_keys()
+    )
     service = NotificationService(
         settings,
         r,
@@ -49,6 +54,10 @@ def main() -> None:
     log.info("alerts-worker listening on %s", keys)
 
     def _handle_message(queue_key: str, raw: dict[str, object]) -> None:
+        if queue_key == QueueNames.ops_alerts():
+            alert = operational_alert_from_json(raw)
+            service.route_operational_alert(alert)
+            return
         if ":alerts_retry:" in queue_key:
             service.retry_delivery(raw)
             return

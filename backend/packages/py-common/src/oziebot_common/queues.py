@@ -7,7 +7,7 @@ from typing import Any
 import redis
 from pydantic import TypeAdapter
 
-from oziebot_domain.events import NotificationEvent
+from oziebot_domain.events import NotificationEvent, OperationalAlert
 from oziebot_domain.execution import ExecutionEvent
 from oziebot_domain.intents import TradeIntent
 from oziebot_domain.risk import RiskDecision
@@ -39,6 +39,10 @@ class QueueNames:
         return f"oziebot:queue:alerts_retry:{mode.value}"
 
     @staticmethod
+    def ops_alerts() -> str:
+        return "oziebot:queue:ops_alerts"
+
+    @staticmethod
     def execution_events(mode: TradingMode) -> str:
         return f"oziebot:queue:execution_events:{mode.value}"
 
@@ -65,6 +69,10 @@ class QueueNames:
     @staticmethod
     def all_alerts_retry_keys() -> list[str]:
         return [QueueNames.alerts_retry(m) for m in TradingMode]
+
+    @staticmethod
+    def all_ops_alert_keys() -> list[str]:
+        return [QueueNames.ops_alerts()]
 
     @staticmethod
     def all_execution_event_keys() -> list[str]:
@@ -163,6 +171,7 @@ _risk_adapter = TypeAdapter(RiskDecision)
 _signal_adapter = TypeAdapter(StrategySignalEvent)
 _execution_event_adapter = TypeAdapter(ExecutionEvent)
 _notification_event_adapter = TypeAdapter(NotificationEvent)
+_operational_alert_adapter = TypeAdapter(OperationalAlert)
 
 
 def trade_intent_to_json(intent: TradeIntent) -> dict[str, Any]:
@@ -203,3 +212,11 @@ def notification_event_to_json(event: NotificationEvent) -> dict[str, Any]:
 
 def notification_event_from_json(data: dict[str, Any]) -> NotificationEvent:
     return _notification_event_adapter.validate_python(data)
+
+
+def operational_alert_to_json(alert: OperationalAlert) -> dict[str, Any]:
+    return alert.model_dump(mode="json")
+
+
+def operational_alert_from_json(data: dict[str, Any]) -> OperationalAlert:
+    return _operational_alert_adapter.validate_python(data)
