@@ -171,6 +171,7 @@ class RiskEngineService:
             ],
             current_strategy_exposure_cents=facts["current_strategy_exposure_cents"],
             current_token_exposure_cents=facts["current_token_exposure_cents"],
+            max_position_cents=facts["max_position_cents"],
             token_policy_max_position_cents=facts["token_policy_max_position_cents"],
             max_strategy_exposure_cents=facts["max_strategy_exposure_cents"],
             max_token_exposure_cents=facts["max_token_exposure_cents"],
@@ -1044,6 +1045,9 @@ class RiskEngineService:
                     Decimal(str(token_exposure.total if token_exposure else 0))
                     * Decimal("100")
                 ).quantize(Decimal("1"))
+            ),
+            "max_position_cents": int(
+                Decimal(str(risk_caps.get("max_position_usd") or 0)) * Decimal("100")
             ),
             "token_policy_max_position_cents": token_policy_max_position_cents,
             "max_strategy_exposure_cents": int(

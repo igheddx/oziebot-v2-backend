@@ -226,6 +226,23 @@ def _insert_token_policy(
         )
 
 
+def _set_platform_config(
+    db_path: Path, strategy_name: str, config_schema: dict[str, object]
+) -> None:
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE platform_strategies SET config_schema = :config_schema "
+                "WHERE slug = :strategy_name"
+            ),
+            {
+                "config_schema": json.dumps(config_schema),
+                "strategy_name": strategy_name,
+            },
+        )
+
+
 def _signal(
     user_id: str,
     strategy_name: str = "momentum",
@@ -381,6 +398,86 @@ def test_risk_reduces_size_by_buying_power(tmp_path: Path):
     if decision.outcome == RiskOutcome.REDUCE_SIZE:
         assert Decimal(decision.final_size) < Decimal(decision.original_size)
         assert intent is not None
+
+
+def test_risk_max_position_cap_uses_symbol_exposure_not_bucket_locked(tmp_path: Path):
+    db_path = tmp_path / "risk-position-cap-symbol.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE strategy_capital_buckets SET locked_capital_cents = 25000 "
+                "WHERE user_id = :u AND strategy_id = 'momentum' AND trading_mode = 'live'"
+            ),
+            {"u": user_id},
+        )
+
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = RiskEngineService(settings, _redis_with_fresh_market())
+
+    decision, intent = svc.evaluate(
+        _signal(user_id, size="0.002"), trace_id="t-pos-cap"
+    )
+
+    assert decision.outcome == RiskOutcome.APPROVE
+    assert intent is not None
+
+
+def test_risk_reduces_size_by_strategy_token_max_position(tmp_path: Path):
+    db_path = tmp_path / "risk-position-cap-reduce.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    now = datetime.now(UTC).isoformat()
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO execution_positions ("
+                "id, tenant_id, user_id, strategy_id, symbol, trading_mode, quantity, avg_entry_price, "
+                "realized_pnl_cents, created_at, updated_at, last_trade_at"
+                ") VALUES ("
+                ":id, :tenant_id, :user_id, 'momentum', 'BTC-USD', 'live', '0.005', '50000', "
+                "0, :now, :now, :now"
+                ")"
+            ),
+            {
+                "id": str(uuid4()),
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "now": now,
+            },
+        )
+        conn.execute(
+            text(
+                "UPDATE strategy_capital_buckets SET locked_capital_cents = 25000 "
+                "WHERE user_id = :u AND strategy_id = 'momentum' AND trading_mode = 'live'"
+            ),
+            {"u": user_id},
+        )
+
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{db_path}",
+        risk_max_per_trade_risk_pct=1.0,
+        risk_max_strategy_allocation_pct=1.0,
+        risk_max_token_concentration_pct=1.0,
+    )
+    svc = RiskEngineService(settings, _redis_with_fresh_market())
+
+    decision, intent = svc.evaluate(
+        _signal(user_id, size="0.002"), trace_id="t-pos-cap-reduce"
+    )
+
+    assert decision.outcome == RiskOutcome.REDUCE_SIZE
+    assert intent is not None
+    assert Decimal(decision.final_size) == Decimal("0.00099990")
 
 
 def test_risk_approves_hold_without_trade_intent(tmp_path: Path):
@@ -787,6 +884,9 @@ def test_risk_reduces_size_for_discouraged_token_policy(tmp_path: Path):
     tenant_id = str(uuid4())
     _seed_common(db_path, user_id, tenant_id)
     _insert_token_policy(db_path, strategy_name="momentum", status="discouraged")
+    _set_platform_config(
+        db_path, "momentum", {"risk_caps": {"max_position_usd": 1_000_000}}
+    )
 
     settings = Settings(
         database_url=f"sqlite+pysqlite:///{db_path}",
@@ -896,6 +996,9 @@ def test_stale_data_degrades_signal_without_full_rejection(tmp_path: Path):
     user_id = str(uuid4())
     tenant_id = str(uuid4())
     _seed_common(db_path, user_id, tenant_id)
+    _set_platform_config(
+        db_path, "momentum", {"risk_caps": {"max_position_usd": 1_000_000}}
+    )
 
     settings = Settings(
         database_url=f"sqlite+pysqlite:///{db_path}",

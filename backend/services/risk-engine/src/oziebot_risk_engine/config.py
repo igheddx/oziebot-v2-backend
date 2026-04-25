@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://oziebot:oziebot@localhost:5432/oziebot"
 
     risk_max_per_trade_risk_pct: float = 0.12
-    risk_max_position_size_cents: int = 15_000
+    risk_max_position_size_cents: int = 0
     risk_max_strategy_allocation_pct: float = 0.8
     risk_max_token_concentration_pct: float = 0.35
     risk_max_daily_loss_cents: int = 3_000

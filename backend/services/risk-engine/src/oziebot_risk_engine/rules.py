@@ -59,6 +59,7 @@ class RuleContext:
     current_strategy_token_exposure_cents: int
     current_strategy_exposure_cents: int
     current_token_exposure_cents: int
+    max_position_cents: int
     token_policy_max_position_cents: int
     max_strategy_exposure_cents: int
     max_token_exposure_cents: int
@@ -309,13 +310,19 @@ class MaxPositionSizeRule(RiskRule):
         self._max_cents = max_cents
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
-        if ctx.bucket is None:
+        max_cents = (
+            ctx.max_position_cents if ctx.max_position_cents > 0 else self._max_cents
+        )
+        if ctx.action != "buy" or max_cents <= 0 or ctx.mid_price <= 0:
             return None
-        locked = int(ctx.bucket["locked_capital_cents"])
-        notional = int(_notional_cents(ctx))
-        projected = locked + notional
-        if projected > self._max_cents:
-            allowed = max(0, self._max_cents - locked)
+        notional = _notional_cents(ctx)
+        projected = Decimal(str(ctx.current_strategy_token_exposure_cents)) + notional
+        limit = Decimal(str(max_cents))
+        if projected > limit:
+            allowed = max(
+                Decimal("0"),
+                limit - Decimal(str(ctx.current_strategy_token_exposure_cents)),
+            )
             if allowed <= 0:
                 return RuleResult(
                     self.name,
