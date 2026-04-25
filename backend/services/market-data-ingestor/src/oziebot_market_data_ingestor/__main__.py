@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import create_engine
@@ -231,6 +231,7 @@ async def _reconcile_candles(
     granularity: int,
 ) -> None:
     now = datetime.now(UTC)
+    recent_candle_cutoff = now - timedelta(seconds=stale.thresholds.candle)
     for p in products:
         try:
             normalized = []
@@ -240,7 +241,10 @@ async def _reconcile_candles(
                 normalized.append(item)
                 cache.put_candle(item)
                 store.insert_candle(item)
-            if not normalized:
+            if (
+                not normalized
+                or max(item.bucket_start for item in normalized) < recent_candle_cutoff
+            ):
                 stale.mark_candle_unavailable(p)
                 continue
             stale.mark_candle(p, now)

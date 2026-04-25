@@ -30,8 +30,7 @@ class StaleDataDetector:
         self._candle_unavailable.discard(product_id)
 
     def mark_candle_unavailable(self, product_id: str) -> None:
-        if product_id not in self._last_candle:
-            self._candle_unavailable.add(product_id)
+        self._candle_unavailable.add(product_id)
 
     def prune(self, products: list[str]) -> None:
         active_products = {str(product_id) for product_id in products}
@@ -50,7 +49,7 @@ class StaleDataDetector:
                 out["trade"].append(p)
             if self._is_stale(now, self._last_bbo.get(p), self.thresholds.bbo):
                 out["bbo"].append(p)
-            if p in self._candle_unavailable and p not in self._last_candle:
+            if p in self._candle_unavailable:
                 continue
             if self._is_stale(now, self._last_candle.get(p), self.thresholds.candle):
                 out["candle"].append(p)

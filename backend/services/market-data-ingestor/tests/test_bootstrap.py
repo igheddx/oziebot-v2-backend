@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
 from oziebot_market_data_ingestor import __main__ as ingestor_main
+from oziebot_market_data_ingestor.stale import StaleDataDetector, StaleThresholds
 
 
 @pytest.mark.anyio
@@ -117,3 +119,44 @@ async def test_reconcile_bbo_refreshes_products_concurrently() -> None:
 
     assert sorted(seen) == ["BTC-USD", "ETH-USD", "SOL-USD"]
     assert max_active > 1
+
+
+@pytest.mark.anyio
+async def test_reconcile_candles_marks_old_only_batches_unavailable() -> None:
+    old_start = int((datetime.now(UTC) - timedelta(minutes=45)).timestamp())
+
+    class FakeRest:
+        async def get_candles(
+            self, product_id: str, granularity_sec: int, limit: int = 50
+        ):
+            return [
+                {
+                    "product_id": product_id,
+                    "start": old_start,
+                    "low": "1",
+                    "high": "1",
+                    "open": "1",
+                    "close": "1",
+                    "volume": "1",
+                }
+            ]
+
+    seen: list[str] = []
+    cache = SimpleNamespace(put_candle=lambda item: seen.append(item.product_id))
+    store = SimpleNamespace(insert_candle=lambda item: None)
+    stale = StaleDataDetector(StaleThresholds(trade=10, bbo=10, candle=120))
+
+    await ingestor_main._reconcile_candles(
+        FakeRest(),
+        store,
+        cache,
+        object(),
+        stale,
+        ["IOTX-USD"],
+        60,
+    )
+
+    stale_map = stale.stale_products(datetime.now(UTC), ["IOTX-USD"])
+
+    assert seen == ["IOTX-USD"]
+    assert stale_map["candle"] == []

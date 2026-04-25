@@ -49,3 +49,16 @@ def test_stale_detector_waives_candles_when_market_has_none_yet():
     stale = detector.stale_products(now + timedelta(seconds=120), ["IOTX-USD"])
 
     assert stale == {"trade": ["IOTX-USD"], "bbo": ["IOTX-USD"], "candle": []}
+
+
+def test_stale_detector_keeps_candle_waiver_after_older_history_exists():
+    detector = StaleDataDetector(StaleThresholds(trade=10, bbo=10, candle=30))
+    now = datetime.now(UTC)
+    detector.mark_trade("IOTX-USD", now)
+    detector.mark_bbo("IOTX-USD", now)
+    detector.mark_candle("IOTX-USD", now - timedelta(seconds=300))
+    detector.mark_candle_unavailable("IOTX-USD")
+
+    stale = detector.stale_products(now + timedelta(seconds=120), ["IOTX-USD"])
+
+    assert stale == {"trade": ["IOTX-USD"], "bbo": ["IOTX-USD"], "candle": []}
