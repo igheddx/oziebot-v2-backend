@@ -17,6 +17,7 @@ class StaleDataDetector:
     _last_trade: dict[str, datetime] = field(default_factory=dict)
     _last_bbo: dict[str, datetime] = field(default_factory=dict)
     _last_candle: dict[str, datetime] = field(default_factory=dict)
+    _candle_unavailable: set[str] = field(default_factory=set)
 
     def mark_trade(self, product_id: str, at: datetime) -> None:
         self._last_trade[product_id] = at
@@ -26,6 +27,11 @@ class StaleDataDetector:
 
     def mark_candle(self, product_id: str, at: datetime) -> None:
         self._last_candle[product_id] = at
+        self._candle_unavailable.discard(product_id)
+
+    def mark_candle_unavailable(self, product_id: str) -> None:
+        if product_id not in self._last_candle:
+            self._candle_unavailable.add(product_id)
 
     def prune(self, products: list[str]) -> None:
         active_products = {str(product_id) for product_id in products}
@@ -33,6 +39,7 @@ class StaleDataDetector:
             for product_id in list(timestamps):
                 if product_id not in active_products:
                     del timestamps[product_id]
+        self._candle_unavailable.intersection_update(active_products)
 
     def stale_products(
         self, now: datetime, products: list[str]
@@ -43,6 +50,8 @@ class StaleDataDetector:
                 out["trade"].append(p)
             if self._is_stale(now, self._last_bbo.get(p), self.thresholds.bbo):
                 out["bbo"].append(p)
+            if p in self._candle_unavailable and p not in self._last_candle:
+                continue
             if self._is_stale(now, self._last_candle.get(p), self.thresholds.candle):
                 out["candle"].append(p)
         return out

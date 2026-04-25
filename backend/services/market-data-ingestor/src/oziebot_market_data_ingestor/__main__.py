@@ -241,6 +241,7 @@ async def _reconcile_candles(
                 cache.put_candle(item)
                 store.insert_candle(item)
             if not normalized:
+                stale.mark_candle_unavailable(p)
                 continue
             stale.mark_candle(p, now)
             message, details = _candle_summary(
