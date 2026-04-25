@@ -619,7 +619,7 @@ async def main() -> None:
                             cache,
                             r,
                             stale,
-                            _refresh_targets(stale_map["bbo"], products),
+                            products,
                             signal_panel,
                             s.bbo_reconcile_max_concurrency,
                         )
