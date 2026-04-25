@@ -21,6 +21,11 @@ def test_universe_filters_platform_and_user_enabled_tokens():
         )
         conn.execute(
             text(
+                "CREATE TABLE user_strategies (user_id TEXT, strategy_id TEXT, is_enabled BOOLEAN NOT NULL, config TEXT NOT NULL)"
+            )
+        )
+        conn.execute(
+            text(
                 "CREATE TABLE execution_positions (user_id TEXT, symbol TEXT, quantity TEXT NOT NULL)"
             )
         )
@@ -44,6 +49,12 @@ def test_universe_filters_platform_and_user_enabled_tokens():
             text(
                 "INSERT INTO execution_positions (user_id, symbol, quantity) VALUES "
                 "('u1','ETH-USD','2'), ('u1','SOL-USD','0')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO user_strategies (user_id, strategy_id, is_enabled, config) VALUES "
+                "('u1','demo.momentum',1,'{\"symbol\":\"BTC-USD\"}')"
             )
         )
 

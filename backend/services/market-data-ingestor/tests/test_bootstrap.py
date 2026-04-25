@@ -55,3 +55,24 @@ def test_refresh_targets_uses_all_products_when_none_are_stale() -> None:
         "BTC-USD",
         "ETH-USD",
     ]
+
+
+def test_refresh_product_universe_returns_delta_and_prunes_removed_symbols() -> None:
+    stale = SimpleNamespace(pruned=None)
+
+    def _prune(products):
+        stale.pruned = list(products)
+
+    stale.prune = _prune
+    universe = SimpleNamespace(list_active_product_ids=lambda: ["ETH-USD", "SOL-USD"])
+
+    delta = ingestor_main._refresh_product_universe(
+        universe, stale, ["BTC-USD", "ETH-USD"]
+    )
+
+    assert delta == ingestor_main.ProductUniverseChange(
+        products=["ETH-USD", "SOL-USD"],
+        added=["SOL-USD"],
+        removed=["BTC-USD"],
+    )
+    assert stale.pruned == ["ETH-USD", "SOL-USD"]

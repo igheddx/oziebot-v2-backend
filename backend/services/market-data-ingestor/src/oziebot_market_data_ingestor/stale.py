@@ -27,6 +27,13 @@ class StaleDataDetector:
     def mark_candle(self, product_id: str, at: datetime) -> None:
         self._last_candle[product_id] = at
 
+    def prune(self, products: list[str]) -> None:
+        active_products = {str(product_id) for product_id in products}
+        for timestamps in (self._last_trade, self._last_bbo, self._last_candle):
+            for product_id in list(timestamps):
+                if product_id not in active_products:
+                    del timestamps[product_id]
+
     def stale_products(
         self, now: datetime, products: list[str]
     ) -> dict[str, list[str]]:

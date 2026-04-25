@@ -24,3 +24,16 @@ def test_stale_detector_flags_missing_and_old_data():
     assert "SOL-USD" in stale["bbo"]
     assert "SOL-USD" in stale["candle"]
     assert "BTC-USD" not in stale["trade"]
+
+
+def test_stale_detector_prunes_removed_products():
+    detector = StaleDataDetector(StaleThresholds(trade=10, bbo=10, candle=30))
+    now = datetime.now(UTC)
+    detector.mark_trade("BTC-USD", now)
+    detector.mark_bbo("ETH-USD", now)
+    detector.mark_candle("SOL-USD", now)
+
+    detector.prune(["BTC-USD"])
+
+    stale = detector.stale_products(now, ["BTC-USD"])
+    assert stale == {"trade": [], "bbo": ["BTC-USD"], "candle": ["BTC-USD"]}

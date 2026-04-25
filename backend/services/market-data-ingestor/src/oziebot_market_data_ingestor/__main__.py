@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -60,6 +61,35 @@ class TradeLogSampler:
 
 def _refresh_targets(stale_products: list[str], all_products: list[str]) -> list[str]:
     return stale_products or all_products
+
+
+@dataclass(frozen=True)
+class ProductUniverseChange:
+    products: list[str]
+    added: list[str]
+    removed: list[str]
+
+
+class ProductUniverseChanged(RuntimeError):
+    """Raised to reconnect the websocket with a refreshed symbol universe."""
+
+
+def _refresh_product_universe(
+    universe: SymbolUniverseProvider,
+    stale: StaleDataDetector,
+    current_products: list[str],
+) -> ProductUniverseChange | None:
+    refreshed_products = universe.list_active_product_ids()
+    if refreshed_products == current_products:
+        return None
+    current_set = set(current_products)
+    refreshed_set = set(refreshed_products)
+    stale.prune(refreshed_products)
+    return ProductUniverseChange(
+        products=refreshed_products,
+        added=sorted(refreshed_set - current_set),
+        removed=sorted(current_set - refreshed_set),
+    )
 
 
 def _format_decimal(value: Decimal, *, places: int = 6) -> str:
@@ -328,9 +358,6 @@ async def main() -> None:
 
     universe = SymbolUniverseProvider(engine)
     products = universe.list_active_product_ids()
-    if not products:
-        log.info("no enabled products found (platform + user token filters)")
-        return
 
     cache = RedisMarketCache(
         r,
@@ -367,170 +394,239 @@ async def main() -> None:
         alert_cooldown_seconds=s.operational_alert_cooldown_seconds,
     )
 
-    log.info("subscribing to products=%s", products)
-
-    # Seed candle history on startup with 50 candles so MAs can be computed immediately
-    log.info("seeding market cache for products=%s", products)
-    await _seed_market_cache(
-        rest=rest,
-        store=store,
-        cache=cache,
-        log_client=r,
-        stale=stale,
-        products=products,
-        trade_limit=s.trade_recovery_limit,
-        granularity_sec=s.candles_granularity_sec,
-        signal_panel=signal_panel,
-        health=health,
-    )
-    refresher.refresh_active_tokens()
-    health.mark_ready()
-
     channels = ["ticker", "market_trades", "heartbeats"]
     last_candle_reconcile = datetime.now(UTC)
     last_trade_reconcile = datetime.now(UTC)
     last_bbo_reconcile = datetime.now(UTC)
     last_policy_refresh = datetime.now(UTC)
+    last_universe_refresh = datetime.now(UTC)
     trade_log_sampler = TradeLogSampler()
     try:
-        async for msg in ws.subscribe_and_stream(products, channels):
-            typ = msg.get("type")
-            if typ == "match":
-                trade = normalize_trade(msg)
-                cache.put_trade(trade)
-                store.insert_trade_snapshot(trade)
-                stale.mark_trade(trade.product_id, trade.ingest_time)
-                if trade_log_sampler.should_emit(
-                    symbol=trade.product_id,
-                    event_type="trade_tick",
-                    now=trade.ingest_time,
-                ):
-                    message, details = _trade_tick_summary(trade)
-                    append_trade_log_event(
-                        r,
-                        symbol=trade.product_id,
-                        event_type="trade_tick",
-                        message=message,
-                        timestamp=trade.ingest_time,
-                        details=details,
-                    )
-                signal_panel.observe_trade(trade)
-            elif typ == "ticker":
-                bbo = normalize_bbo(msg)
-                cache.put_bbo(bbo)
-                store.insert_bbo_snapshot(bbo)
-                stale.mark_bbo(bbo.product_id, bbo.ingest_time)
-                if trade_log_sampler.should_emit(
-                    symbol=bbo.product_id,
-                    event_type="bbo_stream",
-                    now=bbo.ingest_time,
-                ):
-                    message, details = _bbo_summary(bbo, streamed=True)
-                    append_trade_log_event(
-                        r,
-                        symbol=bbo.product_id,
-                        event_type="bbo_update",
-                        message=message,
-                        timestamp=bbo.ingest_time,
-                        details=details,
-                    )
-                signal_panel.observe_bbo(bbo)
-            elif typ in {"snapshot", "l2update"} and msg.get("product_id"):
-                top = normalize_orderbook_top(msg, depth=s.orderbook_depth)
-                cache.put_orderbook(top)
-            elif typ == "candle":
-                candle = normalize_candle(msg, s.candles_granularity_sec)
-                cache.put_candle(candle)
-                store.insert_candle(candle)
-                stale.mark_candle(candle.product_id, candle.ingest_time)
-            health.touch()
-
-            now = datetime.now(UTC)
-            stale_map = stale.stale_products(now, products)
-            stale_details, stale_alert = stale_monitor.evaluate(stale_map, now=now)
-            health.set_detail("marketDataStale", stale_details)
-            redis_details = {}
-            redis_alert = None
-            try:
-                redis_details, redis_alert = redis_monitor.sample(r, now=now)
-            except Exception as exc:
-                redis_details = {"status": "unavailable", "error": str(exc)}
-                log.warning("redis pressure sampling failed err=%s", exc)
-            health.set_detail("redisPressure", redis_details)
-            if redis_alert is not None:
-                push_json(
-                    r,
-                    QueueNames.ops_alerts(),
-                    operational_alert_to_json(redis_alert),
-                )
-            if stale_alert is not None:
-                push_json(
-                    r,
-                    QueueNames.ops_alerts(),
-                    operational_alert_to_json(stale_alert),
-                )
-            if any(stale_map.values()):
-                cache.publish_stale(
-                    "oziebot:md:stale", {"at": now.isoformat(), "stale": stale_map}
-                )
-                log.warning(
-                    "market_data_stale trade=%s bbo=%s candle=%s",
-                    stale_map["trade"],
-                    stale_map["bbo"],
-                    stale_map["candle"],
-                )
-            stale_alert_active = (
-                stale_details.get("activeForSeconds", 0) >= s.stale_alert_after_seconds
-                and stale_details.get("alertSymbolCount", 0) > 0
+        if products:
+            log.info("subscribing to products=%s", products)
+            log.info("seeding market cache for products=%s", products)
+            await _seed_market_cache(
+                rest=rest,
+                store=store,
+                cache=cache,
+                log_client=r,
+                stale=stale,
+                products=products,
+                trade_limit=s.trade_recovery_limit,
+                granularity_sec=s.candles_granularity_sec,
+                signal_panel=signal_panel,
+                health=health,
             )
-            if redis_details.get("severity") == "critical" or stale_alert_active:
-                health.mark_degraded("market_data_monitoring_alert")
-            else:
-                health.mark_ready()
-            if (
-                now - last_trade_reconcile
-            ).total_seconds() >= s.trade_reconcile_interval_seconds:
-                await _reconcile_trades(
-                    rest,
-                    store,
-                    cache,
-                    r,
-                    stale,
-                    _refresh_targets(stale_map["trade"], products),
-                    s.trade_recovery_limit,
-                    signal_panel,
-                )
-                last_trade_reconcile = now
-                health.touch()
-            if (
-                now - last_bbo_reconcile
-            ).total_seconds() >= s.bbo_reconcile_interval_seconds:
-                await _reconcile_bbo(
-                    rest,
-                    store,
-                    cache,
-                    r,
-                    stale,
-                    _refresh_targets(stale_map["bbo"], products),
-                    signal_panel,
-                )
-                last_bbo_reconcile = now
-                health.touch()
+            refresher.refresh_active_tokens()
+            health.mark_ready()
+        else:
+            log.info("no enabled products found; waiting for universe refresh")
+            health.mark_degraded("no_monitored_products")
 
-            if (
-                now - last_candle_reconcile
-            ).total_seconds() >= s.candles_granularity_sec:
-                await _reconcile_candles(
-                    rest, store, cache, r, stale, products, s.candles_granularity_sec
+        while True:
+            if not products:
+                await asyncio.sleep(max(1, s.universe_refresh_interval_seconds))
+                products = universe.list_active_product_ids()
+                stale.prune(products)
+                last_universe_refresh = datetime.now(UTC)
+                if not products:
+                    continue
+                log.info("activating refreshed market data universe products=%s", products)
+                await _seed_market_cache(
+                    rest=rest,
+                    store=store,
+                    cache=cache,
+                    log_client=r,
+                    stale=stale,
+                    products=products,
+                    trade_limit=s.trade_recovery_limit,
+                    granularity_sec=s.candles_granularity_sec,
+                    signal_panel=signal_panel,
+                    health=health,
                 )
-                last_candle_reconcile = now
-                health.touch()
-            if (
-                now - last_policy_refresh
-            ).total_seconds() >= s.token_policy_recalc_interval_seconds:
                 refresher.refresh_active_tokens()
-                last_policy_refresh = now
-                health.touch()
+                health.mark_ready()
+
+            try:
+                async for msg in ws.subscribe_and_stream(products, channels):
+                    typ = msg.get("type")
+                    if typ == "match":
+                        trade = normalize_trade(msg)
+                        cache.put_trade(trade)
+                        store.insert_trade_snapshot(trade)
+                        stale.mark_trade(trade.product_id, trade.ingest_time)
+                        if trade_log_sampler.should_emit(
+                            symbol=trade.product_id,
+                            event_type="trade_tick",
+                            now=trade.ingest_time,
+                        ):
+                            message, details = _trade_tick_summary(trade)
+                            append_trade_log_event(
+                                r,
+                                symbol=trade.product_id,
+                                event_type="trade_tick",
+                                message=message,
+                                timestamp=trade.ingest_time,
+                                details=details,
+                            )
+                        signal_panel.observe_trade(trade)
+                    elif typ == "ticker":
+                        bbo = normalize_bbo(msg)
+                        cache.put_bbo(bbo)
+                        store.insert_bbo_snapshot(bbo)
+                        stale.mark_bbo(bbo.product_id, bbo.ingest_time)
+                        if trade_log_sampler.should_emit(
+                            symbol=bbo.product_id,
+                            event_type="bbo_stream",
+                            now=bbo.ingest_time,
+                        ):
+                            message, details = _bbo_summary(bbo, streamed=True)
+                            append_trade_log_event(
+                                r,
+                                symbol=bbo.product_id,
+                                event_type="bbo_update",
+                                message=message,
+                                timestamp=bbo.ingest_time,
+                                details=details,
+                            )
+                        signal_panel.observe_bbo(bbo)
+                    elif typ in {"snapshot", "l2update"} and msg.get("product_id"):
+                        top = normalize_orderbook_top(msg, depth=s.orderbook_depth)
+                        cache.put_orderbook(top)
+                    elif typ == "candle":
+                        candle = normalize_candle(msg, s.candles_granularity_sec)
+                        cache.put_candle(candle)
+                        store.insert_candle(candle)
+                        stale.mark_candle(candle.product_id, candle.ingest_time)
+                    health.touch()
+
+                    now = datetime.now(UTC)
+                    if (
+                        now - last_universe_refresh
+                    ).total_seconds() >= s.universe_refresh_interval_seconds:
+                        universe_change = _refresh_product_universe(
+                            universe, stale, products
+                        )
+                        last_universe_refresh = now
+                        if universe_change is not None:
+                            products = universe_change.products
+                            log.info(
+                                "market data universe changed added=%s removed=%s products=%s",
+                                universe_change.added,
+                                universe_change.removed,
+                                products,
+                            )
+                            if universe_change.added:
+                                await _seed_market_cache(
+                                    rest=rest,
+                                    store=store,
+                                    cache=cache,
+                                    log_client=r,
+                                    stale=stale,
+                                    products=universe_change.added,
+                                    trade_limit=s.trade_recovery_limit,
+                                    granularity_sec=s.candles_granularity_sec,
+                                    signal_panel=signal_panel,
+                                    health=health,
+                                )
+                            raise ProductUniverseChanged
+
+                    stale_map = stale.stale_products(now, products)
+                    stale_details, stale_alert = stale_monitor.evaluate(
+                        stale_map, now=now
+                    )
+                    health.set_detail("marketDataStale", stale_details)
+                    redis_details = {}
+                    redis_alert = None
+                    try:
+                        redis_details, redis_alert = redis_monitor.sample(r, now=now)
+                    except Exception as exc:
+                        redis_details = {"status": "unavailable", "error": str(exc)}
+                        log.warning("redis pressure sampling failed err=%s", exc)
+                    health.set_detail("redisPressure", redis_details)
+                    if redis_alert is not None:
+                        push_json(
+                            r,
+                            QueueNames.ops_alerts(),
+                            operational_alert_to_json(redis_alert),
+                        )
+                    if stale_alert is not None:
+                        push_json(
+                            r,
+                            QueueNames.ops_alerts(),
+                            operational_alert_to_json(stale_alert),
+                        )
+                    if any(stale_map.values()):
+                        cache.publish_stale(
+                            "oziebot:md:stale", {"at": now.isoformat(), "stale": stale_map}
+                        )
+                        log.warning(
+                            "market_data_stale trade=%s bbo=%s candle=%s",
+                            stale_map["trade"],
+                            stale_map["bbo"],
+                            stale_map["candle"],
+                        )
+                    stale_alert_active = (
+                        stale_details.get("activeForSeconds", 0)
+                        >= s.stale_alert_after_seconds
+                        and stale_details.get("alertSymbolCount", 0) > 0
+                    )
+                    if redis_details.get("severity") == "critical" or stale_alert_active:
+                        health.mark_degraded("market_data_monitoring_alert")
+                    else:
+                        health.mark_ready()
+                    if (
+                        now - last_trade_reconcile
+                    ).total_seconds() >= s.trade_reconcile_interval_seconds:
+                        await _reconcile_trades(
+                            rest,
+                            store,
+                            cache,
+                            r,
+                            stale,
+                            _refresh_targets(stale_map["trade"], products),
+                            s.trade_recovery_limit,
+                            signal_panel,
+                        )
+                        last_trade_reconcile = now
+                        health.touch()
+                    if (
+                        now - last_bbo_reconcile
+                    ).total_seconds() >= s.bbo_reconcile_interval_seconds:
+                        await _reconcile_bbo(
+                            rest,
+                            store,
+                            cache,
+                            r,
+                            stale,
+                            _refresh_targets(stale_map["bbo"], products),
+                            signal_panel,
+                        )
+                        last_bbo_reconcile = now
+                        health.touch()
+
+                    if (
+                        now - last_candle_reconcile
+                    ).total_seconds() >= s.candles_granularity_sec:
+                        await _reconcile_candles(
+                            rest,
+                            store,
+                            cache,
+                            r,
+                            stale,
+                            products,
+                            s.candles_granularity_sec,
+                        )
+                        last_candle_reconcile = now
+                        health.touch()
+                    if (
+                        now - last_policy_refresh
+                    ).total_seconds() >= s.token_policy_recalc_interval_seconds:
+                        refresher.refresh_active_tokens()
+                        last_policy_refresh = now
+                        health.touch()
+            except ProductUniverseChanged:
+                continue
     finally:
         await rest.close()
 
