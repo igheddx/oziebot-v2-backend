@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     orderbook_depth: int = 10
     stale_trade_seconds: int = 15
-    stale_bbo_seconds: int = 10
+    stale_bbo_seconds: int = 30
     stale_candle_seconds: int = 120
 
     candles_granularity_sec: int = 60  # poll REST every 60s for candles
