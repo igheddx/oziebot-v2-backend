@@ -1011,8 +1011,8 @@ def test_stale_data_degrades_signal_without_full_rejection(tmp_path: Path):
     svc = RiskEngineService(
         settings,
         _redis_with_stale_market(
-            trade_age_seconds=25,
-            bbo_age_seconds=10,
+            trade_age_seconds=10,
+            bbo_age_seconds=31,
             candle_age_seconds=90,
         ),
     )
@@ -1039,7 +1039,7 @@ def test_critical_stale_data_still_rejects(tmp_path: Path):
         settings,
         _redis_with_stale_market(
             trade_age_seconds=10,
-            bbo_age_seconds=61,
+            bbo_age_seconds=91,
             candle_age_seconds=90,
         ),
     )
@@ -1052,3 +1052,39 @@ def test_critical_stale_data_still_rejects(tmp_path: Path):
     assert intent is None
     assert "Critically stale market data" in (decision.detail or "")
     assert svc.metrics_snapshot()["signals_rejected"] == 1
+
+
+def test_trade_only_critical_stale_data_degrades_without_rejection(tmp_path: Path):
+    db_path = tmp_path / "risk-stale-trade-only-critical.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+    _set_platform_config(
+        db_path, "momentum", {"risk_caps": {"max_position_usd": 1_000_000}}
+    )
+
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{db_path}",
+        risk_stale_degraded_confidence_multiplier=0.75,
+        risk_max_per_trade_risk_pct=1.0,
+        risk_max_strategy_allocation_pct=1.0,
+        risk_max_token_concentration_pct=1.0,
+    )
+    svc = RiskEngineService(
+        settings,
+        _redis_with_stale_market(
+            trade_age_seconds=70,
+            bbo_age_seconds=10,
+            candle_age_seconds=90,
+        ),
+    )
+
+    decision, intent = svc.evaluate(
+        _signal(user_id, size="0.01"), trace_id="t-stale-trade-only-critical"
+    )
+
+    assert decision.outcome == RiskOutcome.APPROVE
+    assert intent is not None
+    assert Decimal(decision.original_size) == Decimal("0.00750000")
+    assert svc.metrics_snapshot()["signals_rejected"] == 0

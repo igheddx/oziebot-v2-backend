@@ -32,7 +32,13 @@ from oziebot_domain.strategy import SignalType
 from oziebot_domain.trading import Instrument, OrderType, Quantity, Side
 from oziebot_domain.trading_mode import TradingMode
 from oziebot_risk_engine.config import Settings
-from oziebot_risk_engine.rules import RuleContext, RuleResult, default_rules
+from oziebot_risk_engine.rules import (
+    RuleContext,
+    RuleResult,
+    blocking_critical_stale_flags,
+    default_rules,
+    has_blocking_critical_staleness,
+)
 
 log = logging.getLogger("risk-engine.service")
 
@@ -307,11 +313,14 @@ class RiskEngineService:
         quality = {
             "stale_flags": stale_flags,
             "critical_stale_flags": critical_stale_flags,
+            "blocking_critical_stale_flags": blocking_critical_stale_flags(
+                critical_stale_flags
+            ),
             "stale_ages": facts["stale_ages"],
-            "degraded": not any(critical_stale_flags.values()),
+            "degraded": not has_blocking_critical_staleness(critical_stale_flags),
         }
         metadata["market_data_quality"] = quality
-        if any(critical_stale_flags.values()):
+        if has_blocking_critical_staleness(critical_stale_flags):
             return signal.model_copy(update={"reasoning_metadata": metadata})
 
         multiplier = Decimal(

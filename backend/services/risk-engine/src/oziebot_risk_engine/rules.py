@@ -93,6 +93,20 @@ def _cents_to_dollars(value_cents: int | Decimal) -> Decimal:
     return Decimal(str(value_cents)) / Decimal("100")
 
 
+def blocking_critical_stale_flags(
+    critical_stale_flags: dict[str, bool],
+) -> dict[str, bool]:
+    return {
+        "trade": False,
+        "bbo": bool(critical_stale_flags.get("bbo")),
+        "candle": bool(critical_stale_flags.get("candle")),
+    }
+
+
+def has_blocking_critical_staleness(critical_stale_flags: dict[str, bool]) -> bool:
+    return any(blocking_critical_stale_flags(critical_stale_flags).values())
+
+
 class PlatformPauseRule(RiskRule):
     name = "platform_pause"
 
@@ -530,14 +544,16 @@ class StaleDataRule(RiskRule):
     name = "stale_data"
 
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
-        if any(ctx.critical_stale_flags.values()):
+        blocking_critical = blocking_critical_stale_flags(ctx.critical_stale_flags)
+        if any(blocking_critical.values()):
             return RuleResult(
                 self.name,
                 "reject",
                 RejectionReason.POLICY,
                 (
                     "Critically stale market data: "
-                    f"critical={ctx.critical_stale_flags}, stale={ctx.stale_flags}, ages={ctx.stale_ages}"
+                    f"critical={blocking_critical}, raw_critical={ctx.critical_stale_flags}, "
+                    f"stale={ctx.stale_flags}, ages={ctx.stale_ages}"
                 ),
             )
         return None

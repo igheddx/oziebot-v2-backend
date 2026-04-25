@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     risk_cooldown_loss_count: int = 3
     risk_cooldown_minutes: int = 45
 
-    risk_stale_trade_seconds: int = 20
-    risk_stale_bbo_seconds: int = 15
+    risk_stale_trade_seconds: int = 30
+    risk_stale_bbo_seconds: int = 30
     risk_stale_candle_seconds: int = 180
     risk_critical_stale_multiplier: int = 3
     risk_stale_degraded_confidence_multiplier: float = 0.75
