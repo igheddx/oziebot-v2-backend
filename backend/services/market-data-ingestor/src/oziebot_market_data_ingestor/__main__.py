@@ -288,10 +288,14 @@ async def _reconcile_bbo(
     stale: StaleDataDetector,
     products: list[str],
     signal_panel: SignalPanelEmitter | None = None,
+    max_concurrency: int = 8,
 ) -> None:
-    for p in products:
+    semaphore = asyncio.Semaphore(max(1, max_concurrency))
+
+    async def _refresh_product(product_id: str) -> None:
         try:
-            ticker = await rest.get_ticker(p)
+            async with semaphore:
+                ticker = await rest.get_ticker(product_id)
             item = normalize_bbo(ticker)
             cache.put_bbo(item)
             store.insert_bbo_snapshot(item)
@@ -301,15 +305,17 @@ async def _reconcile_bbo(
             message, details = _bbo_summary(item, streamed=False)
             append_trade_log_event(
                 log_client,
-                symbol=p,
+                symbol=product_id,
                 event_type="bbo_update",
                 message=message,
                 details=details,
             )
             if signal_panel is not None:
-                signal_panel.force_emit(p, now=item.ingest_time)
+                signal_panel.force_emit(product_id, now=item.ingest_time)
         except Exception as exc:
-            log.warning("bbo reconciliation failed product=%s err=%s", p, exc)
+            log.warning("bbo reconciliation failed product=%s err=%s", product_id, exc)
+
+    await asyncio.gather(*(_refresh_product(product_id) for product_id in products))
 
 
 async def _seed_market_cache(
@@ -342,7 +348,15 @@ async def _seed_market_cache(
         signal_panel,
     )
     health.touch()
-    await _reconcile_bbo(rest, store, cache, log_client, stale, products, signal_panel)
+    await _reconcile_bbo(
+        rest,
+        store,
+        cache,
+        log_client,
+        stale,
+        products,
+        signal_panel,
+    )
     health.touch()
 
 
@@ -607,6 +621,7 @@ async def main() -> None:
                             stale,
                             _refresh_targets(stale_map["bbo"], products),
                             signal_panel,
+                            s.bbo_reconcile_max_concurrency,
                         )
                         last_bbo_reconcile = now
                         health.touch()

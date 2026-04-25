@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     trade_recovery_limit: int = 20
     trade_reconcile_interval_seconds: int = 15
     bbo_reconcile_interval_seconds: int = 10
+    bbo_reconcile_max_concurrency: int = 8
     universe_refresh_interval_seconds: int = 30
     token_policy_recalc_interval_seconds: int = 900
     loop_sleep_sec: float = 1.0

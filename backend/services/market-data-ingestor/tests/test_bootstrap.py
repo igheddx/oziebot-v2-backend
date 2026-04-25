@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -76,3 +77,43 @@ def test_refresh_product_universe_returns_delta_and_prunes_removed_symbols() -> 
         removed=["BTC-USD"],
     )
     assert stale.pruned == ["ETH-USD", "SOL-USD"]
+
+
+@pytest.mark.anyio
+async def test_reconcile_bbo_refreshes_products_concurrently() -> None:
+    active = 0
+    max_active = 0
+
+    class FakeRest:
+        async def get_ticker(self, product_id: str) -> dict[str, str]:
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return {
+                "product_id": product_id,
+                "best_bid": "100",
+                "best_bid_quantity": "1",
+                "best_ask": "101",
+                "best_ask_quantity": "1",
+                "time": "2026-01-01T00:00:00+00:00",
+            }
+
+    seen: list[str] = []
+    cache = SimpleNamespace(put_bbo=lambda item: seen.append(item.product_id))
+    store = SimpleNamespace(insert_bbo_snapshot=lambda item: None)
+    stale = SimpleNamespace(mark_bbo=lambda product_id, at: None)
+
+    await ingestor_main._reconcile_bbo(
+        FakeRest(),
+        store,
+        cache,
+        object(),
+        stale,
+        ["BTC-USD", "ETH-USD", "SOL-USD"],
+        max_concurrency=3,
+    )
+
+    assert sorted(seen) == ["BTC-USD", "ETH-USD", "SOL-USD"]
+    assert max_active > 1
