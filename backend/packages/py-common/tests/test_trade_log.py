@@ -3,8 +3,11 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 import redis
 
+import oziebot_common.trade_log as trade_log_module
+import oziebot_common.trade_log_intelligence as trade_log_intelligence_module
 from oziebot_common.trade_log import append_trade_log_event, read_trade_log_events
 from oziebot_common.trade_log_intelligence import (
     append_trade_log_sample,
@@ -134,6 +137,57 @@ class FakeRedis:
 class FailingRedis(FakeRedis):
     def pipeline(self) -> FailingPipeline:
         return FailingPipeline(self)
+
+
+class FakeObservabilityStore:
+    def __init__(self) -> None:
+        self.events: list[dict[str, object]] = []
+        self.samples: dict[str, list[dict[str, object]]] = {}
+        self.summaries: dict[str, dict[str, object]] = {}
+
+    def append_trade_event(self, event: dict[str, object]) -> None:
+        self.events.append(event)
+
+    def read_trade_events(
+        self,
+        *,
+        window_seconds: int,  # noqa: ARG002
+        limit: int,
+        symbol: str | None = None,
+        event_type: str | None = None,
+        now: datetime | None = None,  # noqa: ARG002
+    ) -> list[dict[str, object]]:
+        rows = list(self.events)
+        if symbol:
+            rows = [row for row in rows if row["symbol"] == str(symbol).upper()]
+        if event_type:
+            rows = [row for row in rows if row["event_type"] == event_type]
+        return rows[-limit:]
+
+    def append_trade_sample(self, payload: dict[str, object]) -> None:
+        self.samples.setdefault(str(payload["symbol"]), []).append(payload)
+
+    def read_trade_samples(
+        self,
+        *,
+        symbol: str,
+        window_seconds: int,  # noqa: ARG002
+        now: datetime | None = None,  # noqa: ARG002
+    ) -> list[dict[str, object]]:
+        return list(self.samples.get(str(symbol).upper(), []))
+
+    def write_trade_summary(self, summary: dict[str, object]) -> None:
+        self.summaries[str(summary["symbol"])] = summary
+
+    def read_trade_summaries(
+        self,
+        *,
+        symbol: str | None = None,
+    ) -> list[dict[str, object]]:
+        if symbol:
+            summary = self.summaries.get(str(symbol).upper())
+            return [summary] if summary is not None else []
+        return list(self.summaries.values())
 
 
 def test_trade_log_keeps_recent_events_in_chronological_order() -> None:
@@ -310,3 +364,45 @@ def test_trade_log_writes_degrade_when_redis_is_full(caplog) -> None:
     assert any("trade log write failed" in message for message in warnings)
     assert any("trade log sample write failed" in message for message in warnings)
     assert any("trade log summary write failed" in message for message in warnings)
+
+
+def test_trade_log_can_use_s3_observability_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FakeObservabilityStore()
+    monkeypatch.setattr(trade_log_module, "get_observability_store", lambda: store)
+    monkeypatch.setattr(
+        trade_log_intelligence_module,
+        "get_observability_store",
+        lambda: store,
+    )
+    now = datetime.now(UTC)
+
+    append_trade_log_event(
+        None,
+        symbol="BTC-USD",
+        event_type="trade_tick",
+        message="s3 event",
+        timestamp=now,
+    )
+    append_trade_log_sample(
+        None,
+        symbol="BTC-USD",
+        sample={"mid_price": Decimal("62000")},
+        timestamp=now,
+    )
+    write_trade_log_summary(
+        None,
+        symbol="BTC-USD",
+        summary={"symbol": "BTC-USD", "signal_quality_score": 90},
+    )
+
+    events = read_trade_log_events(None, symbol="BTC-USD")
+    samples = read_trade_log_samples(None, symbol="BTC-USD")
+    summaries = read_trade_log_summaries(None, symbol="BTC-USD")
+
+    assert len(events) == 1
+    assert events[0]["message"] == "s3 event"
+    assert len(samples) == 1
+    assert samples[0]["sample"]["mid_price"] == "62000"
+    assert summaries[0]["signal_quality_score"] == 90

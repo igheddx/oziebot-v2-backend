@@ -26,11 +26,12 @@ def _start_runtime_status_publisher(
     def _publisher() -> None:
         from oziebot_common.queues import disconnect_redis, redis_from_url
         from oziebot_common.runtime_status import publish_runtime_status
+        from oziebot_common.s3_observability import get_observability_store
 
         client = None
         while True:
             try:
-                if client is None:
+                if get_observability_store() is None and client is None:
                     client = redis_from_url(
                         redis_url,
                         probe=True,
@@ -153,6 +154,7 @@ def start_health_server(service_name: str) -> HealthState:
     publish_ttl_seconds = int(
         os.environ.get("OZIEBOT_HEALTH_PUBLISH_TTL_SECONDS", "30")
     )
+    from oziebot_common.s3_observability import get_observability_store
 
     state = HealthState(
         service_name=service_name, stale_after_seconds=stale_after_seconds
@@ -203,7 +205,11 @@ def start_health_server(service_name: str) -> HealthState:
             target=_auto_touch, daemon=True, name=f"{service_name}-health-ticker"
         )
         ticker.start()
-    if redis_url and publish_interval_seconds > 0:
+    runtime_publish_enabled = bool(
+        publish_interval_seconds > 0
+        and (redis_url or get_observability_store() is not None)
+    )
+    if runtime_publish_enabled:
         _start_runtime_status_publisher(
             service_name=service_name,
             state=state,
@@ -218,7 +224,7 @@ def start_health_server(service_name: str) -> HealthState:
         port,
         stale_after_seconds,
         auto_touch_seconds,
-        bool(redis_url and publish_interval_seconds > 0),
+        runtime_publish_enabled,
     )
     return state
 

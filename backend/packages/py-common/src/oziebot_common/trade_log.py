@@ -8,6 +8,8 @@ from typing import Any, Mapping
 
 import redis
 
+from oziebot_common.s3_observability import get_observability_store
+
 TRADE_LOG_REDIS_KEY = "oziebot:logs:trade"
 MAX_TRADE_LOG_WINDOW_SECONDS = 120
 MAX_TRADE_LOG_LIMIT = 200
@@ -100,6 +102,18 @@ def append_trade_log_event(
     score = event_time.timestamp()
     cutoff = (event_time - timedelta(seconds=clamped_retention)).timestamp()
     payload = json.dumps(event, separators=(",", ":"))
+    store = get_observability_store()
+    if store is not None:
+        try:
+            store.append_trade_event(event)
+        except Exception as exc:
+            log.warning(
+                "trade log write failed symbol=%s event_type=%s err=%s",
+                event["symbol"],
+                event["event_type"],
+                exc,
+            )
+        return event
 
     pipeline = client.pipeline()
     pipeline.zadd(TRADE_LOG_REDIS_KEY, {payload: score})
@@ -128,6 +142,15 @@ def read_trade_log_events(
 ) -> list[dict[str, Any]]:
     clamped_window = max(1, min(int(window_seconds), MAX_TRADE_LOG_WINDOW_SECONDS))
     clamped_limit = max(1, min(int(limit), MAX_TRADE_LOG_LIMIT))
+    store = get_observability_store()
+    if store is not None:
+        return store.read_trade_events(
+            window_seconds=clamped_window,
+            limit=clamped_limit,
+            symbol=symbol,
+            event_type=event_type,
+            now=now,
+        )
     current_time = (now or datetime.now(UTC)).astimezone(UTC)
     min_score = (current_time - timedelta(seconds=clamped_window)).timestamp()
     normalized_symbol = str(symbol or "").strip().upper()

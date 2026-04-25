@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 import redis
 
+from oziebot_common.s3_observability import get_observability_store
 from oziebot_common.trade_log import (
     DEFAULT_TRADE_LOG_RETENTION_SECONDS,
     MAX_TRADE_LOG_WINDOW_SECONDS,
@@ -47,6 +48,17 @@ def append_trade_log_sample(
         "symbol": normalized_symbol,
         "sample": normalize_trade_log_payload(sample),
     }
+    store = get_observability_store()
+    if store is not None:
+        try:
+            store.append_trade_sample(payload)
+        except Exception as exc:
+            log.warning(
+                "trade log sample write failed symbol=%s err=%s",
+                normalized_symbol,
+                exc,
+            )
+        return payload
     score = event_time.timestamp()
     cutoff = (event_time - timedelta(seconds=clamped_retention)).timestamp()
     sample_key = trade_log_sample_key(normalized_symbol)
@@ -76,6 +88,13 @@ def read_trade_log_samples(
     now: datetime | None = None,
 ) -> list[dict[str, Any]]:
     clamped_window = max(1, min(int(window_seconds), MAX_TRADE_LOG_WINDOW_SECONDS))
+    store = get_observability_store()
+    if store is not None:
+        return store.read_trade_samples(
+            symbol=symbol,
+            window_seconds=clamped_window,
+            now=now,
+        )
     current_time = (now or datetime.now(UTC)).astimezone(UTC)
     min_score = (current_time - timedelta(seconds=clamped_window)).timestamp()
     rows = client.zrevrangebyscore(
@@ -119,6 +138,17 @@ def write_trade_log_summary(
         1, min(int(retention_seconds), MAX_TRADE_LOG_WINDOW_SECONDS)
     )
     normalized_summary = normalize_trade_log_payload(summary)
+    store = get_observability_store()
+    if store is not None:
+        try:
+            store.write_trade_summary(normalized_summary)
+        except Exception as exc:
+            log.warning(
+                "trade log summary write failed symbol=%s err=%s",
+                normalized_symbol,
+                exc,
+            )
+        return normalized_summary
     pipeline = client.pipeline()
     pipeline.setex(
         trade_log_summary_key(normalized_symbol),
@@ -143,6 +173,16 @@ def read_trade_log_summaries(
     *,
     symbol: str | None = None,
 ) -> list[dict[str, Any]]:
+    store = get_observability_store()
+    if store is not None:
+        summaries = store.read_trade_summaries(symbol=symbol)
+        return sorted(
+            summaries,
+            key=lambda item: (
+                -int(item.get("signal_quality_score") or 0),
+                str(item.get("symbol") or ""),
+            ),
+        )
     symbols = [str(symbol).upper()] if symbol else _read_symbols(client)
     if not symbols:
         return []

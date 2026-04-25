@@ -4,6 +4,8 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
+from oziebot_common.s3_observability import get_observability_store
+
 RUNTIME_STATUS_KEY_PREFIX = "oziebot:runtime:health:"
 
 
@@ -20,6 +22,10 @@ def publish_runtime_status(
     service_name = str(snapshot.get("service") or "").strip()
     if not service_name:
         raise ValueError("runtime status snapshot missing service name")
+    store = get_observability_store()
+    if store is not None:
+        store.publish_runtime_status(snapshot)
+        return
     redis_client.set(
         runtime_status_key(service_name),
         json.dumps(snapshot, default=str),
@@ -34,6 +40,9 @@ def read_runtime_statuses(
     names = [str(name).strip() for name in service_names if str(name).strip()]
     if not names:
         return {}
+    store = get_observability_store()
+    if store is not None:
+        return store.read_runtime_statuses(names)
     raw_values = redis_client.mget([runtime_status_key(name) for name in names])
     snapshots: dict[str, dict[str, object]] = {}
     for service_name, raw_value in zip(names, raw_values, strict=False):

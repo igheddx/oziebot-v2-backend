@@ -4,7 +4,6 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import redis
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -16,6 +15,7 @@ from oziebot_api.models.trade_intelligence import StrategySignalSnapshot
 from oziebot_common import redis_from_url
 from oziebot_common.queues import disconnect_redis
 from oziebot_common.runtime_status import read_runtime_statuses
+from oziebot_common.s3_observability import get_observability_store
 
 log = logging.getLogger("oziebot-runtime-status")
 
@@ -98,18 +98,19 @@ def _normalize_runtime_service(
 def _read_runtime_registry(settings: Settings) -> tuple[dict[str, dict[str, object]], str | None]:
     client = None
     try:
-        client = redis_from_url(
-            settings.redis_url,
-            probe=True,
-            socket_connect_timeout=1,
-            socket_timeout=1,
-        )
+        if get_observability_store() is None:
+            client = redis_from_url(
+                settings.redis_url,
+                probe=True,
+                socket_connect_timeout=1,
+                socket_timeout=1,
+            )
         snapshots = read_runtime_statuses(
             client,
             [service["service"] for service in RUNTIME_SERVICES],
         )
         return snapshots, None
-    except (redis.RedisError, ValueError) as exc:
+    except Exception as exc:
         log.warning("runtime status registry unavailable", exc_info=True)
         return {}, str(exc)
     finally:

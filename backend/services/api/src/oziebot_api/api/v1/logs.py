@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-import redis
 from sqlalchemy import select
 
 from oziebot_api.config import Settings
@@ -22,6 +21,7 @@ from oziebot_common.trade_log_intelligence import (
     build_market_signal_snapshot,
     read_trade_log_summaries,
 )
+from oziebot_common.s3_observability import get_observability_store
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
@@ -170,14 +170,16 @@ def get_trade_log(
     event_type: str | None = Query(default=None),
     settings: Settings = Depends(settings_dep),
 ) -> dict[str, object]:
-    redis_error: redis.RedisError | ValueError | None = None
+    redis_error: Exception | None = None
+    client = None
     try:
-        client = redis_from_url(
-            settings.redis_url,
-            probe=True,
-            socket_connect_timeout=1,
-            socket_timeout=1,
-        )
+        if get_observability_store() is None:
+            client = redis_from_url(
+                settings.redis_url,
+                probe=True,
+                socket_connect_timeout=1,
+                socket_timeout=1,
+            )
         events = read_trade_log_events(
             client,
             window_seconds=window_seconds,
@@ -186,10 +188,18 @@ def get_trade_log(
             event_type=event_type,
         )
         summaries = read_trade_log_summaries(client, symbol=symbol)
-    except (redis.RedisError, ValueError) as exc:
+    except Exception as exc:
         redis_error = exc
         events = []
         summaries = []
+    finally:
+        if client is not None:
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
+            pool = getattr(client, "connection_pool", None)
+            if pool is not None:
+                pool.disconnect()
     if not events and not summaries:
         events, summaries = _build_db_trade_log_fallback(
             db,

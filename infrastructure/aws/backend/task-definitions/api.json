@@ -25,7 +25,10 @@
         { "name": "STRIPE_CHECKOUT_SUCCESS_URL", "value": "https://app.oziebot.com/billing/success?session_id={CHECKOUT_SESSION_ID}" },
         { "name": "STRIPE_CHECKOUT_CANCEL_URL", "value": "https://app.oziebot.com/billing/cancel" },
         { "name": "COINBASE_API_BASE_URL", "value": "https://api.coinbase.com" },
-        { "name": "REDIS_URL", "value": "${REDIS_URL}" }
+        { "name": "REDIS_URL", "value": "${REDIS_URL}" },
+        { "name": "OBSERVABILITY_S3_BUCKET", "value": "${OBSERVABILITY_S3_BUCKET}" },
+        { "name": "OBSERVABILITY_S3_PREFIX", "value": "${OBSERVABILITY_S3_PREFIX}" },
+        { "name": "OBSERVABILITY_S3_REGION", "value": "${OBSERVABILITY_S3_REGION}" }
       ],
       "secrets": [
         { "name": "DATABASE_URL", "valueFrom": "${DATABASE_URL_SECRET_ARN}" },

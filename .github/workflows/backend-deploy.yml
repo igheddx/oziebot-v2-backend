@@ -32,6 +32,9 @@ env:
   ECS_SECURITY_GROUPS: ${{ vars.ECS_SECURITY_GROUPS }}
   ECS_ASSIGN_PUBLIC_IP: ${{ vars.ECS_ASSIGN_PUBLIC_IP || 'DISABLED' }}
   REDIS_URL: ${{ vars.REDIS_URL }}
+  OBSERVABILITY_S3_BUCKET: ${{ vars.OBSERVABILITY_S3_BUCKET }}
+  OBSERVABILITY_S3_PREFIX: ${{ vars.OBSERVABILITY_S3_PREFIX || 'observability' }}
+  OBSERVABILITY_S3_REGION: ${{ vars.OBSERVABILITY_S3_REGION || vars.AWS_REGION || 'us-east-1' }}
 
 jobs:
   build-api-image:
@@ -100,7 +103,10 @@ jobs:
             ECS_SUBNETS \
             ECS_SECURITY_GROUPS \
             ECS_ASSIGN_PUBLIC_IP \
-            REDIS_URL
+            REDIS_URL \
+            OBSERVABILITY_S3_BUCKET \
+            OBSERVABILITY_S3_PREFIX \
+            OBSERVABILITY_S3_REGION
           do
             value="${!name:-}"
             cleaned="$(printf '%s' "$value" | tr -d '[:space:]')"
@@ -228,7 +234,10 @@ jobs:
             ECS_SUBNETS \
             ECS_SECURITY_GROUPS \
             ECS_ASSIGN_PUBLIC_IP \
-            REDIS_URL
+            REDIS_URL \
+            OBSERVABILITY_S3_BUCKET \
+            OBSERVABILITY_S3_PREFIX \
+            OBSERVABILITY_S3_REGION
           do
             value="${!name:-}"
             cleaned="$(printf '%s' "$value" | tr -d '[:space:]')"
@@ -337,7 +346,10 @@ jobs:
             ECS_SUBNETS \
             ECS_SECURITY_GROUPS \
             ECS_ASSIGN_PUBLIC_IP \
-            REDIS_URL
+            REDIS_URL \
+            OBSERVABILITY_S3_BUCKET \
+            OBSERVABILITY_S3_PREFIX \
+            OBSERVABILITY_S3_REGION
           do
             value="${!name:-}"
             cleaned="$(printf '%s' "$value" | tr -d '[:space:]')"
