@@ -431,7 +431,9 @@ async def main() -> None:
                 last_universe_refresh = datetime.now(UTC)
                 if not products:
                     continue
-                log.info("activating refreshed market data universe products=%s", products)
+                log.info(
+                    "activating refreshed market data universe products=%s", products
+                )
                 await _seed_market_cache(
                     rest=rest,
                     store=store,
@@ -558,7 +560,8 @@ async def main() -> None:
                         )
                     if any(stale_map.values()):
                         cache.publish_stale(
-                            "oziebot:md:stale", {"at": now.isoformat(), "stale": stale_map}
+                            "oziebot:md:stale",
+                            {"at": now.isoformat(), "stale": stale_map},
                         )
                         log.warning(
                             "market_data_stale trade=%s bbo=%s candle=%s",
@@ -571,7 +574,10 @@ async def main() -> None:
                         >= s.stale_alert_after_seconds
                         and stale_details.get("alertSymbolCount", 0) > 0
                     )
-                    if redis_details.get("severity") == "critical" or stale_alert_active:
+                    if (
+                        redis_details.get("severity") == "critical"
+                        or stale_alert_active
+                    ):
                         health.mark_degraded("market_data_monitoring_alert")
                     else:
                         health.mark_ready()

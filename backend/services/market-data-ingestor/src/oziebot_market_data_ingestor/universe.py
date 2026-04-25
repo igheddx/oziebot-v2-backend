@@ -125,7 +125,9 @@ class SymbolUniverseProvider:
             if symbol not in allowed_by_user[user_id]:
                 allowed_by_user[user_id].append(symbol)
 
-        monitored_symbols = {str(row.symbol) for row in position_rows if str(row.symbol)}
+        monitored_symbols = {
+            str(row.symbol) for row in position_rows if str(row.symbol)
+        }
         for row in strategy_rows:
             user_id = str(row.user_id)
             allowed_symbols = allowed_by_user.get(user_id, [])
