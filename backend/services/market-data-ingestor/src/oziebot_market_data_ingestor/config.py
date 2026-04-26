@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     orderbook_depth: int = 10
     stale_trade_seconds: int = 15
-    stale_bbo_seconds: int = 30
+    stale_bbo_seconds: int = 45
     stale_candle_seconds: int = 120
 
     candles_granularity_sec: int = 60  # poll REST every 60s for candles
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     trade_recovery_limit: int = 20
     trade_reconcile_interval_seconds: int = 15
     bbo_reconcile_interval_seconds: int = 10
-    bbo_reconcile_max_concurrency: int = 8
+    bbo_reconcile_max_concurrency: int = 16
     universe_refresh_interval_seconds: int = 30
     token_policy_recalc_interval_seconds: int = 900
     loop_sleep_sec: float = 1.0

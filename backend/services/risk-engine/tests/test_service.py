@@ -1012,7 +1012,7 @@ def test_stale_data_degrades_signal_without_full_rejection(tmp_path: Path):
         settings,
         _redis_with_stale_market(
             trade_age_seconds=10,
-            bbo_age_seconds=31,
+            bbo_age_seconds=46,
             candle_age_seconds=90,
         ),
     )
@@ -1039,7 +1039,7 @@ def test_critical_stale_data_still_rejects(tmp_path: Path):
         settings,
         _redis_with_stale_market(
             trade_age_seconds=10,
-            bbo_age_seconds=91,
+            bbo_age_seconds=136,
             candle_age_seconds=90,
         ),
     )
