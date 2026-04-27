@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+import redis
 
 from oziebot_market_data_ingestor import __main__ as ingestor_main
 from oziebot_market_data_ingestor.stale import StaleDataDetector, StaleThresholds
@@ -58,6 +59,24 @@ def test_refresh_targets_uses_all_products_when_none_are_stale() -> None:
         "BTC-USD",
         "ETH-USD",
     ]
+
+
+def test_push_json_best_effort_swallows_redis_oom(caplog) -> None:
+    class FakeRedis:
+        def lpush(self, key: str, value: str) -> None:  # noqa: ARG002
+            raise redis.exceptions.OutOfMemoryError(
+                "command not allowed when used memory > 'maxmemory'"
+            )
+
+    with caplog.at_level("WARNING"):
+        ingestor_main._push_json_best_effort(
+            FakeRedis(),
+            "oziebot:test",
+            {"foo": "bar"},
+            op_name="test_alert",
+        )
+
+    assert "redis queue write failed op=test_alert" in caplog.text
 
 
 def test_refresh_product_universe_returns_delta_and_prunes_removed_symbols() -> None:

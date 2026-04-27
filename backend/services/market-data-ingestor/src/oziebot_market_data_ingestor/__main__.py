@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import redis
 from sqlalchemy import create_engine
 
 from oziebot_common import QueueNames, redis_from_url
@@ -37,6 +38,13 @@ from oziebot_market_data_ingestor.universe import SymbolUniverseProvider
 log = logging.getLogger("market-data-ingestor")
 logging.basicConfig(level=logging.INFO)
 RAW_STREAM_LOG_SAMPLE_SECONDS = 15
+
+
+def _push_json_best_effort(r, key: str, payload: dict, *, op_name: str) -> None:
+    try:
+        push_json(r, key, payload)
+    except redis.RedisError as exc:
+        log.warning("redis queue write failed op=%s key=%s err=%s", op_name, key, exc)
 
 
 class TradeLogSampler:
@@ -566,16 +574,18 @@ async def main() -> None:
                         log.warning("redis pressure sampling failed err=%s", exc)
                     health.set_detail("redisPressure", redis_details)
                     if redis_alert is not None:
-                        push_json(
+                        _push_json_best_effort(
                             r,
                             QueueNames.ops_alerts(),
                             operational_alert_to_json(redis_alert),
+                            op_name="redis_alert",
                         )
                     if stale_alert is not None:
-                        push_json(
+                        _push_json_best_effort(
                             r,
                             QueueNames.ops_alerts(),
                             operational_alert_to_json(stale_alert),
+                            op_name="stale_alert",
                         )
                     if any(stale_map.values()):
                         cache.publish_stale(
