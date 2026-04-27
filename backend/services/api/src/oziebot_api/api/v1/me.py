@@ -54,6 +54,8 @@ DASHBOARD_RECENT_ACTIVITY_LIMIT = 20
 DASHBOARD_FEE_BREAKDOWN_LIMIT = 12
 DASHBOARD_REJECTION_EVENT_LIMIT = 100
 DASHBOARD_REJECTION_AUDIT_SCAN_LIMIT = 1000
+DASHBOARD_GROWTH_POINTS = 8
+DASHBOARD_GROWTH_TRADE_LIMIT = 500
 DASHBOARD_POSITION_DUST_NOTIONAL_USD = Decimal("1")
 DASHBOARD_MARK_LOOKBACK_MINUTES = 30
 ANALYTICS_DEFAULT_LOOKBACK_DAYS = 30
@@ -208,6 +210,66 @@ def _normalize_time_window(
 
 def _cents(amount: Decimal) -> int:
     return int((amount * Decimal("100")).quantize(Decimal("1")))
+
+
+def _build_dashboard_growth_series(
+    *,
+    db: DbSession,
+    user_id: Any,
+    trading_mode: str,
+    cutoff: datetime,
+    now: datetime,
+    portfolio_value: float,
+    unrealized_pnl_value: float,
+) -> list[float]:
+    if DASHBOARD_GROWTH_POINTS <= 1:
+        return [round(portfolio_value, 2)]
+
+    trade_rows = (
+        db.query(
+            ExecutionTradeRecord.executed_at,
+            ExecutionTradeRecord.realized_pnl_cents,
+        )
+        .filter(
+            ExecutionTradeRecord.user_id == user_id,
+            ExecutionTradeRecord.trading_mode == trading_mode,
+            ExecutionTradeRecord.executed_at >= cutoff,
+        )
+        .order_by(ExecutionTradeRecord.executed_at.desc())
+        .limit(DASHBOARD_GROWTH_TRADE_LIMIT)
+        .all()
+    )
+    if not trade_rows:
+        return [round(portfolio_value, 2)] * DASHBOARD_GROWTH_POINTS
+
+    sorted_rows = sorted(
+        trade_rows,
+        key=lambda row: _as_utc(row.executed_at) or cutoff,
+    )
+    first_trade_at = _as_utc(sorted_rows[0].executed_at) or cutoff
+    realized_total = sum(int(row.realized_pnl_cents or 0) for row in sorted_rows) / 100
+    start_value = max(0.0, portfolio_value - unrealized_pnl_value - realized_total)
+    series_start = max(cutoff, first_trade_at - timedelta(seconds=1))
+    span_seconds = max((now - series_start).total_seconds(), 1.0)
+    bucket_seconds = span_seconds / max(DASHBOARD_GROWTH_POINTS - 1, 1)
+    growth: list[float] = []
+    cumulative_realized = 0.0
+    next_trade = 0
+
+    for index in range(DASHBOARD_GROWTH_POINTS):
+        point_time = series_start + timedelta(seconds=bucket_seconds * index)
+        while next_trade < len(sorted_rows):
+            trade_time = _as_utc(sorted_rows[next_trade].executed_at)
+            if trade_time is None or trade_time > point_time:
+                break
+            cumulative_realized += int(sorted_rows[next_trade].realized_pnl_cents or 0) / 100
+            next_trade += 1
+        point_value = start_value + cumulative_realized
+        if index == DASHBOARD_GROWTH_POINTS - 1:
+            point_value += unrealized_pnl_value
+            point_value = portfolio_value
+        growth.append(round(max(0.0, point_value), 2))
+    return growth
 
 
 def _format_rejection_record(
@@ -740,6 +802,7 @@ def _build_dashboard_summary_payload(
         + b.unrealized_pnl_cents
         for b in buckets
     )
+    unrealized_pnl_cents = sum(b.unrealized_pnl_cents for b in buckets)
     pnl_cents = sum(b.realized_pnl_cents + b.unrealized_pnl_cents for b in buckets)
     portfolio_value = portfolio_cents / 100
     pnl_value = pnl_cents / 100
@@ -747,12 +810,15 @@ def _build_dashboard_summary_payload(
     pnl_percent = (pnl_value / base) * 100
     now = datetime.now(UTC)
     dashboard_cutoff = now - timedelta(days=DASHBOARD_HISTORY_LOOKBACK_DAYS)
-    growth_points = 8
-    start = max(0.0, portfolio_value - pnl_value)
-    growth = [
-        round(start + ((portfolio_value - start) * i / (growth_points - 1)), 2)
-        for i in range(growth_points)
-    ]
+    growth = _build_dashboard_growth_series(
+        db=db,
+        user_id=user.id,
+        trading_mode=mode,
+        cutoff=dashboard_cutoff,
+        now=now,
+        portfolio_value=portfolio_value,
+        unrealized_pnl_value=unrealized_pnl_cents / 100,
+    )
     return {
         "availableBalance": round(available_balance_cents / 100, 2),
         "portfolioValue": round(portfolio_value, 2),
@@ -964,6 +1030,7 @@ def _build_dashboard_payload(
         + b.unrealized_pnl_cents
         for b in buckets
     )
+    unrealized_pnl_cents = sum(b.unrealized_pnl_cents for b in buckets)
     pnl_cents = sum(b.realized_pnl_cents + b.unrealized_pnl_cents for b in buckets)
     portfolio_value = portfolio_cents / 100
     pnl_value = pnl_cents / 100
@@ -1375,15 +1442,15 @@ def _build_dashboard_payload(
             "netPnl": round(int(row.net_pnl_cents or 0) / 100, 2),
         }
 
-    growth_points = 8
-    if growth_points <= 1:
-        growth = [portfolio_value]
-    else:
-        start = max(0.0, portfolio_value - pnl_value)
-        growth = [
-            round(start + ((portfolio_value - start) * i / (growth_points - 1)), 2)
-            for i in range(growth_points)
-        ]
+    growth = _build_dashboard_growth_series(
+        db=db,
+        user_id=user.id,
+        trading_mode=mode,
+        cutoff=dashboard_cutoff,
+        now=now,
+        portfolio_value=portfolio_value,
+        unrealized_pnl_value=unrealized_pnl_cents / 100,
+    )
 
     return {
         "availableBalance": round(available_balance_cents / 100, 2),

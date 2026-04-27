@@ -78,6 +78,97 @@ def test_dashboard_reports_available_balance_separately_from_portfolio(
     assert payload["portfolioValue"] == 1000.0
 
 
+def test_dashboard_summary_growth_can_finish_below_prior_peak(
+    client,
+    regular_user_and_token,
+    db_session: Session,
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    order_id = uuid.uuid4()
+    db_session.add(
+        StrategyCapitalBucket(
+            user_id=user.id,
+            strategy_id="momentum",
+            trading_mode="paper",
+            assigned_capital_cents=100_000,
+            available_cash_cents=130_000,
+            reserved_cash_cents=0,
+            locked_capital_cents=0,
+            realized_pnl_cents=30_000,
+            unrealized_pnl_cents=-21_500,
+            available_buying_power_cents=130_000,
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.add_all(
+        [
+            ExecutionTradeRecord(
+                id=uuid.uuid4(),
+                order_id=order_id,
+                fill_id=None,
+                tenant_id=membership.tenant_id,
+                user_id=user.id,
+                strategy_id="momentum",
+                symbol="BTC-USD",
+                trading_mode="paper",
+                side="sell",
+                quantity="0.10",
+                price="65000",
+                gross_notional_cents=6_500,
+                fee_cents=50,
+                realized_pnl_cents=20_000,
+                position_quantity_after="0.20",
+                avg_entry_price_after="50000",
+                executed_at=now - timedelta(hours=4),
+                raw_payload={},
+            ),
+            ExecutionTradeRecord(
+                id=uuid.uuid4(),
+                order_id=order_id,
+                fill_id=None,
+                tenant_id=membership.tenant_id,
+                user_id=user.id,
+                strategy_id="momentum",
+                symbol="ETH-USD",
+                trading_mode="paper",
+                side="sell",
+                quantity="1.00",
+                price="3200",
+                gross_notional_cents=3_200,
+                fee_cents=25,
+                realized_pnl_cents=10_000,
+                position_quantity_after="0.00",
+                avg_entry_price_after="0",
+                executed_at=now - timedelta(hours=2),
+                raw_payload={},
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/summary?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    assert payload["portfolioValue"] == 1085.0
+    assert payload["pnlValue"] == 85.0
+    assert payload["growth"][-1] == 1085.0
+    assert max(payload["growth"]) > payload["growth"][-1]
+
+
 def test_dashboard_exposes_capital_utilization_metrics(
     client,
     regular_user_and_token,
