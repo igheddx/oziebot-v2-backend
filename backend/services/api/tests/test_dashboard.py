@@ -99,12 +99,12 @@ def test_dashboard_summary_growth_can_finish_below_prior_peak(
             strategy_id="momentum",
             trading_mode="paper",
             assigned_capital_cents=100_000,
-            available_cash_cents=130_000,
+            available_cash_cents=11_000,
             reserved_cash_cents=0,
-            locked_capital_cents=0,
-            realized_pnl_cents=30_000,
+            locked_capital_cents=2_000,
+            realized_pnl_cents=3_000,
             unrealized_pnl_cents=-21_500,
-            available_buying_power_cents=130_000,
+            available_buying_power_cents=11_000,
             version=1,
             created_at=now,
             updated_at=now,
@@ -152,6 +152,31 @@ def test_dashboard_summary_growth_can_finish_below_prior_peak(
                 executed_at=now - timedelta(hours=2),
                 raw_payload={},
             ),
+            ExecutionPosition(
+                id=uuid.uuid4(),
+                tenant_id=membership.tenant_id,
+                user_id=user.id,
+                strategy_id="momentum",
+                symbol="SOL-USD",
+                trading_mode="paper",
+                quantity="10",
+                avg_entry_price="20",
+                realized_pnl_cents=3_000,
+                created_at=now - timedelta(hours=5),
+                updated_at=now,
+                opened_at=now - timedelta(hours=5),
+                last_trade_at=now - timedelta(hours=2),
+            ),
+            MarketDataBboSnapshot(
+                source="coinbase",
+                product_id="SOL-USD",
+                best_bid_price=17.8,
+                best_bid_size=100,
+                best_ask_price=17.9,
+                best_ask_size=100,
+                event_time=now,
+                ingest_time=now,
+            ),
         ]
     )
     db_session.commit()
@@ -163,9 +188,9 @@ def test_dashboard_summary_growth_can_finish_below_prior_peak(
     assert response.status_code == 200, response.text
     payload = response.json()
 
-    assert payload["portfolioValue"] == 1085.0
-    assert payload["pnlValue"] == 85.0
-    assert payload["growth"][-1] == 1085.0
+    assert payload["portfolioValue"] == 108.5
+    assert payload["pnlValue"] == 8.5
+    assert payload["growth"][-1] == 108.5
     assert max(payload["growth"]) > payload["growth"][-1]
 
 
@@ -730,6 +755,78 @@ def test_dashboard_summary_ignores_rejection_diagnostics_history(
     assert payload["totalRejected"] == 0
 
 
+def test_dashboard_summary_recomputes_paper_unrealized_from_positions(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    db_session.add(
+        StrategyCapitalBucket(
+            user_id=user.id,
+            strategy_id="momentum",
+            trading_mode="paper",
+            assigned_capital_cents=100_000,
+            available_cash_cents=50_000,
+            reserved_cash_cents=0,
+            locked_capital_cents=50_000,
+            realized_pnl_cents=0,
+            unrealized_pnl_cents=-25_000,
+            available_buying_power_cents=50_000,
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.add(
+        ExecutionPosition(
+            id=uuid.uuid4(),
+            tenant_id=membership.tenant_id,
+            user_id=user.id,
+            strategy_id="momentum",
+            symbol="BTC-USD",
+            trading_mode="paper",
+            quantity="1",
+            avg_entry_price="500",
+            realized_pnl_cents=0,
+            created_at=now - timedelta(hours=1),
+            updated_at=now,
+            opened_at=now - timedelta(hours=1),
+            last_trade_at=now - timedelta(minutes=5),
+        )
+    )
+    db_session.add(
+        MarketDataBboSnapshot(
+            source="coinbase",
+            product_id="BTC-USD",
+            best_bid_price=599,
+            best_bid_size=10,
+            best_ask_price=601,
+            best_ask_size=10,
+            event_time=now,
+            ingest_time=now,
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/summary?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["availableBalance"] == 500.0
+    assert payload["portfolioValue"] == 1100.0
+    assert payload["pnlValue"] == 100.0
+
+
 def test_dashboard_details_does_not_fetch_live_coinbase_balances(
     client, regular_user_and_token, db_session: Session
 ):
@@ -1114,7 +1211,7 @@ def test_dashboard_details_use_market_marks_and_hide_dust_positions(
     db_session.commit()
 
     response = client.get(
-        "/v1/me/dashboard/details?trading_mode=paper&force_refresh=true",
+        "/v1/me/dashboard?trading_mode=paper&force_refresh=true",
         headers={"Authorization": f"Bearer {token}"},
     )
 
@@ -1132,6 +1229,79 @@ def test_dashboard_details_use_market_marks_and_hide_dust_positions(
     assert position["closedAt"] is None
     assert 239 <= position["ageMinutes"] <= 241
     assert 3.98 <= position["ageHours"] <= 4.02
+
+
+def test_dashboard_details_recomputes_paper_topline_from_position_marks(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    db_session.add(
+        StrategyCapitalBucket(
+            user_id=user.id,
+            strategy_id="momentum",
+            trading_mode="paper",
+            assigned_capital_cents=100_000,
+            available_cash_cents=70_000,
+            reserved_cash_cents=0,
+            locked_capital_cents=30_000,
+            realized_pnl_cents=4_000,
+            unrealized_pnl_cents=-18_000,
+            available_buying_power_cents=70_000,
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.add(
+        ExecutionPosition(
+            id=uuid.uuid4(),
+            tenant_id=membership.tenant_id,
+            user_id=user.id,
+            strategy_id="momentum",
+            symbol="ETH-USD",
+            trading_mode="paper",
+            quantity="3",
+            avg_entry_price="100",
+            realized_pnl_cents=4_000,
+            created_at=now - timedelta(hours=2),
+            updated_at=now,
+            opened_at=now - timedelta(hours=2),
+            last_trade_at=now - timedelta(minutes=15),
+        )
+    )
+    db_session.add(
+        MarketDataBboSnapshot(
+            source="coinbase",
+            product_id="ETH-USD",
+            best_bid_price=119,
+            best_bid_size=10,
+            best_ask_price=121,
+            best_ask_size=10,
+            event_time=now,
+            ingest_time=now,
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["availableBalance"] == 700.0
+    assert payload["portfolioValue"] == 1060.0
+    assert payload["pnlValue"] == 100.0
+    assert payload["positions"][0]["unrealizedPnl"] == 60.0
 
 
 def test_dashboard_position_age_uses_opened_at_not_last_trade_at(

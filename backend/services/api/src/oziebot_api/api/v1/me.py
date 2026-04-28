@@ -378,6 +378,55 @@ def _latest_symbol_marks(db: DbSession, symbols: list[str]) -> dict[str, Decimal
     return marks
 
 
+def _paper_unrealized_pnl_cents(
+    db: DbSession,
+    positions: list[ExecutionPosition],
+) -> int:
+    marks = _latest_symbol_marks(db, [row.symbol for row in positions])
+    total_unrealized = Decimal("0")
+    for row in positions:
+        quantity = _to_decimal(row.quantity)
+        if quantity == 0:
+            continue
+        entry_price = _to_decimal(row.avg_entry_price)
+        mark = marks.get((row.symbol or "").upper(), entry_price)
+        total_unrealized += (mark - entry_price) * quantity
+    return _cents(total_unrealized)
+
+
+def _paper_positions(db: DbSession, user_id: Any, trading_mode: str) -> list[ExecutionPosition]:
+    return (
+        db.query(ExecutionPosition)
+        .filter(
+            ExecutionPosition.user_id == user_id,
+            ExecutionPosition.trading_mode == trading_mode,
+        )
+        .order_by(ExecutionPosition.updated_at.desc())
+        .all()
+    )
+
+
+def _paper_balance_snapshot(
+    db: DbSession,
+    *,
+    user_id: Any,
+    trading_mode: str,
+    buckets: list[StrategyCapitalBucket],
+    positions: list[ExecutionPosition] | None = None,
+) -> tuple[int, int, int]:
+    positions_rows = (
+        positions if positions is not None else _paper_positions(db, user_id, trading_mode)
+    )
+    available_balance_cents = sum(max(0, b.available_cash_cents) for b in buckets)
+    total_reserved_cents = sum(max(0, b.reserved_cash_cents) for b in buckets)
+    total_locked_cents = sum(max(0, b.locked_capital_cents) for b in buckets)
+    unrealized_pnl_cents = _paper_unrealized_pnl_cents(db, positions_rows)
+    portfolio_cents = (
+        available_balance_cents + total_reserved_cents + total_locked_cents + unrealized_pnl_cents
+    )
+    return available_balance_cents, portfolio_cents, unrealized_pnl_cents
+
+
 def _recent_strategy_rejection_records(
     *,
     user: User,
@@ -487,15 +536,15 @@ def _live_coinbase_balance_snapshot(
 
 
 def _dashboard_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
-    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 2}
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 3}
 
 
 def _dashboard_summary_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
-    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 4}
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 5}
 
 
 def _dashboard_details_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
-    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 3}
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 4}
 
 
 def _dashboard_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -794,16 +843,26 @@ def _build_dashboard_summary_payload(
         )
         .all()
     )
-    available_balance_cents = sum(max(0, b.available_cash_cents) for b in buckets)
-    portfolio_cents = sum(
-        b.available_cash_cents
-        + b.reserved_cash_cents
-        + b.locked_capital_cents
-        + b.unrealized_pnl_cents
-        for b in buckets
-    )
-    unrealized_pnl_cents = sum(b.unrealized_pnl_cents for b in buckets)
+    if mode == TradingMode.PAPER.value:
+        available_balance_cents, portfolio_cents, unrealized_pnl_cents = _paper_balance_snapshot(
+            db,
+            user_id=user.id,
+            trading_mode=mode,
+            buckets=buckets,
+        )
+    else:
+        available_balance_cents = sum(max(0, b.available_cash_cents) for b in buckets)
+        portfolio_cents = sum(
+            b.available_cash_cents
+            + b.reserved_cash_cents
+            + b.locked_capital_cents
+            + b.unrealized_pnl_cents
+            for b in buckets
+        )
+        unrealized_pnl_cents = sum(b.unrealized_pnl_cents for b in buckets)
     pnl_cents = sum(b.realized_pnl_cents + b.unrealized_pnl_cents for b in buckets)
+    if mode == TradingMode.PAPER.value:
+        pnl_cents = sum(b.realized_pnl_cents for b in buckets) + unrealized_pnl_cents
     portfolio_value = portfolio_cents / 100
     pnl_value = pnl_cents / 100
     base = max(1.0, portfolio_value - pnl_value)
@@ -1023,30 +1082,39 @@ def _build_dashboard_payload(
     total_reserved_cents = sum(max(0, b.reserved_cash_cents) for b in buckets)
     total_locked_cents = sum(max(0, b.locked_capital_cents) for b in buckets)
     total_deployed_cents = total_reserved_cents + total_locked_cents
-    portfolio_cents = sum(
-        b.available_cash_cents
-        + b.reserved_cash_cents
-        + b.locked_capital_cents
-        + b.unrealized_pnl_cents
-        for b in buckets
-    )
-    unrealized_pnl_cents = sum(b.unrealized_pnl_cents for b in buckets)
-    pnl_cents = sum(b.realized_pnl_cents + b.unrealized_pnl_cents for b in buckets)
-    portfolio_value = portfolio_cents / 100
-    pnl_value = pnl_cents / 100
-    base = max(1.0, portfolio_value - pnl_value)
-    pnl_percent = (pnl_value / base) * 100
-
-    positions_rows = (
+    all_positions_rows = (
         db.query(ExecutionPosition)
         .filter(
             ExecutionPosition.user_id == user.id,
             ExecutionPosition.trading_mode == mode,
         )
         .order_by(ExecutionPosition.updated_at.desc())
-        .limit(DASHBOARD_POSITIONS_LIMIT)
         .all()
     )
+    if mode == TradingMode.PAPER.value:
+        available_balance_cents, portfolio_cents, unrealized_pnl_cents = _paper_balance_snapshot(
+            db,
+            user_id=user.id,
+            trading_mode=mode,
+            buckets=buckets,
+            positions=all_positions_rows,
+        )
+        pnl_cents = sum(b.realized_pnl_cents for b in buckets) + unrealized_pnl_cents
+    else:
+        portfolio_cents = sum(
+            b.available_cash_cents
+            + b.reserved_cash_cents
+            + b.locked_capital_cents
+            + b.unrealized_pnl_cents
+            for b in buckets
+        )
+        unrealized_pnl_cents = sum(b.unrealized_pnl_cents for b in buckets)
+        pnl_cents = sum(b.realized_pnl_cents + b.unrealized_pnl_cents for b in buckets)
+    portfolio_value = portfolio_cents / 100
+    pnl_value = pnl_cents / 100
+    base = max(1.0, portfolio_value - pnl_value)
+    pnl_percent = (pnl_value / base) * 100
+    positions_rows = all_positions_rows[:DASHBOARD_POSITIONS_LIMIT]
     if use_live_balances and mode == TradingMode.LIVE.value and tenant_id is not None:
         live_balances = _live_coinbase_balance_snapshot(db, user, settings, positions_rows)
         if live_balances is not None:
