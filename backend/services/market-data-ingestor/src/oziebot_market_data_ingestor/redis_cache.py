@@ -114,7 +114,9 @@ class RedisMarketCache:
                 datetime.now(UTC).isoformat(),
             )
             if self._candle_history_limit > 0 and self._candle_history_ttl_seconds > 0:
-                history_key = f"oziebot:md:candles:{item.granularity_sec}:{item.product_id}"
+                history_key = (
+                    f"oziebot:md:candles:{item.granularity_sec}:{item.product_id}"
+                )
                 payload = json.dumps(item.model_dump(mode="json"))
                 self._r.lpush(history_key, payload)
                 self._r.ltrim(history_key, 0, self._candle_history_limit - 1)

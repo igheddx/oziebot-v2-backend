@@ -490,10 +490,13 @@ async def main() -> None:
                         cache.put_trade(trade)
                         store.insert_trade_snapshot(trade)
                         stale.mark_trade(trade.product_id, trade.ingest_time)
-                        if trade_log_sampler is not None and trade_log_sampler.should_emit(
-                            symbol=trade.product_id,
-                            event_type="trade_tick",
-                            now=trade.ingest_time,
+                        if (
+                            trade_log_sampler is not None
+                            and trade_log_sampler.should_emit(
+                                symbol=trade.product_id,
+                                event_type="trade_tick",
+                                now=trade.ingest_time,
+                            )
                         ):
                             message, details = _trade_tick_summary(trade)
                             append_trade_log_event(
@@ -511,10 +514,13 @@ async def main() -> None:
                         cache.put_bbo(bbo)
                         store.insert_bbo_snapshot(bbo)
                         stale.mark_bbo(bbo.product_id, bbo.ingest_time)
-                        if trade_log_sampler is not None and trade_log_sampler.should_emit(
-                            symbol=bbo.product_id,
-                            event_type="bbo_stream",
-                            now=bbo.ingest_time,
+                        if (
+                            trade_log_sampler is not None
+                            and trade_log_sampler.should_emit(
+                                symbol=bbo.product_id,
+                                event_type="bbo_stream",
+                                now=bbo.ingest_time,
+                            )
                         ):
                             message, details = _bbo_summary(bbo, streamed=True)
                             append_trade_log_event(
