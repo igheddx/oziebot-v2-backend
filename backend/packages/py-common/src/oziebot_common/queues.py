@@ -83,6 +83,9 @@ class QueueNames:
         return [QueueNames.signal_generated(m) for m in TradingMode]
 
 
+BOUNDED_QUEUE_MAX_LENGTH = 200
+
+
 def redis_url_candidates(url: str) -> list[str]:
     stripped = url.strip()
     if not stripped:
@@ -131,7 +134,25 @@ def redis_from_url(
 
 
 def push_json(r: redis.Redis, key: str, payload: dict[str, Any]) -> None:
-    r.lpush(key, json.dumps(payload, default=str))
+    serialized = json.dumps(payload, default=str)
+    max_length = _bounded_queue_max_length(key)
+    if max_length is None:
+        r.lpush(key, serialized)
+        return
+    pipeline = r.pipeline()
+    pipeline.lpush(key, serialized)
+    pipeline.ltrim(key, 0, max_length - 1)
+    pipeline.execute()
+
+
+def _bounded_queue_max_length(key: str) -> int | None:
+    if key == QueueNames.ops_alerts():
+        return BOUNDED_QUEUE_MAX_LENGTH
+    if key.startswith("oziebot:queue:alerts:"):
+        return BOUNDED_QUEUE_MAX_LENGTH
+    if key.startswith("oziebot:queue:alerts_retry:"):
+        return BOUNDED_QUEUE_MAX_LENGTH
+    return None
 
 
 def brpop_json(r: redis.Redis, key: str, timeout: int = 5) -> dict[str, Any] | None:

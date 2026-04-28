@@ -5,7 +5,9 @@ from unittest.mock import patch
 import redis
 
 from oziebot_common.queues import (
+    BOUNDED_QUEUE_MAX_LENGTH,
     disconnect_redis,
+    push_json,
     redis_from_url,
     redis_url_candidates,
     reset_redis_connection,
@@ -33,6 +35,34 @@ class _ConnectionPool:
 
     def disconnect(self) -> None:
         self.disconnect_calls += 1
+
+
+class _Pipeline:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...]]] = []
+        self.executed = False
+
+    def lpush(self, key: str, value: str) -> None:
+        self.calls.append(("lpush", (key, value)))
+
+    def ltrim(self, key: str, start: int, stop: int) -> None:
+        self.calls.append(("ltrim", (key, start, stop)))
+
+    def execute(self) -> None:
+        self.executed = True
+
+
+class _QueueClient(_RedisClient):
+    def __init__(self) -> None:
+        super().__init__(should_fail=False)
+        self.lpush_calls: list[tuple[str, str]] = []
+        self.pipeline_instance = _Pipeline()
+
+    def lpush(self, key: str, value: str) -> None:
+        self.lpush_calls.append((key, value))
+
+    def pipeline(self) -> _Pipeline:
+        return self.pipeline_instance
 
 
 def test_redis_url_candidates_include_tls_variant_for_elasticache() -> None:
@@ -79,3 +109,25 @@ def test_disconnect_redis_closes_client_and_disconnects_pool() -> None:
 
     assert client.closed is True
     assert client.connection_pool.disconnect_calls == 1
+
+
+def test_push_json_caps_alert_queue_lengths() -> None:
+    client = _QueueClient()
+
+    push_json(client, "oziebot:queue:ops_alerts", {"ok": True})
+
+    assert client.pipeline_instance.calls[0][0] == "lpush"
+    assert client.pipeline_instance.calls[1] == (
+        "ltrim",
+        ("oziebot:queue:ops_alerts", 0, BOUNDED_QUEUE_MAX_LENGTH - 1),
+    )
+    assert client.pipeline_instance.executed is True
+
+
+def test_push_json_leaves_non_alert_queues_unbounded() -> None:
+    client = _QueueClient()
+
+    push_json(client, "oziebot:queue:signal_generated:paper", {"ok": True})
+
+    assert len(client.lpush_calls) == 1
+    assert client.pipeline_instance.calls == []

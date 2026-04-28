@@ -31,7 +31,7 @@ class RedisMarketCache:
         self._r = client
         self._ttl_seconds = ttl_seconds
         self._candle_history_ttl_seconds = candle_history_ttl_seconds
-        self._candle_history_limit = candle_history_limit
+        self._candle_history_limit = max(0, candle_history_limit)
         self._write_error_log_interval_seconds = write_error_log_interval_seconds
         self._last_write_error_at: datetime | None = None
 
@@ -113,11 +113,12 @@ class RedisMarketCache:
                 self._ttl_seconds,
                 datetime.now(UTC).isoformat(),
             )
-            history_key = f"oziebot:md:candles:{item.granularity_sec}:{item.product_id}"
-            payload = json.dumps(item.model_dump(mode="json"))
-            self._r.lpush(history_key, payload)
-            self._r.ltrim(history_key, 0, self._candle_history_limit - 1)
-            self._r.expire(history_key, self._candle_history_ttl_seconds)
+            if self._candle_history_limit > 0 and self._candle_history_ttl_seconds > 0:
+                history_key = f"oziebot:md:candles:{item.granularity_sec}:{item.product_id}"
+                payload = json.dumps(item.model_dump(mode="json"))
+                self._r.lpush(history_key, payload)
+                self._r.ltrim(history_key, 0, self._candle_history_limit - 1)
+                self._r.expire(history_key, self._candle_history_ttl_seconds)
 
         self._write_cache("candle", _write)
 

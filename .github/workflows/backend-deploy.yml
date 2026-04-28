@@ -311,7 +311,7 @@ jobs:
             ecs_service: oziebot-alerts-worker
             container_name: alerts-worker
             scale_to_zero_before_deploy: true
-            restore_desired_count: 1
+            restore_desired_count: 0
           - dockerfile: backend/services/market-data-ingestor/Dockerfile
             repository: oziebot/market-data-ingestor
             task_definition: infrastructure/aws/backend/task-definitions/market-data-ingestor.json

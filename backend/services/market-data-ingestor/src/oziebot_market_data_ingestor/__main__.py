@@ -315,14 +315,15 @@ async def _reconcile_bbo(
             stale.mark_bbo(item.product_id, item.ingest_time)
             if signal_panel is not None:
                 signal_panel.observe_bbo(item)
-            message, details = _bbo_summary(item, streamed=False)
-            append_trade_log_event(
-                log_client,
-                symbol=product_id,
-                event_type="bbo_update",
-                message=message,
-                details=details,
-            )
+            if log_client is not None:
+                message, details = _bbo_summary(item, streamed=False)
+                append_trade_log_event(
+                    log_client,
+                    symbol=product_id,
+                    event_type="bbo_update",
+                    message=message,
+                    details=details,
+                )
             if signal_panel is not None:
                 signal_panel.force_emit(product_id, now=item.ingest_time)
         except Exception as exc:
@@ -341,7 +342,7 @@ async def _seed_market_cache(
     products: list[str],
     trade_limit: int,
     granularity_sec: int,
-    signal_panel: SignalPanelEmitter,
+    signal_panel: SignalPanelEmitter | None,
     health,
 ) -> None:
     # Seed longer-horizon candles first, then refresh trade/BBO last so the
@@ -390,14 +391,19 @@ async def main() -> None:
         r,
         ttl_seconds=s.cache_ttl_seconds,
         candle_history_ttl_seconds=s.candle_history_ttl_seconds,
+        candle_history_limit=s.candle_history_limit,
     )
     store = MarketDataStore(engine)
     refresher = TokenPolicyRefresher(engine)
-    signal_panel = SignalPanelEmitter(
-        r,
-        retention_seconds=s.signal_panel_retention_seconds,
-        sample_interval_seconds=s.signal_panel_sample_interval_seconds,
-        snapshot_event_interval_seconds=s.signal_panel_snapshot_event_interval_seconds,
+    signal_panel = (
+        SignalPanelEmitter(
+            r,
+            retention_seconds=s.signal_panel_retention_seconds,
+            sample_interval_seconds=s.signal_panel_sample_interval_seconds,
+            snapshot_event_interval_seconds=s.signal_panel_snapshot_event_interval_seconds,
+        )
+        if s.signal_panel_enabled
+        else None
     )
     stale = StaleDataDetector(
         thresholds=StaleThresholds(
@@ -427,7 +433,7 @@ async def main() -> None:
     last_bbo_reconcile = datetime.now(UTC)
     last_policy_refresh = datetime.now(UTC)
     last_universe_refresh = datetime.now(UTC)
-    trade_log_sampler = TradeLogSampler()
+    trade_log_sampler = TradeLogSampler() if s.raw_trade_log_enabled else None
     try:
         if products:
             log.info("subscribing to products=%s", products)
@@ -436,7 +442,7 @@ async def main() -> None:
                 rest=rest,
                 store=store,
                 cache=cache,
-                log_client=r,
+                log_client=r if s.raw_trade_log_enabled else None,
                 stale=stale,
                 products=products,
                 trade_limit=s.trade_recovery_limit,
@@ -465,7 +471,7 @@ async def main() -> None:
                     rest=rest,
                     store=store,
                     cache=cache,
-                    log_client=r,
+                    log_client=r if s.raw_trade_log_enabled else None,
                     stale=stale,
                     products=products,
                     trade_limit=s.trade_recovery_limit,
@@ -484,7 +490,7 @@ async def main() -> None:
                         cache.put_trade(trade)
                         store.insert_trade_snapshot(trade)
                         stale.mark_trade(trade.product_id, trade.ingest_time)
-                        if trade_log_sampler.should_emit(
+                        if trade_log_sampler is not None and trade_log_sampler.should_emit(
                             symbol=trade.product_id,
                             event_type="trade_tick",
                             now=trade.ingest_time,
@@ -498,13 +504,14 @@ async def main() -> None:
                                 timestamp=trade.ingest_time,
                                 details=details,
                             )
-                        signal_panel.observe_trade(trade)
+                        if signal_panel is not None:
+                            signal_panel.observe_trade(trade)
                     elif typ == "ticker":
                         bbo = normalize_bbo(msg)
                         cache.put_bbo(bbo)
                         store.insert_bbo_snapshot(bbo)
                         stale.mark_bbo(bbo.product_id, bbo.ingest_time)
-                        if trade_log_sampler.should_emit(
+                        if trade_log_sampler is not None and trade_log_sampler.should_emit(
                             symbol=bbo.product_id,
                             event_type="bbo_stream",
                             now=bbo.ingest_time,
@@ -518,7 +525,8 @@ async def main() -> None:
                                 timestamp=bbo.ingest_time,
                                 details=details,
                             )
-                        signal_panel.observe_bbo(bbo)
+                        if signal_panel is not None:
+                            signal_panel.observe_bbo(bbo)
                     elif typ in {"snapshot", "l2update"} and msg.get("product_id"):
                         top = normalize_orderbook_top(msg, depth=s.orderbook_depth)
                         cache.put_orderbook(top)
@@ -550,7 +558,7 @@ async def main() -> None:
                                     rest=rest,
                                     store=store,
                                     cache=cache,
-                                    log_client=r,
+                                    log_client=r if s.raw_trade_log_enabled else None,
                                     stale=stale,
                                     products=universe_change.added,
                                     trade_limit=s.trade_recovery_limit,
@@ -573,14 +581,14 @@ async def main() -> None:
                         redis_details = {"status": "unavailable", "error": str(exc)}
                         log.warning("redis pressure sampling failed err=%s", exc)
                     health.set_detail("redisPressure", redis_details)
-                    if redis_alert is not None:
+                    if s.ops_alerts_enabled and redis_alert is not None:
                         _push_json_best_effort(
                             r,
                             QueueNames.ops_alerts(),
                             operational_alert_to_json(redis_alert),
                             op_name="redis_alert",
                         )
-                    if stale_alert is not None:
+                    if s.ops_alerts_enabled and stale_alert is not None:
                         _push_json_best_effort(
                             r,
                             QueueNames.ops_alerts(),

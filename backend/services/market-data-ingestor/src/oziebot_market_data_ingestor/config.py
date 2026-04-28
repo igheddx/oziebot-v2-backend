@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     candles_granularity_sec: int = 60  # poll REST every 60s for candles
     cache_ttl_seconds: int = 120
     candle_history_ttl_seconds: int = 1800
+    candle_history_limit: int = 50
+    signal_panel_enabled: bool = True
+    raw_trade_log_enabled: bool = True
+    ops_alerts_enabled: bool = True
     signal_panel_retention_seconds: int = 60
     signal_panel_sample_interval_seconds: int = 5
     signal_panel_snapshot_event_interval_seconds: int = 15

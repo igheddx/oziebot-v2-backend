@@ -22,7 +22,11 @@
         { "name": "OZIEBOT_HEALTH_AUTO_TOUCH_SECONDS", "value": "30" },
         { "name": "COINBASE_WS_URL", "value": "wss://advanced-trade-ws.coinbase.com" },
         { "name": "COINBASE_REST_URL", "value": "https://api.coinbase.com/api/v3/brokerage" },
-        { "name": "CANDLES_GRANULARITY_SEC", "value": "60" }
+        { "name": "CANDLES_GRANULARITY_SEC", "value": "60" },
+        { "name": "CANDLE_HISTORY_TTL_SECONDS", "value": "600" },
+        { "name": "SIGNAL_PANEL_ENABLED", "value": "false" },
+        { "name": "RAW_TRADE_LOG_ENABLED", "value": "false" },
+        { "name": "OPS_ALERTS_ENABLED", "value": "false" }
       ],
       "secrets": [
         { "name": "DATABASE_URL", "valueFrom": "${DATABASE_URL_SECRET_ARN}" }
