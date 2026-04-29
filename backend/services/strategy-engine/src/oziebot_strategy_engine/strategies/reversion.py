@@ -8,6 +8,7 @@ from math import sqrt
 from statistics import mean
 from uuid import UUID
 
+from oziebot_common.strategy_defaults import strategy_platform_config
 from oziebot_domain.strategy import SignalType, StrategySignal
 from oziebot_domain.trading import Instrument, OrderType, Side
 from oziebot_strategy_engine.strategy import (
@@ -16,6 +17,8 @@ from oziebot_strategy_engine.strategy import (
     StrategyContext,
     TradingStrategy,
 )
+
+_DEFAULT_CONFIG = strategy_platform_config("reversion")["strategy_params"]
 
 
 class ReversionStrategy(TradingStrategy):
@@ -34,12 +37,19 @@ class ReversionStrategy(TradingStrategy):
     version = "1.1"
 
     def validate_config(self, config: dict) -> bool:
-        band_window = int(config.get("band_window", 20))
-        rsi_period = int(config.get("rsi_period", 14))
+        band_window = int(config.get("band_window", _DEFAULT_CONFIG["band_window"]))
+        rsi_period = int(config.get("rsi_period", _DEFAULT_CONFIG["rsi_period"]))
         entry_zscore = float(
-            config.get("zscore_entry", config.get("entry_zscore", 1.6))
+            config.get(
+                "zscore_entry",
+                config.get("entry_zscore", _DEFAULT_CONFIG["zscore_entry"]),
+            )
         )
-        exit_zscore = float(config.get("zscore_exit", config.get("exit_zscore", 0.4)))
+        exit_zscore = float(
+            config.get(
+                "zscore_exit", config.get("exit_zscore", _DEFAULT_CONFIG["zscore_exit"])
+            )
+        )
         rsi_buy_threshold = float(
             config.get("rsi_buy", config.get("rsi_buy_threshold", 30))
         )
@@ -50,17 +60,35 @@ class ReversionStrategy(TradingStrategy):
             config.get("rsi_sell", config.get("rsi_sell_threshold", 65))
         )
         position_size = float(
-            config.get("position_size_fraction", config.get("position_size", 0.05))
+            config.get(
+                "position_size_fraction",
+                config.get("position_size", _DEFAULT_CONFIG["position_size_fraction"]),
+            )
         )
-        stop_loss_pct = float(config.get("stop_loss_pct", 0.025))
-        take_profit_pct = float(config.get("take_profit_pct", 0.04))
+        stop_loss_pct = float(
+            config.get("stop_loss_pct", _DEFAULT_CONFIG["stop_loss_pct"])
+        )
+        take_profit_pct = float(
+            config.get("take_profit_pct", _DEFAULT_CONFIG["take_profit_pct"])
+        )
         min_bandwidth_pct = float(
-            config.get("min_bandwidth", config.get("min_bandwidth_pct", 0.012))
+            config.get(
+                "min_bandwidth",
+                config.get("min_bandwidth_pct", _DEFAULT_CONFIG["min_bandwidth"]),
+            )
         )
-        max_hold_minutes = int(config.get("max_hold_minutes", 120))
-        ema_long_window = int(config.get("ema_long_window", 200))
-        min_trade_usd = float(config.get("min_trade_usd", 30))
-        max_trade_usd = float(config.get("max_trade_usd", 100))
+        max_hold_minutes = int(
+            config.get("max_hold_minutes", _DEFAULT_CONFIG["max_hold_minutes"])
+        )
+        ema_long_window = int(
+            config.get("ema_long_window", _DEFAULT_CONFIG["ema_long_window"])
+        )
+        min_trade_usd = float(
+            config.get("min_trade_usd", _DEFAULT_CONFIG["min_trade_usd"])
+        )
+        max_trade_usd = float(
+            config.get("max_trade_usd", _DEFAULT_CONFIG["max_trade_usd"])
+        )
         target_bucket_utilization_pct = float(
             config.get("target_bucket_utilization_pct", 0.45)
         )
@@ -130,12 +158,19 @@ class ReversionStrategy(TradingStrategy):
         market = context.market_snapshot
         position = context.position_state
 
-        band_window = int(config.get("band_window", 20))
-        rsi_period = int(config.get("rsi_period", 14))
+        band_window = int(config.get("band_window", _DEFAULT_CONFIG["band_window"]))
+        rsi_period = int(config.get("rsi_period", _DEFAULT_CONFIG["rsi_period"]))
         entry_zscore = float(
-            config.get("zscore_entry", config.get("entry_zscore", 1.6))
+            config.get(
+                "zscore_entry",
+                config.get("entry_zscore", _DEFAULT_CONFIG["zscore_entry"]),
+            )
         )
-        exit_zscore = float(config.get("zscore_exit", config.get("exit_zscore", 0.4)))
+        exit_zscore = float(
+            config.get(
+                "zscore_exit", config.get("exit_zscore", _DEFAULT_CONFIG["zscore_exit"])
+            )
+        )
         rsi_buy_threshold = float(
             config.get("rsi_buy", config.get("rsi_buy_threshold", 30))
         )
@@ -146,16 +181,32 @@ class ReversionStrategy(TradingStrategy):
             config.get("rsi_sell", config.get("rsi_sell_threshold", 65))
         )
         position_size = float(
-            config.get("position_size_fraction", config.get("position_size", 0.05))
+            config.get(
+                "position_size_fraction",
+                config.get("position_size", _DEFAULT_CONFIG["position_size_fraction"]),
+            )
         )
-        stop_loss_pct = float(config.get("stop_loss_pct", 0.025))
-        take_profit_pct = float(config.get("take_profit_pct", 0.04))
+        stop_loss_pct = float(
+            config.get("stop_loss_pct", _DEFAULT_CONFIG["stop_loss_pct"])
+        )
+        take_profit_pct = float(
+            config.get("take_profit_pct", _DEFAULT_CONFIG["take_profit_pct"])
+        )
         min_bandwidth_pct = float(
-            config.get("min_bandwidth", config.get("min_bandwidth_pct", 0.012))
+            config.get(
+                "min_bandwidth",
+                config.get("min_bandwidth_pct", _DEFAULT_CONFIG["min_bandwidth"]),
+            )
         )
-        max_hold_minutes = int(config.get("max_hold_minutes", 120))
-        use_trend_filter = bool(config.get("use_trend_filter", True))
-        ema_long_window = int(config.get("ema_long_window", 200))
+        max_hold_minutes = int(
+            config.get("max_hold_minutes", _DEFAULT_CONFIG["max_hold_minutes"])
+        )
+        use_trend_filter = bool(
+            config.get("use_trend_filter", _DEFAULT_CONFIG["use_trend_filter"])
+        )
+        ema_long_window = int(
+            config.get("ema_long_window", _DEFAULT_CONFIG["ema_long_window"])
+        )
 
         closes = [float(value) for value in market.metadata.get("candle_closes", [])]
         required = max(
@@ -302,31 +353,15 @@ class ReversionStrategy(TradingStrategy):
         )
 
     def get_default_config(self) -> dict:
-        return {
-            "band_window": 20,
-            "rsi_period": 14,
-            "zscore_entry": 1.6,
-            "zscore_exit": 0.4,
-            "rsi_buy": 30,
-            "rsi_exit": 50,
-            "rsi_sell": 65,
-            "position_size_fraction": 0.10,
-            "stop_loss_pct": 0.025,
-            "take_profit_pct": 0.04,
-            "min_bandwidth": 0.012,
-            "max_hold_minutes": 120,
-            "use_fear_index_filter": False,
-            "fear_index_buy_max": 35,
-            "fear_index_sell_min": 60,
-            "use_trend_filter": True,
-            "ema_long_window": 200,
-            "dynamic_sizing_enabled": True,
-            "min_trade_usd": 30,
-            "max_trade_usd": 100,
-            "target_bucket_utilization_pct": 0.45,
-            "drawdown_size_reduction_enabled": True,
-            "drawdown_reduction_multiplier": 0.75,
-        }
+        defaults = dict(_DEFAULT_CONFIG)
+        defaults.update(
+            {
+                "use_fear_index_filter": False,
+                "fear_index_buy_max": 35,
+                "fear_index_sell_min": 60,
+            }
+        )
+        return defaults
 
     def get_config_schema(self) -> dict:
         return {
@@ -336,28 +371,28 @@ class ReversionStrategy(TradingStrategy):
                     "type": "integer",
                     "minimum": 5,
                     "maximum": 200,
-                    "default": 20,
+                    "default": _DEFAULT_CONFIG["band_window"],
                     "description": "Rolling window used for mean and standard deviation",
                 },
                 "rsi_period": {
                     "type": "integer",
                     "minimum": 2,
                     "maximum": 100,
-                    "default": 14,
+                    "default": _DEFAULT_CONFIG["rsi_period"],
                     "description": "Lookback period used for RSI calculation",
                 },
                 "zscore_entry": {
                     "type": "number",
                     "minimum": 0.1,
                     "maximum": 5.0,
-                    "default": 1.6,
+                    "default": _DEFAULT_CONFIG["zscore_entry"],
                     "description": "Buy when price is this many standard deviations below the mean",
                 },
                 "zscore_exit": {
                     "type": "number",
                     "minimum": 0.0,
                     "maximum": 3.0,
-                    "default": 0.4,
+                    "default": _DEFAULT_CONFIG["zscore_exit"],
                     "description": "Exit once price reverts back near the rolling mean",
                 },
                 "rsi_buy": {
@@ -385,35 +420,35 @@ class ReversionStrategy(TradingStrategy):
                     "type": "number",
                     "minimum": 0.01,
                     "maximum": 1.0,
-                    "default": 0.10,
+                    "default": _DEFAULT_CONFIG["position_size_fraction"],
                     "description": "Fraction of capital to deploy per entry",
                 },
                 "stop_loss_pct": {
                     "type": "number",
                     "minimum": 0.001,
                     "maximum": 1.0,
-                    "default": 0.025,
+                    "default": _DEFAULT_CONFIG["stop_loss_pct"],
                     "description": "Cut the trade if price falls this far below entry",
                 },
                 "take_profit_pct": {
                     "type": "number",
                     "minimum": 0.001,
                     "maximum": 1.0,
-                    "default": 0.04,
+                    "default": _DEFAULT_CONFIG["take_profit_pct"],
                     "description": "Take profit on a strong oversold bounce",
                 },
                 "min_bandwidth": {
                     "type": "number",
                     "minimum": 0.0,
                     "maximum": 1.0,
-                    "default": 0.012,
+                    "default": _DEFAULT_CONFIG["min_bandwidth"],
                     "description": "Skip trades when the rolling band width is narrower than this",
                 },
                 "max_hold_minutes": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 10080,
-                    "default": 120,
+                    "default": _DEFAULT_CONFIG["max_hold_minutes"],
                     "description": "Maximum time to hold an open reversion position",
                 },
                 "use_fear_index_filter": {
@@ -437,14 +472,14 @@ class ReversionStrategy(TradingStrategy):
                 },
                 "use_trend_filter": {
                     "type": "boolean",
-                    "default": True,
+                    "default": _DEFAULT_CONFIG["use_trend_filter"],
                     "description": "If true, block entries below the long EMA or in bearish market regime",
                 },
                 "ema_long_window": {
                     "type": "integer",
                     "minimum": 5,
                     "maximum": 500,
-                    "default": 200,
+                    "default": _DEFAULT_CONFIG["ema_long_window"],
                     "description": "Long lookback window used for the hard trend filter",
                 },
                 "dynamic_sizing_enabled": {
@@ -455,20 +490,20 @@ class ReversionStrategy(TradingStrategy):
                 "min_trade_usd": {
                     "type": "number",
                     "minimum": 0,
-                    "default": 30,
+                    "default": _DEFAULT_CONFIG["min_trade_usd"],
                     "description": "Minimum dynamic trade notional floor in USD",
                 },
                 "max_trade_usd": {
                     "type": "number",
                     "minimum": 1,
-                    "default": 100,
+                    "default": _DEFAULT_CONFIG["max_trade_usd"],
                     "description": "Dynamic trade notional ceiling before risk caps",
                 },
                 "target_bucket_utilization_pct": {
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
-                    "default": 0.45,
+                    "default": _DEFAULT_CONFIG["target_bucket_utilization_pct"],
                     "description": "Target fraction of assigned bucket capital to keep deployed",
                 },
                 "drawdown_size_reduction_enabled": {
@@ -480,7 +515,7 @@ class ReversionStrategy(TradingStrategy):
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
-                    "default": 0.75,
+                    "default": _DEFAULT_CONFIG["drawdown_reduction_multiplier"],
                     "description": "Multiplier applied when drawdown-aware sizing is active",
                 },
             },

@@ -435,6 +435,17 @@ class StrategyRunner:
                             risk_caps=mode_risk_caps,
                             market=market,
                         )
+                        if (
+                            self._engine is not None
+                            and self._signal_reason_code(signal)
+                            == "partial_take_profit"
+                        ):
+                            self._mark_partial_profit_pending(
+                                user_id=user_id,
+                                strategy_name=strategy_name,
+                                trading_mode=mode.value,
+                                symbol=symbol,
+                            )
                         self._persist_run(
                             run_id=run_id,
                             user_id=user_id,
@@ -1850,50 +1861,13 @@ class StrategyRunner:
         adjusted_signal_rules = dict(signal_rules)
         adjusted_risk_caps = dict(risk_caps)
 
-        adjusted_signal_rules["cooldown_seconds"] = 0
         adjusted_signal_rules["max_signals_per_day"] = 0
         adjusted_signal_rules["only_during_liquid_hours"] = False
-        adjusted_signal_rules["require_volume_confirmation"] = False
-
-        min_confidence = float(adjusted_signal_rules.get("min_confidence", 0) or 0)
-        if min_confidence <= 0 or min_confidence > 0.45:
-            adjusted_signal_rules["min_confidence"] = 0.45
 
         adjusted_risk_caps["max_open_positions"] = 0
         adjusted_risk_caps["max_daily_loss_pct"] = 0
 
-        if strategy_name == "momentum":
-            strength_threshold = float(
-                adjusted_config.get("strength_threshold", 0.012) or 0.012
-            )
-            adjusted_config["strength_threshold"] = min(strength_threshold, 0.006)
-        elif strategy_name == "day_trading":
-            entry_threshold = float(
-                adjusted_config.get("entry_threshold", 0.007) or 0.007
-            )
-            min_volume_multiplier = float(
-                adjusted_config.get("min_volume_multiplier", 1.3) or 1.3
-            )
-            min_volatility_pct = float(
-                adjusted_config.get("min_volatility_pct", 0.005) or 0.005
-            )
-            breakout_lookback = int(
-                adjusted_config.get("breakout_lookback_candles", 5) or 5
-            )
-            adjusted_config["entry_threshold"] = max(entry_threshold, 0.03)
-            adjusted_config["min_volume_multiplier"] = min(min_volume_multiplier, 1.0)
-            adjusted_config["min_volatility_pct"] = min(min_volatility_pct, 0.002)
-            adjusted_config["require_trend_alignment"] = False
-            adjusted_config["breakout_lookback_candles"] = min(breakout_lookback, 3)
-        elif strategy_name == "reversion":
-            entry_zscore = float(adjusted_config.get("zscore_entry", 1.6) or 1.6)
-            rsi_buy = float(adjusted_config.get("rsi_buy", 30) or 30)
-            min_bandwidth = float(adjusted_config.get("min_bandwidth", 0.012) or 0.012)
-            adjusted_config["zscore_entry"] = min(entry_zscore, 1.1)
-            adjusted_config["rsi_buy"] = max(rsi_buy, 38)
-            adjusted_config["min_bandwidth"] = min(min_bandwidth, 0.006)
-            adjusted_config["use_trend_filter"] = False
-        elif strategy_name == "dca":
+        if strategy_name == "dca":
             buy_interval_hours = int(
                 adjusted_config.get("buy_interval_hours", 24) or 24
             )
@@ -1949,15 +1923,38 @@ class StrategyRunner:
             position_state.peak_price = baseline_peak if baseline_peak > 0 else None
             if position_state.opened_at is None:
                 position_state.opened_at = now
+            entry_quantity_raw = existing.get("entry_quantity")
+            entry_quantity = (
+                Decimal(str(entry_quantity_raw))
+                if entry_quantity_raw is not None
+                else position_state.quantity
+            )
+            if entry_quantity <= 0 or position_state.quantity > entry_quantity:
+                entry_quantity = position_state.quantity
+            partial_profit_taken = bool(existing.get("partial_profit_taken", False))
+            partial_profit_pending = bool(existing.get("partial_profit_pending", False))
+            if position_state.quantity < entry_quantity:
+                partial_profit_taken = True
+                partial_profit_pending = False
+            position_state.partial_profit_taken = partial_profit_taken
+            position_state.partial_profit_pending = partial_profit_pending
             existing["peak_price"] = str(position_state.peak_price)
             existing["opened_at"] = position_state.opened_at.isoformat()
+            existing["entry_quantity"] = str(entry_quantity)
+            existing["partial_profit_taken"] = partial_profit_taken
+            existing["partial_profit_pending"] = partial_profit_pending
             merged[position_state.symbol] = existing
             return merged
 
         position_state.peak_price = None
         position_state.opened_at = None
+        position_state.partial_profit_taken = False
+        position_state.partial_profit_pending = False
         existing.pop("peak_price", None)
         existing.pop("opened_at", None)
+        existing.pop("entry_quantity", None)
+        existing.pop("partial_profit_taken", None)
+        existing.pop("partial_profit_pending", None)
         if existing:
             merged[position_state.symbol] = existing
         else:
@@ -2090,6 +2087,8 @@ class StrategyRunner:
                 if isinstance(opened_at_db, str)
                 else opened_at_db
             )
+        partial_profit_taken = bool(symbol_state.get("partial_profit_taken", False))
+        partial_profit_pending = bool(symbol_state.get("partial_profit_pending", False))
 
         return PositionState(
             symbol=symbol,
@@ -2097,7 +2096,50 @@ class StrategyRunner:
             entry_price=entry_price,
             peak_price=peak_price,
             opened_at=opened_at,
+            partial_profit_taken=partial_profit_taken,
+            partial_profit_pending=partial_profit_pending,
         )
+
+    def _mark_partial_profit_pending(
+        self,
+        *,
+        user_id: str,
+        strategy_name: str,
+        trading_mode: str,
+        symbol: str,
+    ) -> None:
+        runtime_state = self._load_strategy_runtime_state(
+            user_id=user_id,
+            strategy_name=strategy_name,
+            trading_mode=trading_mode,
+        )
+        symbol_states = self._coerce_symbol_runtime_states(runtime_state)
+        symbol_state = dict(symbol_states.get(symbol, {}))
+        symbol_state["partial_profit_pending"] = True
+        symbol_states[symbol] = symbol_state
+        state = {"symbols": symbol_states} if symbol_states else {}
+        now = datetime.now(UTC)
+        stmt = text(
+            """
+            INSERT INTO user_strategy_states (id, user_id, strategy_id, trading_mode, state, created_at, updated_at)
+            VALUES (:id, :user_id, :strategy_id, :trading_mode, CAST(:state AS JSON), :created_at, :updated_at)
+            ON CONFLICT (user_id, strategy_id, trading_mode)
+            DO UPDATE SET state = CAST(:state AS JSON), updated_at = :updated_at
+            """
+        )
+        with self._engine.begin() as conn:
+            conn.execute(
+                stmt,
+                {
+                    "id": str(uuid.uuid4()),
+                    "user_id": user_id,
+                    "strategy_id": strategy_name,
+                    "trading_mode": trading_mode,
+                    "state": json.dumps(state),
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
 
     def _sync_position_runtime_state(
         self,

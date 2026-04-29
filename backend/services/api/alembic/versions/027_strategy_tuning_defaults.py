@@ -1,8 +1,24 @@
+"""apply strategy tuning defaults
+
+Revision ID: 027_strategy_tuning_defaults
+Revises: 026_dynamic_sizing_defaults
+Create Date: 2026-04-29 12:00:00.000000
+"""
+
 from __future__ import annotations
 
 import json
 from copy import deepcopy
-from typing import Any
+from typing import Any, Sequence, Union
+
+import sqlalchemy as sa
+from alembic import op
+
+revision: str = "027_strategy_tuning_defaults"
+down_revision: Union[str, None] = "026_dynamic_sizing_defaults"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
 
 GLOBAL_SIGNAL_RULE_DEFAULTS: dict[str, Any] = {
     "min_confidence": 0.6,
@@ -12,7 +28,7 @@ GLOBAL_SIGNAL_RULE_DEFAULTS: dict[str, Any] = {
     "require_volume_confirmation": True,
 }
 
-_BASELINE_PLATFORM_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {
+BASELINE_PLATFORM_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {
     "momentum": {
         "strategy_params": {
             "short_window": 10,
@@ -37,9 +53,7 @@ _BASELINE_PLATFORM_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {
             **GLOBAL_SIGNAL_RULE_DEFAULTS,
             "min_confidence": 0.6,
         },
-        "risk_caps": {
-            "max_position_usd": 300,
-        },
+        "risk_caps": {"max_position_usd": 300},
     },
     "day_trading": {
         "strategy_params": {
@@ -67,9 +81,7 @@ _BASELINE_PLATFORM_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {
         "signal_rules": {
             **GLOBAL_SIGNAL_RULE_DEFAULTS,
         },
-        "risk_caps": {
-            "max_position_usd": 200,
-        },
+        "risk_caps": {"max_position_usd": 200},
     },
     "reversion": {
         "strategy_params": {
@@ -98,9 +110,7 @@ _BASELINE_PLATFORM_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {
             **GLOBAL_SIGNAL_RULE_DEFAULTS,
             "min_confidence": 0.6,
         },
-        "risk_caps": {
-            "max_position_usd": 100,
-        },
+        "risk_caps": {"max_position_usd": 100},
     },
     "dca": {
         "strategy_params": {
@@ -122,7 +132,7 @@ _BASELINE_PLATFORM_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {
     },
 }
 
-_STRATEGY_PARAM_ALIASES: dict[str, dict[str, str]] = {
+ALIASES: dict[str, dict[str, str]] = {
     "momentum": {
         "entry_threshold": "strength_threshold",
         "position_size": "position_size_fraction",
@@ -145,7 +155,27 @@ _STRATEGY_PARAM_ALIASES: dict[str, dict[str, str]] = {
     },
 }
 
-_COMMON_STRATEGY_PARAM_KEYS = {
+SIGNAL_RULE_KEYS = {
+    "min_confidence",
+    "only_during_liquid_hours",
+    "cooldown_seconds",
+    "max_signals_per_day",
+    "paper_only",
+    "require_volume_confirmation",
+    "skip_if_spread_bps_over",
+}
+
+RISK_CAP_KEYS = {
+    "max_position_usd",
+    "max_daily_loss_pct",
+    "max_open_positions",
+    "max_exposure_per_strategy",
+    "max_exposure_per_token",
+    "max_consecutive_losses",
+    "loss_cooldown_minutes",
+}
+
+COMMON_STRATEGY_PARAM_KEYS = {
     "max_spread_pct",
     "max_slippage_pct",
     "fee_pct",
@@ -158,40 +188,38 @@ _COMMON_STRATEGY_PARAM_KEYS = {
     "drawdown_reduction_multiplier",
 }
 
-_SIGNAL_RULE_KEYS = {
-    "min_confidence",
-    "only_during_liquid_hours",
-    "cooldown_seconds",
-    "max_signals_per_day",
-    "paper_only",
-    "require_volume_confirmation",
-    "skip_if_spread_bps_over",
-}
 
-_RISK_CAP_KEYS = {
-    "max_position_usd",
-    "max_daily_loss_pct",
-    "max_open_positions",
-    "max_exposure_per_strategy",
-    "max_exposure_per_token",
-    "max_consecutive_losses",
-    "loss_cooldown_minutes",
-}
+def upgrade() -> None:
+    bind = op.get_bind()
+    platform_strategies = sa.table(
+        "platform_strategies",
+        sa.column("id", sa.Uuid()),
+        sa.column("slug", sa.String()),
+        sa.column("config_schema", sa.JSON()),
+    )
 
+    rows = bind.execute(
+        sa.select(
+            platform_strategies.c.id,
+            platform_strategies.c.slug,
+            platform_strategies.c.config_schema,
+        ).where(platform_strategies.c.slug.in_(tuple(BASELINE_PLATFORM_CONFIGS.keys())))
+    ).all()
 
-def strategy_platform_config(strategy_id: str) -> dict[str, dict[str, Any]]:
-    slug = str(strategy_id).strip().lower()
-    baseline = _BASELINE_PLATFORM_CONFIGS.get(slug)
-    if baseline is None:
-        return {"strategy_params": {}, "signal_rules": {}, "risk_caps": {}}
-    return deepcopy(baseline)
+    for row in rows:
+        bind.execute(
+            platform_strategies.update()
+            .where(platform_strategies.c.id == row.id)
+            .values(config_schema=_normalize_platform_config(str(row.slug), row.config_schema))
+        )
 
 
-def normalize_platform_strategy_config(
-    strategy_id: str, raw_config: Any
-) -> dict[str, dict[str, Any]]:
-    slug = str(strategy_id).strip().lower()
-    normalized = strategy_platform_config(slug)
+def downgrade() -> None:
+    pass
+
+
+def _normalize_platform_config(strategy_id: str, raw_config: Any) -> dict[str, dict[str, Any]]:
+    normalized = deepcopy(BASELINE_PLATFORM_CONFIGS[strategy_id])
     raw = _as_dict(raw_config)
     if not raw:
         return normalized
@@ -201,11 +229,9 @@ def normalize_platform_strategy_config(
         signal_rules = _as_dict(raw.get("signal_rules"))
         risk_caps = _as_dict(raw.get("risk_caps"))
     else:
-        strategy_params, signal_rules, risk_caps = _split_flat_config(slug, raw)
+        strategy_params, signal_rules, risk_caps = _split_flat_config(strategy_id, raw)
 
-    normalized["strategy_params"].update(
-        _normalize_strategy_params(slug, strategy_params)
-    )
+    normalized["strategy_params"].update(_normalize_strategy_params(strategy_id, strategy_params))
     normalized["signal_rules"].update(_sanitize_values(signal_rules))
     normalized["risk_caps"].update(_sanitize_values(risk_caps))
     return normalized
@@ -223,34 +249,25 @@ def _as_dict(value: Any) -> dict[str, Any]:
 def _split_flat_config(
     strategy_id: str, raw: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    strategy_param_keys = _strategy_param_keys(strategy_id)
+    strategy_param_keys = set(COMMON_STRATEGY_PARAM_KEYS)
+    strategy_param_keys.update(BASELINE_PLATFORM_CONFIGS[strategy_id]["strategy_params"].keys())
+    strategy_param_keys.update(ALIASES.get(strategy_id, {}).keys())
+
     strategy_params: dict[str, Any] = {}
     signal_rules: dict[str, Any] = {}
     risk_caps: dict[str, Any] = {}
-
     for key, value in raw.items():
-        if key in _SIGNAL_RULE_KEYS:
+        if key in SIGNAL_RULE_KEYS:
             signal_rules[key] = value
-        elif key in _RISK_CAP_KEYS:
+        elif key in RISK_CAP_KEYS:
             risk_caps[key] = value
         elif key in strategy_param_keys:
             strategy_params[key] = value
-
     return strategy_params, signal_rules, risk_caps
 
 
-def _strategy_param_keys(strategy_id: str) -> set[str]:
-    baseline = _BASELINE_PLATFORM_CONFIGS.get(strategy_id, {})
-    keys = set(_COMMON_STRATEGY_PARAM_KEYS)
-    keys.update(baseline.get("strategy_params", {}).keys())
-    keys.update(_STRATEGY_PARAM_ALIASES.get(strategy_id, {}).keys())
-    return keys
-
-
-def _normalize_strategy_params(
-    strategy_id: str, params: dict[str, Any]
-) -> dict[str, Any]:
-    aliases = _STRATEGY_PARAM_ALIASES.get(strategy_id, {})
+def _normalize_strategy_params(strategy_id: str, params: dict[str, Any]) -> dict[str, Any]:
+    aliases = ALIASES.get(strategy_id, {})
     normalized: dict[str, Any] = {}
     for key, value in params.items():
         canonical = aliases.get(key, key)

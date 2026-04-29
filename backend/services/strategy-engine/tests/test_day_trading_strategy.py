@@ -51,14 +51,14 @@ def _context(
     )
 
 
-def test_day_trading_can_enter_with_single_confirmation():
+def test_day_trading_can_enter_with_strong_confirmations():
     strategy = DayTradingStrategy()
-    closes = [100.0] * 20 + [99.2, 99.3, 99.25, 99.22, 99.2]
-    highs = [100.3] * 20 + [99.4, 99.45, 99.42, 99.4, 99.38]
-    lows = [99.0] * 20 + [99.0, 99.02, 99.01, 99.0, 99.0]
-    volumes = [100.0] * 24 + [100.0]
+    closes = [98.0] * 20 + [99.0, 99.6, 99.85, 99.4, 99.01]
+    highs = [101.0] * 20 + [99.05, 99.65, 99.9, 99.45, 99.05]
+    lows = [99.0] * 25
+    volumes = [100.0] * 24 + [220.0]
     context = _context(
-        current_price="99.005",
+        current_price="99.01",
         closes=closes,
         highs=highs,
         lows=lows,
@@ -67,13 +67,33 @@ def test_day_trading_can_enter_with_single_confirmation():
 
     signal = strategy.generate_signal(
         context,
-        {"require_trend_alignment": False},
+        {},
         uuid4(),
         uuid4(),
     )
 
     assert signal.signal_type == SignalType.BUY
     assert "Near session low with confirmations" in signal.reason
+
+
+def test_day_trading_holds_when_confirmations_are_too_weak():
+    strategy = DayTradingStrategy()
+    closes = [98.0] * 20 + [99.0, 99.6, 99.85, 99.4, 99.01]
+    highs = [101.0] * 20 + [99.05, 99.65, 99.9, 99.45, 99.05]
+    lows = [99.0] * 25
+    volumes = [100.0] * 25
+    context = _context(
+        current_price="99.01",
+        closes=closes,
+        highs=highs,
+        lows=lows,
+        volumes=volumes,
+    )
+
+    signal = strategy.generate_signal(context, {}, uuid4(), uuid4())
+
+    assert signal.signal_type == SignalType.HOLD
+    assert "Entry confirmations too weak" in signal.reason
 
 
 def test_day_trading_holds_before_max_age_in_paper():

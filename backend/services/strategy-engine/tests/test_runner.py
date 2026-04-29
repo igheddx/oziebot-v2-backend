@@ -217,6 +217,39 @@ def test_close_signal_event_uses_open_position_size():
     assert event.suggested_size == Decimal("46.56468999557635445042024633")
 
 
+def test_close_signal_event_preserves_explicit_partial_quantity():
+    signal = StrategySignal(
+        signal_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        strategy_id="momentum",
+        trading_mode=TradingMode.PAPER,
+        signal_type=SignalType.CLOSE,
+        quantity=Quantity(amount="5"),
+        confidence=0.7,
+        reason="partial exit",
+        metadata={"reason_code": "partial_take_profit"},
+    )
+
+    event = StrategyRunner._to_signal_event(
+        run_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        strategy_name="momentum",
+        symbol="AERO-USD",
+        signal=signal,
+        trading_mode=TradingMode.PAPER,
+        timestamp=datetime.now(UTC),
+        position_state=PositionState(
+            symbol="AERO-USD",
+            quantity=Decimal("46.56468999557635445042024633"),
+            entry_price=Decimal("0.43"),
+        ),
+    )
+
+    assert event.action == SignalType.CLOSE
+    assert event.suggested_size == Decimal("5")
+
+
 def test_runner_applies_dynamic_bucket_sizing_to_buy_signal(tmp_path: Path):
     db_path = tmp_path / "runner-dynamic-sizing.sqlite"
     _setup_intelligence_db(db_path)
@@ -306,13 +339,13 @@ def test_runner_resolves_all_allowed_symbols_by_default():
     ) == ["BTC-USD"]
 
 
-def test_runner_applies_more_permissive_paper_controls():
+def test_runner_preserves_signal_quality_paper_controls():
     config, signal_rules, risk_caps = StrategyRunner._paper_relaxed_controls(
         strategy_name="day_trading",
         config={
-            "entry_threshold": 0.007,
-            "min_volume_multiplier": 1.3,
-            "min_volatility_pct": 0.005,
+            "entry_threshold": 0.012,
+            "min_volume_multiplier": 1.8,
+            "min_volatility_pct": 0.008,
             "require_trend_alignment": True,
             "breakout_lookback_candles": 5,
         },
@@ -326,16 +359,16 @@ def test_runner_applies_more_permissive_paper_controls():
         risk_caps={"max_open_positions": 1, "max_daily_loss_pct": 0.12},
     )
 
-    assert config["entry_threshold"] == 0.03
-    assert config["min_volume_multiplier"] == 1.0
-    assert config["min_volatility_pct"] == 0.002
-    assert config["require_trend_alignment"] is False
-    assert config["breakout_lookback_candles"] == 3
-    assert signal_rules["min_confidence"] == 0.45
-    assert signal_rules["cooldown_seconds"] == 0
+    assert config["entry_threshold"] == 0.012
+    assert config["min_volume_multiplier"] == 1.8
+    assert config["min_volatility_pct"] == 0.008
+    assert config["require_trend_alignment"] is True
+    assert config["breakout_lookback_candles"] == 5
+    assert signal_rules["min_confidence"] == 0.6
+    assert signal_rules["cooldown_seconds"] == 20
     assert signal_rules["max_signals_per_day"] == 0
     assert signal_rules["only_during_liquid_hours"] is False
-    assert signal_rules["require_volume_confirmation"] is False
+    assert signal_rules["require_volume_confirmation"] is True
     assert risk_caps["max_open_positions"] == 0
     assert risk_caps["max_daily_loss_pct"] == 0
 

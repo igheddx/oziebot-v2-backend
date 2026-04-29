@@ -18,9 +18,12 @@ def _context(
     *,
     current_price: str,
     closes: list[float],
+    volumes: list[float] | None = None,
     quantity: str = "0",
     entry_price: str | None = None,
     peak_price: str | None = None,
+    partial_profit_taken: bool = False,
+    partial_profit_pending: bool = False,
     opened_at: datetime | None = None,
 ) -> StrategyContext:
     now = datetime.now(UTC)
@@ -30,6 +33,8 @@ def _context(
         quantity=Decimal(quantity),
         entry_price=Decimal(entry_price) if entry_price is not None else None,
         peak_price=Decimal(peak_price) if peak_price is not None else None,
+        partial_profit_taken=partial_profit_taken,
+        partial_profit_pending=partial_profit_pending,
         opened_at=opened_at,
     )
     market = MarketSnapshot(
@@ -44,6 +49,7 @@ def _context(
         low_price=price,
         close_price=price,
         candle_closes=closes,
+        candle_volumes=volumes or ([100.0] * len(closes)),
     )
     return StrategyContext(
         tenant_id=uuid4(),
@@ -57,7 +63,7 @@ def test_momentum_exits_on_stop_loss():
     strategy = MomentumStrategy()
     context = _context(
         current_price="95",
-        closes=[100.0] * 33 + [101.0],
+        closes=[100.0] * 39 + [101.0],
         quantity="10",
         entry_price="100",
         peak_price="102",
@@ -74,7 +80,7 @@ def test_momentum_exits_on_take_profit():
     strategy = MomentumStrategy()
     context = _context(
         current_price="107",
-        closes=[100.0] * 33 + [102.0],
+        closes=[100.0] * 39 + [102.0],
         quantity="10",
         entry_price="100",
         peak_price="107",
@@ -87,11 +93,31 @@ def test_momentum_exits_on_take_profit():
     assert "Take profit hit" in signal.reason
 
 
+def test_momentum_takes_partial_profit_before_full_take_profit():
+    strategy = MomentumStrategy()
+    context = _context(
+        current_price="102.5",
+        closes=[100.0] * 35 + [103.0] * 5,
+        quantity="10",
+        entry_price="100",
+        peak_price="102.5",
+        opened_at=datetime.now(UTC) - timedelta(minutes=10),
+    )
+
+    signal = strategy.generate_signal(context, {}, uuid4(), uuid4())
+
+    assert signal.signal_type == SignalType.CLOSE
+    assert signal.quantity is not None
+    assert signal.quantity.amount == Decimal("5.0")
+    assert signal.metadata is not None
+    assert signal.metadata["reason_code"] == "partial_take_profit"
+
+
 def test_momentum_exits_on_trailing_stop():
     strategy = MomentumStrategy()
     context = _context(
         current_price="102",
-        closes=[100.0] * 33 + [101.0],
+        closes=[100.0] * 39 + [101.0],
         quantity="10",
         entry_price="100",
         peak_price="106",
@@ -110,10 +136,10 @@ def test_momentum_exits_on_max_hold_time():
     strategy = MomentumStrategy()
     context = _context(
         current_price="101",
-        closes=[100.0] * 33 + [100.5],
+        closes=[100.0] * 39 + [100.5],
         quantity="10",
         entry_price="100",
-        peak_price="103",
+        peak_price="102.5",
         opened_at=datetime.now(UTC) - timedelta(minutes=500),
     )
 
@@ -126,11 +152,26 @@ def test_momentum_exits_on_max_hold_time():
 def test_momentum_default_threshold_generates_more_entries():
     strategy = MomentumStrategy()
     context = _context(
-        current_price="102.5",
-        closes=[100.0] * 15 + [102.5] * 5,
+        current_price="120",
+        closes=[100.0] * 35 + [120.0] * 5,
+        volumes=[100.0] * 39 + [130.0],
     )
 
     signal = strategy.generate_signal(context, {}, uuid4(), uuid4())
 
     assert signal.signal_type == SignalType.BUY
     assert "MA crossover bullish" in signal.reason
+
+
+def test_momentum_blocks_entry_when_volume_is_too_weak():
+    strategy = MomentumStrategy()
+    context = _context(
+        current_price="120",
+        closes=[100.0] * 35 + [120.0] * 5,
+        volumes=[100.0] * 40,
+    )
+
+    signal = strategy.generate_signal(context, {}, uuid4(), uuid4())
+
+    assert signal.signal_type == SignalType.HOLD
+    assert "Volume filter blocked entry" in signal.reason

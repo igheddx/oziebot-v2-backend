@@ -50,12 +50,16 @@ class PositionState:
         entry_price: Decimal | None = None,
         peak_price: Decimal | None = None,
         opened_at: datetime | None = None,
+        partial_profit_taken: bool = False,
+        partial_profit_pending: bool = False,
     ):
         self.symbol = symbol
         self.quantity = quantity  # Can be negative for short positions
         self.entry_price = entry_price
         self.peak_price = peak_price
         self.opened_at = opened_at
+        self.partial_profit_taken = partial_profit_taken
+        self.partial_profit_pending = partial_profit_pending
 
 
 class StrategyContext:
