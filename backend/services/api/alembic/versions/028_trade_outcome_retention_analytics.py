@@ -1,6 +1,8 @@
 """add trade outcome retention analytics fields
 
-Revision ID: 028_trade_outcome_retention_analytics
+Revision ID: 028_trade_outcome_retention
+
+Must stay <= 32 characters (alembic_version.version_num is VARCHAR(32)).
 Revises: 027_strategy_tuning_defaults
 Create Date: 2026-04-29 02:30:00.000000
 """
@@ -12,7 +14,7 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "028_trade_outcome_retention_analytics"
+revision: str = "028_trade_outcome_retention"
 down_revision: Union[str, None] = "027_strategy_tuning_defaults"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
