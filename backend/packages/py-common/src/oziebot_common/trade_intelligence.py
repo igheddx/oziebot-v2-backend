@@ -200,6 +200,9 @@ def persist_trade_outcome_feature(
     realized_return_pct: Decimal | None,
     max_favorable_excursion_pct: Decimal | None,
     max_adverse_excursion_pct: Decimal | None,
+    profit_giveback_pct: Decimal | None,
+    partial_profit_taken: bool,
+    remaining_position_outcome: str | None,
     exit_reason: str | None,
     win_loss_label: str,
     profitable_after_fees_label: str,
@@ -215,12 +218,14 @@ def persist_trade_outcome_feature(
                   entry_price, exit_price, filled_size, fee_paid, slippage_realized,
                   hold_seconds, realized_pnl, realized_return_pct,
                   max_favorable_excursion_pct, max_adverse_excursion_pct,
+                  profit_giveback_pct, partial_profit_taken, remaining_position_outcome,
                   exit_reason, win_loss_label, profitable_after_fees_label, created_at
                 ) VALUES (
                   :id, :trade_id, :signal_snapshot_id, :trading_mode, :strategy_name, :token_symbol,
                   :entry_price, :exit_price, :filled_size, :fee_paid, :slippage_realized,
                   :hold_seconds, :realized_pnl, :realized_return_pct,
                   :max_favorable_excursion_pct, :max_adverse_excursion_pct,
+                  :profit_giveback_pct, :partial_profit_taken, :remaining_position_outcome,
                   :exit_reason, :win_loss_label, :profitable_after_fees_label, :created_at
                 )
                 """
@@ -256,6 +261,13 @@ def persist_trade_outcome_feature(
                     if max_adverse_excursion_pct is not None
                     else None
                 ),
+                "profit_giveback_pct": (
+                    str(profit_giveback_pct)
+                    if profit_giveback_pct is not None
+                    else None
+                ),
+                "partial_profit_taken": partial_profit_taken,
+                "remaining_position_outcome": remaining_position_outcome,
                 "exit_reason": exit_reason,
                 "win_loss_label": win_loss_label,
                 "profitable_after_fees_label": profitable_after_fees_label,

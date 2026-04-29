@@ -9,9 +9,11 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.models.execution import ExecutionOrder, ExecutionTradeRecord
 from oziebot_api.models.membership import TenantMembership
+from oziebot_api.models.platform_setting import PlatformSetting
+from oziebot_api.models.platform_strategy import PlatformStrategy
 from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.strategy_signal_pipeline import StrategyRun, StrategySignalRecord
-from oziebot_api.models.trade_intelligence import TradeOutcomeFeature
+from oziebot_api.models.trade_intelligence import StrategySignalSnapshot, TradeOutcomeFeature
 from oziebot_api.models.user import User
 from oziebot_api.services import trade_review_analytics
 
@@ -26,10 +28,101 @@ def _seed_trade_review_data(db_session: Session, user: User, membership: TenantM
     live_order_id = uuid.uuid4()
     live_failed_order_id = uuid.uuid4()
     paper_trade_id = uuid.uuid4()
+    paper_partial_trade_id = uuid.uuid4()
+    paper_final_trade_id = uuid.uuid4()
     live_trade_id = uuid.uuid4()
+    paper_snapshot_id = uuid.uuid4()
+    live_snapshot_id = uuid.uuid4()
+    day_trading_snapshot_id = uuid.uuid4()
+
+    for slug in ("momentum", "day_trading"):
+        if db_session.scalar(select(PlatformStrategy).where(PlatformStrategy.slug == slug)) is None:
+            db_session.add(
+                PlatformStrategy(
+                    slug=slug,
+                    display_name=slug.replace("_", " ").title(),
+                    description=None,
+                    is_enabled=True,
+                    entry_point=None,
+                    config_schema={"risk_caps": {"max_position_usd": 300}},
+                    sort_order=0,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    if db_session.get(PlatformSetting, "execution.fee_model") is None:
+        db_session.add(
+            PlatformSetting(
+                key="execution.fee_model",
+                value={},
+                updated_at=now,
+                updated_by_user_id=user.id,
+            )
+        )
 
     db_session.add_all(
         [
+            StrategySignalSnapshot(
+                id=paper_snapshot_id,
+                user_id=user.id,
+                tenant_id=membership.tenant_id,
+                trading_mode="paper",
+                strategy_name="momentum",
+                token_symbol="BTC-USD",
+                timestamp=now - timedelta(hours=2),
+                current_price=50000,
+                best_bid=49990,
+                best_ask=50010,
+                spread_pct=0.0004,
+                estimated_slippage_pct=0.0008,
+                volume=1000,
+                volatility=0.01,
+                confidence_score=0.81,
+                raw_feature_json={"momentum_value": 0.03},
+                token_policy_status="allowed",
+                token_policy_multiplier=1.0,
+            ),
+            StrategySignalSnapshot(
+                id=live_snapshot_id,
+                user_id=user.id,
+                tenant_id=membership.tenant_id,
+                trading_mode="live",
+                strategy_name="momentum",
+                token_symbol="BTC-USD",
+                timestamp=now - timedelta(hours=1),
+                current_price=50000,
+                best_bid=49990,
+                best_ask=50010,
+                spread_pct=0.0004,
+                estimated_slippage_pct=0.0008,
+                volume=1000,
+                volatility=0.01,
+                confidence_score=0.69,
+                raw_feature_json={"momentum_value": 0.02},
+                token_policy_status="allowed",
+                token_policy_multiplier=1.0,
+            ),
+            StrategySignalSnapshot(
+                id=day_trading_snapshot_id,
+                user_id=user.id,
+                tenant_id=membership.tenant_id,
+                trading_mode="paper",
+                strategy_name="day_trading",
+                token_symbol="SOL-USD",
+                timestamp=now - timedelta(minutes=35),
+                current_price=20,
+                best_bid=19.98,
+                best_ask=20.02,
+                spread_pct=0.002,
+                estimated_slippage_pct=0.004,
+                volume=5000,
+                volatility=0.015,
+                confidence_score=0.74,
+                raw_feature_json={"breakout_strength": 0.018},
+                token_policy_status="allowed",
+                token_policy_multiplier=1.0,
+            ),
             StrategyRun(
                 run_id=paper_run,
                 user_id=user.id,
@@ -290,6 +383,46 @@ def _seed_trade_review_data(db_session: Session, user: User, membership: TenantM
                 raw_payload={},
             ),
             ExecutionTradeRecord(
+                id=paper_partial_trade_id,
+                order_id=paper_order_id,
+                fill_id=None,
+                tenant_id=membership.tenant_id,
+                user_id=user.id,
+                strategy_id="day_trading",
+                symbol="SOL-USD",
+                trading_mode="paper",
+                side="sell",
+                quantity="0.50",
+                price="20.40",
+                gross_notional_cents=1020,
+                fee_cents=15,
+                realized_pnl_cents=20,
+                position_quantity_after="0.50",
+                avg_entry_price_after="20.00",
+                executed_at=now - timedelta(minutes=30),
+                raw_payload={},
+            ),
+            ExecutionTradeRecord(
+                id=paper_final_trade_id,
+                order_id=paper_order_id,
+                fill_id=None,
+                tenant_id=membership.tenant_id,
+                user_id=user.id,
+                strategy_id="day_trading",
+                symbol="SOL-USD",
+                trading_mode="paper",
+                side="sell",
+                quantity="0.50",
+                price="20.10",
+                gross_notional_cents=1005,
+                fee_cents=15,
+                realized_pnl_cents=5,
+                position_quantity_after="0.00",
+                avg_entry_price_after="20.00",
+                executed_at=now - timedelta(minutes=10),
+                raw_payload={},
+            ),
+            ExecutionTradeRecord(
                 id=live_trade_id,
                 order_id=live_order_id,
                 fill_id=None,
@@ -311,7 +444,7 @@ def _seed_trade_review_data(db_session: Session, user: User, membership: TenantM
             ),
             TradeOutcomeFeature(
                 trade_id=paper_trade_id,
-                signal_snapshot_id=None,
+                signal_snapshot_id=paper_snapshot_id,
                 trading_mode="paper",
                 strategy_name="momentum",
                 token_symbol="BTC-USD",
@@ -325,14 +458,65 @@ def _seed_trade_review_data(db_session: Session, user: User, membership: TenantM
                 realized_return_pct=0.03,
                 max_favorable_excursion_pct=0.04,
                 max_adverse_excursion_pct=-0.01,
+                profit_giveback_pct=0.01,
+                partial_profit_taken=False,
+                remaining_position_outcome=None,
                 exit_reason="take_profit",
                 win_loss_label="win",
                 profitable_after_fees_label="profitable",
                 created_at=now - timedelta(hours=2),
             ),
             TradeOutcomeFeature(
+                trade_id=paper_partial_trade_id,
+                signal_snapshot_id=day_trading_snapshot_id,
+                trading_mode="paper",
+                strategy_name="day_trading",
+                token_symbol="SOL-USD",
+                entry_price=20.0,
+                exit_price=20.4,
+                filled_size=0.5,
+                fee_paid=0.15,
+                slippage_realized=0.0005,
+                hold_seconds=300,
+                realized_pnl=2.0,
+                realized_return_pct=0.02,
+                max_favorable_excursion_pct=0.025,
+                max_adverse_excursion_pct=-0.003,
+                profit_giveback_pct=0.005,
+                partial_profit_taken=True,
+                remaining_position_outcome="gave_back_profit",
+                exit_reason="partial_take_profit",
+                win_loss_label="win",
+                profitable_after_fees_label="profitable",
+                created_at=now - timedelta(minutes=30),
+            ),
+            TradeOutcomeFeature(
+                trade_id=paper_final_trade_id,
+                signal_snapshot_id=day_trading_snapshot_id,
+                trading_mode="paper",
+                strategy_name="day_trading",
+                token_symbol="SOL-USD",
+                entry_price=20.0,
+                exit_price=20.1,
+                filled_size=0.5,
+                fee_paid=0.15,
+                slippage_realized=0.0007,
+                hold_seconds=1200,
+                realized_pnl=0.5,
+                realized_return_pct=0.005,
+                max_favorable_excursion_pct=0.022,
+                max_adverse_excursion_pct=-0.005,
+                profit_giveback_pct=0.017,
+                partial_profit_taken=True,
+                remaining_position_outcome="gave_back_profit",
+                exit_reason="trailing_stop",
+                win_loss_label="win",
+                profitable_after_fees_label="profitable",
+                created_at=now - timedelta(minutes=10),
+            ),
+            TradeOutcomeFeature(
                 trade_id=live_trade_id,
-                signal_snapshot_id=None,
+                signal_snapshot_id=live_snapshot_id,
                 trading_mode="live",
                 strategy_name="momentum",
                 token_symbol="BTC-USD",
@@ -346,6 +530,9 @@ def _seed_trade_review_data(db_session: Session, user: User, membership: TenantM
                 realized_return_pct=-0.012,
                 max_favorable_excursion_pct=0.01,
                 max_adverse_excursion_pct=-0.03,
+                profit_giveback_pct=0.022,
+                partial_profit_taken=False,
+                remaining_position_outcome=None,
                 exit_reason="stop_loss",
                 win_loss_label="loss",
                 profitable_after_fees_label="not_profitable",
@@ -374,11 +561,15 @@ def test_trade_review_analytics_overview(client, regular_user_and_token, db_sess
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["summary"]["evaluated"] == 2
-    assert payload["summary"]["rejected"] == 2
+    assert payload["summary"]["rejected"] == 3
     assert payload["summary"]["executed"] == 1
-    assert payload["summary"]["profitable"] == 1
+    assert payload["summary"]["profitable"] == 3
+    assert payload["summary"]["partialProfitCount"] == 1
+    assert payload["summary"]["trailingStopCount"] == 1
+    assert payload["summary"]["avgGivebackPct"] > 0
     assert payload["rejectionBreakdown"]["totalRejected"] == 3
     assert {row["strategyName"] for row in payload["strategyPerformance"]} >= {
+        "day_trading",
         "momentum",
         "reversion",
     }
@@ -389,6 +580,8 @@ def test_trade_review_analytics_overview(client, regular_user_and_token, db_sess
     ]
     assert momentum_rows
     assert momentum_rows[0]["winRatePct"] == 100.0
+    assert payload["outcomes"]
+    assert payload["paperLiveValidation"]["overview"]["paperTradesReviewed"] == 3
     assert payload["paperLiveComparison"]["overview"]
 
 
@@ -416,6 +609,58 @@ def test_trade_review_analytics_pair_endpoint_honors_filters(
     assert payload["rows"][0]["strategyName"] == "momentum"
     assert payload["rows"][0]["symbol"] == "BTC-USD"
     assert payload["rows"][0]["tradingMode"] == "live"
+
+
+def test_trade_review_analytics_outcomes_endpoint_returns_giveback_rows(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+    _seed_trade_review_data(db_session, user, membership)
+
+    response = client.get(
+        "/v1/me/analytics/outcomes?trading_mode=paper",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["rows"]
+    assert any(row["partialProfitTaken"] for row in payload["rows"])
+    assert any(row["exitReason"] == "partial_take_profit" for row in payload["rows"])
+    assert any(row["remainingPositionOutcome"] == "gave_back_profit" for row in payload["rows"])
+
+
+def test_trade_review_analytics_validation_endpoint_reports_live_equivalent_rejections(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+    _seed_trade_review_data(db_session, user, membership)
+
+    response = client.get(
+        "/v1/me/analytics/validation?trading_mode=paper",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["paperLiveValidation"]["overview"]["paperTradesReviewed"] == 3
+    assert payload["paperLiveValidation"]["reasonBreakdown"]
+    assert any(
+        row["liveEquivalentRejected"] and row["rejectedReasonCodes"]
+        for row in payload["paperLiveValidation"]["rows"]
+    )
 
 
 def test_trade_review_analytics_summary_clamps_lookback_window(

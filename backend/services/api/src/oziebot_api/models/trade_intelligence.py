@@ -108,6 +108,11 @@ class TradeOutcomeFeature(Base):
         Numeric(18, 10), nullable=True
     )
     max_adverse_excursion_pct: Mapped[float | None] = mapped_column(Numeric(18, 10), nullable=True)
+    profit_giveback_pct: Mapped[float | None] = mapped_column(Numeric(18, 10), nullable=True)
+    partial_profit_taken: Mapped[bool] = mapped_column(default=False, nullable=False)
+    remaining_position_outcome: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, index=True
+    )
     exit_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
     win_loss_label: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     profitable_after_fees_label: Mapped[str] = mapped_column(String(16), nullable=False, index=True)

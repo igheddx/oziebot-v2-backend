@@ -1427,6 +1427,8 @@ class ExecutionService:
                     "opened_at": opened_at,
                     "entry_price": str(avg_after if avg_after > 0 else fill.price),
                     "entry_signal_snapshot_id": entry_snapshot_id,
+                    "partial_profit_taken": False,
+                    "partial_profit_outcome_id": None,
                 },
                 fill.occurred_at,
             )
@@ -1453,7 +1455,27 @@ class ExecutionService:
             closed_at=fill.occurred_at,
             entry_price=entry_price,
         )
-        persist_trade_outcome_feature(
+        profit_giveback_pct = (
+            mfe_pct - realized_return_pct
+            if mfe_pct is not None and realized_return_pct is not None
+            else None
+        )
+        exit_reason = self._resolve_exit_reason(request)
+        prior_partial_profit_taken = bool(state.get("partial_profit_taken"))
+        is_partial_profit_capture = (
+            exit_reason == "partial_take_profit" and qty_after > 0
+        )
+        partial_profit_taken = prior_partial_profit_taken or is_partial_profit_capture
+        remaining_position_outcome = (
+            self._classify_remaining_position_outcome(
+                realized_pnl=realized_pnl,
+                max_favorable_excursion_pct=mfe_pct,
+                profit_giveback_pct=profit_giveback_pct,
+            )
+            if prior_partial_profit_taken and not is_partial_profit_capture
+            else None
+        )
+        outcome_id = persist_trade_outcome_feature(
             self._engine,
             trade_id=trade_id,
             signal_snapshot_id=str(entry_signal_snapshot_id)
@@ -1473,13 +1495,21 @@ class ExecutionService:
             realized_return_pct=realized_return_pct,
             max_favorable_excursion_pct=mfe_pct,
             max_adverse_excursion_pct=mae_pct,
-            exit_reason=self._resolve_exit_reason(request),
+            profit_giveback_pct=profit_giveback_pct,
+            partial_profit_taken=partial_profit_taken,
+            remaining_position_outcome=remaining_position_outcome,
+            exit_reason=exit_reason,
             win_loss_label="win" if realized_pnl >= 0 else "loss",
             profitable_after_fees_label=(
                 "profitable" if realized_pnl > 0 else "not_profitable"
             ),
             created_at=fill.occurred_at,
         )
+        if remaining_position_outcome and state.get("partial_profit_outcome_id"):
+            self._update_trade_outcome_remaining_position_outcome(
+                outcome_id=str(state["partial_profit_outcome_id"]),
+                remaining_position_outcome=remaining_position_outcome,
+            )
         if qty_after > 0:
             self._store_trade_intelligence_state(
                 request,
@@ -1487,6 +1517,12 @@ class ExecutionService:
                     "opened_at": opened_at.isoformat(),
                     "entry_price": str(avg_after if avg_after > 0 else entry_price),
                     "entry_signal_snapshot_id": entry_signal_snapshot_id,
+                    "partial_profit_taken": partial_profit_taken,
+                    "partial_profit_outcome_id": (
+                        outcome_id
+                        if is_partial_profit_capture
+                        else state.get("partial_profit_outcome_id")
+                    ),
                 },
                 fill.occurred_at,
             )
@@ -1506,6 +1542,44 @@ class ExecutionService:
         if request.risk.reason is not None:
             return request.risk.reason.value
         return None
+
+    def _classify_remaining_position_outcome(
+        self,
+        *,
+        realized_pnl: Decimal,
+        max_favorable_excursion_pct: Decimal | None,
+        profit_giveback_pct: Decimal | None,
+    ) -> str:
+        if realized_pnl <= 0:
+            return "lost"
+        if (
+            max_favorable_excursion_pct is not None
+            and max_favorable_excursion_pct > 0
+            and profit_giveback_pct is not None
+            and profit_giveback_pct > 0
+        ):
+            return "gave_back_profit"
+        return "won"
+
+    def _update_trade_outcome_remaining_position_outcome(
+        self, *, outcome_id: str, remaining_position_outcome: str
+    ) -> None:
+        if self._engine is None:
+            return
+        with self._engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE trade_outcome_features
+                    SET remaining_position_outcome = :remaining_position_outcome
+                    WHERE id = :id
+                    """
+                ),
+                {
+                    "id": outcome_id,
+                    "remaining_position_outcome": remaining_position_outcome,
+                },
+            )
 
     def _load_excursion_pct(
         self,

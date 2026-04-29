@@ -38,6 +38,32 @@ class FakeRedis:
     def lpush(self, key: str, value: str) -> None:
         self._lists.setdefault(key, []).insert(0, value)
 
+    def ltrim(self, key: str, start: int, stop: int) -> None:
+        items = self._lists.get(key, [])
+        self._lists[key] = items[start : stop + 1]
+
+    def pipeline(self):
+        redis = self
+
+        class FakePipeline:
+            def __init__(self) -> None:
+                self._operations: list[tuple[str, tuple]] = []
+
+            def lpush(self, key: str, value: str):
+                self._operations.append(("lpush", (key, value)))
+                return self
+
+            def ltrim(self, key: str, start: int, stop: int):
+                self._operations.append(("ltrim", (key, start, stop)))
+                return self
+
+            def execute(self):
+                for op, args in self._operations:
+                    getattr(redis, op)(*args)
+                return []
+
+        return FakePipeline()
+
     def list_len(self, key: str) -> int:
         return len(self._lists.get(key, []))
 
@@ -191,6 +217,7 @@ def _setup_db(db_path: Path) -> None:
                 "id TEXT PRIMARY KEY, trade_id TEXT, signal_snapshot_id TEXT, trading_mode TEXT, strategy_name TEXT, token_symbol TEXT,"
                 "entry_price TEXT, exit_price TEXT, filled_size TEXT, fee_paid TEXT, slippage_realized TEXT, hold_seconds INTEGER,"
                 "realized_pnl TEXT, realized_return_pct TEXT, max_favorable_excursion_pct TEXT, max_adverse_excursion_pct TEXT,"
+                "profit_giveback_pct TEXT, partial_profit_taken BOOLEAN, remaining_position_outcome TEXT,"
                 "exit_reason TEXT, win_loss_label TEXT, profitable_after_fees_label TEXT, created_at TEXT)"
             )
         )
@@ -841,7 +868,8 @@ def test_execution_records_trade_outcome_and_decision_audits(tmp_path: Path):
     with eng.begin() as conn:
         outcome = conn.execute(
             text(
-                "SELECT signal_snapshot_id, trading_mode, win_loss_label, profitable_after_fees_label, hold_seconds FROM trade_outcome_features LIMIT 1"
+                "SELECT signal_snapshot_id, trading_mode, win_loss_label, profitable_after_fees_label, hold_seconds, profit_giveback_pct, partial_profit_taken "
+                "FROM trade_outcome_features LIMIT 1"
             )
         ).first()
         decisions = conn.execute(
@@ -855,6 +883,7 @@ def test_execution_records_trade_outcome_and_decision_audits(tmp_path: Path):
     assert outcome[2] == "win"
     assert outcome[3] == "profitable"
     assert outcome[4] is not None
+    assert outcome[6] in {0, False}
     assert {row[0] for row in decisions} >= {"emitted", "executed"}
 
 

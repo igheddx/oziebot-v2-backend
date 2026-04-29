@@ -598,7 +598,7 @@ def _analytics_cache_params(filters: AnalyticsFilters) -> dict[str, Any]:
         "symbol": filters.symbol,
         "start_at": _as_utc(filters.start_at).isoformat() if filters.start_at else None,
         "end_at": _as_utc(filters.end_at).isoformat() if filters.end_at else None,
-        "version": 2,
+        "version": 3,
     }
 
 
@@ -649,6 +649,26 @@ def _analytics_comparison_payload(
         "filters": service.filters_payload(filters),
         "budget": service.budget_payload(),
         "paperLiveComparison": comparison,
+    }
+
+
+def _analytics_outcomes_payload(
+    service: TradeReviewAnalyticsService, filters: AnalyticsFilters
+) -> dict[str, Any]:
+    return {
+        "filters": service.filters_payload(filters),
+        "budget": service.budget_payload(),
+        "rows": service.build_outcome_rows(filters),
+    }
+
+
+def _analytics_validation_payload(
+    service: TradeReviewAnalyticsService, filters: AnalyticsFilters
+) -> dict[str, Any]:
+    return {
+        "filters": service.filters_payload(filters),
+        "budget": service.budget_payload(),
+        "paperLiveValidation": service.build_paper_live_validation(filters),
     }
 
 
@@ -1832,6 +1852,60 @@ def read_trade_review_paper_live_comparison(
         end_at=end_at,
         force_refresh=force_refresh,
         builder=_analytics_comparison_payload,
+    )
+
+
+@router.get("/analytics/outcomes")
+def read_trade_review_outcomes(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    strategy_name: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    start_at: datetime | None = Query(default=None),
+    end_at: datetime | None = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    settings: Settings = Depends(settings_dep),
+) -> dict[str, Any]:
+    return _cached_analytics_slice_payload(
+        namespace="analytics-outcomes-v1",
+        user=user,
+        db=db,
+        settings=settings,
+        trading_mode=trading_mode,
+        strategy_name=strategy_name,
+        symbol=symbol,
+        start_at=start_at,
+        end_at=end_at,
+        force_refresh=force_refresh,
+        builder=_analytics_outcomes_payload,
+    )
+
+
+@router.get("/analytics/validation")
+def read_trade_review_paper_live_validation(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    strategy_name: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    start_at: datetime | None = Query(default=None),
+    end_at: datetime | None = Query(default=None),
+    force_refresh: bool = Query(default=False),
+    settings: Settings = Depends(settings_dep),
+) -> dict[str, Any]:
+    return _cached_analytics_slice_payload(
+        namespace="analytics-validation-v1",
+        user=user,
+        db=db,
+        settings=settings,
+        trading_mode=trading_mode,
+        strategy_name=strategy_name,
+        symbol=symbol,
+        start_at=start_at,
+        end_at=end_at,
+        force_refresh=force_refresh,
+        builder=_analytics_validation_payload,
     )
 
 

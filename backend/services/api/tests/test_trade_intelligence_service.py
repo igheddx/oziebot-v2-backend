@@ -33,6 +33,7 @@ def _setup_db(db_path: Path) -> None:
                 "id TEXT PRIMARY KEY, trade_id TEXT, signal_snapshot_id TEXT, trading_mode TEXT, strategy_name TEXT, token_symbol TEXT,"
                 "entry_price TEXT, exit_price TEXT, filled_size TEXT, fee_paid TEXT, slippage_realized TEXT, hold_seconds INTEGER,"
                 "realized_pnl TEXT, realized_return_pct TEXT, max_favorable_excursion_pct TEXT, max_adverse_excursion_pct TEXT,"
+                "profit_giveback_pct TEXT, partial_profit_taken BOOLEAN, remaining_position_outcome TEXT,"
                 "exit_reason TEXT, win_loss_label TEXT, profitable_after_fees_label TEXT, created_at TEXT)"
             )
         )
@@ -60,8 +61,8 @@ def _setup_db(db_path: Path) -> None:
         conn.execute(
             text(
                 "INSERT INTO trade_outcome_features VALUES "
-                "('outcome-1','trade-1','snap-paper','paper','momentum','BTC-USD','50000','51000','0.5','5','0.0002',300,'45','0.018','0.03','-0.01','take_profit','win','profitable',:now),"
-                "('outcome-2','trade-2','snap-live','live','momentum','BTC-USD','50000','49500','0.5','5','0.0003',600,'-30','-0.012','0.01','-0.02','stop_loss','loss','not_profitable',:now)"
+                "('outcome-1','trade-1','snap-paper','paper','momentum','BTC-USD','50000','51000','0.5','5','0.0002',300,'45','0.018','0.03','-0.01','0.012',0,NULL,'take_profit','win','profitable',:now),"
+                "('outcome-2','trade-2','snap-live','live','momentum','BTC-USD','50000','49500','0.5','5','0.0003',600,'-30','-0.012','0.01','-0.02','0.022',0,NULL,'stop_loss','loss','not_profitable',:now)"
             ),
             {"now": now},
         )
