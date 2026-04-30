@@ -28,7 +28,7 @@ from oziebot_api.models.tenant import Tenant
 from oziebot_api.models.user import User
 from oziebot_api.models.user_strategy import UserStrategy
 from oziebot_api.schemas.me import MeOut, TenantBrief, TradingModePatch
-from oziebot_api.services.entitlements import has_strategy_entitlement
+from oziebot_api.services.entitlements import tenant_strategy_entitlement_gate
 from oziebot_api.services.live_coinbase import (
     CASH_EQUIVALENT_CURRENCIES,
     load_live_coinbase_accounts,
@@ -45,7 +45,7 @@ from oziebot_domain.trading_mode import TradingMode
 
 router = APIRouter(prefix="/me", tags=["me"])
 
-DASHBOARD_CACHE_TTL_SECONDS = 30
+DASHBOARD_CACHE_TTL_SECONDS = 120
 ANALYTICS_CACHE_TTL_SECONDS = 120
 DASHBOARD_HISTORY_LOOKBACK_DAYS = 30
 DASHBOARD_POSITIONS_LIMIT = 50
@@ -347,24 +347,33 @@ def _latest_symbol_marks(db: DbSession, symbols: list[str]) -> dict[str, Decimal
         return {}
 
     recent_cutoff = datetime.now(UTC) - timedelta(minutes=DASHBOARD_MARK_LOOKBACK_MINUTES)
-    rows = db.execute(
+    # Latest row per product: global ORDER BY + LIMIT scanned the whole hot window for busy pairs.
+    rn = (
+        func.row_number()
+        .over(
+            partition_by=MarketDataBboSnapshot.product_id,
+            order_by=MarketDataBboSnapshot.event_time.desc(),
+        )
+        .label("rn")
+    )
+    ranked = (
         select(
-            MarketDataBboSnapshot.product_id,
-            MarketDataBboSnapshot.best_bid_price,
-            MarketDataBboSnapshot.best_ask_price,
+            MarketDataBboSnapshot.product_id.label("pid"),
+            MarketDataBboSnapshot.best_bid_price.label("bid"),
+            MarketDataBboSnapshot.best_ask_price.label("ask"),
+            rn,
         )
         .where(
             MarketDataBboSnapshot.product_id.in_(normalized_symbols),
             MarketDataBboSnapshot.event_time >= recent_cutoff,
         )
-        .order_by(MarketDataBboSnapshot.event_time.desc())
-        .limit(max(len(normalized_symbols) * 20, 100))
-    ).all()
+        .subquery("ranked_bbo")
+    )
+    stmt = select(ranked.c.pid, ranked.c.bid, ranked.c.ask).where(ranked.c.rn == 1)
+    rows = db.execute(stmt).all()
     marks: dict[str, Decimal] = {}
     for product_id, bid_price, ask_price in rows:
         key = str(product_id).upper()
-        if key in marks:
-            continue
         bid = _to_decimal(str(bid_price))
         ask = _to_decimal(str(ask_price))
         if bid > 0 and ask > 0:
@@ -373,8 +382,6 @@ def _latest_symbol_marks(db: DbSession, symbols: list[str]) -> dict[str, Decimal
             marks[key] = bid
         elif ask > 0:
             marks[key] = ask
-        if len(marks) >= len(normalized_symbols):
-            break
     return marks
 
 
@@ -1044,10 +1051,16 @@ def _build_dashboard_payload(
         .all()
     }
 
+    if uses_tenant_scope and tenant_id is not None:
+        global_entitled, entitled_strategy_ids = tenant_strategy_entitlement_gate(db, tenant_id)
+    else:
+        global_entitled = False
+        entitled_strategy_ids = set()
+
     enabled_strategies: list[dict[str, Any]] = []
     for row in platform_rows:
         assigned = (
-            bool(tenant_id and has_strategy_entitlement(db, tenant_id, row.slug))
+            bool(global_entitled or row.id in entitled_strategy_ids)
             if uses_tenant_scope
             else user.is_root_admin
         )

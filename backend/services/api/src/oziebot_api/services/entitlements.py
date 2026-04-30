@@ -80,6 +80,31 @@ def has_live_trading_billing(db: Session, tenant_id: uuid.UUID) -> bool:
     return is_trial_active(db, tenant_id) or has_active_subscription(db, tenant_id)
 
 
+def tenant_strategy_entitlement_gate(
+    db: Session, tenant_id: uuid.UUID
+) -> tuple[bool, set[uuid.UUID]]:
+    """Load tenant strategy access once for many platform strategies (dashboard hot path).
+
+    Returns (global_entitlement_covers_all_strategies, specific_platform_strategy_ids).
+    """
+    sync_trial_entitlement_rows(db, tenant_id)
+    now = datetime.now(UTC)
+    rows = db.scalars(
+        select(TenantEntitlement).where(
+            TenantEntitlement.tenant_id == tenant_id,
+            TenantEntitlement.is_active.is_(True),
+            TenantEntitlement.valid_from <= now,
+            or_(
+                TenantEntitlement.valid_until.is_(None),
+                TenantEntitlement.valid_until > now,
+            ),
+        )
+    ).all()
+    global_ok = any(r.platform_strategy_id is None for r in rows)
+    specifics = {r.platform_strategy_id for r in rows if r.platform_strategy_id is not None}
+    return global_ok, specifics
+
+
 def has_strategy_entitlement(db: Session, tenant_id: uuid.UUID, strategy_slug: str) -> bool:
     sync_trial_entitlement_rows(db, tenant_id)
     now = datetime.now(UTC)
