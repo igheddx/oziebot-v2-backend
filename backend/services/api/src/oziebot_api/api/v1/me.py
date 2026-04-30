@@ -438,7 +438,11 @@ def _recent_strategy_rejection_records(
     # Join snapshots so we filter audits by tenant user + mode in the DB. A global audit
     # scan (missing user predicates) degenerates into full-table reads and gateway timeouts.
     rows = (
-        db.query(StrategyDecisionAudit, StrategySignalSnapshot.strategy_name, StrategySignalSnapshot.token_symbol)
+        db.query(
+            StrategyDecisionAudit,
+            StrategySignalSnapshot.strategy_name,
+            StrategySignalSnapshot.token_symbol,
+        )
         .join(
             StrategySignalSnapshot,
             StrategyDecisionAudit.signal_snapshot_id == StrategySignalSnapshot.id,
