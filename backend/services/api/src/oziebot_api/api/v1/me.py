@@ -435,58 +435,42 @@ def _recent_strategy_rejection_records(
     cutoff: datetime,
     limit: int,
 ) -> tuple[list[dict[str, Any]], bool]:
-    audits = (
-        db.query(StrategyDecisionAudit)
+    # Join snapshots so we filter audits by tenant user + mode in the DB. A global audit
+    # scan (missing user predicates) degenerates into full-table reads and gateway timeouts.
+    rows = (
+        db.query(StrategyDecisionAudit, StrategySignalSnapshot.strategy_name, StrategySignalSnapshot.token_symbol)
+        .join(
+            StrategySignalSnapshot,
+            StrategyDecisionAudit.signal_snapshot_id == StrategySignalSnapshot.id,
+        )
         .filter(
+            StrategySignalSnapshot.user_id == user.id,
+            StrategySignalSnapshot.trading_mode == trading_mode,
             StrategyDecisionAudit.decision == "rejected",
             StrategyDecisionAudit.stage.in_(("strategy", "suppression")),
             StrategyDecisionAudit.created_at >= cutoff,
-            StrategyDecisionAudit.signal_snapshot_id.is_not(None),
         )
         .order_by(StrategyDecisionAudit.created_at.desc())
         .limit(DASHBOARD_REJECTION_AUDIT_SCAN_LIMIT)
         .all()
     )
-    snapshot_ids = [
-        audit.signal_snapshot_id for audit in audits if audit.signal_snapshot_id is not None
-    ]
-    if not snapshot_ids:
-        return [], False
-
-    snapshot_rows = db.execute(
-        select(
-            StrategySignalSnapshot.id,
-            StrategySignalSnapshot.strategy_name,
-            StrategySignalSnapshot.token_symbol,
-        ).where(
-            StrategySignalSnapshot.id.in_(snapshot_ids),
-            StrategySignalSnapshot.user_id == user.id,
-            StrategySignalSnapshot.trading_mode == trading_mode,
-        )
-    ).all()
-    snapshot_meta = {
-        row.id: {"strategy": row.strategy_name, "symbol": row.token_symbol} for row in snapshot_rows
-    }
 
     records: list[dict[str, Any]] = []
-    for audit in audits:
-        if audit.signal_snapshot_id not in snapshot_meta:
-            continue
-        meta = snapshot_meta[audit.signal_snapshot_id]
+    for audit, strategy_name, token_symbol in rows:
         records.append(
             _format_rejection_record(
                 stage=str(audit.stage),
                 reason_code=audit.reason_code,
                 reason_detail=audit.reason_detail,
-                strategy=str(meta.get("strategy") or ""),
-                symbol=str(meta.get("symbol") or ""),
+                strategy=str(strategy_name or ""),
+                symbol=str(token_symbol or ""),
                 created_at=audit.created_at,
             )
         )
         if len(records) >= limit:
             break
 
-    capped = len(audits) >= DASHBOARD_REJECTION_AUDIT_SCAN_LIMIT or len(records) >= limit
+    capped = len(rows) >= DASHBOARD_REJECTION_AUDIT_SCAN_LIMIT or len(records) >= limit
     return records, capped
 
 

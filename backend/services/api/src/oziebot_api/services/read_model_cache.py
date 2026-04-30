@@ -47,8 +47,8 @@ class ReadModelCache:
             return redis_from_url(
                 self._settings.redis_url,
                 probe=True,
-                socket_connect_timeout=0.5,
-                socket_timeout=0.5,
+                socket_connect_timeout=2.0,
+                socket_timeout=10.0,
             )
         except (redis.RedisError, ValueError):
             return None
