@@ -703,6 +703,7 @@ def test_trade_review_analytics_reports_budget_degradation(
     assert membership is not None
     _seed_trade_review_data(db_session, user, membership)
     monkeypatch.setattr(trade_review_analytics, "ANALYTICS_DATASET_ROW_LIMIT", 1)
+    monkeypatch.setattr(trade_review_analytics, "ANALYTICS_SUMMARY_ROW_LIMIT", 1)
     monkeypatch.setattr(trade_review_analytics, "ANALYTICS_GROUP_ROW_LIMIT", 1)
 
     response = client.get(

@@ -23,6 +23,9 @@ from oziebot_api.models.strategy_signal_pipeline import StrategyRun, StrategySig
 from oziebot_api.models.trade_intelligence import StrategySignalSnapshot, TradeOutcomeFeature
 
 ANALYTICS_DATASET_ROW_LIMIT = 1000
+# Summary endpoint (/analytics/summary) uses tighter caps and skips signal-snapshot joins
+# so aggregates stay fast enough for ALB timeouts under load.
+ANALYTICS_SUMMARY_ROW_LIMIT = 400
 ANALYTICS_GROUP_ROW_LIMIT = 50
 ANALYTICS_REJECTION_ROW_LIMIT = 25
 ANALYTICS_COMPARISON_STRATEGY_LIMIT = 25
@@ -178,7 +181,7 @@ class TradeReviewAnalyticsService:
         }
 
     def build_summary(self, filters: AnalyticsFilters) -> dict[str, Any]:
-        dataset = self._load_dataset(filters)
+        dataset = self._load_summary_dataset(filters)
         return {
             "filters": self.filters_payload(filters),
             "summary": self._summary_payload(dataset),
@@ -245,7 +248,19 @@ class TradeReviewAnalyticsService:
             "outcomes": self._load_outcomes(filters),
         }
 
-    def _load_runs(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
+    def _load_summary_dataset(self, filters: AnalyticsFilters) -> dict[str, list[dict[str, Any]]]:
+        lim = ANALYTICS_SUMMARY_ROW_LIMIT
+        return {
+            "runs": self._load_runs(filters, row_limit=lim),
+            "signals": self._load_signals(filters, row_limit=lim),
+            "risk_events": self._load_risk_events(filters, row_limit=lim),
+            "orders": self._load_orders(filters, row_limit=lim),
+            "outcomes": self._load_outcomes(filters, row_limit=lim, include_signal_snapshot=False),
+        }
+
+    def _load_runs(
+        self, filters: AnalyticsFilters, *, row_limit: int | None = None
+    ) -> list[dict[str, Any]]:
         timestamp_expr = func.coalesce(StrategyRun.completed_at, StrategyRun.started_at)
         rows = self._limited_scalars(
             self._apply_filters(
@@ -258,6 +273,7 @@ class TradeReviewAnalyticsService:
                 user_column=StrategyRun.user_id,
             ).order_by(timestamp_expr.desc()),
             dataset_name="runs",
+            row_limit=row_limit,
         )
         payload: list[dict[str, Any]] = []
         for row in rows:
@@ -276,7 +292,9 @@ class TradeReviewAnalyticsService:
             )
         return payload
 
-    def _load_signals(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
+    def _load_signals(
+        self, filters: AnalyticsFilters, *, row_limit: int | None = None
+    ) -> list[dict[str, Any]]:
         rows = self._limited_scalars(
             self._apply_filters(
                 select(StrategySignalRecord),
@@ -288,6 +306,7 @@ class TradeReviewAnalyticsService:
                 user_column=StrategySignalRecord.user_id,
             ).order_by(StrategySignalRecord.timestamp.desc()),
             dataset_name="signals",
+            row_limit=row_limit,
         )
         payload: list[dict[str, Any]] = []
         for row in rows:
@@ -302,7 +321,9 @@ class TradeReviewAnalyticsService:
             )
         return payload
 
-    def _load_risk_events(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
+    def _load_risk_events(
+        self, filters: AnalyticsFilters, *, row_limit: int | None = None
+    ) -> list[dict[str, Any]]:
         rows = self._limited_scalars(
             self._apply_filters(
                 select(RiskEvent),
@@ -314,6 +335,7 @@ class TradeReviewAnalyticsService:
                 user_column=RiskEvent.user_id,
             ).order_by(RiskEvent.created_at.desc()),
             dataset_name="risk_events",
+            row_limit=row_limit,
         )
         payload: list[dict[str, Any]] = []
         for row in rows:
@@ -332,7 +354,9 @@ class TradeReviewAnalyticsService:
             )
         return payload
 
-    def _load_orders(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
+    def _load_orders(
+        self, filters: AnalyticsFilters, *, row_limit: int | None = None
+    ) -> list[dict[str, Any]]:
         timestamp_expr = func.coalesce(
             ExecutionOrder.completed_at,
             ExecutionOrder.failed_at,
@@ -350,6 +374,7 @@ class TradeReviewAnalyticsService:
                 user_column=ExecutionOrder.user_id,
             ).order_by(timestamp_expr.desc()),
             dataset_name="orders",
+            row_limit=row_limit,
         )
         payload: list[dict[str, Any]] = []
         for row in rows:
@@ -371,9 +396,15 @@ class TradeReviewAnalyticsService:
             )
         return payload
 
-    def _load_outcomes(self, filters: AnalyticsFilters) -> list[dict[str, Any]]:
-        rows = self._limited_execute(
-            self._apply_filters(
+    def _load_outcomes(
+        self,
+        filters: AnalyticsFilters,
+        *,
+        row_limit: int | None = None,
+        include_signal_snapshot: bool = True,
+    ) -> list[dict[str, Any]]:
+        if include_signal_snapshot:
+            base_query = (
                 select(
                     TradeOutcomeFeature,
                     ExecutionTradeRecord,
@@ -387,7 +418,16 @@ class TradeReviewAnalyticsService:
                     StrategySignalSnapshot,
                     TradeOutcomeFeature.signal_snapshot_id == StrategySignalSnapshot.id,
                     isouter=True,
-                ),
+                )
+            )
+        else:
+            base_query = select(TradeOutcomeFeature, ExecutionTradeRecord).join(
+                ExecutionTradeRecord,
+                TradeOutcomeFeature.trade_id == ExecutionTradeRecord.id,
+            )
+        rows = self._limited_execute(
+            self._apply_filters(
+                base_query,
                 filters=filters,
                 strategy_column=TradeOutcomeFeature.strategy_name,
                 symbol_column=TradeOutcomeFeature.token_symbol,
@@ -396,78 +436,115 @@ class TradeReviewAnalyticsService:
                 user_column=ExecutionTradeRecord.user_id,
             ).order_by(TradeOutcomeFeature.created_at.desc()),
             dataset_name="outcomes",
+            row_limit=row_limit,
         )
         payload: list[dict[str, Any]] = []
-        for outcome, trade, snapshot in rows:
-            mfe_pct = _to_decimal(outcome.max_favorable_excursion_pct) * Decimal("100")
-            mae_pct = _to_decimal(outcome.max_adverse_excursion_pct) * Decimal("100")
-            realized_return_pct = _to_decimal(outcome.realized_return_pct) * Decimal("100")
-            giveback_pct = _to_decimal(outcome.profit_giveback_pct) * Decimal("100")
-            signal_timestamp = snapshot.timestamp if snapshot is not None else None
-            signal_spread_pct = (
-                _to_decimal(snapshot.spread_pct) if snapshot is not None else Decimal("0")
-            )
-            signal_slippage_pct = (
-                _to_decimal(snapshot.estimated_slippage_pct)
-                if snapshot is not None
-                else Decimal("0")
-            )
-            confidence_score = (
-                float(snapshot.confidence_score)
-                if snapshot is not None and snapshot.confidence_score is not None
-                else None
-            )
-            payload.append(
-                {
-                    "outcome_id": str(outcome.id),
-                    "trade_id": str(outcome.trade_id) if outcome.trade_id else None,
-                    "signal_snapshot_id": (
-                        str(outcome.signal_snapshot_id) if outcome.signal_snapshot_id else None
-                    ),
-                    "strategy_name": outcome.strategy_name,
-                    "symbol": outcome.token_symbol,
-                    "trading_mode": outcome.trading_mode,
-                    "side": trade.side,
-                    "entry_price": _to_decimal(outcome.entry_price),
-                    "exit_price": _to_decimal(outcome.exit_price),
-                    "filled_size": _to_decimal(outcome.filled_size),
-                    "fee_paid": _to_decimal(outcome.fee_paid),
-                    "slippage_realized": _to_decimal(outcome.slippage_realized),
-                    "hold_seconds": int(outcome.hold_seconds or 0),
-                    "realized_pnl": _to_decimal(outcome.realized_pnl),
-                    "realized_return_pct": realized_return_pct,
-                    "max_favorable_excursion_pct": mfe_pct,
-                    "max_adverse_excursion_pct": mae_pct,
-                    "profit_giveback_pct": giveback_pct,
-                    "partial_profit_taken": bool(outcome.partial_profit_taken),
-                    "remaining_position_outcome": outcome.remaining_position_outcome,
-                    "exit_reason": outcome.exit_reason,
-                    "win_loss_label": (outcome.win_loss_label or "").lower(),
-                    "profitable_after_fees_label": (
-                        outcome.profitable_after_fees_label or ""
-                    ).lower(),
-                    "signal_timestamp": signal_timestamp,
-                    "signal_spread_pct": signal_spread_pct * Decimal("100"),
-                    "signal_estimated_slippage_pct": signal_slippage_pct * Decimal("100"),
-                    "signal_confidence_score": confidence_score,
-                    "timestamp": outcome.created_at,
-                }
-            )
+        if include_signal_snapshot:
+            for outcome, trade, snapshot in rows:
+                self._append_outcome_payload_row(
+                    payload,
+                    outcome,
+                    trade,
+                    snapshot=snapshot,
+                )
+        else:
+            for outcome, trade in rows:
+                self._append_outcome_payload_row(payload, outcome, trade, snapshot=None)
         return payload
 
-    def _limited_scalars(self, query: Select[Any], *, dataset_name: str) -> list[Any]:
-        rows = self._db.scalars(query.limit(self._budget.dataset_row_limit + 1)).all()
-        return self._record_dataset_budget(dataset_name, rows)
+    def _append_outcome_payload_row(
+        self,
+        payload: list[dict[str, Any]],
+        outcome: TradeOutcomeFeature,
+        trade: ExecutionTradeRecord,
+        *,
+        snapshot: StrategySignalSnapshot | None,
+    ) -> None:
+        mfe_pct = _to_decimal(outcome.max_favorable_excursion_pct) * Decimal("100")
+        mae_pct = _to_decimal(outcome.max_adverse_excursion_pct) * Decimal("100")
+        realized_return_pct = _to_decimal(outcome.realized_return_pct) * Decimal("100")
+        giveback_pct = _to_decimal(outcome.profit_giveback_pct) * Decimal("100")
+        signal_timestamp = snapshot.timestamp if snapshot is not None else None
+        signal_spread_pct = (
+            _to_decimal(snapshot.spread_pct) if snapshot is not None else Decimal("0")
+        )
+        signal_slippage_pct = (
+            _to_decimal(snapshot.estimated_slippage_pct) if snapshot is not None else Decimal("0")
+        )
+        confidence_score = (
+            float(snapshot.confidence_score)
+            if snapshot is not None and snapshot.confidence_score is not None
+            else None
+        )
+        payload.append(
+            {
+                "outcome_id": str(outcome.id),
+                "trade_id": str(outcome.trade_id) if outcome.trade_id else None,
+                "signal_snapshot_id": (
+                    str(outcome.signal_snapshot_id) if outcome.signal_snapshot_id else None
+                ),
+                "strategy_name": outcome.strategy_name,
+                "symbol": outcome.token_symbol,
+                "trading_mode": outcome.trading_mode,
+                "side": trade.side,
+                "entry_price": _to_decimal(outcome.entry_price),
+                "exit_price": _to_decimal(outcome.exit_price),
+                "filled_size": _to_decimal(outcome.filled_size),
+                "fee_paid": _to_decimal(outcome.fee_paid),
+                "slippage_realized": _to_decimal(outcome.slippage_realized),
+                "hold_seconds": int(outcome.hold_seconds or 0),
+                "realized_pnl": _to_decimal(outcome.realized_pnl),
+                "realized_return_pct": realized_return_pct,
+                "max_favorable_excursion_pct": mfe_pct,
+                "max_adverse_excursion_pct": mae_pct,
+                "profit_giveback_pct": giveback_pct,
+                "partial_profit_taken": bool(outcome.partial_profit_taken),
+                "remaining_position_outcome": outcome.remaining_position_outcome,
+                "exit_reason": outcome.exit_reason,
+                "win_loss_label": (outcome.win_loss_label or "").lower(),
+                "profitable_after_fees_label": (outcome.profitable_after_fees_label or "").lower(),
+                "signal_timestamp": signal_timestamp,
+                "signal_spread_pct": signal_spread_pct * Decimal("100"),
+                "signal_estimated_slippage_pct": signal_slippage_pct * Decimal("100"),
+                "signal_confidence_score": confidence_score,
+                "timestamp": outcome.created_at,
+            }
+        )
 
-    def _limited_execute(self, query: Select[Any], *, dataset_name: str) -> list[Any]:
-        rows = self._db.execute(query.limit(self._budget.dataset_row_limit + 1)).all()
-        return self._record_dataset_budget(dataset_name, rows)
+    def _effective_row_limit(self, row_limit: int | None) -> int:
+        return row_limit if row_limit is not None else self._budget.dataset_row_limit
 
-    def _record_dataset_budget(self, dataset_name: str, rows: list[Any]) -> list[Any]:
-        truncated = len(rows) > self._budget.dataset_row_limit
-        limited_rows = rows[: self._budget.dataset_row_limit]
+    def _limited_scalars(
+        self,
+        query: Select[Any],
+        *,
+        dataset_name: str,
+        row_limit: int | None = None,
+    ) -> list[Any]:
+        eff = self._effective_row_limit(row_limit)
+        rows = self._db.scalars(query.limit(eff + 1)).all()
+        truncated = len(rows) > eff
+        limited_rows = rows[:eff]
         self._budget.datasets[dataset_name] = {
-            "limit": self._budget.dataset_row_limit,
+            "limit": eff,
+            "returned": len(limited_rows),
+            "truncated": truncated,
+        }
+        return limited_rows
+
+    def _limited_execute(
+        self,
+        query: Select[Any],
+        *,
+        dataset_name: str,
+        row_limit: int | None = None,
+    ) -> list[Any]:
+        eff = self._effective_row_limit(row_limit)
+        rows = self._db.execute(query.limit(eff + 1)).all()
+        truncated = len(rows) > eff
+        limited_rows = rows[:eff]
+        self._budget.datasets[dataset_name] = {
+            "limit": eff,
             "returned": len(limited_rows),
             "truncated": truncated,
         }

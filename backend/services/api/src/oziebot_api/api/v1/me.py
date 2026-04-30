@@ -47,6 +47,7 @@ router = APIRouter(prefix="/me", tags=["me"])
 
 DASHBOARD_CACHE_TTL_SECONDS = 120
 ANALYTICS_CACHE_TTL_SECONDS = 120
+ANALYTICS_SUMMARY_CACHE_TTL_SECONDS = 300
 DASHBOARD_HISTORY_LOOKBACK_DAYS = 30
 DASHBOARD_POSITIONS_LIMIT = 50
 DASHBOARD_ACTIVE_TRADES_LIMIT = 20
@@ -593,7 +594,7 @@ def _analytics_cache_params(filters: AnalyticsFilters) -> dict[str, Any]:
         "symbol": filters.symbol,
         "start_at": _as_utc(filters.start_at).isoformat() if filters.start_at else None,
         "end_at": _as_utc(filters.end_at).isoformat() if filters.end_at else None,
-        "version": 3,
+        "version": 5,
     }
 
 
@@ -821,6 +822,7 @@ def _cached_analytics_slice_payload(
     end_at: datetime | None,
     force_refresh: bool = False,
     builder,
+    ttl_seconds: int | None = None,
 ) -> dict[str, Any]:
     filters, window_meta = _analytics_filters(
         user=user,
@@ -830,12 +832,13 @@ def _cached_analytics_slice_payload(
         start_at=start_at,
         end_at=end_at,
     )
+    cache_ttl = ANALYTICS_CACHE_TTL_SECONDS if ttl_seconds is None else ttl_seconds
     cache = ReadModelCache(settings)
     payload = cache.get_or_build(
         namespace=namespace,
         identity=str(user.id),
         params=_analytics_cache_params(filters),
-        ttl_seconds=ANALYTICS_CACHE_TTL_SECONDS,
+        ttl_seconds=cache_ttl,
         force_refresh=force_refresh,
         builder=lambda: builder(TradeReviewAnalyticsService(db), filters),
     )
@@ -1713,6 +1716,7 @@ def read_trade_review_analytics_summary(
         end_at=end_at,
         force_refresh=force_refresh,
         builder=lambda service, filters: service.build_summary(filters),
+        ttl_seconds=ANALYTICS_SUMMARY_CACHE_TTL_SECONDS,
     )
     return _analytics_summary_payload(payload)
 
