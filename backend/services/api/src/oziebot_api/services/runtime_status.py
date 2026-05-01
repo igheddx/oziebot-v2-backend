@@ -93,21 +93,43 @@ def _normalize_runtime_service(
 
 
 def _read_runtime_registry(db: Session) -> tuple[dict[str, dict[str, object]], str | None]:
-    eng = None
+    names = [svc["service"] for svc in RUNTIME_SERVICES]
+    merged: dict[str, dict[str, object]] = {}
+    errors: list[str] = []
+    observability = get_observability_store()
+
+    # S3 observability when configured — may lag or be unset while Postgres holds live heartbeats.
+    if observability is not None:
+        try:
+            merged.update(read_runtime_statuses(None, names))
+        except Exception as exc:
+            log.warning("runtime status S3 observability read failed", exc_info=True)
+            errors.append(f"s3_observability:{exc}")
+
+    bind = db.get_bind()
+    if bind is None:
+        if observability is None:
+            return {}, "database_session_unavailable"
+        if not merged and errors:
+            return {}, "; ".join(errors)
+        return merged, None
+
     try:
-        if get_observability_store() is None:
-            bind = db.get_bind()
-            if bind is None:
-                return {}, "database_session_unavailable"
-            eng = bind
-        snapshots = read_runtime_statuses(
-            eng,
-            [service["service"] for service in RUNTIME_SERVICES],
+        from_pg = read_runtime_statuses(
+            bind,
+            names,
+            use_observability_store=False,
         )
-        return snapshots, None
+        overlaid = dict(merged)
+        overlaid.update(from_pg)
+        merged = overlaid
     except Exception as exc:
-        log.warning("runtime status registry unavailable", exc_info=True)
-        return {}, str(exc)
+        log.warning("runtime status Postgres runtime_kv read failed", exc_info=True)
+        errors.append(f"postgres_runtime_kv:{exc}")
+
+    if not merged and errors:
+        return {}, "; ".join(errors)
+    return merged, None
 
 
 def _aggregate_mode_activity(

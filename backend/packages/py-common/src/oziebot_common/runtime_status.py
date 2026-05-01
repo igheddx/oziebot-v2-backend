@@ -41,13 +41,22 @@ def publish_runtime_status(
 def read_runtime_statuses(
     engine: Engine | None,
     service_names: Iterable[str],
+    *,
+    use_observability_store: bool = True,
 ) -> dict[str, dict[str, object]]:
+    """Load worker heartbeat payloads keyed by logical service name.
+
+    When ``use_observability_store`` is True (default), an S3 observability backend
+    (``OBSERVABILITY_S3_BUCKET``) wins if configured. Pass ``False`` to read only
+    from Postgres ``runtime_kv`` using ``engine``.
+    """
     names = [str(name).strip() for name in service_names if str(name).strip()]
     if not names:
         return {}
-    store = get_observability_store()
-    if store is not None:
-        return store.read_runtime_statuses(names)
+    if use_observability_store:
+        store = get_observability_store()
+        if store is not None:
+            return store.read_runtime_statuses(names)
     if engine is None:
         return {}
     kv = PostgresRuntimeKV(engine)
