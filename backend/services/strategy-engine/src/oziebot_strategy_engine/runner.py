@@ -17,7 +17,9 @@ from oziebot_common.dynamic_sizing import (
     DynamicSizingInput,
     calculate_dynamic_trade_size,
 )
-from oziebot_common.queues import QueueNames, push_json, strategy_signal_to_json
+from oziebot_common.postgres_runtime_kv import PostgresRuntimeKV
+from oziebot_common.queues import QueueNames, strategy_signal_to_json
+from oziebot_common.worker_outbox import enqueue_worker_payload
 from oziebot_common.fee_model import (
     SETTING_EXECUTION_FEE_MODEL,
     calculate_round_trip_cost_bps,
@@ -79,10 +81,14 @@ class StrategyScheduleState:
 
 class StrategyRunner:
     def __init__(
-        self, *, engine: Engine, redis_client, candle_granularity_sec: int = 60
+        self,
+        *,
+        engine: Engine,
+        runtime_kv: PostgresRuntimeKV,
+        candle_granularity_sec: int = 60,
     ):
         self._engine = engine
-        self._redis = redis_client
+        self._kv = runtime_kv
         self._schedule = StrategyScheduleState()
         self._candle_granularity_sec = candle_granularity_sec
         self._metrics: Counter[str] = Counter()
@@ -479,14 +485,15 @@ class StrategyRunner:
                             created_at=now,
                         )
                         q = QueueNames.signal_generated(mode)
-                        push_json(
-                            self._redis,
-                            q,
-                            {
-                                "signal": strategy_signal_to_json(event),
-                                "trace_id": trace_id,
-                            },
-                        )
+                        if self._engine is not None:
+                            enqueue_worker_payload(
+                                self._engine,
+                                q,
+                                {
+                                    "signal": strategy_signal_to_json(event),
+                                    "trace_id": trace_id,
+                                },
+                            )
                         processed += 1
                         signal_generated = event.action != SignalType.HOLD
                         if signal_generated:
@@ -2211,8 +2218,8 @@ class StrategyRunner:
         return position_state
 
     def _load_market_snapshot(self, symbol: str) -> MarketSnapshot | None:
-        bbo_raw = self._redis.get(f"oziebot:md:bbo:{symbol}")
-        candle_raw = self._redis.get(
+        bbo_raw = self._kv.get(f"oziebot:md:bbo:{symbol}")
+        candle_raw = self._kv.get(
             f"oziebot:md:candle:{self._candle_granularity_sec}:{symbol}"
         )
         if not bbo_raw or not candle_raw:
@@ -2222,7 +2229,7 @@ class StrategyRunner:
         candle = json.loads(candle_raw)
 
         # Load rolling candle history for MA calculations (newest first)
-        history_raw = self._redis.lrange(
+        history_raw = self._kv.lrange_strings(
             f"oziebot:md:candles:{self._candle_granularity_sec}:{symbol}", 0, 49
         )
         candle_closes: list[float] = []
@@ -2427,6 +2434,7 @@ class StrategyRunner:
             )
 
 
-def build_runner(database_url: str, redis_client) -> StrategyRunner:
+def build_runner(database_url: str) -> StrategyRunner:
     engine = create_engine(database_url)
-    return StrategyRunner(engine=engine, redis_client=redis_client)
+    kv = PostgresRuntimeKV(engine)
+    return StrategyRunner(engine=engine, runtime_kv=kv)

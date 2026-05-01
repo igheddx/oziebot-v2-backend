@@ -10,6 +10,7 @@ build/
 .venv/
 venv/
 .env
+.env.lean
 .env.local
 .env.*.local
 
@@ -31,6 +32,12 @@ next-env.d.ts
 .coverage
 htmlcov/
 *.db
+
+# AWS live snapshots (may contain ARNs/endpoints; keep out of git)
+infrastructure/aws/archive/snapshots/
+
+# Local lean backups
+backups/lean-pg/
 
 # Terraform
 .terraform/

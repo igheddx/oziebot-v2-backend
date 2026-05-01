@@ -2,121 +2,115 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from oziebot_common.trade_log import read_trade_log_events
-from oziebot_common.trade_log_intelligence import read_trade_log_summaries
+import pytest
+
+from oziebot_common.trade_log import build_trade_log_event
 from oziebot_market_data_ingestor.normalizer import normalize_bbo, normalize_trade
 from oziebot_market_data_ingestor.signal_panel import SignalPanelEmitter
 
 
-class FakePipeline:
-    def __init__(self, client: "FakeRedis") -> None:
-        self._client = client
-        self._ops: list[tuple[str, tuple, dict]] = []
+@pytest.fixture
+def patched_trade_pipeline(monkeypatch):
+    samples: list[dict] = []
+    summaries: dict[str, dict] = {}
+    events: list[dict] = []
 
-    def zadd(self, *args, **kwargs):
-        self._ops.append(("zadd", args, kwargs))
-        return self
+    def append_sample(_engine, *, symbol, sample, timestamp=None, retention_seconds=60):  # noqa: ARG001
+        t = (timestamp or datetime.now(UTC)).astimezone(UTC)
+        row = {
+            "timestamp": t.isoformat(),
+            "symbol": str(symbol).upper(),
+            "sample": dict(sample),
+        }
+        samples.append(row)
+        return row
 
-    def zremrangebyscore(self, *args, **kwargs):
-        self._ops.append(("zremrangebyscore", args, kwargs))
-        return self
+    def read_samples(_engine, *, symbol, window_seconds=60, now=None):  # noqa: ARG001
+        _ = window_seconds
+        sym = str(symbol).upper()
+        return [r for r in samples if r["symbol"] == sym]
 
-    def expire(self, *args, **kwargs):
-        self._ops.append(("expire", args, kwargs))
-        return self
+    def write_summary(_engine, *, symbol, summary, retention_seconds=60):  # noqa: ARG001
+        sym = str(symbol).upper()
+        summaries[sym] = dict(summary)
+        return summaries[sym]
 
-    def sadd(self, *args, **kwargs):
-        self._ops.append(("sadd", args, kwargs))
-        return self
+    def append_event(_engine, **kwargs):  # noqa: ARG001
+        ev = build_trade_log_event(**kwargs)
+        events.append(ev)
+        return ev
 
-    def setex(self, *args, **kwargs):
-        self._ops.append(("setex", args, kwargs))
-        return self
+    def read_summaries(_engine, *, symbol=None):  # noqa: ARG001
+        if symbol:
+            s = summaries.get(str(symbol).upper())
+            return [s] if s else []
+        return sorted(
+            summaries.values(),
+            key=lambda item: (
+                -int(item.get("signal_quality_score") or 0),
+                str(item.get("symbol") or ""),
+            ),
+        )
 
-    def get(self, *args, **kwargs):
-        self._ops.append(("get", args, kwargs))
-        return self
-
-    def execute(self):
-        results = []
-        for name, args, kwargs in self._ops:
-            results.append(getattr(self._client, name)(*args, **kwargs))
-        return results
-
-
-class FakeRedis:
-    def __init__(self) -> None:
-        self._sorted: dict[str, dict[str, float]] = {}
-        self._sets: dict[str, set[str]] = {}
-        self._strings: dict[str, str] = {}
-
-    def pipeline(self) -> FakePipeline:
-        return FakePipeline(self)
-
-    def zadd(self, key: str, mapping: dict[str, float]) -> None:
-        bucket = self._sorted.setdefault(key, {})
-        bucket.update(mapping)
-
-    def zremrangebyscore(self, key: str, min_score, max_score) -> None:
-        bucket = self._sorted.setdefault(key, {})
-        max_value = float(max_score)
-        if min_score == "-inf":
-            to_delete = [
-                member for member, score in bucket.items() if score <= max_value
-            ]
-        else:
-            min_value = float(min_score)
-            to_delete = [
-                member
-                for member, score in bucket.items()
-                if min_value <= score <= max_value
-            ]
-        for member in to_delete:
-            bucket.pop(member, None)
-
-    def expire(self, key: str, seconds: int) -> None:  # noqa: ARG002
-        return None
-
-    def sadd(self, key: str, *values: str) -> None:
-        bucket = self._sets.setdefault(key, set())
-        bucket.update(values)
-
-    def smembers(self, key: str) -> set[str]:
-        return self._sets.get(key, set())
-
-    def setex(self, key: str, seconds: int, value: str) -> None:  # noqa: ARG002
-        self._strings[key] = value
-
-    def get(self, key: str) -> str | None:
-        return self._strings.get(key)
-
-    def zrevrangebyscore(
-        self,
-        key: str,
-        max_score,
-        min_score,
+    def read_events(
+        _engine,
         *,
-        start: int = 0,
-        num: int | None = None,
-    ) -> list[str]:
-        bucket = self._sorted.get(key, {})
-        min_value = float(min_score)
-        max_value = float("inf") if max_score == "+inf" else float(max_score)
-        rows = [
-            member
-            for member, score in sorted(
-                bucket.items(), key=lambda item: item[1], reverse=True
-            )
-            if min_value <= score <= max_value
-        ]
-        if num is None:
-            return rows[start:]
-        return rows[start : start + num]
+        window_seconds=120,
+        limit=200,
+        symbol=None,
+        event_type=None,
+        now=None,
+    ):  # noqa: ARG001
+        current = (now or datetime.now(UTC)).astimezone(UTC)
+        cutoff = current - timedelta(seconds=window_seconds)
+        out: list[dict] = []
+        for ev in events:
+            ts = datetime.fromisoformat(str(ev["timestamp"]).replace("Z", "+00:00"))
+            if ts < cutoff:
+                continue
+            if symbol and str(ev.get("symbol") or "").upper() != str(symbol).upper():
+                continue
+            if (
+                event_type
+                and str(ev.get("event_type") or "").lower() != str(event_type).lower()
+            ):
+                continue
+            out.append(ev)
+        return out[-limit:]
+
+    monkeypatch.setattr(
+        "oziebot_market_data_ingestor.signal_panel.append_trade_log_sample",
+        append_sample,
+    )
+    monkeypatch.setattr(
+        "oziebot_market_data_ingestor.signal_panel.read_trade_log_samples",
+        read_samples,
+    )
+    monkeypatch.setattr(
+        "oziebot_market_data_ingestor.signal_panel.write_trade_log_summary",
+        write_summary,
+    )
+    monkeypatch.setattr(
+        "oziebot_market_data_ingestor.signal_panel.append_trade_log_event",
+        append_event,
+    )
+
+    monkeypatch.setattr(
+        "oziebot_common.trade_log.read_trade_log_events",
+        read_events,
+    )
+    monkeypatch.setattr(
+        "oziebot_common.trade_log_intelligence.read_trade_log_summaries",
+        read_summaries,
+    )
+
+    return events
 
 
-def test_signal_panel_emits_summary_and_market_snapshot_events() -> None:
-    fake_redis = FakeRedis()
-    emitter = SignalPanelEmitter(fake_redis)
+def test_signal_panel_emits_summary_and_market_snapshot_events(
+    patched_trade_pipeline,
+) -> None:  # noqa: ARG001
+    emitter = SignalPanelEmitter(engine=None)
     start = datetime.now(UTC)
 
     first_bbo = normalize_bbo(
@@ -156,13 +150,16 @@ def test_signal_panel_emits_summary_and_market_snapshot_events() -> None:
     emitter.observe_trade(second_trade)
     emitter.force_emit("BTC-USD", now=second_trade_at)
 
-    summaries = read_trade_log_summaries(fake_redis)
+    from oziebot_common.trade_log import read_trade_log_events
+    from oziebot_common.trade_log_intelligence import read_trade_log_summaries
+
+    summaries = read_trade_log_summaries(None, symbol=None)
     assert len(summaries) == 1
     assert summaries[0]["symbol"] == "BTC-USD"
     assert summaries[0]["market_state"]["trend"] in {"UP", "FLAT"}
 
     events = read_trade_log_events(
-        fake_redis,
+        None,
         now=second_trade_at,
         window_seconds=120,
         limit=20,

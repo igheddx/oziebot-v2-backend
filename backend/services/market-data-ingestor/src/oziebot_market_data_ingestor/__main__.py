@@ -6,22 +6,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-import redis
 from sqlalchemy import create_engine
 
-from oziebot_common import QueueNames, redis_from_url
+from oziebot_common import QueueNames
 from oziebot_common.health import start_health_server
-from oziebot_common.queues import operational_alert_to_json, push_json
+from oziebot_common.postgres_runtime_kv import PostgresRuntimeKV
+from oziebot_common.queues import operational_alert_to_json
 from oziebot_common.trade_log import append_trade_log_event
+from oziebot_common.worker_outbox import enqueue_worker_payload
 from oziebot_market_data_ingestor.coinbase_client import (
     CoinbaseRestClient,
     CoinbaseWsClient,
 )
 from oziebot_market_data_ingestor.config import get_settings
-from oziebot_market_data_ingestor.monitoring import (
-    PersistentStaleMonitor,
-    RedisPressureMonitor,
-)
+from oziebot_market_data_ingestor.monitoring import PersistentStaleMonitor
 from oziebot_market_data_ingestor.normalizer import (
     normalize_bbo,
     normalize_candle,
@@ -29,7 +27,7 @@ from oziebot_market_data_ingestor.normalizer import (
     normalize_trade,
 )
 from oziebot_market_data_ingestor.policy_refresh import TokenPolicyRefresher
-from oziebot_market_data_ingestor.redis_cache import RedisMarketCache
+from oziebot_market_data_ingestor.postgres_market_cache import PostgresMarketCache
 from oziebot_market_data_ingestor.signal_panel import SignalPanelEmitter
 from oziebot_market_data_ingestor.stale import StaleDataDetector, StaleThresholds
 from oziebot_market_data_ingestor.storage import MarketDataStore
@@ -40,11 +38,13 @@ logging.basicConfig(level=logging.INFO)
 RAW_STREAM_LOG_SAMPLE_SECONDS = 15
 
 
-def _push_json_best_effort(r, key: str, payload: dict, *, op_name: str) -> None:
+def _enqueue_ops_best_effort(engine, payload: dict, *, op_name: str) -> None:
     try:
-        push_json(r, key, payload)
-    except redis.RedisError as exc:
-        log.warning("redis queue write failed op=%s key=%s err=%s", op_name, key, exc)
+        if engine is None:
+            return
+        enqueue_worker_payload(engine, QueueNames.ops_alerts(), payload)
+    except Exception as exc:
+        log.warning("ops alert enqueue failed op=%s err=%s", op_name, exc)
 
 
 class TradeLogSampler:
@@ -232,8 +232,7 @@ def _orderbook_summary(top) -> tuple[str, dict[str, object]]:
 async def _reconcile_candles(
     rest: CoinbaseRestClient,
     store: MarketDataStore,
-    cache: RedisMarketCache,
-    log_client,
+    cache: PostgresMarketCache,
     stale: StaleDataDetector,
     products: list[str],
     granularity: int,
@@ -268,8 +267,7 @@ async def _reconcile_candles(
 async def _reconcile_trades(
     rest: CoinbaseRestClient,
     store: MarketDataStore,
-    cache: RedisMarketCache,
-    log_client,
+    cache: PostgresMarketCache,
     stale: StaleDataDetector,
     products: list[str],
     limit: int,
@@ -296,8 +294,8 @@ async def _reconcile_trades(
 async def _reconcile_bbo(
     rest: CoinbaseRestClient,
     store: MarketDataStore,
-    cache: RedisMarketCache,
-    log_client,
+    cache: PostgresMarketCache,
+    trade_log_engine,
     stale: StaleDataDetector,
     products: list[str],
     signal_panel: SignalPanelEmitter | None = None,
@@ -315,10 +313,10 @@ async def _reconcile_bbo(
             stale.mark_bbo(item.product_id, item.ingest_time)
             if signal_panel is not None:
                 signal_panel.observe_bbo(item)
-            if log_client is not None:
+            if trade_log_engine is not None:
                 message, details = _bbo_summary(item, streamed=False)
                 append_trade_log_event(
-                    log_client,
+                    trade_log_engine,
                     symbol=product_id,
                     event_type="bbo_update",
                     message=message,
@@ -336,8 +334,8 @@ async def _seed_market_cache(
     *,
     rest: CoinbaseRestClient,
     store: MarketDataStore,
-    cache: RedisMarketCache,
-    log_client,
+    cache: PostgresMarketCache,
+    trade_log_engine,
     stale: StaleDataDetector,
     products: list[str],
     trade_limit: int,
@@ -347,15 +345,12 @@ async def _seed_market_cache(
 ) -> None:
     # Seed longer-horizon candles first, then refresh trade/BBO last so the
     # freshest short-horizon market data is present when the service becomes ready.
-    await _reconcile_candles(
-        rest, store, cache, log_client, stale, products, granularity_sec
-    )
+    await _reconcile_candles(rest, store, cache, stale, products, granularity_sec)
     health.touch()
     await _reconcile_trades(
         rest,
         store,
         cache,
-        log_client,
         stale,
         products,
         trade_limit,
@@ -366,7 +361,7 @@ async def _seed_market_cache(
         rest,
         store,
         cache,
-        log_client,
+        trade_log_engine,
         stale,
         products,
         signal_panel,
@@ -377,18 +372,14 @@ async def _seed_market_cache(
 async def main() -> None:
     s = get_settings()
     engine = create_engine(s.database_url)
-    r = redis_from_url(
-        s.redis_url,
-        probe=True,
-        socket_connect_timeout=3,
-        socket_timeout=3,
-    )
+    kv = PostgresRuntimeKV(engine)
+    trade_log_engine = engine if s.raw_trade_log_enabled else None
 
     universe = SymbolUniverseProvider(engine)
     products = universe.list_active_product_ids()
 
-    cache = RedisMarketCache(
-        r,
+    cache = PostgresMarketCache(
+        kv,
         ttl_seconds=s.cache_ttl_seconds,
         candle_history_ttl_seconds=s.candle_history_ttl_seconds,
         candle_history_limit=s.candle_history_limit,
@@ -397,7 +388,7 @@ async def main() -> None:
     refresher = TokenPolicyRefresher(engine)
     signal_panel = (
         SignalPanelEmitter(
-            r,
+            engine,
             retention_seconds=s.signal_panel_retention_seconds,
             sample_interval_seconds=s.signal_panel_sample_interval_seconds,
             snapshot_event_interval_seconds=s.signal_panel_snapshot_event_interval_seconds,
@@ -416,12 +407,6 @@ async def main() -> None:
     ws = CoinbaseWsClient(s.coinbase_ws_url)
     rest = CoinbaseRestClient(s.coinbase_rest_url)
     health = start_health_server("market-data-ingestor")
-    redis_monitor = RedisPressureMonitor(
-        warning_pct=s.redis_pressure_warning_pct,
-        critical_pct=s.redis_pressure_critical_pct,
-        check_interval_seconds=s.redis_pressure_check_interval_seconds,
-        alert_cooldown_seconds=s.operational_alert_cooldown_seconds,
-    )
     stale_monitor = PersistentStaleMonitor(
         alert_after_seconds=s.stale_alert_after_seconds,
         alert_cooldown_seconds=s.operational_alert_cooldown_seconds,
@@ -442,7 +427,7 @@ async def main() -> None:
                 rest=rest,
                 store=store,
                 cache=cache,
-                log_client=r if s.raw_trade_log_enabled else None,
+                trade_log_engine=trade_log_engine,
                 stale=stale,
                 products=products,
                 trade_limit=s.trade_recovery_limit,
@@ -471,7 +456,7 @@ async def main() -> None:
                     rest=rest,
                     store=store,
                     cache=cache,
-                    log_client=r if s.raw_trade_log_enabled else None,
+                    trade_log_engine=trade_log_engine,
                     stale=stale,
                     products=products,
                     trade_limit=s.trade_recovery_limit,
@@ -500,7 +485,7 @@ async def main() -> None:
                         ):
                             message, details = _trade_tick_summary(trade)
                             append_trade_log_event(
-                                r,
+                                trade_log_engine,
                                 symbol=trade.product_id,
                                 event_type="trade_tick",
                                 message=message,
@@ -524,7 +509,7 @@ async def main() -> None:
                         ):
                             message, details = _bbo_summary(bbo, streamed=True)
                             append_trade_log_event(
-                                r,
+                                trade_log_engine,
                                 symbol=bbo.product_id,
                                 event_type="bbo_update",
                                 message=message,
@@ -564,7 +549,7 @@ async def main() -> None:
                                     rest=rest,
                                     store=store,
                                     cache=cache,
-                                    log_client=r if s.raw_trade_log_enabled else None,
+                                    trade_log_engine=trade_log_engine,
                                     stale=stale,
                                     products=universe_change.added,
                                     trade_limit=s.trade_recovery_limit,
@@ -579,25 +564,9 @@ async def main() -> None:
                         stale_map, now=now
                     )
                     health.set_detail("marketDataStale", stale_details)
-                    redis_details = {}
-                    redis_alert = None
-                    try:
-                        redis_details, redis_alert = redis_monitor.sample(r, now=now)
-                    except Exception as exc:
-                        redis_details = {"status": "unavailable", "error": str(exc)}
-                        log.warning("redis pressure sampling failed err=%s", exc)
-                    health.set_detail("redisPressure", redis_details)
-                    if s.ops_alerts_enabled and redis_alert is not None:
-                        _push_json_best_effort(
-                            r,
-                            QueueNames.ops_alerts(),
-                            operational_alert_to_json(redis_alert),
-                            op_name="redis_alert",
-                        )
                     if s.ops_alerts_enabled and stale_alert is not None:
-                        _push_json_best_effort(
-                            r,
-                            QueueNames.ops_alerts(),
+                        _enqueue_ops_best_effort(
+                            engine,
                             operational_alert_to_json(stale_alert),
                             op_name="stale_alert",
                         )
@@ -617,10 +586,7 @@ async def main() -> None:
                         >= s.stale_alert_after_seconds
                         and stale_details.get("alertSymbolCount", 0) > 0
                     )
-                    if (
-                        redis_details.get("severity") == "critical"
-                        or stale_alert_active
-                    ):
+                    if stale_alert_active:
                         health.mark_degraded("market_data_monitoring_alert")
                     else:
                         health.mark_ready()
@@ -631,7 +597,6 @@ async def main() -> None:
                             rest,
                             store,
                             cache,
-                            r,
                             stale,
                             _refresh_targets(stale_map["trade"], products),
                             s.trade_recovery_limit,
@@ -646,7 +611,7 @@ async def main() -> None:
                             rest,
                             store,
                             cache,
-                            r,
+                            trade_log_engine,
                             stale,
                             products,
                             signal_panel,
@@ -662,7 +627,6 @@ async def main() -> None:
                             rest,
                             store,
                             cache,
-                            r,
                             stale,
                             products,
                             s.candles_granularity_sec,

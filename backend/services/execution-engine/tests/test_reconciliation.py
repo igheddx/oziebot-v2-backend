@@ -68,12 +68,22 @@ def _service_with_reconciler(
         reconciliation_health_failure_threshold=2,
         reconciliation_balance_drift_tolerance_cents=0,
     )
+    eng = create_engine(settings.database_url or f"sqlite+pysqlite:///{db_path}")
     paper = PaperExecutionAdapter(redis, fee_bps=10, slippage_bps=0)
     live = LiveCoinbaseExecutionAdapter(
         client, credential_loader=lambda tenant_id: ("key", "secret")
     )
+
+    def _enqueue_fn(queue_name: str, payload: dict) -> None:
+        redis.enqueued.append((queue_name, payload))
+
     execution = ExecutionService(
-        settings, redis, paper_adapter=paper, live_adapter=live
+        settings,
+        eng,
+        runtime_kv=redis,
+        paper_adapter=paper,
+        live_adapter=live,
+        enqueue_fn=_enqueue_fn,
     )
     return execution, ReconciliationService(
         settings,

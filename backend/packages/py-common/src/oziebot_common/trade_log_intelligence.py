@@ -7,13 +7,15 @@ from decimal import Decimal, InvalidOperation
 from math import sqrt
 from typing import Any, Mapping
 
-import redis
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
 
 from oziebot_common.s3_observability import get_observability_store
 from oziebot_common.trade_log import (
     DEFAULT_TRADE_LOG_RETENTION_SECONDS,
     MAX_TRADE_LOG_WINDOW_SECONDS,
     normalize_trade_log_payload,
+    _trade_log_payload_sql_fragment,
 )
 
 TRADE_LOG_SAMPLE_KEY_PREFIX = "oziebot:logs:trade:samples:"
@@ -31,7 +33,7 @@ def trade_log_summary_key(symbol: str) -> str:
 
 
 def append_trade_log_sample(
-    client: Any,
+    engine: Engine | None,
     *,
     symbol: str,
     sample: Mapping[str, Any],
@@ -59,19 +61,34 @@ def append_trade_log_sample(
                 exc,
             )
         return payload
-    score = event_time.timestamp()
-    cutoff = (event_time - timedelta(seconds=clamped_retention)).timestamp()
-    sample_key = trade_log_sample_key(normalized_symbol)
 
-    pipeline = client.pipeline()
-    pipeline.zadd(sample_key, {json.dumps(payload, separators=(",", ":")): score})
-    pipeline.zremrangebyscore(sample_key, "-inf", cutoff)
-    pipeline.expire(sample_key, clamped_retention + 30)
-    pipeline.sadd(TRADE_LOG_SYMBOLS_KEY, normalized_symbol)
-    pipeline.expire(TRADE_LOG_SYMBOLS_KEY, clamped_retention + 30)
+    if engine is None:
+        return payload
+
+    cutoff = event_time - timedelta(seconds=clamped_retention)
+    row_payload = json.dumps(payload, separators=(",", ":"), default=str)
     try:
-        pipeline.execute()
-    except redis.RedisError as exc:
+        with engine.begin() as conn:
+            frag = _trade_log_payload_sql_fragment(engine)
+            conn.execute(
+                text(
+                    f"""
+                    INSERT INTO trade_signal_samples (symbol, payload)
+                    VALUES (:sym, {frag})
+                    """
+                ),
+                {"sym": normalized_symbol, "payload": row_payload},
+            )
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM trade_signal_samples
+                    WHERE symbol = :sym AND created_at < :cutoff
+                    """
+                ),
+                {"sym": normalized_symbol, "cutoff": cutoff},
+            )
+    except Exception as exc:
         log.warning(
             "trade log sample write failed symbol=%s err=%s",
             normalized_symbol,
@@ -81,7 +98,7 @@ def append_trade_log_sample(
 
 
 def read_trade_log_samples(
-    client: Any,
+    engine: Engine | None,
     *,
     symbol: str,
     window_seconds: int = 60,
@@ -95,48 +112,65 @@ def read_trade_log_samples(
             window_seconds=clamped_window,
             now=now,
         )
+    if engine is None:
+        return []
+
     current_time = (now or datetime.now(UTC)).astimezone(UTC)
-    min_score = (current_time - timedelta(seconds=clamped_window)).timestamp()
-    rows = client.zrevrangebyscore(
-        trade_log_sample_key(symbol),
-        "+inf",
-        min_score,
-        start=0,
-        num=max(1, clamped_window * 2),
-    )
+    min_time = current_time - timedelta(seconds=clamped_window)
+    sym = str(symbol).upper()
+    stmt = """
+        SELECT payload FROM trade_signal_samples
+        WHERE symbol = :sym AND created_at >= :min_time
+        ORDER BY created_at ASC
+    """
+
+    try:
+        with engine.connect() as conn:
+            rows = list(
+                conn.execute(text(stmt), {"sym": sym, "min_time": min_time}).all()
+            )
+    except Exception as exc:
+        log.warning("trade log samples read failed err=%s", exc)
+        return []
 
     samples: list[dict[str, Any]] = []
-    for raw in reversed(rows):
-        try:
-            payload = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
-        except json.JSONDecodeError:
+    limit = max(1, clamped_window * 2)
+    for row in rows[-limit:]:
+        raw_payload = row[0]
+        if isinstance(raw_payload, dict):
+            p = raw_payload
+        else:
+            try:
+                p = (
+                    json.loads(raw_payload)
+                    if isinstance(raw_payload, str)
+                    else raw_payload
+                )
+            except json.JSONDecodeError:
+                continue
+        if not isinstance(p, dict):
             continue
-        if not isinstance(payload, dict):
-            continue
-        sample = payload.get("sample")
-        if not isinstance(sample, dict):
+        samp = p.get("sample")
+        if not isinstance(samp, dict):
             continue
         samples.append(
             {
-                "timestamp": str(payload.get("timestamp") or ""),
-                "symbol": str(payload.get("symbol") or "").upper(),
-                "sample": sample,
+                "timestamp": str(p.get("timestamp") or ""),
+                "symbol": str(p.get("symbol") or "").upper(),
+                "sample": samp,
             }
         )
     return samples
 
 
 def write_trade_log_summary(
-    client: Any,
+    engine: Engine | None,
     *,
     symbol: str,
     summary: Mapping[str, Any],
-    retention_seconds: int = DEFAULT_TRADE_LOG_RETENTION_SECONDS,
+    retention_seconds: int = DEFAULT_TRADE_LOG_RETENTION_SECONDS,  # noqa: ARG001
 ) -> dict[str, Any]:
     normalized_symbol = str(symbol).upper()
-    clamped_retention = max(
-        1, min(int(retention_seconds), MAX_TRADE_LOG_WINDOW_SECONDS)
-    )
     normalized_summary = normalize_trade_log_payload(summary)
     store = get_observability_store()
     if store is not None:
@@ -149,17 +183,28 @@ def write_trade_log_summary(
                 exc,
             )
         return normalized_summary
-    pipeline = client.pipeline()
-    pipeline.setex(
-        trade_log_summary_key(normalized_symbol),
-        clamped_retention + 30,
-        json.dumps(normalized_summary, separators=(",", ":")),
-    )
-    pipeline.sadd(TRADE_LOG_SYMBOLS_KEY, normalized_symbol)
-    pipeline.expire(TRADE_LOG_SYMBOLS_KEY, clamped_retention + 30)
+
+    if engine is None:
+        return normalized_summary
+
+    payload_json = json.dumps(normalized_summary, separators=(",", ":"), default=str)
+    now = datetime.now(UTC)
     try:
-        pipeline.execute()
-    except redis.RedisError as exc:
+        with engine.begin() as conn:
+            frag = _trade_log_payload_sql_fragment(engine)
+            conn.execute(
+                text(
+                    f"""
+                    INSERT INTO trade_signal_summaries (symbol, payload, updated_at)
+                    VALUES (:sym, {frag}, :now)
+                    ON CONFLICT (symbol) DO UPDATE SET
+                      payload = EXCLUDED.payload,
+                      updated_at = EXCLUDED.updated_at
+                    """
+                ),
+                {"sym": normalized_symbol, "payload": payload_json, "now": now},
+            )
+    except Exception as exc:
         log.warning(
             "trade log summary write failed symbol=%s err=%s",
             normalized_symbol,
@@ -169,7 +214,7 @@ def write_trade_log_summary(
 
 
 def read_trade_log_summaries(
-    client: Any,
+    engine: Engine | None,
     *,
     symbol: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -183,25 +228,42 @@ def read_trade_log_summaries(
                 str(item.get("symbol") or ""),
             ),
         )
-    symbols = [str(symbol).upper()] if symbol else _read_symbols(client)
-    if not symbols:
+    if engine is None:
         return []
 
-    pipeline = client.pipeline()
-    for item in symbols:
-        pipeline.get(trade_log_summary_key(item))
-    rows = pipeline.execute()
+    try:
+        with engine.connect() as conn:
+            if symbol:
+                rows = conn.execute(
+                    text(
+                        "SELECT payload FROM trade_signal_summaries WHERE symbol = :sym"
+                    ),
+                    {"sym": str(symbol).upper()},
+                ).all()
+            else:
+                rows = conn.execute(
+                    text("SELECT payload FROM trade_signal_summaries")
+                ).all()
+    except Exception as exc:
+        log.warning("trade log summaries read failed err=%s", exc)
+        return []
 
     summaries: list[dict[str, Any]] = []
-    for raw in rows:
-        if raw is None:
-            continue
-        try:
-            payload = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            summaries.append(payload)
+    for row in rows:
+        raw_payload = row[0]
+        if isinstance(raw_payload, dict):
+            p = raw_payload
+        else:
+            try:
+                p = (
+                    json.loads(raw_payload)
+                    if isinstance(raw_payload, str)
+                    else raw_payload
+                )
+            except json.JSONDecodeError:
+                continue
+        if isinstance(p, dict):
+            summaries.append(p)
 
     return sorted(
         summaries,
@@ -210,16 +272,6 @@ def read_trade_log_summaries(
             str(item.get("symbol") or ""),
         ),
     )
-
-
-def _read_symbols(client: Any) -> list[str]:
-    members = client.smembers(TRADE_LOG_SYMBOLS_KEY)
-    symbols: list[str] = []
-    for raw in members:
-        value = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
-        if value:
-            symbols.append(value.upper())
-    return sorted(set(symbols))
 
 
 def build_market_signal_snapshot(

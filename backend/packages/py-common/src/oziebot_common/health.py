@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from sqlalchemy import create_engine
+
 log = logging.getLogger("oziebot-health")
 
 
@@ -19,47 +21,32 @@ def _start_runtime_status_publisher(
     *,
     service_name: str,
     state: "HealthState",
-    redis_url: str,
+    database_url: str,
     publish_interval_seconds: int,
     ttl_seconds: int,
 ) -> None:
     def _publisher() -> None:
-        from oziebot_common.queues import disconnect_redis, redis_from_url
         from oziebot_common.runtime_status import publish_runtime_status
         from oziebot_common.s3_observability import get_observability_store
 
-        client = None
+        eng = None
         while True:
             try:
-                if get_observability_store() is None and client is None:
-                    client = redis_from_url(
-                        redis_url,
-                        probe=True,
-                        socket_connect_timeout=1,
-                        socket_timeout=1,
-                    )
+                if get_observability_store() is None:
+                    if eng is None:
+                        eng = create_engine(database_url)
                 publish_runtime_status(
-                    client,
+                    eng,
                     state.snapshot(),
                     ttl_seconds=ttl_seconds,
                 )
             except Exception:
                 log.warning(
-                    "runtime status publish failed service=%s redis_url=%s",
+                    "runtime status publish failed service=%s database=%s",
                     service_name,
-                    redis_url,
+                    bool(database_url),
                     exc_info=True,
                 )
-                if client is not None:
-                    try:
-                        disconnect_redis(client)
-                    except Exception:
-                        log.debug(
-                            "runtime status redis disconnect failed service=%s",
-                            service_name,
-                            exc_info=True,
-                        )
-                    client = None
             time.sleep(publish_interval_seconds)
 
     thread = threading.Thread(
@@ -147,7 +134,7 @@ def start_health_server(service_name: str) -> HealthState:
     host = os.environ.get("OZIEBOT_HEALTH_HOST", "0.0.0.0")
     stale_after_seconds = int(os.environ.get("OZIEBOT_HEALTH_STALE_SECONDS", "90"))
     auto_touch_seconds = int(os.environ.get("OZIEBOT_HEALTH_AUTO_TOUCH_SECONDS", "0"))
-    redis_url = str(os.environ.get("REDIS_URL") or "").strip()
+    database_url = str(os.environ.get("DATABASE_URL") or "").strip()
     publish_interval_seconds = int(
         os.environ.get("OZIEBOT_HEALTH_PUBLISH_SECONDS", "5")
     )
@@ -207,13 +194,13 @@ def start_health_server(service_name: str) -> HealthState:
         ticker.start()
     runtime_publish_enabled = bool(
         publish_interval_seconds > 0
-        and (redis_url or get_observability_store() is not None)
+        and (database_url or get_observability_store() is not None)
     )
     if runtime_publish_enabled:
         _start_runtime_status_publisher(
             service_name=service_name,
             state=state,
-            redis_url=redis_url,
+            database_url=database_url or "",
             publish_interval_seconds=publish_interval_seconds,
             ttl_seconds=publish_ttl_seconds,
         )

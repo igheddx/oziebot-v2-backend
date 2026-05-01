@@ -5,18 +5,31 @@ import json
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-import redis
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 
 from oziebot_api.config import Settings
-from oziebot_common import redis_from_url
-from oziebot_common.queues import disconnect_redis
+from oziebot_common.postgres_runtime_kv import PostgresRuntimeKV
 
 T = TypeVar("T")
 
 
 class ReadModelCache:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, bind: Engine | None = None):
         self._settings = settings
+        self._bind = bind
+        self._kv: PostgresRuntimeKV | None = None
+
+    def _runtime_kv(self) -> PostgresRuntimeKV | None:
+        if self._kv is not None:
+            return self._kv
+        engine = self._bind
+        if engine is None:
+            if not self._settings.database_url:
+                return None
+            engine = create_engine(self._settings.database_url)
+        self._kv = PostgresRuntimeKV(engine)
+        return self._kv
 
     def get_or_build(
         self,
@@ -42,38 +55,27 @@ class ReadModelCache:
         digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
         return f"oziebot:read-model:{namespace}:{identity}:{digest}"
 
-    def _client(self) -> redis.Redis | None:
-        try:
-            return redis_from_url(
-                self._settings.redis_url,
-                probe=True,
-                socket_connect_timeout=2.0,
-                socket_timeout=10.0,
-            )
-        except (redis.RedisError, ValueError):
-            return None
-
     def _read_json(self, key: str) -> Any | None:
-        client = self._client()
-        if client is None:
+        kv = self._runtime_kv()
+        if kv is None:
             return None
         try:
-            payload = client.get(key)
-            if not payload:
+            raw = kv.get(key)
+            if not raw:
                 return None
-            return json.loads(payload)
-        except (redis.RedisError, ValueError, TypeError, json.JSONDecodeError):
+            return json.loads(raw)
+        except (ValueError, TypeError, json.JSONDecodeError):
             return None
-        finally:
-            disconnect_redis(client)
 
     def _write_json(self, key: str, payload: Any, *, ttl_seconds: int) -> None:
-        client = self._client()
-        if client is None:
+        kv = self._runtime_kv()
+        if kv is None:
             return
         try:
-            client.setex(key, ttl_seconds, json.dumps(payload, separators=(",", ":"), default=str))
-        except (redis.RedisError, TypeError, ValueError):
+            kv.setex(
+                key,
+                ttl_seconds,
+                json.dumps(payload, separators=(",", ":"), default=str),
+            )
+        except (TypeError, ValueError):
             return
-        finally:
-            disconnect_redis(client)

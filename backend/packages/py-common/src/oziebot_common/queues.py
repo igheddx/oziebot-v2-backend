@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import json
-from urllib.parse import SplitResult, urlsplit, urlunsplit
 from typing import Any
 
-import redis
 from pydantic import TypeAdapter
 
 from oziebot_domain.events import NotificationEvent, OperationalAlert
@@ -16,7 +13,7 @@ from oziebot_domain.trading_mode import TradingMode
 
 
 class QueueNames:
-    """Redis list keys partitioned by TradingMode so PAPER and LIVE never share a queue."""
+    """Logical Postgres outbox queues partitioned by TradingMode."""
 
     @staticmethod
     def intent_submitted(mode: TradingMode) -> str:
@@ -79,113 +76,15 @@ class QueueNames:
         return [QueueNames.execution_events(m) for m in TradingMode]
 
     @staticmethod
+    def all_execution_reconciliation_keys() -> list[str]:
+        return [QueueNames.execution_reconciliation(m) for m in TradingMode]
+
+    @staticmethod
     def all_signal_generated_keys() -> list[str]:
         return [QueueNames.signal_generated(m) for m in TradingMode]
 
 
 BOUNDED_QUEUE_MAX_LENGTH = 200
-
-
-def redis_url_candidates(url: str) -> list[str]:
-    stripped = url.strip()
-    if not stripped:
-        return [stripped]
-
-    parsed = urlsplit(stripped)
-    if parsed.scheme not in {"redis", "rediss"}:
-        return [stripped]
-
-    candidates = [stripped]
-    hostname = (parsed.hostname or "").lower()
-    if hostname.endswith(".cache.amazonaws.com"):
-        alternate_scheme = "rediss" if parsed.scheme == "redis" else "redis"
-        alternate = urlunsplit(
-            SplitResult(
-                scheme=alternate_scheme,
-                netloc=parsed.netloc,
-                path=parsed.path,
-                query=parsed.query,
-                fragment=parsed.fragment,
-            )
-        )
-        if alternate not in candidates:
-            candidates.append(alternate)
-    return candidates
-
-
-def redis_from_url(
-    url: str,
-    *,
-    probe: bool = False,
-    **kwargs: Any,
-) -> redis.Redis:
-    last_error: Exception | None = None
-    for candidate in redis_url_candidates(url):
-        try:
-            client = redis.Redis.from_url(candidate, decode_responses=True, **kwargs)
-            if probe:
-                client.ping()
-            return client
-        except (redis.RedisError, ValueError) as exc:
-            last_error = exc
-    if last_error is not None:
-        raise last_error
-    raise ValueError("Redis URL must not be empty")
-
-
-def push_json(r: redis.Redis, key: str, payload: dict[str, Any]) -> None:
-    serialized = json.dumps(payload, default=str)
-    max_length = _bounded_queue_max_length(key)
-    if max_length is None:
-        r.lpush(key, serialized)
-        return
-    pipeline = r.pipeline()
-    pipeline.lpush(key, serialized)
-    pipeline.ltrim(key, 0, max_length - 1)
-    pipeline.execute()
-
-
-def _bounded_queue_max_length(key: str) -> int | None:
-    if key == QueueNames.ops_alerts():
-        return BOUNDED_QUEUE_MAX_LENGTH
-    if key.startswith("oziebot:queue:alerts:"):
-        return BOUNDED_QUEUE_MAX_LENGTH
-    if key.startswith("oziebot:queue:alerts_retry:"):
-        return BOUNDED_QUEUE_MAX_LENGTH
-    return None
-
-
-def brpop_json(r: redis.Redis, key: str, timeout: int = 5) -> dict[str, Any] | None:
-    item = r.brpop(key, timeout=timeout)
-    if item is None:
-        return None
-    _, raw = item
-    return json.loads(raw)
-
-
-def brpop_json_any(
-    r: redis.Redis, keys: list[str], timeout: int = 5
-) -> tuple[str, dict[str, Any]] | None:
-    """Block on the first available message across mode-specific queues."""
-    if not keys:
-        return None
-    item = r.brpop(keys, timeout=timeout)
-    if item is None:
-        return None
-    key, raw = item
-    return key, json.loads(raw)
-
-
-def disconnect_redis(r: redis.Redis) -> None:
-    try:
-        r.close()
-    finally:
-        r.connection_pool.disconnect()
-
-
-def reset_redis_connection(r: redis.Redis) -> None:
-    r.connection_pool.disconnect()
-
 
 _intent_adapter = TypeAdapter(TradeIntent)
 _risk_adapter = TypeAdapter(RiskDecision)

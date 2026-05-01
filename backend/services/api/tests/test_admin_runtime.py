@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import UTC, datetime
 
@@ -13,15 +12,7 @@ from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.tenant import Tenant
 from oziebot_api.models.trade_intelligence import StrategySignalSnapshot
 from oziebot_api.models.user import User
-from oziebot_common.runtime_status import runtime_status_key
-
-
-class FakeRedis:
-    def __init__(self, values: dict[str, str]) -> None:
-        self.values = values
-
-    def mget(self, keys: list[str]) -> list[str | None]:
-        return [self.values.get(key) for key in keys]
+from oziebot_common.runtime_status import publish_runtime_status
 
 
 def test_admin_runtime_requires_root(client, regular_user_and_token: tuple[str, str]):
@@ -39,7 +30,6 @@ def test_admin_runtime_reports_service_and_pipeline_activity(
     client,
     root_user_and_token: tuple[str, str],
     db_session: Session,
-    monkeypatch,
 ):
     _, token = root_user_and_token
     root_user = db_session.scalar(select(User).where(User.email == "root@example.com"))
@@ -187,43 +177,38 @@ def test_admin_runtime_reports_service_and_pipeline_activity(
     )
     db_session.commit()
 
-    redis_values = {
-        runtime_status_key("strategy-engine"): json.dumps(
-            {
-                "service": "strategy-engine",
-                "status": "ok",
-                "ready": True,
-                "degraded": False,
-                "degraded_reason": None,
-                "started_at": now.isoformat(),
-                "last_heartbeat_at": now.isoformat(),
-                "heartbeat_age_seconds": 1.2,
-                "stale_after_seconds": 90,
-                "details": {},
-            }
-        ),
-        runtime_status_key("execution-engine"): json.dumps(
-            {
-                "service": "execution-engine",
-                "status": "degraded",
-                "ready": False,
-                "degraded": True,
-                "degraded_reason": "redis_receive_failed",
-                "started_at": now.isoformat(),
-                "last_heartbeat_at": now.isoformat(),
-                "heartbeat_age_seconds": 4.5,
-                "stale_after_seconds": 90,
-                "details": {"workerRuntime": {"redisReceiveFailuresTotal": 2}},
-            }
-        ),
-    }
-    monkeypatch.setattr(
-        "oziebot_api.services.runtime_status.redis_from_url",
-        lambda *args, **kwargs: FakeRedis(redis_values),
+    bind = db_session.get_bind()
+    publish_runtime_status(
+        bind,
+        {
+            "service": "strategy-engine",
+            "status": "ok",
+            "ready": True,
+            "degraded": False,
+            "degraded_reason": None,
+            "started_at": now.isoformat(),
+            "last_heartbeat_at": now.isoformat(),
+            "heartbeat_age_seconds": 1.2,
+            "stale_after_seconds": 90,
+            "details": {},
+        },
+        ttl_seconds=90,
     )
-    monkeypatch.setattr(
-        "oziebot_api.services.runtime_status.disconnect_redis",
-        lambda client: None,
+    publish_runtime_status(
+        bind,
+        {
+            "service": "execution-engine",
+            "status": "degraded",
+            "ready": False,
+            "degraded": True,
+            "degraded_reason": "queue_receive_failed",
+            "started_at": now.isoformat(),
+            "last_heartbeat_at": now.isoformat(),
+            "heartbeat_age_seconds": 4.5,
+            "stale_after_seconds": 90,
+            "details": {"workerRuntime": {"queueReceiveFailuresTotal": 2}},
+        },
+        ttl_seconds=90,
     )
 
     response = client.get(

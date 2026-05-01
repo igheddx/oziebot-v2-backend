@@ -1,20 +1,38 @@
 from __future__ import annotations
 
-import logging
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Mapping
 
-import redis
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
 
 from oziebot_common.s3_observability import get_observability_store
 
-TRADE_LOG_REDIS_KEY = "oziebot:logs:trade"
+"""Trade log backed by Postgres table ``trade_raw_log`` when observability store is absent."""
+
 MAX_TRADE_LOG_WINDOW_SECONDS = 120
 MAX_TRADE_LOG_LIMIT = 200
 DEFAULT_TRADE_LOG_RETENTION_SECONDS = 60
+TRADE_LOG_REDIS_KEY = "oziebot:logs:trade"  # legacy identifier; persisted in Postgres
 log = logging.getLogger("oziebot-trade-log")
+
+
+def _trade_log_payload_sql_fragment(engine: Engine) -> str:
+    return (
+        "CAST(:payload AS jsonb)" if engine.dialect.name == "postgresql" else ":payload"
+    )
+
+
+def _trade_log_where_order_by_logical_ts(engine: Engine) -> tuple[str, str]:
+    """Compare using embedded ISO timestamps so read windows match semantic event times."""
+    if engine.dialect.name == "postgresql":
+        ts = "(payload ->> 'timestamp')::timestamptz"
+        return f"{ts} >= CAST(:min_time AS timestamptz)", f"{ts} DESC NULLS LAST"
+    ts_expr = "json_extract(payload, '$.timestamp')"
+    return f"{ts_expr} >= :min_iso", f"{ts_expr} DESC"
 
 
 def build_trade_log_event(
@@ -77,7 +95,7 @@ def normalize_trade_log_payload(details: Mapping[str, Any] | None) -> dict[str, 
 
 
 def append_trade_log_event(
-    client: Any,
+    engine: Engine | None,
     *,
     symbol: str,
     event_type: str,
@@ -99,9 +117,7 @@ def append_trade_log_event(
         details=details,
     )
     event_time = datetime.fromisoformat(event["timestamp"])
-    score = event_time.timestamp()
-    cutoff = (event_time - timedelta(seconds=clamped_retention)).timestamp()
-    payload = json.dumps(event, separators=(",", ":"))
+    sym = str(event["symbol"]).upper()
     store = get_observability_store()
     if store is not None:
         try:
@@ -115,16 +131,41 @@ def append_trade_log_event(
             )
         return event
 
-    pipeline = client.pipeline()
-    pipeline.zadd(TRADE_LOG_REDIS_KEY, {payload: score})
-    pipeline.zremrangebyscore(TRADE_LOG_REDIS_KEY, "-inf", cutoff)
-    pipeline.expire(TRADE_LOG_REDIS_KEY, clamped_retention + 30)
+    if engine is None:
+        return event
+
+    cutoff = event_time - timedelta(seconds=clamped_retention)
+    payload_json = json.dumps(event, separators=(",", ":"), default=str)
     try:
-        pipeline.execute()
-    except redis.RedisError as exc:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    f"""
+                    INSERT INTO trade_raw_log (symbol, payload)
+                    VALUES (:sym, {_trade_log_payload_sql_fragment(engine)})
+                    """
+                ),
+                {"sym": sym, "payload": payload_json},
+            )
+            cutoff_iso = cutoff.astimezone(UTC).isoformat()
+            if engine.dialect.name == "postgresql":
+                delete_stmt = (
+                    "DELETE FROM trade_raw_log WHERE symbol = :sym AND "
+                    "(payload ->> 'timestamp')::timestamptz < CAST(:cutoff_ts AS timestamptz)"
+                )
+                del_params = {"sym": sym, "cutoff_ts": cutoff}
+            else:
+                delete_stmt = (
+                    "DELETE FROM trade_raw_log WHERE symbol = :sym AND "
+                    "json_extract(payload, '$.timestamp') < :cutoff_iso"
+                )
+                del_params = {"sym": sym, "cutoff_iso": cutoff_iso}
+
+            conn.execute(text(delete_stmt), del_params)
+    except Exception as exc:
         log.warning(
             "trade log write failed symbol=%s event_type=%s err=%s",
-            event["symbol"],
+            sym,
             event["event_type"],
             exc,
         )
@@ -132,7 +173,7 @@ def append_trade_log_event(
 
 
 def read_trade_log_events(
-    client: Any,
+    engine: Engine | None,
     *,
     window_seconds: int = MAX_TRADE_LOG_WINDOW_SECONDS,
     limit: int = MAX_TRADE_LOG_LIMIT,
@@ -151,46 +192,72 @@ def read_trade_log_events(
             event_type=event_type,
             now=now,
         )
+    if engine is None:
+        return []
+
     current_time = (now or datetime.now(UTC)).astimezone(UTC)
-    min_score = (current_time - timedelta(seconds=clamped_window)).timestamp()
+    min_time = current_time - timedelta(seconds=clamped_window)
     normalized_symbol = str(symbol or "").strip().upper()
     normalized_event_type = str(event_type or "").strip().lower()
-    rows = client.zrevrangebyscore(
-        TRADE_LOG_REDIS_KEY,
-        "+inf",
-        min_score,
-        start=0,
-        num=clamped_limit,
-    )
+
+    sym_filter = normalized_symbol or None
+    ts_where, order_by = _trade_log_where_order_by_logical_ts(engine)
+    stmt = f"""
+        SELECT payload FROM trade_raw_log
+        WHERE {ts_where}
+    """
+    params: dict[str, Any] = {"lim": clamped_limit}
+    if engine.dialect.name == "postgresql":
+        params["min_time"] = min_time
+    else:
+        params["min_iso"] = min_time.astimezone(UTC).isoformat()
+    if sym_filter:
+        stmt += " AND symbol = :sym"
+        params["sym"] = sym_filter
+    stmt += f" ORDER BY {order_by} LIMIT :lim"
+
+    try:
+        with engine.connect() as conn:
+            rows = list(conn.execute(text(stmt), params).all())
+    except Exception as exc:
+        log.warning("trade log read failed err=%s", exc)
+        return []
 
     events: list[dict[str, Any]] = []
-    for raw in reversed(rows):
-        try:
-            payload = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
-        except json.JSONDecodeError:
-            continue
+    for row in reversed(rows):
+        raw_payload = row[0]
+        if isinstance(raw_payload, dict):
+            payload = raw_payload
+        else:
+            try:
+                payload = (
+                    json.loads(raw_payload)
+                    if isinstance(raw_payload, str)
+                    else json.loads(raw_payload.decode("utf-8"))
+                )
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                continue
         if not isinstance(payload, dict):
             continue
-        timestamp = str(payload.get("timestamp") or "")
-        symbol = str(payload.get("symbol") or "").upper()
-        event_type = str(payload.get("event_type") or "")
-        message = str(payload.get("message") or "")
-        source = str(payload.get("source") or "coinbase").lower()
-        if not timestamp or not symbol or not event_type or not message:
+        ts = str(payload.get("timestamp") or "")
+        sym = str(payload.get("symbol") or "").upper()
+        et = str(payload.get("event_type") or "")
+        msg = str(payload.get("message") or "")
+        src = str(payload.get("source") or "coinbase").lower()
+        if not ts or not sym or not et or not msg:
             continue
-        if normalized_symbol and symbol != normalized_symbol:
+        if normalized_event_type and et.lower() != normalized_event_type:
             continue
-        if normalized_event_type and event_type.lower() != normalized_event_type:
-            continue
-        event: dict[str, Any] = {
-            "timestamp": timestamp,
-            "symbol": symbol,
-            "event_type": event_type,
-            "message": message,
-            "source": source,
+        evt: dict[str, Any] = {
+            "timestamp": ts,
+            "symbol": sym,
+            "event_type": et,
+            "message": msg,
+            "source": src,
         }
-        details = payload.get("details")
-        if isinstance(details, dict) and details:
-            event["details"] = details
-        events.append(event)
-    return events
+        d = payload.get("details")
+        if isinstance(d, dict) and d:
+            evt["details"] = d
+        events.append(evt)
+
+    return events[-clamped_limit:]

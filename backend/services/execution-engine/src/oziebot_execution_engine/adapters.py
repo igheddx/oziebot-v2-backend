@@ -24,13 +24,13 @@ class ExecutionAdapter(Protocol):
 
 
 class PaperExecutionAdapter:
-    def __init__(self, redis_client, *, fee_bps: int, slippage_bps: int) -> None:
-        self._redis = redis_client
+    def __init__(self, runtime_kv, *, fee_bps: int, slippage_bps: int) -> None:
+        self._kv = runtime_kv
         self._default_fee_bps = fee_bps
         self._default_slippage_bps = slippage_bps
 
     def submit(self, request: ExecutionRequest) -> ExecutionSubmission:
-        raw = self._redis.get(f"oziebot:md:bbo:{request.symbol}")
+        raw = self._kv.get(f"oziebot:md:bbo:{request.symbol}")
         payload = json.loads(raw) if raw else {}
         if request.side == Side.BUY:
             base_price = Decimal(

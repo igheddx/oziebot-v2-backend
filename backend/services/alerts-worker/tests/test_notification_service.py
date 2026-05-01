@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine, text
 
 from oziebot_domain.events import (
@@ -18,12 +18,18 @@ from oziebot_domain.trading_mode import TradingMode
 from oziebot_alerts_worker.service import NotificationService
 
 
-class FakeRedis:
-    def __init__(self) -> None:
-        self.pushed: list[tuple[str, dict]] = []
+@pytest.fixture
+def capture_enqueue(monkeypatch):
+    recorded: list[tuple[str, dict]] = []
 
-    def lpush(self, key: str, value: str) -> None:
-        self.pushed.append((key, json.loads(value)))
+    def _rec(_engine, queue_name: str, payload: dict) -> None:
+        recorded.append((queue_name, payload))
+
+    monkeypatch.setattr(
+        "oziebot_alerts_worker.service.enqueue_worker_payload",
+        _rec,
+    )
+    return recorded
 
 
 class CapturingAdapter:
@@ -148,7 +154,9 @@ def _attempt_rows(db_url: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def test_route_event_honors_mode_and_isolates_channel_failures(tmp_path: Path):
+def test_route_event_honors_mode_and_isolates_channel_failures(
+    tmp_path: Path, capture_enqueue
+):
     db_path = tmp_path / "alerts.db"
     db_url = f"sqlite+pysqlite:///{db_path}"
     _create_tables(db_url)
@@ -157,12 +165,12 @@ def test_route_event_honors_mode_and_isolates_channel_failures(tmp_path: Path):
     tenant_id = uuid.uuid4()
     _seed_user_config(db_url, user_id=user_id, mode="paper")
 
-    redis = FakeRedis()
+    engine = create_engine(db_url)
     sms = CapturingAdapter(should_fail=False)
     slack = CapturingAdapter(should_fail=True)
     service = NotificationService(
         _Settings(database_url=db_url, notify_max_retries=2),
-        redis,
+        engine,
         {"sms": sms, "slack": slack},
     )
 
@@ -179,8 +187,8 @@ def test_route_event_honors_mode_and_isolates_channel_failures(tmp_path: Path):
 
     assert len(sms.calls) == 1
     assert len(slack.calls) == 1
-    assert len(redis.pushed) == 1
-    retry_key, retry_payload = redis.pushed[0]
+    assert len(capture_enqueue) == 1
+    retry_key, retry_payload = capture_enqueue[0]
     assert retry_key.endswith(":alerts_retry:paper")
     assert retry_payload["attempt"] == 2
 
@@ -190,7 +198,9 @@ def test_route_event_honors_mode_and_isolates_channel_failures(tmp_path: Path):
     assert "retry_scheduled" in statuses
 
 
-def test_route_event_skips_when_mode_preference_does_not_match(tmp_path: Path):
+def test_route_event_skips_when_mode_preference_does_not_match(
+    tmp_path: Path, capture_enqueue
+):
     db_path = tmp_path / "alerts_mode.db"
     db_url = f"sqlite+pysqlite:///{db_path}"
     _create_tables(db_url)
@@ -199,10 +209,10 @@ def test_route_event_skips_when_mode_preference_does_not_match(tmp_path: Path):
     tenant_id = uuid.uuid4()
     _seed_user_config(db_url, user_id=user_id, mode="live")
 
-    redis = FakeRedis()
+    engine = create_engine(db_url)
     sms = CapturingAdapter(should_fail=False)
     service = NotificationService(
-        _Settings(database_url=db_url, notify_max_retries=2), redis, {"sms": sms}
+        _Settings(database_url=db_url, notify_max_retries=2), engine, {"sms": sms}
     )
 
     event = NotificationEvent(
@@ -217,21 +227,23 @@ def test_route_event_skips_when_mode_preference_does_not_match(tmp_path: Path):
     service.route_event(event)
 
     assert sms.calls == []
-    assert redis.pushed == []
+    assert capture_enqueue == []
     assert _attempt_rows(db_url) == []
 
 
-def test_retry_delivery_stops_at_max_retries(tmp_path: Path):
+def test_retry_delivery_stops_at_max_retries(tmp_path: Path, capture_enqueue):
     db_path = tmp_path / "alerts_retry.db"
     db_url = f"sqlite+pysqlite:///{db_path}"
     _create_tables(db_url)
 
     user_id = uuid.uuid4()
     tenant_id = uuid.uuid4()
-    redis = FakeRedis()
+    engine = create_engine(db_url)
     failing = CapturingAdapter(should_fail=True)
     service = NotificationService(
-        _Settings(database_url=db_url, notify_max_retries=2), redis, {"slack": failing}
+        _Settings(database_url=db_url, notify_max_retries=2),
+        engine,
+        {"slack": failing},
     )
 
     event = NotificationEvent(
@@ -255,7 +267,7 @@ def test_retry_delivery_stops_at_max_retries(tmp_path: Path):
     rows = _attempt_rows(db_url)
     statuses = [r["status"] for r in rows]
     assert statuses == ["retry_scheduled", "failed"]
-    assert redis.pushed == []
+    assert capture_enqueue == []
 
 
 def test_route_operational_alert_uses_slack_adapter(tmp_path: Path):
@@ -263,21 +275,21 @@ def test_route_operational_alert_uses_slack_adapter(tmp_path: Path):
     db_url = f"sqlite+pysqlite:///{db_path}"
     _create_tables(db_url)
 
-    redis = FakeRedis()
+    engine = create_engine(db_url)
     slack = CapturingAdapter(should_fail=False)
     service = NotificationService(
         _Settings(database_url=db_url, notify_max_retries=2),
-        redis,
+        engine,
         {"slack": slack},
     )
 
     alert = OperationalAlert(
         alert_id=uuid.uuid4(),
         source_service="market-data-ingestor",
-        alert_type="redis_memory_pressure",
+        alert_type="runtime_kv_pressure",
         severity=OperationalAlertSeverity.CRITICAL,
-        title="Redis memory pressure detected",
-        message="Redis memory usage is 91.2%.",
+        title="Runtime KV capacity warning",
+        message="Observed elevated load on Postgres runtime KV.",
         payload={"usage_pct": 91.2},
     )
     service.route_operational_alert(alert)
@@ -285,5 +297,5 @@ def test_route_operational_alert_uses_slack_adapter(tmp_path: Path):
     assert len(slack.calls) == 1
     destination, message, payload = slack.calls[0]
     assert destination == "https://hooks.slack.com/services/test/test/test"
-    assert "[OPS][CRITICAL] Redis memory pressure detected" in message
+    assert "[OPS][CRITICAL] Runtime KV capacity warning" in message
     assert payload["usage_pct"] == 91.2

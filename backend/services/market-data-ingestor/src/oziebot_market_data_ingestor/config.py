@@ -5,7 +5,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+psycopg://oziebot:oziebot@localhost:5432/oziebot"
-    redis_url: str = "redis://localhost:6379/0"
 
     coinbase_ws_url: str = "wss://advanced-trade-ws.coinbase.com"
     coinbase_rest_url: str = "https://api.coinbase.com/api/v3/brokerage"
@@ -25,9 +24,6 @@ class Settings(BaseSettings):
     signal_panel_retention_seconds: int = 60
     signal_panel_sample_interval_seconds: int = 5
     signal_panel_snapshot_event_interval_seconds: int = 15
-    redis_pressure_check_interval_seconds: int = 30
-    redis_pressure_warning_pct: float = 70.0
-    redis_pressure_critical_pct: float = 85.0
     operational_alert_cooldown_seconds: int = 300
     stale_alert_after_seconds: int = 90
     trade_recovery_limit: int = 20

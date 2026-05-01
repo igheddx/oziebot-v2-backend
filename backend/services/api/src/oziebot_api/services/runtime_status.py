@@ -7,13 +7,10 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from oziebot_api.config import Settings
 from oziebot_api.models.execution import ExecutionOrder, ExecutionTradeRecord
 from oziebot_api.models.market_data import MarketDataBboSnapshot, MarketDataTradeSnapshot
 from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.trade_intelligence import StrategySignalSnapshot
-from oziebot_common import redis_from_url
-from oziebot_common.queues import disconnect_redis
 from oziebot_common.runtime_status import read_runtime_statuses
 from oziebot_common.s3_observability import get_observability_store
 
@@ -95,27 +92,22 @@ def _normalize_runtime_service(
     }
 
 
-def _read_runtime_registry(settings: Settings) -> tuple[dict[str, dict[str, object]], str | None]:
-    client = None
+def _read_runtime_registry(db: Session) -> tuple[dict[str, dict[str, object]], str | None]:
+    eng = None
     try:
         if get_observability_store() is None:
-            client = redis_from_url(
-                settings.redis_url,
-                probe=True,
-                socket_connect_timeout=1,
-                socket_timeout=1,
-            )
+            bind = db.get_bind()
+            if bind is None:
+                return {}, "database_session_unavailable"
+            eng = bind
         snapshots = read_runtime_statuses(
-            client,
+            eng,
             [service["service"] for service in RUNTIME_SERVICES],
         )
         return snapshots, None
     except Exception as exc:
         log.warning("runtime status registry unavailable", exc_info=True)
         return {}, str(exc)
-    finally:
-        if client is not None:
-            disconnect_redis(client)
 
 
 def _aggregate_mode_activity(
@@ -176,11 +168,11 @@ def _aggregate_market_data_activity(
     }
 
 
-def build_runtime_status_payload(settings: Settings, db: Session) -> dict[str, Any]:
+def build_runtime_status_payload(db: Session) -> dict[str, Any]:
     now = datetime.now(UTC)
     window_minutes = 15
     window_start = now - timedelta(minutes=window_minutes)
-    snapshots, registry_error = _read_runtime_registry(settings)
+    snapshots, registry_error = _read_runtime_registry(db)
     services = [
         _normalize_runtime_service(definition, snapshots.get(definition["service"]))
         for definition in RUNTIME_SERVICES

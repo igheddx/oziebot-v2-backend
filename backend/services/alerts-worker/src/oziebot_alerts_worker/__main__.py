@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import logging
 
+from sqlalchemy import create_engine
+
 from oziebot_common.health import install_shutdown_handlers, start_health_server
 from oziebot_common.queues import (
     QueueNames,
-    disconnect_redis,
     notification_event_from_json,
     operational_alert_from_json,
 )
 from oziebot_common.worker_runtime import (
-    DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
-    redis_client_for_worker,
-    run_redis_queue_worker,
+    DEFAULT_POLL_IDLE_SECONDS,
+    run_postgres_queue_worker,
 )
 from oziebot_domain.events import NotificationEvent, NotificationEventType
 from oziebot_domain.trading_mode import TradingMode
@@ -27,10 +27,9 @@ log = logging.getLogger("alerts-worker")
 
 def main() -> None:
     settings = get_settings()
-    r = redis_client_for_worker(
-        settings.redis_url,
-        queue_pop_timeout_seconds=DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
-    )
+    if not settings.database_url:
+        raise RuntimeError("DATABASE_URL is required for alerts-worker")
+    engine = create_engine(settings.database_url)
     keys = (
         QueueNames.all_alerts_keys()
         + QueueNames.all_alerts_retry_keys()
@@ -38,7 +37,7 @@ def main() -> None:
     )
     service = NotificationService(
         settings,
-        r,
+        engine,
         adapters={
             "sms": SmsAdapter(settings.sms_webhook_url),
             "slack": SlackAdapter(settings.slack_webhook_url),
@@ -49,7 +48,6 @@ def main() -> None:
     stop_event = install_shutdown_handlers(
         "alerts-worker",
         health_state=health,
-        on_shutdown=lambda: disconnect_redis(r),
     )
     log.info("alerts-worker listening on %s", keys)
 
@@ -64,7 +62,6 @@ def main() -> None:
         try:
             event = notification_event_from_json(raw)
         except Exception:
-            # Backward compatibility for legacy alert payloads.
             mode = TradingMode(str(raw.get("trading_mode") or "paper"))
             event = NotificationEvent(
                 event_id=raw.get("event_id") or __import__("uuid").uuid4(),
@@ -77,15 +74,15 @@ def main() -> None:
             )
         service.route_event(event)
 
-    run_redis_queue_worker(
+    run_postgres_queue_worker(
         worker_name="alerts-worker",
-        redis_client=r,
-        queue_keys=keys,
+        engine=engine,
+        queue_names=keys,
         stop_event=stop_event,
         health=health,
         handle_message=_handle_message,
         logger=log,
-        queue_pop_timeout_seconds=DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
+        poll_idle_seconds=DEFAULT_POLL_IDLE_SECONDS,
     )
     log.info("alerts-worker shutdown complete")
 

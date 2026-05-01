@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
-import redis
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.market_data import MarketDataBboSnapshot, MarketDataTradeSnapshot
@@ -13,124 +12,22 @@ from oziebot_common.trade_log import append_trade_log_event
 from oziebot_common.trade_log_intelligence import write_trade_log_summary
 
 
-class FakePipeline:
-    def __init__(self, client: "FakeRedis") -> None:
-        self._client = client
-        self._ops: list[tuple[str, tuple, dict]] = []
-
-    def zadd(self, *args, **kwargs):
-        self._ops.append(("zadd", args, kwargs))
-        return self
-
-    def zremrangebyscore(self, *args, **kwargs):
-        self._ops.append(("zremrangebyscore", args, kwargs))
-        return self
-
-    def expire(self, *args, **kwargs):
-        self._ops.append(("expire", args, kwargs))
-        return self
-
-    def sadd(self, *args, **kwargs):
-        self._ops.append(("sadd", args, kwargs))
-        return self
-
-    def setex(self, *args, **kwargs):
-        self._ops.append(("setex", args, kwargs))
-        return self
-
-    def get(self, *args, **kwargs):
-        self._ops.append(("get", args, kwargs))
-        return self
-
-    def execute(self):
-        results = []
-        for name, args, kwargs in self._ops:
-            results.append(getattr(self._client, name)(*args, **kwargs))
-        return results
-
-
-class FakeRedis:
-    def __init__(self) -> None:
-        self._sorted: dict[str, dict[str, float]] = {}
-        self._sets: dict[str, set[str]] = {}
-        self._strings: dict[str, str] = {}
-
-    def pipeline(self) -> FakePipeline:
-        return FakePipeline(self)
-
-    def zadd(self, key: str, mapping: dict[str, float]) -> None:
-        bucket = self._sorted.setdefault(key, {})
-        bucket.update(mapping)
-
-    def zremrangebyscore(self, key: str, min_score, max_score) -> None:
-        bucket = self._sorted.setdefault(key, {})
-        max_value = float(max_score)
-        if min_score == "-inf":
-            to_delete = [member for member, score in bucket.items() if score <= max_value]
-        else:
-            min_value = float(min_score)
-            to_delete = [
-                member for member, score in bucket.items() if min_value <= score <= max_value
-            ]
-        for member in to_delete:
-            bucket.pop(member, None)
-
-    def expire(self, key: str, seconds: int) -> None:  # noqa: ARG002
-        return None
-
-    def sadd(self, key: str, *values: str) -> None:
-        bucket = self._sets.setdefault(key, set())
-        bucket.update(values)
-
-    def smembers(self, key: str) -> set[str]:
-        return self._sets.get(key, set())
-
-    def setex(self, key: str, seconds: int, value: str) -> None:  # noqa: ARG002
-        self._strings[key] = value
-
-    def get(self, key: str) -> str | None:
-        return self._strings.get(key)
-
-    def zrevrangebyscore(
-        self,
-        key: str,
-        max_score,
-        min_score,
-        *,
-        start: int = 0,
-        num: int | None = None,
-    ) -> list[str]:
-        bucket = self._sorted.get(key, {})
-        min_value = float(min_score)
-        max_value = float("inf") if max_score == "+inf" else float(max_score)
-        rows = [
-            member
-            for member, score in sorted(bucket.items(), key=lambda item: item[1], reverse=True)
-            if min_value <= score <= max_value
-        ]
-        if num is None:
-            return rows[start:]
-        return rows[start : start + num]
-
-
-@patch("oziebot_api.api.v1.logs.redis_from_url")
 def test_trade_log_endpoint_returns_recent_events(
-    mock_redis_from_url, client, regular_user_and_token
+    client, regular_user_and_token, db_session: Session
 ):
     _, token = regular_user_and_token
-    fake_redis = FakeRedis()
-    mock_redis_from_url.return_value = fake_redis
+    bind = db_session.get_bind()
 
     now = datetime.now(UTC)
     append_trade_log_event(
-        fake_redis,
+        bind,
         symbol="BTC-USD",
         event_type="market_snapshot",
         message="BTC-USD market snapshot pulled",
         timestamp=now - timedelta(seconds=30),
     )
     append_trade_log_event(
-        fake_redis,
+        bind,
         symbol="ETH-USD",
         event_type="bbo_update",
         message="ETH-USD BBO updated",
@@ -142,7 +39,7 @@ def test_trade_log_endpoint_returns_recent_events(
         },
     )
     write_trade_log_summary(
-        fake_redis,
+        bind,
         symbol="ETH-USD",
         summary={
             "timestamp": now.isoformat(),
@@ -182,12 +79,12 @@ def test_trade_log_endpoint_returns_recent_events(
     assert payload["summaries"][0]["signal_quality_score"] == 78
 
 
-@patch("oziebot_api.api.v1.logs.redis_from_url")
-def test_trade_log_endpoint_returns_503_when_trade_log_redis_unavailable(
-    mock_redis_from_url, client, regular_user_and_token
+@patch("oziebot_api.api.v1.logs.read_trade_log_events")
+def test_trade_log_endpoint_returns_503_when_store_read_fails(
+    mock_read, client, regular_user_and_token
 ):
+    mock_read.side_effect = RuntimeError("db down")
     _, token = regular_user_and_token
-    mock_redis_from_url.side_effect = redis.TimeoutError("redis timed out")
 
     response = client.get(
         "/v1/logs/trade?window_seconds=120&limit=200",
@@ -198,12 +95,10 @@ def test_trade_log_endpoint_returns_503_when_trade_log_redis_unavailable(
     assert response.json()["detail"] == "Trade log temporarily unavailable"
 
 
-@patch("oziebot_api.api.v1.logs.redis_from_url")
-def test_trade_log_endpoint_falls_back_to_db_market_data_when_redis_window_empty(
-    mock_redis_from_url, client, regular_user_and_token, db_session: Session
+def test_trade_log_endpoint_falls_back_to_db_market_data_when_trade_log_window_empty(
+    client, regular_user_and_token, db_session: Session
 ):
     _, token = regular_user_and_token
-    mock_redis_from_url.return_value = FakeRedis()
     now = datetime.now(UTC)
 
     db_session.add(

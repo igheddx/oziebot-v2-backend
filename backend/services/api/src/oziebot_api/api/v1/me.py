@@ -46,6 +46,7 @@ from oziebot_domain.trading_mode import TradingMode
 router = APIRouter(prefix="/me", tags=["me"])
 
 DASHBOARD_CACHE_TTL_SECONDS = 120
+DASHBOARD_REJECTION_CACHE_TTL_SECONDS = 300
 ANALYTICS_CACHE_TTL_SECONDS = 120
 ANALYTICS_SUMMARY_CACHE_TTL_SECONDS = 300
 DASHBOARD_HISTORY_LOOKBACK_DAYS = 30
@@ -54,7 +55,7 @@ DASHBOARD_ACTIVE_TRADES_LIMIT = 20
 DASHBOARD_RECENT_ACTIVITY_LIMIT = 20
 DASHBOARD_FEE_BREAKDOWN_LIMIT = 12
 DASHBOARD_REJECTION_EVENT_LIMIT = 100
-DASHBOARD_REJECTION_AUDIT_SCAN_LIMIT = 1000
+DASHBOARD_REJECTION_AUDIT_SCAN_LIMIT = 250
 DASHBOARD_GROWTH_POINTS = 8
 DASHBOARD_GROWTH_TRADE_LIMIT = 500
 DASHBOARD_POSITION_DUST_NOTIONAL_USD = Decimal("1")
@@ -677,7 +678,7 @@ def _cached_dashboard_payload(
     force_refresh: bool = False,
 ) -> dict[str, Any]:
     mode = _dashboard_mode(user, trading_mode)
-    cache = ReadModelCache(settings)
+    cache = ReadModelCache(settings, db.get_bind())
     return cache.get_or_build(
         namespace="dashboard-v2",
         identity=str(user.id),
@@ -702,7 +703,7 @@ def _cached_dashboard_summary_payload(
     force_refresh: bool = False,
 ) -> dict[str, Any]:
     mode = _dashboard_mode(user, trading_mode)
-    cache = ReadModelCache(settings)
+    cache = ReadModelCache(settings, db.get_bind())
     return cache.get_or_build(
         namespace="dashboard-summary-v1",
         identity=str(user.id),
@@ -726,7 +727,7 @@ def _cached_dashboard_details_payload(
     force_refresh: bool = False,
 ) -> dict[str, Any]:
     mode = _dashboard_mode(user, trading_mode)
-    cache = ReadModelCache(settings)
+    cache = ReadModelCache(settings, db.get_bind())
     return cache.get_or_build(
         namespace="dashboard-details-v2",
         identity=str(user.id),
@@ -754,7 +755,7 @@ def _cached_dashboard_rejection_payload(
     force_refresh: bool = False,
 ) -> dict[str, Any]:
     mode = _dashboard_mode(user, trading_mode)
-    cache = ReadModelCache(settings)
+    cache = ReadModelCache(settings, db.get_bind())
     return cache.get_or_build(
         namespace="dashboard-rejections-v1",
         identity=str(user.id),
@@ -762,9 +763,9 @@ def _cached_dashboard_rejection_payload(
             "user_id": str(user.id),
             "trading_mode": mode,
             "window_hours": window_hours,
-            "version": 2,
+            "version": 3,
         },
-        ttl_seconds=DASHBOARD_CACHE_TTL_SECONDS,
+        ttl_seconds=DASHBOARD_REJECTION_CACHE_TTL_SECONDS,
         force_refresh=force_refresh,
         builder=lambda: _build_dashboard_rejection_history_payload(
             user=user,
@@ -795,7 +796,7 @@ def _cached_analytics_payload(
         start_at=start_at,
         end_at=end_at,
     )
-    cache = ReadModelCache(settings)
+    cache = ReadModelCache(settings, db.get_bind())
     payload = cache.get_or_build(
         namespace="analytics-v1",
         identity=str(user.id),
@@ -833,7 +834,7 @@ def _cached_analytics_slice_payload(
         end_at=end_at,
     )
     cache_ttl = ANALYTICS_CACHE_TTL_SECONDS if ttl_seconds is None else ttl_seconds
-    cache = ReadModelCache(settings)
+    cache = ReadModelCache(settings, db.get_bind())
     payload = cache.get_or_build(
         namespace=namespace,
         identity=str(user.id),

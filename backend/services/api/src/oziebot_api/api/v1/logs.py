@@ -3,14 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
-from oziebot_api.config import Settings
-from oziebot_api.deps import DbSession, settings_dep
+from oziebot_api.deps import DbSession
 from oziebot_api.deps.auth import CurrentUser
 from oziebot_api.models.market_data import MarketDataBboSnapshot, MarketDataTradeSnapshot
-from oziebot_common import redis_from_url
 from oziebot_common.trade_log import (
     MAX_TRADE_LOG_LIMIT,
     MAX_TRADE_LOG_WINDOW_SECONDS,
@@ -21,7 +19,6 @@ from oziebot_common.trade_log_intelligence import (
     build_market_signal_snapshot,
     read_trade_log_summaries,
 )
-from oziebot_common.s3_observability import get_observability_store
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
@@ -168,38 +165,22 @@ def get_trade_log(
     limit: int = Query(default=200, ge=1, le=MAX_TRADE_LOG_LIMIT),
     symbol: str | None = Query(default=None),
     event_type: str | None = Query(default=None),
-    settings: Settings = Depends(settings_dep),
 ) -> dict[str, object]:
-    redis_error: Exception | None = None
-    client = None
+    store_error: Exception | None = None
+    db_engine = db.get_bind()
     try:
-        if get_observability_store() is None:
-            client = redis_from_url(
-                settings.redis_url,
-                probe=True,
-                socket_connect_timeout=1,
-                socket_timeout=1,
-            )
         events = read_trade_log_events(
-            client,
+            db_engine,
             window_seconds=window_seconds,
             limit=limit,
             symbol=symbol,
             event_type=event_type,
         )
-        summaries = read_trade_log_summaries(client, symbol=symbol)
+        summaries = read_trade_log_summaries(db_engine, symbol=symbol)
     except Exception as exc:
-        redis_error = exc
+        store_error = exc
         events = []
         summaries = []
-    finally:
-        if client is not None:
-            close = getattr(client, "close", None)
-            if callable(close):
-                close()
-            pool = getattr(client, "connection_pool", None)
-            if pool is not None:
-                pool.disconnect()
     if not events and not summaries:
         events, summaries = _build_db_trade_log_fallback(
             db,
@@ -208,10 +189,10 @@ def get_trade_log(
             symbol=symbol,
             event_type=event_type,
         )
-    if redis_error is not None and not events and not summaries:
+    if store_error is not None and not events and not summaries:
         raise HTTPException(
             status_code=503, detail="Trade log temporarily unavailable"
-        ) from redis_error
+        ) from store_error
     available_symbols = sorted(
         {str(event["symbol"]) for event in events}
         | {str(summary.get("symbol") or "") for summary in summaries if summary.get("symbol")}

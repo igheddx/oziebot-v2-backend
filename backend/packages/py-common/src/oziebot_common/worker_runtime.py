@@ -1,166 +1,94 @@
+"""Postgres-backed worker dequeue loop."""
+
 from __future__ import annotations
 
 import logging
 import threading
 import time
+import traceback
 from collections.abc import Callable
 from typing import Any
 
-from redis import Redis, RedisError
+from sqlalchemy.exc import OperationalError
+
+from sqlalchemy.engine import Engine
 
 from oziebot_common.health import HealthState
-from oziebot_common.queues import brpop_json_any, redis_from_url, reset_redis_connection
-
-DEFAULT_QUEUE_POP_TIMEOUT_SECONDS = 5
-DEFAULT_REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS = 3
-DEFAULT_REDIS_RETRY_DELAY_SECONDS = 1
-DEFAULT_REDIS_FAILURE_THRESHOLD = 3
-DEFAULT_REDIS_CIRCUIT_OPEN_SECONDS = 15
-
-
-def _runtime_details(
-    *,
-    queue_pop_timeout_seconds: int,
-    failure_threshold: int,
-    circuit_open_seconds: int,
-    receive_failures_total: int,
-    circuit_open_total: int,
-    receive_recoveries_total: int,
-    consecutive_failures: int,
-) -> dict[str, object]:
-    return {
-        "queuePopTimeoutSeconds": queue_pop_timeout_seconds,
-        "failureThreshold": failure_threshold,
-        "circuitOpenSeconds": circuit_open_seconds,
-        "redisReceiveFailuresTotal": receive_failures_total,
-        "redisCircuitOpenTotal": circuit_open_total,
-        "redisReceiveRecoveriesTotal": receive_recoveries_total,
-        "consecutiveFailures": consecutive_failures,
-        "autoRecoveredWithoutRestart": receive_recoveries_total > 0,
-        "sloStatus": "degraded" if consecutive_failures else "ok",
-    }
+from oziebot_common.worker_outbox import (
+    LEASE_SECONDS_DEFAULT,
+    claim_next_worker_message,
+    finalize_worker_retry,
+    finalize_worker_success,
+    reclaim_stale_leases,
+)
 
 
-def redis_socket_timeout_seconds(queue_pop_timeout_seconds: int) -> int:
-    return queue_pop_timeout_seconds + 5
+DEFAULT_POLL_IDLE_SECONDS = 0.35
 
 
-def redis_client_for_worker(
-    redis_url: str,
-    *,
-    queue_pop_timeout_seconds: int = DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
-    socket_connect_timeout_seconds: int = DEFAULT_REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS,
-) -> Redis:
-    return redis_from_url(
-        redis_url,
-        probe=True,
-        socket_connect_timeout=socket_connect_timeout_seconds,
-        socket_timeout=redis_socket_timeout_seconds(queue_pop_timeout_seconds),
-    )
-
-
-def run_redis_queue_worker(
+def run_postgres_queue_worker(
     *,
     worker_name: str,
-    redis_client: Redis,
-    queue_keys: list[str],
+    engine: Engine,
+    queue_names: list[str],
     stop_event: threading.Event,
     health: HealthState,
     handle_message: Callable[[str, dict[str, Any]], None],
     logger: logging.Logger,
     on_iteration: Callable[[], None] | None = None,
-    queue_pop_timeout_seconds: int = DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
-    retry_delay_seconds: int = DEFAULT_REDIS_RETRY_DELAY_SECONDS,
-    failure_threshold: int = DEFAULT_REDIS_FAILURE_THRESHOLD,
-    circuit_open_seconds: int = DEFAULT_REDIS_CIRCUIT_OPEN_SECONDS,
+    poll_idle_seconds: float = DEFAULT_POLL_IDLE_SECONDS,
+    lease_seconds: int = LEASE_SECONDS_DEFAULT,
+    receive_retry_delay_seconds: float = 0.75,
 ) -> None:
-    consecutive_failures = 0
-    receive_failures_total = 0
-    circuit_open_total = 0
-    receive_recoveries_total = 0
-    health.set_detail(
-        "workerRuntime",
-        _runtime_details(
-            queue_pop_timeout_seconds=queue_pop_timeout_seconds,
-            failure_threshold=failure_threshold,
-            circuit_open_seconds=circuit_open_seconds,
-            receive_failures_total=receive_failures_total,
-            circuit_open_total=circuit_open_total,
-            receive_recoveries_total=receive_recoveries_total,
-            consecutive_failures=consecutive_failures,
-        ),
-    )
     health.mark_ready()
+    poll_idle_seconds = max(0.05, float(poll_idle_seconds))
     while not stop_event.is_set():
         try:
-            got = brpop_json_any(
-                redis_client, queue_keys, timeout=queue_pop_timeout_seconds
-            )
-        except RedisError as exc:
-            if stop_event.is_set():
-                break
-            consecutive_failures += 1
-            receive_failures_total += 1
-            health.mark_degraded("redis_receive_failed")
-            reset_redis_connection(redis_client)
-            sleep_seconds = retry_delay_seconds
-            if consecutive_failures >= failure_threshold:
-                sleep_seconds = circuit_open_seconds
-                circuit_open_total += 1
-                logger.warning(
-                    "%s redis_circuit_open consecutive_failures=%s sleep_seconds=%s error=%s",
-                    worker_name,
-                    consecutive_failures,
-                    sleep_seconds,
-                    exc,
-                )
-            else:
-                logger.warning(
-                    "%s redis_receive_failed consecutive_failures=%s error=%s",
-                    worker_name,
-                    consecutive_failures,
-                    exc,
-                )
-            health.set_detail(
-                "workerRuntime",
-                _runtime_details(
-                    queue_pop_timeout_seconds=queue_pop_timeout_seconds,
-                    failure_threshold=failure_threshold,
-                    circuit_open_seconds=circuit_open_seconds,
-                    receive_failures_total=receive_failures_total,
-                    circuit_open_total=circuit_open_total,
-                    receive_recoveries_total=receive_recoveries_total,
-                    consecutive_failures=consecutive_failures,
-                ),
-            )
-            time.sleep(sleep_seconds)
-            continue
+            reclaim_stale_leases(engine)
 
-        if consecutive_failures:
-            receive_recoveries_total += 1
-            logger.info(
-                "%s redis_receive_recovered consecutive_failures=%s",
-                worker_name,
-                consecutive_failures,
-            )
-            consecutive_failures = 0
-            health.set_detail(
-                "workerRuntime",
-                _runtime_details(
-                    queue_pop_timeout_seconds=queue_pop_timeout_seconds,
-                    failure_threshold=failure_threshold,
-                    circuit_open_seconds=circuit_open_seconds,
-                    receive_failures_total=receive_failures_total,
-                    circuit_open_total=circuit_open_total,
-                    receive_recoveries_total=receive_recoveries_total,
-                    consecutive_failures=consecutive_failures,
-                ),
-            )
-        health.mark_ready()
-        if on_iteration is not None:
-            on_iteration()
-        if got is None:
-            continue
-        queue_key, raw = got
-        handle_message(queue_key, raw)
-        health.touch()
+            claimed: tuple[str, Any, dict[str, Any]] | None = None
+            with engine.begin() as conn:
+                got = claim_next_worker_message(
+                    conn,
+                    queue_names,
+                    lease_seconds=lease_seconds,
+                )
+                if got is None:
+                    pass
+                else:
+                    claimed = got
+
+            if on_iteration is not None:
+                on_iteration()
+
+            if claimed is None:
+                health.touch()
+                time.sleep(poll_idle_seconds)
+                continue
+
+            queue_key, mid, payload = claimed
+            try:
+                handle_message(queue_key, payload)
+                with engine.begin() as conn:
+                    finalize_worker_success(conn, mid)
+            except Exception:
+                logger.exception(
+                    "%s worker handle failed queue=%s", worker_name, queue_key
+                )
+                with engine.begin() as conn:
+                    finalize_worker_retry(
+                        conn, mid, retry_after_seconds=int(receive_retry_delay_seconds)
+                    )
+
+            health.touch()
+
+        except OperationalError:
+            logger.warning("%s postgres_queue_receive_failed backing_off", worker_name)
+            health.mark_degraded("postgres_receive_failed")
+            time.sleep(max(1.0, receive_retry_delay_seconds))
+            health.mark_ready()
+
+        except Exception:
+            traceback.print_exc()
+            logger.exception("%s postgres worker loop crashed", worker_name)
+            time.sleep(max(1.0, receive_retry_delay_seconds))

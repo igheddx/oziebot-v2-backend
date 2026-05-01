@@ -3,17 +3,18 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
+from sqlalchemy import create_engine
+
 from oziebot_common.health import install_shutdown_handlers, start_health_server
+from oziebot_common.postgres_runtime_kv import PostgresRuntimeKV
 from oziebot_common.queues import (
     QueueNames,
-    disconnect_redis,
     risk_decision_from_json,
     trade_intent_from_json,
 )
 from oziebot_common.worker_runtime import (
-    DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
-    redis_client_for_worker,
-    run_redis_queue_worker,
+    DEFAULT_POLL_IDLE_SECONDS,
+    run_postgres_queue_worker,
 )
 
 from oziebot_execution_engine.adapters import (
@@ -31,16 +32,15 @@ log = logging.getLogger("execution-engine")
 
 def main() -> None:
     settings = get_settings()
-    r = redis_client_for_worker(
-        settings.redis_url,
-        queue_pop_timeout_seconds=DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
-    )
+    engine = create_engine(settings.database_url)
+    kv = PostgresRuntimeKV(engine)
     coinbase_client = HttpCoinbaseExecutionClient(settings.coinbase_api_base_url)
     service = ExecutionService(
         settings,
-        r,
+        engine,
+        runtime_kv=kv,
         paper_adapter=PaperExecutionAdapter(
-            r,
+            kv,
             fee_bps=settings.paper_default_fee_bps,
             slippage_bps=settings.paper_default_slippage_bps,
         ),
@@ -57,7 +57,6 @@ def main() -> None:
     stop_event = install_shutdown_handlers(
         "execution-engine",
         health_state=health,
-        on_shutdown=lambda: disconnect_redis(r),
     )
     keys = QueueNames.all_intent_approved_keys()
     log.info("execution-engine listening on %s", keys)
@@ -99,16 +98,16 @@ def main() -> None:
             result.duplicated,
         )
 
-    run_redis_queue_worker(
+    run_postgres_queue_worker(
         worker_name="execution-engine",
-        redis_client=r,
-        queue_keys=keys,
+        engine=engine,
+        queue_names=keys,
         stop_event=stop_event,
         health=health,
         handle_message=_handle_message,
         logger=log,
         on_iteration=_reconcile_if_due,
-        queue_pop_timeout_seconds=DEFAULT_QUEUE_POP_TIMEOUT_SECONDS,
+        poll_idle_seconds=DEFAULT_POLL_IDLE_SECONDS,
     )
     log.info("execution-engine shutdown complete")
 

@@ -73,7 +73,7 @@ class SymbolPanelState:
 
 @dataclass
 class SignalPanelEmitter:
-    client: Any
+    engine: Any
     retention_seconds: int = 60
     sample_interval_seconds: int = 5
     snapshot_event_interval_seconds: int = 15
@@ -112,14 +112,14 @@ class SignalPanelEmitter:
 
         sample = self._build_sample(symbol, state, current)
         append_trade_log_sample(
-            self.client,
+            self.engine,
             symbol=symbol,
             sample=sample,
             timestamp=current,
             retention_seconds=self.retention_seconds,
         )
         samples = read_trade_log_samples(
-            self.client,
+            self.engine,
             symbol=symbol,
             window_seconds=min(60, self.retention_seconds),
             now=current,
@@ -131,7 +131,7 @@ class SignalPanelEmitter:
             return None
 
         write_trade_log_summary(
-            self.client,
+            self.engine,
             symbol=symbol,
             summary=snapshot,
             retention_seconds=self.retention_seconds,
@@ -147,7 +147,7 @@ class SignalPanelEmitter:
             or state_changed
         ):
             append_trade_log_event(
-                self.client,
+                self.engine,
                 symbol=symbol,
                 event_type="market_snapshot",
                 message=self._snapshot_message(snapshot),
@@ -157,7 +157,7 @@ class SignalPanelEmitter:
             state.last_snapshot_event_at = current
         if state_changed and state.last_derived_signature is not None:
             append_trade_log_event(
-                self.client,
+                self.engine,
                 symbol=symbol,
                 event_type="derived_signal",
                 message=self._derived_signal_message(snapshot),

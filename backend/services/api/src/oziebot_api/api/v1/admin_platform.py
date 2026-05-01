@@ -105,12 +105,8 @@ def read_fee_settings(_admin: RootAdminUser, db: DbSession) -> dict[str, Any]:
 
 
 @router.get("/runtime")
-def read_runtime_status(
-    _admin: RootAdminUser,
-    db: DbSession,
-    app_settings: Settings = Depends(settings_dep),
-) -> dict[str, Any]:
-    return build_runtime_status_payload(app_settings, db)
+def read_runtime_status(_admin: RootAdminUser, db: DbSession) -> dict[str, Any]:
+    return build_runtime_status_payload(db)
 
 
 @router.put("/fee-settings")

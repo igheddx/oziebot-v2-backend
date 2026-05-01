@@ -7,7 +7,6 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     database_url: str | None = None
-    redis_url: str = "redis://localhost:6379/0"
     api_secret: str = Field(
         default="dev-insecure", description="Legacy internal signing; prefer jwt_secret"
     )

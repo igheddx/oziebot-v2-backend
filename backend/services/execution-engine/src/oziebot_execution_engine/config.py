@@ -6,7 +6,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str | None = None
-    redis_url: str = "redis://localhost:6379/0"
     coinbase_api_base_url: str = "https://api.coinbase.com"
     exchange_credentials_encryption_key: str | None = None
     paper_default_fee_bps: int = Field(default=15, ge=0)

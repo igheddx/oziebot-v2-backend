@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-import redis
 
 from oziebot_market_data_ingestor import __main__ as ingestor_main
 from oziebot_market_data_ingestor.stale import StaleDataDetector, StaleThresholds
@@ -35,7 +34,7 @@ async def test_seed_market_cache_refreshes_trades_and_bbo_after_candles(monkeypa
         rest=object(),  # type: ignore[arg-type]
         store=object(),  # type: ignore[arg-type]
         cache=object(),  # type: ignore[arg-type]
-        log_client=object(),
+        trade_log_engine=None,
         stale=object(),  # type: ignore[arg-type]
         products=["BTC-USD"],
         trade_limit=25,
@@ -61,22 +60,21 @@ def test_refresh_targets_uses_all_products_when_none_are_stale() -> None:
     ]
 
 
-def test_push_json_best_effort_swallows_redis_oom(caplog) -> None:
-    class FakeRedis:
-        def lpush(self, key: str, value: str) -> None:  # noqa: ARG002
-            raise redis.exceptions.OutOfMemoryError(
-                "command not allowed when used memory > 'maxmemory'"
-            )
+def test_enqueue_ops_best_effort_swallows_enqueue_errors(caplog, monkeypatch) -> None:
+    def boom(_engine, _queue_name, _payload) -> None:
+        raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr(ingestor_main, "enqueue_worker_payload", boom)
+
+    class _Eng:
+        pass
 
     with caplog.at_level("WARNING"):
-        ingestor_main._push_json_best_effort(
-            FakeRedis(),
-            "oziebot:test",
-            {"foo": "bar"},
-            op_name="test_alert",
+        ingestor_main._enqueue_ops_best_effort(
+            _Eng(), {"foo": "bar"}, op_name="test_alert"
         )
 
-    assert "redis queue write failed op=test_alert" in caplog.text
+    assert "ops alert enqueue failed op=test_alert" in caplog.text
 
 
 def test_refresh_product_universe_returns_delta_and_prunes_removed_symbols() -> None:
@@ -130,7 +128,7 @@ async def test_reconcile_bbo_refreshes_products_concurrently() -> None:
         FakeRest(),
         store,
         cache,
-        object(),
+        None,
         stale,
         ["BTC-USD", "ETH-USD", "SOL-USD"],
         max_concurrency=3,
@@ -169,7 +167,6 @@ async def test_reconcile_candles_marks_old_only_batches_unavailable() -> None:
         FakeRest(),
         store,
         cache,
-        object(),
         stale,
         ["IOTX-USD"],
         60,

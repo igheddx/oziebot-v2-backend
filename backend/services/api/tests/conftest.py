@@ -24,6 +24,8 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from oziebot_common.sqlite_aux_schema import ensure_sqlite_aux_schema
+
 from oziebot_api.db.base import Base
 from oziebot_api.deps import require_db
 from oziebot_api.main import app
@@ -40,6 +42,7 @@ def engine():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(eng)
+    ensure_sqlite_aux_schema(eng)
     return eng
 
 

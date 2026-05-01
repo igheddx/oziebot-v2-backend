@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
+from oziebot_common.queues import QueueNames
 from sqlalchemy import create_engine, text
 
 from oziebot_domain.risk import RiskOutcome
@@ -29,6 +30,18 @@ class FakeRedis:
 
     def lpush(self, key: str, value: str):
         self._lists.setdefault(key, []).insert(0, value)
+
+    def lrange_strings(self, key: str, start: int, end: int) -> list[str]:
+        items = self._lists.get(key, [])
+        if end < 0:
+            slice_stop = len(items)
+        else:
+            slice_stop = min(len(items), end + 1)
+        return [items[i] for i in range(max(0, start), slice_stop) if i < len(items)]
+
+
+def _risk_svc(settings: Settings, kv: FakeRedis) -> RiskEngineService:
+    return RiskEngineService(settings, create_engine(settings.database_url), kv)
 
 
 def _setup_db(db_path: Path) -> None:
@@ -327,7 +340,7 @@ def test_risk_approves_live_signal(tmp_path: Path):
     _seed_common(db_path, user_id, tenant_id)
 
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
 
     decision, intent = svc.evaluate(_signal(user_id), trace_id="t1")
     assert decision.outcome in (RiskOutcome.APPROVE, RiskOutcome.REDUCE_SIZE)
@@ -352,7 +365,7 @@ def test_risk_rejects_when_platform_paused(tmp_path: Path):
         )
 
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
 
     decision, intent = svc.evaluate(_signal(user_id), trace_id="t2")
     assert decision.outcome == RiskOutcome.REJECT
@@ -367,7 +380,7 @@ def test_risk_records_decision_audit(tmp_path: Path):
     _seed_common(db_path, user_id, tenant_id)
 
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
     svc.evaluate(_signal(user_id, mode=TradingMode.PAPER), trace_id="risk-audit")
 
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
@@ -391,7 +404,7 @@ def test_risk_reduces_size_by_buying_power(tmp_path: Path):
     _seed_common(db_path, user_id, tenant_id)
 
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
 
     decision, intent = svc.evaluate(_signal(user_id, size="10"), trace_id="t3")
     assert decision.outcome in (RiskOutcome.REDUCE_SIZE, RiskOutcome.REJECT)
@@ -418,7 +431,7 @@ def test_risk_max_position_cap_uses_symbol_exposure_not_bucket_locked(tmp_path: 
         )
 
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
 
     decision, intent = svc.evaluate(
         _signal(user_id, size="0.002"), trace_id="t-pos-cap"
@@ -469,7 +482,7 @@ def test_risk_reduces_size_by_strategy_token_max_position(tmp_path: Path):
         risk_max_strategy_allocation_pct=1.0,
         risk_max_token_concentration_pct=1.0,
     )
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
 
     decision, intent = svc.evaluate(
         _signal(user_id, size="0.002"), trace_id="t-pos-cap-reduce"
@@ -488,7 +501,7 @@ def test_risk_approves_hold_without_trade_intent(tmp_path: Path):
     _seed_common(db_path, user_id, tenant_id)
 
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
 
     decision, intent = svc.evaluate(_hold_signal(user_id), trace_id="t-hold")
     assert decision.outcome == RiskOutcome.APPROVE
@@ -504,7 +517,7 @@ def test_risk_rejects_trade_when_fee_drag_exceeds_expected_edge(tmp_path: Path):
     _seed_common(db_path, user_id, tenant_id)
 
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
     signal = _signal(user_id).model_copy(
         update={
             "reasoning_metadata": {
@@ -551,7 +564,7 @@ def test_paper_relaxes_fee_economics_even_with_legacy_relaxed_rule_config(
         database_url=f"sqlite+pysqlite:///{db_path}",
         risk_relaxed_paper_rules="max_daily_loss,cooldown_after_losses",
     )
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
     signal = _signal(user_id, mode=TradingMode.PAPER).model_copy(
         update={
             "reasoning_metadata": {
@@ -604,7 +617,7 @@ def test_paper_can_trade_without_entitlement_when_allowed(tmp_path: Path):
         )
 
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
 
     paper_decision, paper_intent = svc.evaluate(
         _signal(user_id, mode=TradingMode.PAPER), trace_id="t-paper-entitled"
@@ -648,7 +661,7 @@ def test_paper_can_relax_daily_loss_but_live_rejects(tmp_path: Path):
         risk_max_daily_loss_cents=1000,
         risk_relaxed_paper_rules="max_daily_loss,cooldown_after_losses",
     )
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
 
     live_decision, _ = svc.evaluate(
         _signal(user_id, mode=TradingMode.LIVE), trace_id="t4-live"
@@ -692,7 +705,7 @@ def test_risk_rejects_spread_from_strategy_quality_controls(tmp_path: Path):
         '{"best_bid_price":"50000","best_bid_size":"2","best_ask_price":"50120","best_ask_size":"2"}',
     )
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
-    svc = RiskEngineService(settings, redis)
+    svc = _risk_svc(settings, redis)
 
     decision, intent = svc.evaluate(_signal(user_id, size="0.01"), trace_id="t-spread")
 
@@ -737,7 +750,7 @@ def test_paper_relaxes_execution_quality_even_with_legacy_relaxed_rule_config(
         database_url=f"sqlite+pysqlite:///{db_path}",
         risk_relaxed_paper_rules="max_daily_loss,cooldown_after_losses",
     )
-    svc = RiskEngineService(settings, redis)
+    svc = _risk_svc(settings, redis)
 
     paper_decision, paper_intent = svc.evaluate(
         _signal(user_id, mode=TradingMode.PAPER, size="0.01"),
@@ -798,7 +811,7 @@ def test_risk_rejects_after_consecutive_strategy_losses(tmp_path: Path):
         database_url=f"sqlite+pysqlite:///{db_path}",
         risk_max_daily_loss_cents=100_000_000,
     )
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
 
     decision, intent = svc.evaluate(
         _signal(user_id, size="0.01"), trace_id="t-cooldown"
@@ -809,7 +822,19 @@ def test_risk_rejects_after_consecutive_strategy_losses(tmp_path: Path):
     assert "Cooldown active" in (decision.detail or "")
 
 
-def test_risk_rejects_when_global_daily_loss_guard_triggered(tmp_path: Path):
+def test_risk_rejects_when_global_daily_loss_guard_triggered(
+    tmp_path: Path, monkeypatch
+):
+    captured: list[tuple[str, dict]] = []
+
+    def _capture(_engine: object, queue_name: str, payload: dict) -> None:
+        captured.append((queue_name, payload))
+
+    monkeypatch.setattr(
+        "oziebot_risk_engine.service.enqueue_worker_payload",
+        _capture,
+    )
+
     db_path = tmp_path / "risk-global-guard.sqlite"
     _setup_db(db_path)
     user_id = str(uuid4())
@@ -847,7 +872,7 @@ def test_risk_rejects_when_global_daily_loss_guard_triggered(tmp_path: Path):
         database_url=f"sqlite+pysqlite:///{db_path}",
         risk_max_daily_loss_cents=100_000_000,
     )
-    svc = RiskEngineService(settings, redis)
+    svc = _risk_svc(settings, redis)
 
     decision, intent = svc.evaluate(
         _signal(user_id, size="0.01"), trace_id="t-global-guard"
@@ -856,7 +881,9 @@ def test_risk_rejects_when_global_daily_loss_guard_triggered(tmp_path: Path):
     assert decision.outcome == RiskOutcome.REJECT
     assert intent is None
     assert "Global daily loss guard active" in (decision.detail or "")
-    assert redis._lists
+    assert any(
+        queue_name == QueueNames.alerts(TradingMode.LIVE) for queue_name, _ in captured
+    )
 
 
 def test_risk_rejects_blocked_token_strategy_policy(tmp_path: Path):
@@ -868,7 +895,7 @@ def test_risk_rejects_blocked_token_strategy_policy(tmp_path: Path):
     _insert_token_policy(db_path, strategy_name="momentum", status="blocked")
 
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
 
     decision, intent = svc.evaluate(_signal(user_id), trace_id="t-token-policy-blocked")
 
@@ -895,7 +922,7 @@ def test_risk_reduces_size_for_discouraged_token_policy(tmp_path: Path):
         risk_max_strategy_allocation_pct=1.0,
         risk_max_token_concentration_pct=1.0,
     )
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
 
     decision, intent = svc.evaluate(
         _signal(user_id, size="0.02"), trace_id="t-token-policy-discouraged"
@@ -926,7 +953,7 @@ def test_risk_applies_max_position_pct_override(tmp_path: Path):
         risk_max_strategy_allocation_pct=1.0,
         risk_max_token_concentration_pct=1.0,
     )
-    svc = RiskEngineService(settings, _redis_with_fresh_market())
+    svc = _risk_svc(settings, _redis_with_fresh_market())
 
     decision, intent = svc.evaluate(
         _signal(user_id, size="0.1"), trace_id="t-token-policy-cap"
@@ -950,8 +977,10 @@ def test_risk_rejects_buy_when_user_token_disabled(tmp_path: Path):
             {"u": user_id},
         )
 
+    _db_url = f"sqlite+pysqlite:///{db_path}"
     svc = RiskEngineService(
-        Settings(database_url=f"sqlite+pysqlite:///{db_path}"),
+        Settings(database_url=_db_url),
+        create_engine(_db_url),
         _redis_with_fresh_market(),
     )
 
@@ -976,8 +1005,10 @@ def test_risk_allows_close_when_user_token_disabled(tmp_path: Path):
             {"u": user_id},
         )
 
+    _db_url = f"sqlite+pysqlite:///{db_path}"
     svc = RiskEngineService(
-        Settings(database_url=f"sqlite+pysqlite:///{db_path}"),
+        Settings(database_url=_db_url),
+        create_engine(_db_url),
         _redis_with_fresh_market(),
     )
 
@@ -1010,6 +1041,7 @@ def test_stale_data_degrades_signal_without_full_rejection(tmp_path: Path):
     )
     svc = RiskEngineService(
         settings,
+        create_engine(settings.database_url),
         _redis_with_stale_market(
             trade_age_seconds=10,
             bbo_age_seconds=46,
@@ -1037,6 +1069,7 @@ def test_critical_stale_data_still_rejects(tmp_path: Path):
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
     svc = RiskEngineService(
         settings,
+        create_engine(settings.database_url),
         _redis_with_stale_market(
             trade_age_seconds=10,
             bbo_age_seconds=136,
@@ -1073,6 +1106,7 @@ def test_trade_only_critical_stale_data_degrades_without_rejection(tmp_path: Pat
     )
     svc = RiskEngineService(
         settings,
+        create_engine(settings.database_url),
         _redis_with_stale_market(
             trade_age_seconds=70,
             bbo_age_seconds=10,

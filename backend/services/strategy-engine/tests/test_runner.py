@@ -17,23 +17,31 @@ from oziebot_strategy_engine.runner import StrategyScheduleState, StrategyRunner
 from oziebot_strategy_engine.strategy import MarketSnapshot, PositionState
 
 
-class DummyRedis:
-    def __init__(self, kv: dict[str, str] | None = None):
-        self.kv = kv or {}
+class DummyRuntimeKV:
+    """Minimal runtime_kv stand-in matching ``PostgresRuntimeKV`` surface used in tests."""
 
-    def get(self, key: str):
-        return self.kv.get(key)
+    def __init__(self, kv: dict[str, str | list[str]] | None = None):
+        self._kv = dict(kv or {})
 
-    def lrange(self, key: str, start: int, end: int):
-        value = self.kv.get(key, [])
-        if isinstance(value, list):
-            return value[start : end + 1 if end >= 0 else None]
-        return []
+    def get(self, key: str) -> str | None:
+        val = self._kv.get(key)
+        if isinstance(val, list):
+            return None
+        return val if val is not None else None
 
-    def lpush(self, key: str, value: str):
-        existing = self.kv.setdefault(key, [])
-        if isinstance(existing, list):
-            existing.insert(0, value)
+    def lrange_strings(self, key: str, start: int, end: int) -> list[str]:
+        val = self._kv.get(key)
+        if not isinstance(val, list):
+            return []
+        if end < 0:
+            slice_stop = len(val)
+        else:
+            slice_stop = min(len(val), end + 1)
+        out: list[str] = []
+        for i in range(max(0, start), slice_stop):
+            if i < len(val):
+                out.append(str(val[i]))
+        return out
 
 
 def _setup_intelligence_db(db_path: Path) -> None:
@@ -123,7 +131,7 @@ def test_schedule_pattern_intervals():
 
 def test_runner_load_market_snapshot_from_normalized_cache():
     symbol = "BTC-USD"
-    redis = DummyRedis(
+    kv = DummyRuntimeKV(
         {
             f"oziebot:md:bbo:{symbol}": json.dumps(
                 {
@@ -144,7 +152,7 @@ def test_runner_load_market_snapshot_from_normalized_cache():
     )
 
     # Engine is unused by this method in this test path.
-    runner = StrategyRunner(engine=None, redis_client=redis)  # type: ignore[arg-type]
+    runner = StrategyRunner(engine=None, runtime_kv=kv)  # type: ignore[arg-type]
     snap = runner._load_market_snapshot(symbol)
 
     assert snap is not None
@@ -265,7 +273,7 @@ def test_runner_applies_dynamic_bucket_sizing_to_buy_signal(tmp_path: Path):
             {"id": uuid.uuid4().hex, "user_id": user_id},
         )
 
-    runner = StrategyRunner(engine=engine, redis_client=DummyRedis())
+    runner = StrategyRunner(engine=engine, runtime_kv=DummyRuntimeKV())
     market = MarketSnapshot(
         timestamp=now,
         symbol="BTC-USD",
@@ -325,7 +333,7 @@ def test_runner_applies_dynamic_bucket_sizing_to_buy_signal(tmp_path: Path):
 
 
 def test_runner_resolves_all_allowed_symbols_by_default():
-    runner = StrategyRunner(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+    runner = StrategyRunner(engine=None, runtime_kv=DummyRuntimeKV())  # type: ignore[arg-type]
 
     assert runner._resolve_symbols(
         config={}, allowed_symbols=["AERO-USD", "BTC-USD"]
@@ -439,7 +447,7 @@ def test_merge_symbol_runtime_state_preserves_other_symbols():
 def test_run_once_processes_only_current_trading_mode_symbols():
     class FanoutRunner(StrategyRunner):
         def __init__(self):
-            super().__init__(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+            super().__init__(engine=None, runtime_kv=DummyRuntimeKV())  # type: ignore[arg-type]
             self.events: list[StrategySignalEvent] = []
 
         def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
@@ -532,7 +540,7 @@ def test_run_once_processes_only_current_trading_mode_symbols():
 def test_run_once_keeps_open_position_symbols_when_entries_disabled():
     class ExitAwareRunner(StrategyRunner):
         def __init__(self):
-            super().__init__(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+            super().__init__(engine=None, runtime_kv=DummyRuntimeKV())  # type: ignore[arg-type]
             self.events: list[StrategySignalEvent] = []
 
         def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
@@ -642,7 +650,7 @@ def test_run_once_persists_signal_snapshots_and_ai_inference(tmp_path: Path):
         def __init__(self):
             super().__init__(
                 engine=create_engine(f"sqlite+pysqlite:///{db_path}"),
-                redis_client=DummyRedis(),
+                runtime_kv=DummyRuntimeKV(),
             )
 
         def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
@@ -726,7 +734,7 @@ def test_run_once_continues_when_trade_intelligence_persistence_fails(
         def __init__(self):
             super().__init__(
                 engine=create_engine(f"sqlite+pysqlite:///{db_path}"),
-                redis_client=DummyRedis(),
+                runtime_kv=DummyRuntimeKV(),
             )
 
         def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
@@ -812,7 +820,7 @@ def test_run_once_continues_when_decision_audit_persistence_fails(
         def __init__(self):
             super().__init__(
                 engine=create_engine(f"sqlite+pysqlite:///{db_path}"),
-                redis_client=DummyRedis(),
+                runtime_kv=DummyRuntimeKV(),
             )
 
         def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
@@ -892,7 +900,7 @@ def test_run_once_persists_suppression_audit(tmp_path: Path):
         def __init__(self):
             super().__init__(
                 engine=create_engine(f"sqlite+pysqlite:///{db_path}"),
-                redis_client=DummyRedis(),
+                runtime_kv=DummyRuntimeKV(),
             )
 
         def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
@@ -968,7 +976,7 @@ def test_run_once_persists_suppression_audit(tmp_path: Path):
 def test_dca_scheduler_enforces_buy_interval_from_runtime_state():
     class DcaRunner(StrategyRunner):
         def __init__(self):
-            super().__init__(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+            super().__init__(engine=None, runtime_kv=DummyRuntimeKV())  # type: ignore[arg-type]
             self.generated = 0
 
         def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
@@ -1063,7 +1071,7 @@ def test_dca_scheduler_enforces_buy_interval_from_runtime_state():
 def test_momentum_runner_skips_blocked_token_policy():
     class PolicyRunner(StrategyRunner):
         def __init__(self):
-            super().__init__(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+            super().__init__(engine=None, runtime_kv=DummyRuntimeKV())  # type: ignore[arg-type]
             self.generated = 0
 
         def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
@@ -1142,7 +1150,7 @@ def test_momentum_runner_skips_blocked_token_policy():
 def test_mean_reversion_runner_skips_admin_disabled_token_policy():
     class PolicyRunner(StrategyRunner):
         def __init__(self):
-            super().__init__(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+            super().__init__(engine=None, runtime_kv=DummyRuntimeKV())  # type: ignore[arg-type]
             self.generated = 0
 
         def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
@@ -1219,7 +1227,7 @@ def test_mean_reversion_runner_skips_admin_disabled_token_policy():
 
 
 def test_apply_token_policy_to_signal_returns_updated_copy_for_frozen_signal():
-    runner = StrategyRunner(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+    runner = StrategyRunner(engine=None, runtime_kv=DummyRuntimeKV())  # type: ignore[arg-type]
     signal = StrategySignal(
         signal_id=uuid.uuid4(),
         correlation_id=uuid.uuid4(),
@@ -1261,7 +1269,7 @@ def test_apply_token_policy_to_signal_returns_updated_copy_for_frozen_signal():
 def test_runner_requires_max_position_usd_for_fractional_sizing():
     class SizingRunner(StrategyRunner):
         def __init__(self):
-            super().__init__(engine=None, redis_client=DummyRedis())  # type: ignore[arg-type]
+            super().__init__(engine=None, runtime_kv=DummyRuntimeKV())  # type: ignore[arg-type]
             self.generated = 0
 
         def _load_enabled_user_strategies(self) -> list[dict[str, str]]:

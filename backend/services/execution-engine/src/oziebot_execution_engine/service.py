@@ -8,19 +8,20 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from collections.abc import Callable
 from typing import Any
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from oziebot_common.queues import (
     QueueNames,
     execution_event_to_json,
     notification_event_to_json,
-    push_json,
     risk_decision_from_json,
     trade_intent_from_json,
 )
+from oziebot_common.worker_outbox import enqueue_worker_payload
 from oziebot_common.strategy_defaults import normalize_platform_strategy_config
 from oziebot_common.token_policy import resolve_effective_token_policy
 from oziebot_common.trade_intelligence import (
@@ -74,21 +75,30 @@ class ExecutionService:
     def __init__(
         self,
         settings,
-        redis_client,
+        engine,
         *,
+        runtime_kv,
         paper_adapter: ExecutionAdapter,
         live_adapter: ExecutionAdapter,
+        enqueue_fn: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self._settings = settings
-        self._redis = redis_client
-        self._engine = (
-            create_engine(settings.database_url) if settings.database_url else None
-        )
+        self._engine = engine
+        self._kv = runtime_kv
         self._paper_adapter = paper_adapter
         self._live_adapter = live_adapter
+        self._enqueue_fn = enqueue_fn
         self._crypto = CredentialCrypto(settings.exchange_credentials_encryption_key)
         self._metrics: Counter[str] = Counter()
         self._rejection_reasons: Counter[str] = Counter()
+
+    def _enqueue(self, queue_name: str, payload: dict[str, Any]) -> None:
+        if self._engine is None:
+            return
+        if self._enqueue_fn is not None:
+            self._enqueue_fn(queue_name, payload)
+            return
+        enqueue_worker_payload(self._engine, queue_name, payload)
 
     @staticmethod
     def build_idempotency_key(intent_id: str, trading_mode: TradingMode) -> str:
@@ -606,7 +616,7 @@ class ExecutionService:
         )
 
     def _market_price_hint(self, symbol: str, side: str) -> Decimal | None:
-        raw = self._redis.get(f"oziebot:md:bbo:{symbol}") if self._redis else None
+        raw = self._kv.get(f"oziebot:md:bbo:{symbol}") if self._kv else None
         if not raw:
             return None
         payload = json.loads(raw)
@@ -1258,7 +1268,7 @@ class ExecutionService:
             detail=detail,
             payload=payload,
         )
-        if self._redis is None:
+        if self._engine is None:
             return
         event = ExecutionEvent(
             order_id=order_id,
@@ -1274,13 +1284,11 @@ class ExecutionService:
             detail=detail,
             payload=payload,
         )
-        push_json(
-            self._redis,
+        self._enqueue(
             QueueNames.execution_events(request.trading_mode),
             execution_event_to_json(event),
         )
-        push_json(
-            self._redis,
+        self._enqueue(
             QueueNames.execution_reconciliation(request.trading_mode),
             execution_event_to_json(event),
         )
@@ -1315,8 +1323,7 @@ class ExecutionService:
                     "state": state.value,
                 },
             )
-            push_json(
-                self._redis,
+            self._enqueue(
                 QueueNames.alerts(request.trading_mode),
                 notification_event_to_json(notif),
             )

@@ -25,9 +25,11 @@ from oziebot_execution_engine.state_machine import ensure_transition
 
 
 class FakeRedis:
+    """KV + enqueue capture for execution unit tests (Postgres-free)."""
+
     def __init__(self) -> None:
         self._kv: dict[str, str] = {}
-        self._lists: dict[str, list[str]] = {}
+        self.enqueued: list[tuple[str, dict]] = []
 
     def get(self, key: str):
         return self._kv.get(key)
@@ -35,37 +37,8 @@ class FakeRedis:
     def set(self, key: str, value: str) -> None:
         self._kv[key] = value
 
-    def lpush(self, key: str, value: str) -> None:
-        self._lists.setdefault(key, []).insert(0, value)
-
-    def ltrim(self, key: str, start: int, stop: int) -> None:
-        items = self._lists.get(key, [])
-        self._lists[key] = items[start : stop + 1]
-
-    def pipeline(self):
-        redis = self
-
-        class FakePipeline:
-            def __init__(self) -> None:
-                self._operations: list[tuple[str, tuple]] = []
-
-            def lpush(self, key: str, value: str):
-                self._operations.append(("lpush", (key, value)))
-                return self
-
-            def ltrim(self, key: str, start: int, stop: int):
-                self._operations.append(("ltrim", (key, start, stop)))
-                return self
-
-            def execute(self):
-                for op, args in self._operations:
-                    getattr(redis, op)(*args)
-                return []
-
-        return FakePipeline()
-
     def list_len(self, key: str) -> int:
-        return len(self._lists.get(key, []))
+        return sum(1 for queue_name, _ in self.enqueued if queue_name == key)
 
 
 class FakeLiveClient:
@@ -440,6 +413,7 @@ def _service(
     db_path: Path, redis: FakeRedis, live_submission: ExecutionSubmission | None = None
 ) -> tuple[ExecutionService, FakeLiveClient]:
     settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    eng = create_engine(settings.database_url or f"sqlite+pysqlite:///{db_path}")
     paper = PaperExecutionAdapter(redis, fee_bps=10, slippage_bps=0)
     live_client = FakeLiveClient(
         live_submission
@@ -452,8 +426,17 @@ def _service(
     live = LiveCoinbaseExecutionAdapter(
         live_client, credential_loader=lambda tenant_id: ("key", "secret")
     )
+
+    def _enqueue_fn(queue_name: str, payload: dict) -> None:
+        redis.enqueued.append((queue_name, payload))
+
     return ExecutionService(
-        settings, redis, paper_adapter=paper, live_adapter=live
+        settings,
+        eng,
+        runtime_kv=redis,
+        paper_adapter=paper,
+        live_adapter=live,
+        enqueue_fn=_enqueue_fn,
     ), live_client
 
 

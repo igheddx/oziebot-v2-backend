@@ -6,9 +6,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
-from oziebot_common.queues import QueueNames, notification_event_to_json, push_json
+from oziebot_common.queues import QueueNames, notification_event_to_json
+from oziebot_common.worker_outbox import enqueue_worker_payload
 from oziebot_domain.events import NotificationEvent, OperationalAlert
 
 from oziebot_alerts_worker.templates import render_message
@@ -17,13 +18,10 @@ log = logging.getLogger("alerts-worker.service")
 
 
 class NotificationService:
-    def __init__(self, settings, redis_client, adapters: dict[str, Any]) -> None:
+    def __init__(self, settings, engine, adapters: dict[str, Any]) -> None:
         self._settings = settings
-        self._redis = redis_client
         self._adapters = adapters
-        self._engine = (
-            create_engine(settings.database_url) if settings.database_url else None
-        )
+        self._engine = engine
 
     def route_event(self, event: NotificationEvent) -> None:
         if self._engine is None:
@@ -115,21 +113,22 @@ class NotificationService:
                     event, channel_row, status="failed", attempt=attempt, error=err
                 )
                 return
-            push_json(
-                self._redis,
-                QueueNames.alerts_retry(event.trading_mode),
-                {
-                    "event": notification_event_to_json(event),
-                    "channel": {
-                        "channel": channel_row["channel"],
-                        "destination": destination,
-                        "id": str(channel_row.get("id") or ""),
+            if self._engine is not None:
+                enqueue_worker_payload(
+                    self._engine,
+                    QueueNames.alerts_retry(event.trading_mode),
+                    {
+                        "event": notification_event_to_json(event),
+                        "channel": {
+                            "channel": channel_row["channel"],
+                            "destination": destination,
+                            "id": str(channel_row.get("id") or ""),
+                        },
+                        "attempt": attempt + 1,
+                        "message": message,
+                        "scheduled_at": now.isoformat(),
                     },
-                    "attempt": attempt + 1,
-                    "message": message,
-                    "scheduled_at": now.isoformat(),
-                },
-            )
+                )
 
     def _load_enabled_channels(self, event: NotificationEvent) -> list[dict[str, Any]]:
         if self._engine is None:

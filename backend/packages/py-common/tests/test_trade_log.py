@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import MagicMock
 
 import pytest
-import redis
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 
 import oziebot_common.trade_log as trade_log_module
 import oziebot_common.trade_log_intelligence as trade_log_intelligence_module
+from oziebot_common.sqlite_aux_schema import ensure_sqlite_aux_schema
 from oziebot_common.trade_log import append_trade_log_event, read_trade_log_events
 from oziebot_common.trade_log_intelligence import (
     append_trade_log_sample,
@@ -18,125 +21,15 @@ from oziebot_common.trade_log_intelligence import (
 )
 
 
-class FakePipeline:
-    def __init__(self, client: "FakeRedis") -> None:
-        self._client = client
-        self._ops: list[tuple[str, tuple, dict]] = []
-
-    def zadd(self, *args, **kwargs):
-        self._ops.append(("zadd", args, kwargs))
-        return self
-
-    def zremrangebyscore(self, *args, **kwargs):
-        self._ops.append(("zremrangebyscore", args, kwargs))
-        return self
-
-    def expire(self, *args, **kwargs):
-        self._ops.append(("expire", args, kwargs))
-        return self
-
-    def sadd(self, *args, **kwargs):
-        self._ops.append(("sadd", args, kwargs))
-        return self
-
-    def setex(self, *args, **kwargs):
-        self._ops.append(("setex", args, kwargs))
-        return self
-
-    def get(self, *args, **kwargs):
-        self._ops.append(("get", args, kwargs))
-        return self
-
-    def execute(self):
-        results = []
-        for name, args, kwargs in self._ops:
-            results.append(getattr(self._client, name)(*args, **kwargs))
-        return results
-
-
-class FailingPipeline(FakePipeline):
-    def execute(self):
-        raise redis.exceptions.OutOfMemoryError(
-            "command not allowed when used memory > 'maxmemory'"
-        )
-
-
-class FakeRedis:
-    def __init__(self) -> None:
-        self._sorted: dict[str, dict[str, float]] = {}
-        self._sets: dict[str, set[str]] = {}
-        self._strings: dict[str, str] = {}
-
-    def pipeline(self) -> FakePipeline:
-        return FakePipeline(self)
-
-    def zadd(self, key: str, mapping: dict[str, float]) -> None:
-        bucket = self._sorted.setdefault(key, {})
-        bucket.update(mapping)
-
-    def zremrangebyscore(self, key: str, min_score, max_score) -> None:
-        bucket = self._sorted.setdefault(key, {})
-        max_value = float(max_score)
-        if min_score == "-inf":
-            to_delete = [
-                member for member, score in bucket.items() if score <= max_value
-            ]
-        else:
-            min_value = float(min_score)
-            to_delete = [
-                member
-                for member, score in bucket.items()
-                if min_value <= score <= max_value
-            ]
-        for member in to_delete:
-            bucket.pop(member, None)
-
-    def expire(self, key: str, seconds: int) -> None:  # noqa: ARG002
-        return None
-
-    def sadd(self, key: str, *values: str) -> None:
-        bucket = self._sets.setdefault(key, set())
-        bucket.update(values)
-
-    def smembers(self, key: str) -> set[str]:
-        return self._sets.get(key, set())
-
-    def setex(self, key: str, seconds: int, value: str) -> None:  # noqa: ARG002
-        self._strings[key] = value
-
-    def get(self, key: str) -> str | None:
-        return self._strings.get(key)
-
-    def zrevrangebyscore(
-        self,
-        key: str,
-        max_score,
-        min_score,
-        *,
-        start: int = 0,
-        num: int | None = None,
-    ) -> list[str]:
-        bucket = self._sorted.get(key, {})
-        min_value = float(min_score)
-        if max_score == "+inf":
-            max_value = float("inf")
-        else:
-            max_value = float(max_score)
-        rows = [
-            member
-            for member, score in sorted(
-                bucket.items(), key=lambda item: item[1], reverse=True
-            )
-            if min_value <= score <= max_value
-        ]
-        if num is None:
-            return rows[start:]
-        return rows[start : start + num]
-
-
-class FailingRedis(FakeRedis):
-    def pipeline(self) -> FailingPipeline:
-        return FailingPipeline(self)
+@pytest.fixture
+def sqlite_engine():
+    eng = create_engine(
+        "sqlite+pysqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    ensure_sqlite_aux_schema(eng)
+    return eng
 
 
 class FakeObservabilityStore:
@@ -190,45 +83,43 @@ class FakeObservabilityStore:
         return list(self.summaries.values())
 
 
-def test_trade_log_keeps_recent_events_in_chronological_order() -> None:
-    client = FakeRedis()
+def test_trade_log_keeps_recent_events_in_chronological_order(sqlite_engine) -> None:
     now = datetime.now(UTC)
 
     append_trade_log_event(
-        client,
+        sqlite_engine,
         symbol="BTC-USD",
         event_type="market_snapshot",
         message="BTC-USD market snapshot pulled",
         timestamp=now - timedelta(seconds=150),
     )
     append_trade_log_event(
-        client,
+        sqlite_engine,
         symbol="ETH-USD",
         event_type="bbo_update",
         message="ETH-USD BBO updated",
         timestamp=now - timedelta(seconds=50),
     )
     append_trade_log_event(
-        client,
+        sqlite_engine,
         symbol="SOL-USD",
         event_type="candles_refresh",
         message="SOL-USD candles refreshed",
         timestamp=now - timedelta(seconds=10),
     )
 
-    events = read_trade_log_events(client, now=now, window_seconds=120, limit=10)
+    events = read_trade_log_events(sqlite_engine, now=now, window_seconds=120, limit=10)
 
     assert [event["symbol"] for event in events] == ["ETH-USD", "SOL-USD"]
     assert events[0]["message"] == "ETH-USD BBO updated"
     assert events[1]["message"] == "SOL-USD candles refreshed"
 
 
-def test_trade_log_preserves_structured_details() -> None:
-    client = FakeRedis()
+def test_trade_log_preserves_structured_details(sqlite_engine) -> None:
     now = datetime.now(UTC)
 
     append_trade_log_event(
-        client,
+        sqlite_engine,
         symbol="BTC-USD",
         event_type="trade_tick",
         message="BTC-USD trade tick sampled",
@@ -241,7 +132,7 @@ def test_trade_log_preserves_structured_details() -> None:
         },
     )
 
-    events = read_trade_log_events(client, now=now, window_seconds=120, limit=10)
+    events = read_trade_log_events(sqlite_engine, now=now, window_seconds=120, limit=10)
 
     assert events[0]["source"] == "coinbase"
     assert events[0]["details"] == {
@@ -252,18 +143,17 @@ def test_trade_log_preserves_structured_details() -> None:
     }
 
 
-def test_trade_log_filters_by_symbol_and_event_type() -> None:
-    client = FakeRedis()
+def test_trade_log_filters_by_symbol_and_event_type(sqlite_engine) -> None:
     now = datetime.now(UTC)
     append_trade_log_event(
-        client,
+        sqlite_engine,
         symbol="BTC-USD",
         event_type="market_snapshot",
         message="btc snapshot",
         timestamp=now - timedelta(seconds=5),
     )
     append_trade_log_event(
-        client,
+        sqlite_engine,
         symbol="ETH-USD",
         event_type="trade_tick",
         message="eth tick",
@@ -271,7 +161,7 @@ def test_trade_log_filters_by_symbol_and_event_type() -> None:
     )
 
     events = read_trade_log_events(
-        client,
+        sqlite_engine,
         now=now,
         window_seconds=120,
         limit=10,
@@ -284,8 +174,7 @@ def test_trade_log_filters_by_symbol_and_event_type() -> None:
     assert events[0]["event_type"] == "market_snapshot"
 
 
-def test_trade_log_summary_round_trip_and_snapshot_build() -> None:
-    client = FakeRedis()
+def test_trade_log_summary_round_trip_and_snapshot_build(sqlite_engine) -> None:
     now = datetime.now(UTC)
     for seconds, mid_price, volume, buy_volume, sell_volume in [
         (30, "64000", "120000", "0.9", "0.6"),
@@ -293,7 +182,7 @@ def test_trade_log_summary_round_trip_and_snapshot_build() -> None:
         (6, "64105", "260000", "1.7", "0.4"),
     ]:
         append_trade_log_sample(
-            client,
+            sqlite_engine,
             symbol="BTC-USD",
             timestamp=now - timedelta(seconds=seconds),
             sample={
@@ -317,7 +206,7 @@ def test_trade_log_summary_round_trip_and_snapshot_build() -> None:
     snapshot = build_market_signal_snapshot(
         symbol="BTC-USD",
         samples=read_trade_log_samples(
-            client, symbol="BTC-USD", now=now, window_seconds=60
+            sqlite_engine, symbol="BTC-USD", now=now, window_seconds=60
         ),
     )
 
@@ -326,31 +215,35 @@ def test_trade_log_summary_round_trip_and_snapshot_build() -> None:
     assert snapshot["market_state"]["trend"] == "UP"
     assert snapshot["signal_quality_label"] in {"MODERATE", "HIGH"}
 
-    write_trade_log_summary(client, symbol="BTC-USD", summary=snapshot)
-    summaries = read_trade_log_summaries(client)
+    write_trade_log_summary(sqlite_engine, symbol="BTC-USD", summary=snapshot)
+    summaries = read_trade_log_summaries(sqlite_engine)
     assert len(summaries) == 1
     assert summaries[0]["symbol"] == "BTC-USD"
 
 
-def test_trade_log_writes_degrade_when_redis_is_full(caplog) -> None:
-    client = FailingRedis()
+def test_trade_log_writes_degrade_when_database_unavailable(caplog) -> None:
+    engine = MagicMock()
+    engine.dialect.name = "postgresql"
+    cm = MagicMock()
+    cm.__enter__.side_effect = RuntimeError("db unavailable")
+    engine.begin.return_value = cm
     now = datetime.now(UTC)
 
     event = append_trade_log_event(
-        client,
+        engine,
         symbol="BTC-USD",
         event_type="trade_tick",
         message="test",
         timestamp=now,
     )
     sample = append_trade_log_sample(
-        client,
+        engine,
         symbol="BTC-USD",
         sample={"mid_price": Decimal("62000")},
         timestamp=now,
     )
     summary = write_trade_log_summary(
-        client,
+        engine,
         symbol="BTC-USD",
         summary={"symbol": "BTC-USD", "signal_quality_score": 80},
     )

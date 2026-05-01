@@ -1,6 +1,7 @@
-"""Shared non-domain utilities (queues, Redis, token policy helpers)."""
+"""Shared non-domain utilities (queues, Postgres runtime helpers, fee model)."""
 
 from oziebot_common.health import HealthState, start_health_server
+from oziebot_common.postgres_runtime_kv import PostgresRuntimeKV
 from oziebot_common.fee_model import (
     DEFAULT_FEE_MODEL_SETTINGS,
     SETTING_EXECUTION_FEE_MODEL,
@@ -20,9 +21,6 @@ from oziebot_common.runtime_status import (
 )
 from oziebot_common.queues import (
     QueueNames,
-    brpop_json_any,
-    redis_from_url,
-    redis_url_candidates,
 )
 from oziebot_common.strategy_defaults import (
     GLOBAL_SIGNAL_RULE_DEFAULTS,
@@ -88,6 +86,7 @@ __all__ = [
     "DecisionAuditStage",
     "GLOBAL_SIGNAL_RULE_DEFAULTS",
     "HealthState",
+    "PostgresRuntimeKV",
     "QueueNames",
     "RUNTIME_STATUS_KEY_PREFIX",
     "SETTING_EXECUTION_FEE_MODEL",
@@ -116,7 +115,6 @@ __all__ = [
     "default_fee_model_settings",
     "estimate_signal_expected_edge_bps",
     "extract_signal_snapshot_id",
-    "brpop_json_any",
     "compute_market_profile",
     "is_trade_net_positive",
     "normalize_fee_model_settings",
@@ -127,8 +125,6 @@ __all__ = [
     "persist_decision_audit",
     "persist_signal_snapshot",
     "persist_trade_outcome_feature",
-    "redis_from_url",
-    "redis_url_candidates",
     "read_trade_log_events",
     "read_runtime_statuses",
     "read_trade_log_samples",

@@ -8,14 +8,16 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 from oziebot_common.fee_model import (
     SETTING_EXECUTION_FEE_MODEL,
     calculate_round_trip_cost_bps,
     resolve_fee_profile,
 )
-from oziebot_common.queues import QueueNames, notification_event_to_json, push_json
+from oziebot_common.queues import QueueNames, notification_event_to_json
+from oziebot_common.postgres_runtime_kv import PostgresRuntimeKV
+from oziebot_common.worker_outbox import enqueue_worker_payload
 from oziebot_common.strategy_defaults import normalize_platform_strategy_config
 from oziebot_common.token_policy import resolve_effective_token_policy
 from oziebot_common.trade_intelligence import (
@@ -51,10 +53,10 @@ DEFAULT_PAPER_RELAXED_RULES = {
 
 
 class RiskEngineService:
-    def __init__(self, settings: Settings, redis_client):
+    def __init__(self, settings: Settings, engine, runtime_kv: PostgresRuntimeKV):
         self._settings = settings
-        self._redis = redis_client
-        self._engine = create_engine(settings.database_url)
+        self._engine = engine
+        self._kv = runtime_kv
         self._rules = default_rules(settings)
         configured_paper_relaxed = {
             x.strip() for x in settings.risk_relaxed_paper_rules.split(",") if x.strip()
@@ -481,7 +483,7 @@ class RiskEngineService:
         now_iso = now.isoformat()
         token, quote = symbol.split("-", 1) if "-" in symbol else (symbol, "USD")
 
-        bbo_raw = self._redis.get(f"oziebot:md:bbo:{symbol}")
+        bbo_raw = self._kv.get(f"oziebot:md:bbo:{symbol}")
         bbo = json.loads(bbo_raw) if bbo_raw else None
         bid = Decimal(str(bbo.get("best_bid_price", "0"))) if bbo else Decimal("0")
         ask = Decimal(str(bbo.get("best_ask_price", "0"))) if bbo else Decimal("0")
@@ -500,12 +502,9 @@ class RiskEngineService:
                     Decimal("1"), Decimal(str(signal.suggested_size)) / depth
                 )
                 est_slippage_pct = spread_pct * participation
-                candle_history = []
-                if hasattr(self._redis, "lrange"):
-                    candle_history = list(
-                        self._redis.lrange(f"oziebot:md:candles:60:{symbol}", 0, 19)
-                        or []
-                    )
+                candle_history = self._kv.lrange_strings(
+                    f"oziebot:md:candles:60:{symbol}", 0, 19
+                )
                 closes: list[Decimal] = []
                 for raw in reversed(candle_history):
                     try:
@@ -1114,7 +1113,7 @@ class RiskEngineService:
     def _staleness_state(
         self, *, key: str, threshold_seconds: int, now: datetime
     ) -> dict[str, float | bool | None]:
-        raw = self._redis.get(key)
+        raw = self._kv.get(key)
         if not raw:
             return {"stale": True, "critical": True, "age_seconds": None}
         try:
@@ -1285,8 +1284,8 @@ class RiskEngineService:
                 "limit_pct": float(limit),
             },
         )
-        push_json(
-            self._redis,
+        enqueue_worker_payload(
+            self._engine,
             QueueNames.alerts(signal.trading_mode),
             notification_event_to_json(notification),
         )
