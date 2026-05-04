@@ -5,6 +5,14 @@ name: Deploy Backend to EC2
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+
+# One deploy at a time; cancel an in-flight run when a newer push lands on main.
+concurrency:
+  group: deploy-backend-ec2
+  cancel-in-progress: true
 
 permissions:
   contents: read
