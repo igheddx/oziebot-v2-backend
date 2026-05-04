@@ -27,14 +27,12 @@ def _start_runtime_status_publisher(
 ) -> None:
     def _publisher() -> None:
         from oziebot_common.runtime_status import publish_runtime_status
-        from oziebot_common.s3_observability import get_observability_store
 
         eng = None
         while True:
             try:
-                if get_observability_store() is None:
-                    if eng is None:
-                        eng = create_engine(database_url)
+                if eng is None and database_url.strip():
+                    eng = create_engine(database_url)
                 publish_runtime_status(
                     eng,
                     state.snapshot(),

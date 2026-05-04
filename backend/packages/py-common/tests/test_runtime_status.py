@@ -96,3 +96,31 @@ def test_runtime_status_can_use_s3_observability_store(
 
     assert snapshots["strategy-engine"]["status"] == "ok"
     assert "risk-engine" not in snapshots
+
+
+def test_publish_with_observability_also_writes_postgres_when_engine_present(
+    monkeypatch: pytest.MonkeyPatch,
+    sqlite_engine,
+) -> None:
+    store = FakeObservabilityStore()
+    monkeypatch.setattr(
+        runtime_status_module,
+        "get_observability_store",
+        lambda: store,
+    )
+    publish_runtime_status(
+        sqlite_engine,
+        {
+            "service": "strategy-engine",
+            "status": "ok",
+            "ready": True,
+        },
+        ttl_seconds=25,
+    )
+    assert "strategy-engine" in store.snapshots
+    snaps = read_runtime_statuses(
+        sqlite_engine,
+        ["strategy-engine"],
+        use_observability_store=False,
+    )
+    assert snaps["strategy-engine"]["status"] == "ok"

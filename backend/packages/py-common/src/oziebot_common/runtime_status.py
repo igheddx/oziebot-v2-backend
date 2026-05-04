@@ -27,7 +27,8 @@ def publish_runtime_status(
     store = get_observability_store()
     if store is not None:
         store.publish_runtime_status(snapshot)
-        return
+    # Postgres mirror when ENGINE is present: Lightsail/UI reads merge DB rows and stay
+    # healthy even if S3 IAM or OBSERVABILITY config differs across containers.
     if engine is None:
         return
     kv = PostgresRuntimeKV(engine)
