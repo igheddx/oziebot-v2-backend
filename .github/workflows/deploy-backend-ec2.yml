@@ -108,14 +108,31 @@ jobs:
             "${EC2_USER}@${EC2_HOST}" \
             "mkdir -p '${LEAN_REPO_PATH_ON_HOST}' '${LEAN_REPO_PATH_ON_HOST}/infrastructure/lean' '${LEAN_REPO_PATH_ON_HOST}/infrastructure/aws'"
 
-      - name: Copy application files to EC2 and start Compose
+      - name: Rsync repo to Lightsail host
         env:
           LEAN_REPO_PATH: ${{ vars.LEAN_EC2_REPO_PATH }}
           LEAN_USE_EDGE: "1"
         run: |
           set -euo pipefail
-          # Same user@host as mkdir/ssh-keyscan steps (avoid re-interpolating vars differently).
           export LEAN_SSH="${EC2_USER}@${EC2_HOST}"
           unset RSYNC_RSH || true
-          echo "📤 Copying application files to EC2 (${LEAN_SSH})..."
-          bash infrastructure/lean/deploy-lean-host.sh --rsync
+          echo "Rsync to ${LEAN_SSH}:${LEAN_REPO_PATH}"
+          bash infrastructure/lean/deploy-lean-host.sh --sync-only
+
+      - name: Require .env.lean on host (secrets file is never rsync'd)
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "${EC2_USER}@${EC2_HOST}" \
+            "test -f '${LEAN_REPO_PATH_ON_HOST}/.env.lean'" \
+            || { echo "::error::Missing ${LEAN_REPO_PATH_ON_HOST}/.env.lean — SSH to Lightsail once, cp .env.lean.example → .env.lean in that directory, fill DB/JWT/exchange secrets, chmod 600."; exit 1; }
+
+      - name: Docker Compose build/up on Lightsail
+        env:
+          LEAN_REPO_PATH: ${{ vars.LEAN_EC2_REPO_PATH }}
+          LEAN_USE_EDGE: "1"
+        run: |
+          set -euo pipefail
+          export LEAN_SSH="${EC2_USER}@${EC2_HOST}"
+          unset RSYNC_RSH || true
+          bash infrastructure/lean/deploy-lean-host.sh --remote-only

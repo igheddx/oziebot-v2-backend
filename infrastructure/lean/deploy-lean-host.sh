@@ -5,7 +5,10 @@
 # Usage:
 #   export LEAN_SSH="ubuntu@203.0.113.50"
 #   export LEAN_REPO_PATH="/home/ubuntu/oziebot"   # path ON THE SERVER
-#   ./infrastructure/lean/deploy-lean-host.sh
+#   ./infrastructure/lean/deploy-lean-host.sh              # compose only on remote (no rsync)
+#   ./infrastructure/lean/deploy-lean-host.sh --rsync       # rsync local tree, then compose
+#   ./infrastructure/lean/deploy-lean-host.sh --sync-only   # rsync only (no compose)
+#   ./infrastructure/lean/deploy-lean-host.sh --remote-only # ssh + compose/build only (no rsync)
 #
 # Or from your laptop (syncs current directory to server, then compose up):
 #   export LEAN_SSH="ubuntu@host"
@@ -24,7 +27,23 @@ COMPOSE="docker compose -f docker-compose.lean.yml --env-file .env.lean"
 if [[ "${LEAN_USE_EDGE:-0}" == "1" ]]; then
   COMPOSE="docker compose -f docker-compose.lean.yml -f docker-compose.lean.edge.yml --env-file .env.lean"
 fi
-if [[ "${1:-}" == "--rsync" ]]; then
+
+mode="remote_only"
+case "${1:-}" in
+"") ;;
+--rsync) mode="sync_and_deploy" ;;
+--sync-only) mode="sync_only" ;;
+--remote-only) mode="remote_only" ;;
+*)
+  echo "usage: $0 [--rsync | --sync-only | --remote-only]" >&2
+  exit 1
+  ;;
+esac
+
+maybe_rsync() {
+  if [[ "${mode}" != "sync_only" && "${mode}" != "sync_and_deploy" ]]; then
+    return 0
+  fi
   LEAN_SYNC_LOCAL="${LEAN_SYNC_LOCAL:-$(cd "$(dirname "$0")/../.." && pwd)}"
   rsync -az --delete \
     --rsh="$RSYNC_SHELL" \
@@ -35,17 +54,40 @@ if [[ "${1:-}" == "--rsync" ]]; then
     --exclude '**/__pycache__' \
     --exclude 'frontend' \
     "${LEAN_SYNC_LOCAL}/" "${LEAN_SSH}:${LEAN_REPO_PATH}/"
-fi
+}
 
-$LEAN_SH "${LEAN_SSH}" bash -s <<EOF
-set -euo pipefail
+maybe_remote_compose() {
+  if [[ "${mode}" != "sync_and_deploy" && "${mode}" != "remote_only" ]]; then
+    return 0
+  fi
+
+  if [[ "${LEAN_REMOTE_VERBOSE:-0}" == "1" ]]; then
+    remote_shell_head="set -xeuo pipefail"
+  else
+    remote_shell_head="set -euo pipefail"
+  fi
+
+  $LEAN_SH "${LEAN_SSH}" bash -s <<EOF
+${remote_shell_head}
 mkdir -p "${LEAN_REPO_PATH}/infrastructure/lean"
 mkdir -p "${LEAN_REPO_PATH}/infrastructure/aws"
 cd "${LEAN_REPO_PATH}"
-test -f .env.lean || { echo "Missing .env.lean on server"; exit 1; }
+test -f .env.lean || { echo "::error::Missing .env.lean under ${LEAN_REPO_PATH} — create it on the host (.env.lean is not rsync'd). Copy from .env.lean.example and fill secrets."; exit 2; }
 ${COMPOSE} build
 ${COMPOSE} up -d
 ${COMPOSE} ps
 EOF
+}
 
-echo "Deploy complete. Run ./infrastructure/lean/healthcheck-lean.sh remotely or via SSH."
+maybe_rsync
+
+maybe_remote_compose
+
+case "${mode}" in
+sync_only)
+  echo "Rsync complete (compose skipped)."
+  ;;
+sync_and_deploy | remote_only)
+  echo "Deploy complete. Run ./infrastructure/lean/healthcheck-lean.sh remotely or via SSH."
+  ;;
+esac
