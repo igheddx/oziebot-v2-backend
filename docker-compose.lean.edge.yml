@@ -1,0 +1,25 @@
+# HTTPS edge for lean mode — merge with docker-compose.lean.yml
+#
+#   docker compose -f docker-compose.lean.yml -f docker-compose.lean.edge.yml \
+#     --env-file .env.lean up -d
+#
+# Caddy obtains Let's Encrypt certs for the hostname(s) in infrastructure/lean/Caddyfile.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    volumes:
+      - ./infrastructure/lean/Caddyfile:/etc/caddy/Caddyfile:ro
+      - lean_caddy_data:/data
+      - lean_caddy_config:/config
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  lean_caddy_data:
+  lean_caddy_config:

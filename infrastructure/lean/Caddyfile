@@ -1,0 +1,10 @@
+# Terminates TLS on the lean host for api.oziebot.com and proxies to the API container.
+#
+# Prerequisites:
+# - DNS A record for api.oziebot.com points to THIS host's public IP.
+# - Ports 80 and 443 reachable from the Internet (ufw/firewall/SG).
+
+api.oziebot.com {
+	encode gzip
+	reverse_proxy api:8000
+}

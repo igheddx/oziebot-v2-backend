@@ -1,0 +1,34 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CleanupInventoryRead",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ListTaskDefinitions",
+        "ecs:ListTaskDefinitionFamilies",
+        "ecs:DescribeTaskDefinition",
+        "ecr:ListImages",
+        "ecr:DescribeImages",
+        "sqs:ListQueues",
+        "sqs:GetQueueAttributes",
+        "sqs:ListQueueTags",
+        "events:ListRules",
+        "events:DescribeRule",
+        "events:ListTargetsByRule",
+        "events:ListTagsForResource",
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CleanupMutation",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DeregisterTaskDefinition",
+        "ecr:BatchDeleteImage"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

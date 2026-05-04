@@ -1,0 +1,201 @@
+# Oziebot lean mode: full stack on one host (validation / cost control).
+# Use with: docker compose -f docker-compose.lean.yml --env-file .env.lean up -d --build
+#
+# Does not replace ECS definitions in infrastructure/aws; ECS can be scaled to 0
+# while this stack runs. See README_LEAN_MODE.md.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-oziebot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oziebot}
+      POSTGRES_DB: ${POSTGRES_DB:-oziebot}
+    ports:
+      # Host ports avoid clashing with local Postgres/Redis installs
+      - "127.0.0.1:${LEAN_HOST_PG_PORT:-15432}:5432"
+    volumes:
+      - lean_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oziebot} -d ${POSTGRES_DB:-oziebot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: &lean-logging
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${LEAN_HOST_REDIS_PORT:-16379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging: *lean-logging
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/services/api/Dockerfile
+    ports:
+      - "${LEAN_API_BIND:-127.0.0.1}:8000:8000"
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_CHECKOUT_SUCCESS_URL: ${STRIPE_CHECKOUT_SUCCESS_URL:-}
+      STRIPE_CHECKOUT_CANCEL_URL: ${STRIPE_CHECKOUT_CANCEL_URL:-}
+      EXCHANGE_CREDENTIALS_ENCRYPTION_KEY: ${EXCHANGE_CREDENTIALS_ENCRYPTION_KEY:-}
+      COINBASE_API_BASE_URL: ${COINBASE_API_BASE_URL:-https://api.coinbase.com}
+      RUN_DB_MIGRATIONS_ON_STARTUP: ${RUN_DB_MIGRATIONS_ON_STARTUP:-1}
+      # Lean: raise thresholds slightly to cut log noise/cost vs noisy local disk
+      API_SLOW_REQUEST_MS: ${API_SLOW_REQUEST_MS:-2000}
+      API_SLOW_QUERY_MS: ${API_SLOW_QUERY_MS:-500}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *lean-logging
+    deploy:
+      resources:
+        limits:
+          memory: ${API_MEMORY_LIMIT:-1024M}
+    restart: unless-stopped
+
+  strategy-engine:
+    build:
+      context: .
+      dockerfile: backend/services/strategy-engine/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      OZIEBOT_STRATEGY_DEMO: ${OZIEBOT_STRATEGY_DEMO:-0}
+      OZIEBOT_TRADING_MODE: ${OZIEBOT_TRADING_MODE:-paper}
+      OZIEBOT_STRATEGY_RUNNER_POLL_SEC: ${OZIEBOT_STRATEGY_RUNNER_POLL_SEC:-1.0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *lean-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  risk-engine:
+    build:
+      context: .
+      dockerfile: backend/services/risk-engine/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      RISK_STALE_TRADE_SECONDS: ${RISK_STALE_TRADE_SECONDS:-20}
+      RISK_STALE_BBO_SECONDS: ${RISK_STALE_BBO_SECONDS:-15}
+      RISK_STALE_CANDLE_SECONDS: ${RISK_STALE_CANDLE_SECONDS:-180}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *lean-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  execution-engine:
+    build:
+      context: .
+      dockerfile: backend/services/execution-engine/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      COINBASE_API_BASE_URL: ${COINBASE_API_BASE_URL:-https://api.coinbase.com}
+      EXCHANGE_CREDENTIALS_ENCRYPTION_KEY: ${EXCHANGE_CREDENTIALS_ENCRYPTION_KEY:-}
+      PAPER_DEFAULT_FEE_BPS: ${PAPER_DEFAULT_FEE_BPS:-15}
+      PAPER_DEFAULT_SLIPPAGE_BPS: ${PAPER_DEFAULT_SLIPPAGE_BPS:-8}
+      RECONCILIATION_INTERVAL_SECONDS: ${RECONCILIATION_INTERVAL_SECONDS:-60}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *lean-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  alerts-worker:
+    build:
+      context: .
+      dockerfile: backend/services/alerts-worker/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      NOTIFY_MAX_RETRIES: ${NOTIFY_MAX_RETRIES:-3}
+      SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *lean-logging
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    restart: unless-stopped
+
+  market-data-ingestor:
+    build:
+      context: .
+      dockerfile: backend/services/market-data-ingestor/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      COINBASE_WS_URL: ${COINBASE_WS_URL:-wss://advanced-trade-ws.coinbase.com}
+      COINBASE_REST_URL: ${COINBASE_REST_URL:-https://api.coinbase.com/api/v3/brokerage}
+      CANDLES_GRANULARITY_SEC: ${CANDLES_GRANULARITY_SEC:-60}
+      # Lean: less Redis churn; turn extras back on if you need ops alert queue volume
+      RAW_TRADE_LOG_ENABLED: ${RAW_TRADE_LOG_ENABLED:-false}
+      OPS_ALERTS_ENABLED: ${OPS_ALERTS_ENABLED:-false}
+      SIGNAL_PANEL_ENABLED: ${SIGNAL_PANEL_ENABLED:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *lean-logging
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    restart: unless-stopped
+
+volumes:
+  lean_pgdata:
