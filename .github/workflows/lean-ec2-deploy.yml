@@ -1,0 +1,62 @@
+# Deploy lean Compose stack onto a single Docker host (e.g. EC2/Lightsail).
+#
+# Prerequisites (repository Variables + Secrets — configure in repo Settings → Secrets and Variables):
+#   Vars: LEAN_EC2_REPO_PATH (absolute path on host, e.g. /home/ubuntu/oziebot)
+#        LEAN_EC2_USER       (SSH user, often ubuntu)
+#        LEAN_EC2_HOST       (public hostname or IPv4 — can be Variable or reuse Secret LEAN_EC2_HOST)
+#   Secrets: LEAN_EC2_SSH_PRIVATE_KEY — PEM allowed to SSH as LEAN_EC2_USER
+#
+# The "Ensure EC2 bind dirs..." step avoids Docker Compose failing on bind-mount parents
+# (e.g. infrastructure/lean for Caddyfile in docker-compose.lean.edge.yml).
+
+name: Deploy lean EC2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      LEAN_REPO_PATH_ON_HOST: ${{ vars.LEAN_EC2_REPO_PATH }}
+      EC2_USER: ${{ vars.LEAN_EC2_USER }}
+      EC2_HOST: ${{ vars.LEAN_EC2_HOST }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate workflow configuration
+        run: |
+          set -euo pipefail
+          test -n "${LEAN_REPO_PATH_ON_HOST}" \
+            || { echo "Configure repository variable LEAN_EC2_REPO_PATH"; exit 1; }
+          test -n "${EC2_USER:-}" \
+            || { echo "Configure repository variable LEAN_EC2_USER"; exit 1; }
+          test -n "${EC2_HOST:-}" \
+            || { echo "Configure repository variable LEAN_EC2_HOST"; exit 1; }
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.LEAN_EC2_SSH_PRIVATE_KEY }}
+
+      - name: Add SSH host fingerprint
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${EC2_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Ensure EC2 bind dirs exist before docker run
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "${EC2_USER}@${EC2_HOST}" \
+            "mkdir -p '${LEAN_REPO_PATH_ON_HOST}' '${LEAN_REPO_PATH_ON_HOST}/infrastructure/lean' '${LEAN_REPO_PATH_ON_HOST}/infrastructure/aws'"
+
+      - name: Sync repo to host and bring up Compose (edge by default)
+        env:
+          LEAN_REPO_PATH: ${{ vars.LEAN_EC2_REPO_PATH }}
+          LEAN_SSH: '${{ vars.LEAN_EC2_USER }}@${{ vars.LEAN_EC2_HOST }}'
+          LEAN_USE_EDGE: "1"
+        run: bash infrastructure/lean/deploy-lean-host.sh --rsync
