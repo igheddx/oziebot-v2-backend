@@ -3,7 +3,7 @@
 # - push to main/master or workflow_dispatch: tests then Lightsail (Compose) deploy
 #
 # SSH: LEAN_EC2_SSH_PRIVATE_KEY must be the private half of the Lightsail key pair
-# shown on the instance (sshKeyName), e.g. oziebot-lean-keypair — not the regional
+# shown on the instance (sshKeyName), e.g. oziebot-lean-keypair2 — not the regional
 # "default" download unless that is the pair attached to this instance.
 #
 # Frontend: github.com/igheddx/oziebot-v2-frontend (not deployed from this repo).
