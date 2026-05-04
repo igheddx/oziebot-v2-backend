@@ -1,7 +1,10 @@
 # Single source of truth: host **must** come from repository Variables (LEAN_EC2_HOST).
 # Older workflows sometimes hard-coded an IP → wrong host and SSH timeouts.
 #
-# This is the canonical backend production deploy (Lightsail / single host + Docker Compose).
+# Backend-only repo: frontend lives at github.com/igheddx/oziebot-v2-frontend (do not ship frontends here).
+#
+# GitHub Actions secret LEAN_EC2_SSH_PRIVATE_KEY must be an unencrypted OpenSSH PEM for the same
+# Lightsail key pair attached to the instance (e.g. oziebot-lean-keypair), Ubuntu user → LEAN_EC2_USER.
 
 name: Deploy Backend to EC2
 
@@ -26,6 +29,12 @@ jobs:
       LEAN_REPO_PATH_ON_HOST: ${{ vars.LEAN_EC2_REPO_PATH }}
       EC2_USER: ${{ vars.LEAN_EC2_USER }}
       EC2_HOST: ${{ vars.LEAN_EC2_HOST }}
+      # Unquoted expansion in bash so each -o … is its own ssh(1) argument.
+      SSH_CLI_OPTS: >-
+        -o BatchMode=yes
+        -o StrictHostKeyChecking=yes
+        -o IdentitiesOnly=yes
+        -o ConnectTimeout=20
     steps:
       - uses: actions/checkout@v4
 
@@ -95,6 +104,19 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.LEAN_EC2_SSH_PRIVATE_KEY }}
 
+      - name: Verify SSH agent has a usable Lightsail key
+        shell: bash
+        run: |
+          set -euo pipefail
+          list="$(ssh-add -l 2>&1 || true)"
+          printf '%s\n' "$list"
+          case "$list" in
+          *'The agent has no identities'*|*'Could not open a connection to your authentication agent'*)
+            echo '::error::LEAN_EC2_SSH_PRIVATE_KEY did not load. Use the private OpenSSH PEM for the Lightsail key pair on this instance (see instance sshKeyName in AWS), pasted whole into Repo secret LEAN_EC2_SSH_PRIVATE_KEY — no passphrase, include BEGIN/END lines.'
+            exit 1
+            ;;
+          esac
+
       - name: Add SSH host fingerprint
         run: |
           set -euo pipefail
@@ -102,28 +124,30 @@ jobs:
           ssh-keyscan -H "${EC2_HOST}" >> ~/.ssh/known_hosts
 
       - name: Ensure EC2 bind dirs exist before docker run
+        shell: bash
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            "${EC2_USER}@${EC2_HOST}" \
+          ssh ${SSH_CLI_OPTS} "${EC2_USER}@${EC2_HOST}" \
             "mkdir -p '${LEAN_REPO_PATH_ON_HOST}' '${LEAN_REPO_PATH_ON_HOST}/infrastructure/lean' '${LEAN_REPO_PATH_ON_HOST}/infrastructure/aws'"
 
       - name: Rsync repo to Lightsail host
         env:
           LEAN_REPO_PATH: ${{ vars.LEAN_EC2_REPO_PATH }}
           LEAN_USE_EDGE: "1"
+        shell: bash
         run: |
           set -euo pipefail
           export LEAN_SSH="${EC2_USER}@${EC2_HOST}"
-          unset RSYNC_RSH || true
+          export LEAN_SH="ssh ${SSH_CLI_OPTS}"
+          export RSYNC_RSH="$LEAN_SH"
           echo "Rsync to ${LEAN_SSH}:${LEAN_REPO_PATH}"
           bash infrastructure/lean/deploy-lean-host.sh --sync-only
 
       - name: Require .env.lean on host (secrets file is never rsync'd)
+        shell: bash
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            "${EC2_USER}@${EC2_HOST}" \
+          ssh ${SSH_CLI_OPTS} "${EC2_USER}@${EC2_HOST}" \
             "test -f '${LEAN_REPO_PATH_ON_HOST}/.env.lean'" \
             || { echo "::error::Missing ${LEAN_REPO_PATH_ON_HOST}/.env.lean — SSH to Lightsail once, cp .env.lean.example → .env.lean in that directory, fill DB/JWT/exchange secrets, chmod 600."; exit 1; }
 
@@ -131,8 +155,10 @@ jobs:
         env:
           LEAN_REPO_PATH: ${{ vars.LEAN_EC2_REPO_PATH }}
           LEAN_USE_EDGE: "1"
+        shell: bash
         run: |
           set -euo pipefail
           export LEAN_SSH="${EC2_USER}@${EC2_HOST}"
-          unset RSYNC_RSH || true
+          export LEAN_SH="ssh ${SSH_CLI_OPTS}"
+          export RSYNC_RSH="$LEAN_SH"
           bash infrastructure/lean/deploy-lean-host.sh --remote-only
