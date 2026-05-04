@@ -1,15 +1,7 @@
-# Deploy lean Compose stack onto a single Docker host (e.g. EC2/Lightsail).
-#
-# Prerequisites (repository Variables + Secrets — configure in repo Settings → Secrets and Variables):
-#   Vars: LEAN_EC2_REPO_PATH (absolute path on host, e.g. /home/ubuntu/oziebot)
-#        LEAN_EC2_USER       (SSH user, often ubuntu)
-#        LEAN_EC2_HOST       (public hostname or IPv4 — can be Variable or reuse Secret LEAN_EC2_HOST)
-#   Secrets: LEAN_EC2_SSH_PRIVATE_KEY — PEM allowed to SSH as LEAN_EC2_USER
-#
-# The "Ensure EC2 bind dirs..." step avoids Docker Compose failing on bind-mount parents
-# (e.g. infrastructure/lean for Caddyfile in docker-compose.lean.edge.yml).
+# Single source of truth: host **must** come from repository Variables (LEAN_EC2_HOST).
+# Older workflows sometimes hard-coded an IP → wrong host and SSH timeouts.
 
-name: Deploy lean EC2
+name: Deploy Backend to EC2
 
 on:
   workflow_dispatch:
@@ -31,11 +23,16 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${LEAN_REPO_PATH_ON_HOST}" \
-            || { echo "Configure repository variable LEAN_EC2_REPO_PATH"; exit 1; }
+            || { echo "::error::Set repository variable LEAN_EC2_REPO_PATH"; exit 1; }
           test -n "${EC2_USER:-}" \
-            || { echo "Configure repository variable LEAN_EC2_USER"; exit 1; }
+            || { echo "::error::Set repository variable LEAN_EC2_USER"; exit 1; }
           test -n "${EC2_HOST:-}" \
-            || { echo "Configure repository variable LEAN_EC2_HOST"; exit 1; }
+            || { echo "::error::Set repository variable LEAN_EC2_HOST"; exit 1; }
+
+      - name: Show SSH target (from Variables only — no hard-coded IP)
+        run: |
+          echo "LEAN_EC2_HOST (from repo Variable) = ${{ vars.LEAN_EC2_HOST }}"
+          echo "Effective SSH target = ${EC2_USER}@${EC2_HOST}"
 
       - uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -54,9 +51,12 @@ jobs:
             "${EC2_USER}@${EC2_HOST}" \
             "mkdir -p '${LEAN_REPO_PATH_ON_HOST}' '${LEAN_REPO_PATH_ON_HOST}/infrastructure/lean' '${LEAN_REPO_PATH_ON_HOST}/infrastructure/aws'"
 
-      - name: Sync repo to host and bring up Compose (edge by default)
+      - name: Copy application files to EC2 and start Compose
         env:
           LEAN_REPO_PATH: ${{ vars.LEAN_EC2_REPO_PATH }}
           LEAN_SSH: '${{ vars.LEAN_EC2_USER }}@${{ vars.LEAN_EC2_HOST }}'
           LEAN_USE_EDGE: "1"
-        run: bash infrastructure/lean/deploy-lean-host.sh --rsync
+        run: |
+          set -euo pipefail
+          echo "📤 Copying application files to EC2 (${LEAN_SSH})..."
+          bash infrastructure/lean/deploy-lean-host.sh --rsync
