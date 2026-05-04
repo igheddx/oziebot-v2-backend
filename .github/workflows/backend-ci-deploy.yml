@@ -1,0 +1,230 @@
+# Tests + production deploy in one workflow.
+# - pull_request: pytest / ruff / docker build only
+# - push to main/master or workflow_dispatch: tests then Lightsail (Compose) deploy
+#
+# SSH: LEAN_EC2_SSH_PRIVATE_KEY must be the private half of the Lightsail key pair
+# shown on the instance (sshKeyName), e.g. oziebot-lean-keypair — not the regional
+# "default" download unless that is the pair attached to this instance.
+#
+# Frontend: github.com/igheddx/oziebot-v2-frontend (not deployed from this repo).
+
+name: Backend CI and Deploy
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: backend-ci-deploy-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install packages
+        run: |
+          pip install --upgrade pip
+          pip install ruff
+          pip install -e backend/packages/domain -e backend/packages/py-common
+          pip install -e "backend/services/api[dev]" -e backend/services/strategy-engine -e backend/services/risk-engine \
+            -e backend/services/execution-engine -e backend/services/alerts-worker
+      - name: Ruff
+        run: ruff check backend/packages backend/services && ruff format --check backend/packages backend/services
+      - name: Pytest (API)
+        working-directory: backend/services/api
+        run: pytest -v
+      - name: Import check
+        working-directory: backend/services/api
+        env:
+          PYTHONPATH: src
+        run: python -c "from oziebot_api.main import app; print(app.title)"
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/services/api/Dockerfile
+          push: false
+          load: true
+          tags: oziebot-api:ci
+      - name: API image import check
+        run: |
+          docker run --rm --entrypoint python oziebot-api:ci -c "from oziebot_strategy_engine.registry import StrategyRegistry; print(len(StrategyRegistry.list_strategies()))"
+
+  deploy:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
+    needs: [python, docker]
+    runs-on: ubuntu-latest
+    env:
+      LEAN_REPO_PATH_ON_HOST: ${{ vars.LEAN_EC2_REPO_PATH }}
+      EC2_USER: ${{ vars.LEAN_EC2_USER }}
+      EC2_HOST: ${{ vars.LEAN_EC2_HOST }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate workflow configuration
+        run: |
+          set -euo pipefail
+          test -n "${LEAN_REPO_PATH_ON_HOST}" \
+            || { echo "::error::Set repository variable LEAN_EC2_REPO_PATH"; exit 1; }
+          test -n "${EC2_USER:-}" \
+            || { echo "::error::Set repository variable LEAN_EC2_USER"; exit 1; }
+          test -n "${EC2_HOST:-}" \
+            || { echo "::error::Set repository variable LEAN_EC2_HOST"; exit 1; }
+
+      - name: Show SSH target (repo Variables only)
+        run: |
+          echo "LEAN_EC2_HOST (variable) = ${{ vars.LEAN_EC2_HOST }}"
+          echo "Effective SSH target = ${EC2_USER}@${EC2_HOST}"
+
+      - name: Fail fast if SSH target is not a public IPv4 for GitHub-hosted runners
+        env:
+          H: ${{ vars.LEAN_EC2_HOST }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import ipaddress
+          import os
+          import socket
+          import sys
+
+          raw = os.environ.get("H", "").strip()
+          if not raw:
+              print("::error::LEAN_EC2_HOST is empty"); sys.exit(1)
+
+          def addrs(host: str):
+              try:
+                  ipaddress.ip_address(host)
+                  return {host}
+              except ValueError:
+                  pass
+              ips = []
+              for fam, _, _, _, sockaddr in socket.getaddrinfo(host, 22):
+                  if fam == socket.AF_INET:
+                      ips.append(sockaddr[0])
+              if not ips:
+                  print(f"::error::Could not resolve IPv4 for {host!r}"); sys.exit(1)
+              return set(ips)
+
+          bad_ranges = tuple(
+              ipaddress.ip_network(p)
+              for p in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")
+          )
+
+          unreachable = []
+          for a in addrs(raw):
+              ip = ipaddress.ip_address(a)
+              if any(ip in net for net in bad_ranges):
+                  unreachable.append(a)
+
+          if unreachable:
+              print(f"SSH would target {sorted(unreachable)} — not reachable from GitHub-hosted runners.")
+              print("Use the instance public IPv4 (Lightsail static IP) or a public DNS name.")
+              sys.exit(1)
+          PY
+
+      - name: Install Lightsail SSH private key (file-based; reliable with rsync)
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.LEAN_EC2_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          KEY_FILE="$HOME/.ssh/lean_lightsail_deploy"
+          if [[ -z "${SSH_PRIVATE_KEY//[[:space:]]/}" ]]; then
+            echo "::error::LEAN_EC2_SSH_PRIVATE_KEY is empty. Add the private key PEM under Repo secrets."
+            exit 1
+          fi
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          if ! ssh-keygen -y -f "$KEY_FILE" >/dev/null 2>&1; then
+            echo "::error::LEAN_EC2_SSH_PRIVATE_KEY is not a valid unencrypted OpenSSH/PEM key (ssh-keygen -y failed)."
+            echo "Use a PEM with -----BEGIN ... PRIVATE KEY----- / END lines, no passphrase, Unix newlines."
+            exit 1
+          fi
+          echo "Private key parses OK. Fingerprint (compare to Lightsail key pair / your local pem):"
+          ssh-keygen -lf "$KEY_FILE"
+          {
+            echo "LEAN_SSH_KEY_FILE=$KEY_FILE"
+            echo 'SSH_BASE_OPTS=-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o ConnectTimeout=25 -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no'
+          } >> "$GITHUB_ENV"
+
+      - name: Add SSH host fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh-keyscan -H "${EC2_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Probe SSH (catch auth errors early)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SSH probe: ${EC2_USER}@${EC2_HOST} with key file + IdentitiesOnly"
+          if ! ssh -v -i "$LEAN_SSH_KEY_FILE" ${SSH_BASE_OPTS} "${EC2_USER}@${EC2_HOST}" "echo ssh-ok" >ssh_probe.log 2>&1; then
+            echo "::error::SSH authentication failed."
+            echo " (1) Secret must be the private key for the Lightsail key pair attached to this instance (Networking → SSH keys / sshKeyName), not a different regional default .pem."
+            echo " (2) Repository variable LEAN_EC2_USER must match the image (Ubuntu → ubuntu)."
+            echo " (3) Lightsail firewall must allow SSH (22) from the internet for GitHub-hosted runners."
+            tail -n 80 ssh_probe.log || true
+            exit 1
+          fi
+          echo "SSH probe OK."
+          head -n 5 ssh_probe.log || true
+
+      - name: Ensure bind dirs exist on host
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$LEAN_SSH_KEY_FILE" ${SSH_BASE_OPTS} "${EC2_USER}@${EC2_HOST}" \
+            "mkdir -p '${LEAN_REPO_PATH_ON_HOST}' '${LEAN_REPO_PATH_ON_HOST}/infrastructure/lean' '${LEAN_REPO_PATH_ON_HOST}/infrastructure/aws'"
+
+      - name: Rsync repo to Lightsail host
+        env:
+          LEAN_REPO_PATH: ${{ vars.LEAN_EC2_REPO_PATH }}
+          LEAN_USE_EDGE: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LEAN_SSH="${EC2_USER}@${EC2_HOST}"
+          export LEAN_SH="ssh -i ${LEAN_SSH_KEY_FILE} ${SSH_BASE_OPTS}"
+          export RSYNC_RSH="$LEAN_SH"
+          echo "Rsync to ${LEAN_SSH}:${LEAN_REPO_PATH}"
+          bash infrastructure/lean/deploy-lean-host.sh --sync-only
+
+      - name: Require .env.lean on host
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$LEAN_SSH_KEY_FILE" ${SSH_BASE_OPTS} "${EC2_USER}@${EC2_HOST}" \
+            "test -f '${LEAN_REPO_PATH_ON_HOST}/.env.lean'" \
+            || { echo "::error::Missing ${LEAN_REPO_PATH_ON_HOST}/.env.lean on host. Create it once from .env.lean.example; not rsynced for safety."; exit 1; }
+
+      - name: Docker Compose build/up on Lightsail
+        env:
+          LEAN_REPO_PATH: ${{ vars.LEAN_EC2_REPO_PATH }}
+          LEAN_USE_EDGE: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LEAN_SSH="${EC2_USER}@${EC2_HOST}"
+          export LEAN_SH="ssh -i ${LEAN_SSH_KEY_FILE} ${SSH_BASE_OPTS}"
+          export RSYNC_RSH="$LEAN_SH"
+          bash infrastructure/lean/deploy-lean-host.sh --remote-only
