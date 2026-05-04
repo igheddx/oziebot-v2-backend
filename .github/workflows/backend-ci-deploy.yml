@@ -180,9 +180,12 @@ jobs:
           echo "SSH probe: ${EC2_USER}@${EC2_HOST} with key file + IdentitiesOnly"
           if ! ssh -v -i "$LEAN_SSH_KEY_FILE" ${SSH_BASE_OPTS} "${EC2_USER}@${EC2_HOST}" "echo ssh-ok" >ssh_probe.log 2>&1; then
             echo "::error::SSH authentication failed."
-            echo " (1) Secret must be the private key for the Lightsail key pair attached to this instance (Networking → SSH keys / sshKeyName), not a different regional default .pem."
-            echo " (2) Repository variable LEAN_EC2_USER must match the image (Ubuntu → ubuntu)."
-            echo " (3) Lightsail firewall must allow SSH (22) from the internet for GitHub-hosted runners."
+            echo " If logs show 'Trying private key' then 'Permission denied', the server rejected this key: ~/.ssh on the INSTANCE does not contain the matching PUBLIC key."
+            echo " Creating a new Lightsail key pair + pasting only the private key into GitHub does NOT update the VM. You must append the new .pub (one line) to /home/${EC2_USER}/.ssh/authorized_keys on the instance."
+            echo " Connect once via Lightsail browser SSH or your OLD working key, then: echo 'ssh-ed25519 AAAA...' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+            echo " (1) Or use the same private key as the pair already trusted on the instance (see sshKeyName when the instance was created)."
+            echo " (2) LEAN_EC2_USER must match the OS user (Ubuntu → ubuntu)."
+            echo " (3) Lightsail firewall must allow TCP 22 from the internet."
             tail -n 80 ssh_probe.log || true
             exit 1
           fi
