@@ -1,5 +1,7 @@
 # Single source of truth: host **must** come from repository Variables (LEAN_EC2_HOST).
 # Older workflows sometimes hard-coded an IP → wrong host and SSH timeouts.
+#
+# This is the canonical backend production deploy (Lightsail / single host + Docker Compose).
 
 name: Deploy Backend to EC2
 
