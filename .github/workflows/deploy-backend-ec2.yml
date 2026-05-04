@@ -42,6 +42,53 @@ jobs:
           echo "LEAN_EC2_HOST (from repo Variable) = ${{ vars.LEAN_EC2_HOST }}"
           echo "Effective SSH target = ${EC2_USER}@${EC2_HOST}"
 
+      - name: Fail fast if SSH target is not reachable from GitHub-hosted runners
+        env:
+          H: ${{ vars.LEAN_EC2_HOST }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import ipaddress
+          import os
+          import socket
+          import sys
+
+          raw = os.environ.get("H", "").strip()
+          if not raw:
+              print("::error::LEAN_EC2_HOST is empty"); sys.exit(1)
+
+          def addrs(host: str):
+              try:
+                  ipaddress.ip_address(host)
+                  return {host}
+              except ValueError:
+                  pass
+              ips = []
+              for fam, _, _, _, sockaddr in socket.getaddrinfo(host, 22):
+                  if fam == socket.AF_INET:
+                      ips.append(sockaddr[0])
+              if not ips:
+                  print(f"::error::Could not resolve IPv4 for {host!r}"); sys.exit(1)
+              return set(ips)
+
+          bad_ranges = tuple(
+              ipaddress.ip_network(p)
+              for p in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")
+          )
+
+          unreachable = []
+          for a in addrs(raw):
+              ip = ipaddress.ip_address(a)
+              if any(ip in net for net in bad_ranges):
+                  unreachable.append(a)
+
+          if unreachable:
+              print(f"SSH would target {sorted(unreachable)} — these IPs are NOT reachable")
+              print("from github-hosted runners unless you use a self-hosted runner on the same network.")
+              print("Use your instance public IPv4 (e.g. Lightsail / EC2 \"Public IP\") or a public hostname.")
+              sys.exit(1)
+          PY
+
       - uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.LEAN_EC2_SSH_PRIVATE_KEY }}
@@ -62,9 +109,11 @@ jobs:
       - name: Copy application files to EC2 and start Compose
         env:
           LEAN_REPO_PATH: ${{ vars.LEAN_EC2_REPO_PATH }}
-          LEAN_SSH: '${{ vars.LEAN_EC2_USER }}@${{ vars.LEAN_EC2_HOST }}'
           LEAN_USE_EDGE: "1"
         run: |
           set -euo pipefail
+          # Same user@host as mkdir/ssh-keyscan steps (avoid re-interpolating vars differently).
+          export LEAN_SSH="${EC2_USER}@${EC2_HOST}"
+          unset RSYNC_RSH || true
           echo "📤 Copying application files to EC2 (${LEAN_SSH})..."
           bash infrastructure/lean/deploy-lean-host.sh --rsync
