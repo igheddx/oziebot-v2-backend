@@ -68,6 +68,12 @@ services:
       # Lean: raise thresholds slightly to cut log noise/cost vs noisy local disk
       API_SLOW_REQUEST_MS: ${API_SLOW_REQUEST_MS:-2000}
       API_SLOW_QUERY_MS: ${API_SLOW_QUERY_MS:-500}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
     depends_on:
       postgres:
         condition: service_healthy

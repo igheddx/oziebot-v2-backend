@@ -18,7 +18,7 @@ services:
       - lean_caddy_config:/config
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
 
 volumes:
   lean_caddy_data:
