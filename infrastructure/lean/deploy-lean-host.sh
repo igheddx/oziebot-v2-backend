@@ -73,6 +73,21 @@ mkdir -p "${LEAN_REPO_PATH}/infrastructure/lean"
 mkdir -p "${LEAN_REPO_PATH}/infrastructure/aws"
 cd "${LEAN_REPO_PATH}"
 test -f .env.lean || { echo "::error::Missing .env.lean under ${LEAN_REPO_PATH} — create it on the host (.env.lean is not rsync'd). Copy from .env.lean.example and fill secrets."; exit 2; }
+
+# Drop this compose project so rebuild can replace containers.
+${COMPOSE} down --remove-orphans 2>/dev/null || true
+
+# Edge mode publishes host :80 and :443. Another compose project (or stray Caddy) often
+# still holds them — 'up' then fails with "Bind for 0.0.0.0:80 failed". Stop any
+# Docker container still publishing those ports (dedicated lean hosts only).
+for _lp in 80 443; do
+  _ids=\$(docker ps -q --filter "publish=\${_lp}" 2>/dev/null || true)
+  if [ -n "\${_ids}" ]; then
+    echo "Stopping containers publishing host port \${_lp}: \${_ids}"
+    docker stop \${_ids} 2>/dev/null || true
+  fi
+done
+
 ${COMPOSE} build
 ${COMPOSE} up -d
 ${COMPOSE} ps
