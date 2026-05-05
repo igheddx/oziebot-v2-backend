@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
-import sys
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -91,7 +91,11 @@ def _max_drawdown_pnls(pnls: list[float]) -> float:
     return round(abs(max_dd), 4)
 
 
-def run(limit: int = TRADE_LIMIT) -> dict[str, Any]:
+def run(
+    limit: int = TRADE_LIMIT,
+    user_id: Any | None = None,
+    trading_mode: str | None = None,
+) -> dict[str, Any]:
     settings = get_settings()
     if not settings.database_url:
         raise SystemExit("DATABASE_URL is required")
@@ -100,33 +104,83 @@ def run(limit: int = TRADE_LIMIT) -> dict[str, Any]:
         raise SystemExit("Could not create session factory")
     session: Session = factory()
     try:
-        return _build_report(session, limit)
+        return _build_report(session, limit, user_id=user_id, trading_mode=trading_mode)
     finally:
         session.close()
 
 
-def _build_report(session: Session, limit: int) -> dict[str, Any]:
+def build_report(
+    session: Session,
+    limit: int,
+    *,
+    user_id: Any | None = None,
+    trading_mode: str | None = None,
+) -> dict[str, Any]:
+    """Build report using an existing DB session (e.g. FastAPI request scope)."""
+    return _build_report(session, limit, user_id=user_id, trading_mode=trading_mode)
+
+
+def trades_to_csv_string(trades: list[dict[str, Any]]) -> str:
+    buf = io.StringIO()
+    writer = csv.DictWriter(
+        buf,
+        fieldnames=_TRADE_CSV_FIELDS,
+        extrasaction="ignore",
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for t in trades:
+        writer.writerow({k: _csv_cell(t.get(k)) for k in _TRADE_CSV_FIELDS})
+    return buf.getvalue()
+
+
+def _build_report(
+    session: Session,
+    limit: int,
+    *,
+    user_id: Any | None = None,
+    trading_mode: str | None = None,
+) -> dict[str, Any]:
+    count_q = (
+        select(func.count())
+        .select_from(TradeOutcomeFeature)
+        .join(
+            ExecutionTradeRecord,
+            TradeOutcomeFeature.trade_id == ExecutionTradeRecord.id,
+        )
+    )
+    if user_id is not None:
+        count_q = count_q.where(ExecutionTradeRecord.user_id == user_id)
+    if trading_mode is not None:
+        count_q = count_q.where(TradeOutcomeFeature.trading_mode == trading_mode)
+    total_outcome_rows = int(session.scalar(count_q) or 0)
+
+    id_base = select(TradeOutcomeFeature.id).join(
+        ExecutionTradeRecord,
+        TradeOutcomeFeature.trade_id == ExecutionTradeRecord.id,
+    )
+    if user_id is not None:
+        id_base = id_base.where(ExecutionTradeRecord.user_id == user_id)
+    if trading_mode is not None:
+        id_base = id_base.where(TradeOutcomeFeature.trading_mode == trading_mode)
     latest_ids = list(
-        session.scalars(
-            select(TradeOutcomeFeature.id)
-            .order_by(TradeOutcomeFeature.created_at.desc())
-            .limit(limit)
-        ).all()
+        session.scalars(id_base.order_by(TradeOutcomeFeature.created_at.desc()).limit(limit)).all()
     )
     if not latest_ids:
-        rows = []
+        joined_rows: list[Any] = []
     else:
-        rows = (
-            session.execute(
-                select(TradeOutcomeFeature, ExecutionTradeRecord)
-                .join(
-                    ExecutionTradeRecord,
-                    TradeOutcomeFeature.trade_id == ExecutionTradeRecord.id,
-                )
-                .where(TradeOutcomeFeature.id.in_(latest_ids))
-                .order_by(TradeOutcomeFeature.created_at.desc())
+        row_stmt = (
+            select(TradeOutcomeFeature, ExecutionTradeRecord)
+            .join(
+                ExecutionTradeRecord,
+                TradeOutcomeFeature.trade_id == ExecutionTradeRecord.id,
             )
-        ).all()
+            .where(TradeOutcomeFeature.id.in_(latest_ids))
+            .order_by(TradeOutcomeFeature.created_at.desc())
+        )
+        if user_id is not None:
+            row_stmt = row_stmt.where(ExecutionTradeRecord.user_id == user_id)
+        joined_rows = session.execute(row_stmt).all()
 
     trades_out: list[dict[str, Any]] = []
     user_ids: set[Any] = set()
@@ -134,7 +188,7 @@ def _build_report(session: Session, limit: int) -> dict[str, Any]:
     exit_times: list[datetime] = []
     pnls_ordered: list[float] = []
 
-    for feat, ex in rows:
+    for feat, ex in joined_rows:
         user_ids.add(ex.user_id)
         trading_modes.add(feat.trading_mode)
         exit_at = feat.created_at
@@ -420,6 +474,17 @@ def _build_report(session: Session, limit: int) -> dict[str, Any]:
         "limit": limit,
         "mfe_mae_units": "percent (stored fractions in DB, reported as % points)",
         "pnl_pct_units": "percent points (return fraction * 100)",
+        "diagnostics": {
+            "trade_outcome_features_rows_in_db": total_outcome_rows,
+            "feature_ids_fetched_for_sample": len(latest_ids),
+            "rows_after_inner_join_execution_trades": len(joined_rows),
+            "scoped_user_id": str(user_id) if user_id is not None else None,
+            "trading_mode_filter": trading_mode,
+            "hint_empty_trades": (
+                "No rows in trade_outcome_features, or inner join dropped all sample rows "
+                "(missing execution_trades for those trade_ids), or this is a fresh/empty DB volume."
+            ),
+        },
     }
 
     return {
@@ -458,15 +523,7 @@ def _csv_cell(v: Any) -> str:
 
 
 def _print_trades_csv(trades: list[dict[str, Any]]) -> None:
-    writer = csv.DictWriter(
-        sys.stdout,
-        fieldnames=_TRADE_CSV_FIELDS,
-        extrasaction="ignore",
-        lineterminator="\n",
-    )
-    writer.writeheader()
-    for t in trades:
-        writer.writerow({k: _csv_cell(t.get(k)) for k in _TRADE_CSV_FIELDS})
+    print(trades_to_csv_string(trades), end="")
 
 
 def main() -> None:

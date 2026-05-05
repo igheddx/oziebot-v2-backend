@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import joinedload
 
@@ -1912,6 +1913,39 @@ def read_trade_review_paper_live_validation(
         end_at=end_at,
         force_refresh=force_refresh,
         builder=_analytics_validation_payload,
+    )
+
+
+@router.get("/exports/trading-performance.csv")
+def export_trading_performance_csv(
+    user: CurrentUser,
+    db: DbSession,
+    trading_mode: TradingMode | None = None,
+    limit: int = Query(default=100, ge=1, le=5000),
+) -> Response:
+    """Download recent trade outcome rows for the current user as CSV."""
+    from oziebot_api.scripts import trading_performance_report as tpr
+
+    effective_mode = trading_mode
+    if effective_mode is None:
+        try:
+            effective_mode = TradingMode(user.current_trading_mode or "paper")
+        except ValueError:
+            effective_mode = TradingMode.PAPER
+
+    data = tpr.build_report(
+        db,
+        limit=limit,
+        user_id=user.id,
+        trading_mode=effective_mode.value,
+    )
+    csv_text = tpr.trades_to_csv_string(data["trades"])
+    safe_mode = effective_mode.value.replace(" ", "_")
+    filename = f"oziebot-trade-outcomes-{safe_mode}-n{limit}.csv"
+    return Response(
+        content=csv_text.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

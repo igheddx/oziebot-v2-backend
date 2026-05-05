@@ -1,6 +1,11 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Comma-separated origins browsers may use when calling this API.
+# Override with env CORS_ORIGINS. Includes production app host so deploys missing
+# env still allow https://app.oziebot.com; add more origins via CORS_ORIGINS.
+CORS_ORIGINS_DEFAULT = "http://localhost:3000,https://app.oziebot.com"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -16,7 +21,7 @@ class Settings(BaseSettings):
     )
     jwt_access_exp_minutes: int = 15
     jwt_refresh_exp_days: int = 7
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = CORS_ORIGINS_DEFAULT
     stripe_secret_key: str | None = None
     stripe_webhook_secret: str | None = None
     stripe_checkout_success_url: str = (
