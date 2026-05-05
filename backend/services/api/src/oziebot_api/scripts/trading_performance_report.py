@@ -2,13 +2,18 @@
 
 Usage (from repo root, with API venv):
   cd backend/services/api && PYTHONPATH=src python -m oziebot_api.scripts.trading_performance_report
+  python -m oziebot_api.scripts.trading_performance_report --format csv > trades.csv
+  python -m oziebot_api.scripts.trading_performance_report --format json --limit 200
 
 Requires DATABASE_URL (see oziebot_api.config).
 """
 
 from __future__ import annotations
 
+import argparse
+import csv
 import json
+import sys
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -34,6 +39,24 @@ from oziebot_api.models.trade_intelligence import (
 )
 
 TRADE_LIMIT = 100
+
+_TRADE_CSV_FIELDS = [
+    "trade_id",
+    "strategy",
+    "token",
+    "trading_mode",
+    "entry_price",
+    "exit_price",
+    "entry_time",
+    "exit_time",
+    "size_usd",
+    "pnl_pct",
+    "pnl_usd",
+    "fees",
+    "exit_reason",
+    "max_favorable_excursion_pct",
+    "max_adverse_excursion_pct",
+]
 
 
 def _d(v: Any) -> Decimal:
@@ -118,9 +141,7 @@ def _build_report(session: Session, limit: int) -> dict[str, Any]:
         exit_times.append(exit_at)
         hold = feat.hold_seconds
         entry_at = (
-            exit_at - timedelta(seconds=int(hold))
-            if hold is not None and hold >= 0
-            else None
+            exit_at - timedelta(seconds=int(hold)) if hold is not None and hold >= 0 else None
         )
         basis = _d(feat.entry_price) * _d(feat.filled_size)
         size_usd = round(_f(basis), 4)
@@ -185,9 +206,7 @@ def _build_report(session: Session, limit: int) -> dict[str, Any]:
                 round(sum((x["pnl_pct"] or 0) for x in wins) / len(wins), 4) if wins else 0.0
             ),
             "avg_loss_pct": (
-                round(sum((x["pnl_pct"] or 0) for x in losses) / len(losses), 4)
-                if losses
-                else 0.0
+                round(sum((x["pnl_pct"] or 0) for x in losses) / len(losses), 4) if losses else 0.0
             ),
             "total_pnl_usd": total_pnl,
             "total_pnl": total_pnl,
@@ -262,9 +281,7 @@ def _build_report(session: Session, limit: int) -> dict[str, Any]:
             ).all()
         )
         filtered = [
-            a
-            for a in audits
-            if a.signal_snapshot_id is None or a.signal_snapshot_id in snap_ids
+            a for a in audits if a.signal_snapshot_id is None or a.signal_snapshot_id in snap_ids
         ]
 
         dec_counts = Counter(a.decision for a in filtered)
@@ -298,9 +315,7 @@ def _build_report(session: Session, limit: int) -> dict[str, Any]:
             select(StrategyAllocationPlan).where(StrategyAllocationPlan.user_id.in_(user_ids))
         ).all()
         if plans:
-            capital["total_capital_usd"] = round(
-                sum(p.total_capital_cents for p in plans) / 100, 2
-            )
+            capital["total_capital_usd"] = round(sum(p.total_capital_cents for p in plans) / 100, 2)
         for p in plans:
             capital["total_capital_usd_by_user"][str(p.user_id)] = round(
                 p.total_capital_cents / 100, 2
@@ -342,9 +357,7 @@ def _build_report(session: Session, limit: int) -> dict[str, Any]:
             )
         if deployed_vals:
             capital["total_deployed_proxy_usd"] = round(sum(deployed_vals), 2)
-            capital["avg_deployed_capital_usd"] = round(
-                sum(deployed_vals) / len(deployed_vals), 2
-            )
+            capital["avg_deployed_capital_usd"] = round(sum(deployed_vals) / len(deployed_vals), 2)
             capital["peak_deployed_capital_usd"] = round(max(deployed_vals), 2)
 
         if exit_times:
@@ -362,9 +375,7 @@ def _build_report(session: Session, limit: int) -> dict[str, Any]:
             if rows_ldg:
                 peaks = [r[0] / 100 for r in rows_ldg]
                 capital["ledger_peak_deployed_usd_in_window"] = round(max(peaks), 2)
-                capital["ledger_avg_deployed_usd_in_window"] = round(
-                    sum(peaks) / len(peaks), 2
-                )
+                capital["ledger_avg_deployed_usd_in_window"] = round(sum(peaks) / len(peaks), 2)
             else:
                 capital["notes"].append(
                     "No strategy_capital_ledger rows in trade window; peak/avg from ledger omitted."
@@ -440,10 +451,53 @@ def _ascii_table(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join(out)
 
 
+def _csv_cell(v: Any) -> str:
+    if v is None:
+        return ""
+    return str(v)
+
+
+def _print_trades_csv(trades: list[dict[str, Any]]) -> None:
+    writer = csv.DictWriter(
+        sys.stdout,
+        fieldnames=_TRADE_CSV_FIELDS,
+        extrasaction="ignore",
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for t in trades:
+        writer.writerow({k: _csv_cell(t.get(k)) for k in _TRADE_CSV_FIELDS})
+
+
 def main() -> None:
-    data = run()
+    parser = argparse.ArgumentParser(
+        description="Trading performance report from trade_outcome_features."
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=TRADE_LIMIT,
+        help=f"Max trades to include (default: {TRADE_LIMIT})",
+    )
+    parser.add_argument(
+        "--format",
+        choices=("full", "json", "csv"),
+        default="full",
+        help="full: JSON + ASCII tables; json: JSON only; csv: trades table only (stdout)",
+    )
+    args = parser.parse_args()
+    lim = max(1, args.limit)
+    data = run(limit=lim)
+
+    if args.format == "csv":
+        _print_trades_csv(data["trades"])
+        return
+    if args.format == "json":
+        print(json.dumps(data, indent=2, default=str))
+        return
+
     print(json.dumps(data, indent=2, default=str))
-    print("\n--- TABLE: Recent trades (up to {}) ---\n".format(TRADE_LIMIT))
+    print("\n--- TABLE: Recent trades (up to {}) ---\n".format(lim))
     headers = [
         "strategy",
         "token",
