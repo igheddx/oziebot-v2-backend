@@ -1,4 +1,19 @@
-"""Create or update the platform root admin user (is_root_admin=True)."""
+"""Create or update the platform root admin user (is_root_admin=True).
+
+If the user has no tenant membership (typical after an empty DB or volume swap),
+creates a minimal tenant + integration + membership + trial + token permissions,
+matching normal registration bootstrap so /me and the web app work.
+
+Usage (Compose, from repo root on the host):
+
+  docker compose -f docker-compose.lean.yml -f docker-compose.lean.edge.yml \\
+    --env-file .env.lean exec -T \\
+    -e SEED_ROOT_EMAIL=you@example.com \\
+    -e SEED_ROOT_PASSWORD='choose-a-strong-password' \\
+    api python -m oziebot_api.scripts.seed_root_admin
+
+Optional: SEED_ROOT_FULL_NAME, SEED_TENANT_NAME (default: Personal).
+"""
 
 from __future__ import annotations
 
@@ -11,9 +26,57 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.config import get_settings
 from oziebot_api.db.session import make_engine, make_session_factory
+from oziebot_api.models.membership import TenantMembership
+from oziebot_api.models.tenant import Tenant
+from oziebot_api.models.tenant_integration import TenantIntegration
 from oziebot_api.models.user import User
 from oziebot_api.services.passwords import hash_password
 from oziebot_api.services.root_admin_defaults import ensure_root_admin_strategy_access
+from oziebot_api.services.strategy_catalog import ensure_platform_strategy_catalog
+from oziebot_api.services.token_permissions import TokenPermissionService
+from oziebot_api.services.trial import start_trial_for_new_tenant
+
+
+def _ensure_minimal_tenant(session: Session, user: User, now: datetime) -> None:
+    has_membership = (
+        session.scalars(
+            select(TenantMembership).where(TenantMembership.user_id == user.id).limit(1)
+        ).first()
+        is not None
+    )
+    if has_membership:
+        return
+
+    tenant_label = os.environ.get("SEED_TENANT_NAME", "Personal").strip() or "Personal"
+    tenant = Tenant(
+        id=uuid.uuid4(),
+        name=tenant_label,
+        created_at=now,
+        default_trading_mode="paper",
+    )
+    session.add(tenant)
+    session.flush()
+    session.add(
+        TenantIntegration(
+            tenant_id=tenant.id,
+            coinbase_connected=False,
+            updated_at=now,
+        )
+    )
+    session.add(
+        TenantMembership(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            tenant_id=tenant.id,
+            role="user",
+            created_at=now,
+        )
+    )
+    session.flush()
+    ensure_platform_strategy_catalog(session)
+    start_trial_for_new_tenant(session, tenant.id)
+    TokenPermissionService.initialize_user_tokens(session, user.id, enabled=True)
+    print(f"Bootstrapped tenant {tenant.id} and membership for {user.email}")
 
 
 def run() -> None:
@@ -68,6 +131,7 @@ def run() -> None:
             if existing is not None
             else session.scalars(select(User).where(func.lower(User.email) == email)).one()
         )
+        _ensure_minimal_tenant(session, user, now)
         ensure_root_admin_strategy_access(session, user)
         session.commit()
     finally:
