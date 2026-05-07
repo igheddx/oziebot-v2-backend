@@ -37,9 +37,12 @@ class TokenAllowlistPatch(BaseModel):
 
 
 class TokenStrategyPolicyPatch(BaseModel):
+    is_enabled: bool | None = None
     admin_enabled: bool | None = None
     recommendation_status: Literal["preferred", "allowed", "discouraged", "blocked"] | None = None
     recommendation_reason: str | None = None
+    size_multiplier: Annotated[float | None, Field(default=None, ge=0, le=1)] = None
+    max_position_usd_override: Annotated[float | None, Field(default=None, ge=0)] = None
     max_position_pct_override: Annotated[float | None, Field(default=None, ge=0, le=1)] = None
     notes: str | None = None
 
@@ -76,6 +79,7 @@ class TokenStrategyPolicyResponse(BaseModel):
     id: str
     strategy_id: str
     strategy_display_name: str | None = None
+    is_enabled: bool
     admin_enabled: bool
     suitability_score: float
     computed_recommendation_status: str
@@ -86,10 +90,20 @@ class TokenStrategyPolicyResponse(BaseModel):
     recommendation_reason: str | None = None
     recommendation_status_override: str | None = None
     recommendation_reason_override: str | None = None
+    size_multiplier: float
+    configured_size_multiplier: float | None = None
+    max_position_usd_override: float | None = None
     max_position_pct_override: float | None = None
     notes: str | None = None
+    created_at: str | None = None
     computed_at: str | None = None
     updated_at: str | None = None
+
+
+class TokenPolicyDefaultsResponse(BaseModel):
+    tokens_processed: int
+    policies_written: int
+    updated_symbols: list[str]
 
 
 class TokenPolicyDetailResponse(BaseModel):
@@ -102,6 +116,7 @@ class TokenPolicySizingImpact(BaseModel):
     original_size: str | None = None
     final_size: str | None = None
     size_multiplier: str | None = None
+    max_position_usd_override: str | None = None
     max_position_pct_override: str | None = None
     requested_quantity: str | None = None
 

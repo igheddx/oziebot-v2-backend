@@ -57,12 +57,12 @@ def test_dynamic_sizing_respects_bucket_buying_power():
     assert "bucket_buying_power_cap" in result.reduction_reasons
 
 
-def test_dynamic_sizing_respects_token_position_override():
+def test_dynamic_sizing_respects_token_position_usd_override():
     result = calculate_dynamic_trade_size(
         _input(
             max_trade_usd=Decimal("500"),
             max_position_usd=Decimal("500"),
-            token_policy_max_position_pct_override=Decimal("0.05"),
+            token_policy_max_position_usd_override=Decimal("250"),
         )
     )
 

@@ -89,8 +89,8 @@ def _setup_db(db_path: Path) -> None:
                 "CREATE TABLE token_strategy_policy ("
                 "id TEXT PRIMARY KEY, token_id TEXT, strategy_id TEXT, admin_enabled BOOLEAN, suitability_score REAL,"
                 "recommendation_status TEXT, recommendation_reason TEXT, recommendation_status_override TEXT,"
-                "recommendation_reason_override TEXT, max_position_pct_override REAL, notes TEXT,"
-                "computed_at TEXT, updated_at TEXT)"
+                "recommendation_reason_override TEXT, size_multiplier REAL, max_position_usd_override REAL,"
+                "max_position_pct_override REAL, notes TEXT, created_at TEXT, computed_at TEXT, updated_at TEXT)"
             )
         )
         conn.execute(
@@ -206,6 +206,8 @@ def _insert_token_policy(
     strategy_name: str,
     status: str = "allowed",
     admin_enabled: bool = True,
+    size_multiplier: float | None = None,
+    max_position_usd_override: float | None = None,
     max_position_pct_override: float | None = None,
 ) -> None:
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
@@ -222,8 +224,8 @@ def _insert_token_policy(
                 "INSERT INTO token_strategy_policy ("
                 "id, token_id, strategy_id, admin_enabled, suitability_score, recommendation_status,"
                 "recommendation_reason, recommendation_status_override, recommendation_reason_override,"
-                "max_position_pct_override, notes, computed_at, updated_at"
-                ") VALUES (:id,:token_id,:strategy_id,:admin_enabled,80,:status,:reason,NULL,NULL,:max_position_pct_override,NULL,:computed_at,:updated_at)"
+                "size_multiplier, max_position_usd_override, max_position_pct_override, notes, created_at, computed_at, updated_at"
+                ") VALUES (:id,:token_id,:strategy_id,:admin_enabled,80,:status,:reason,NULL,NULL,:size_multiplier,:max_position_usd_override,:max_position_pct_override,NULL,:created_at,:computed_at,:updated_at)"
             ),
             {
                 "id": str(uuid4()),
@@ -232,7 +234,10 @@ def _insert_token_policy(
                 "admin_enabled": 1 if admin_enabled else 0,
                 "status": status,
                 "reason": f"{strategy_name}:{status}",
+                "size_multiplier": size_multiplier,
+                "max_position_usd_override": max_position_usd_override,
                 "max_position_pct_override": max_position_pct_override,
+                "created_at": now,
                 "computed_at": now,
                 "updated_at": now,
             },
@@ -930,10 +935,10 @@ def test_risk_reduces_size_for_discouraged_token_policy(tmp_path: Path):
 
     assert decision.outcome == RiskOutcome.REDUCE_SIZE
     assert intent is not None
-    assert Decimal(decision.final_size) == Decimal("0.01200000")
+    assert Decimal(decision.final_size) == Decimal("0.01000000")
 
 
-def test_risk_applies_max_position_pct_override(tmp_path: Path):
+def test_risk_applies_max_position_usd_override(tmp_path: Path):
     db_path = tmp_path / "risk-token-policy-cap.sqlite"
     _setup_db(db_path)
     user_id = str(uuid4())
@@ -943,7 +948,7 @@ def test_risk_applies_max_position_pct_override(tmp_path: Path):
         db_path,
         strategy_name="momentum",
         status="allowed",
-        max_position_pct_override=0.10,
+        max_position_usd_override=200,
     )
 
     settings = Settings(

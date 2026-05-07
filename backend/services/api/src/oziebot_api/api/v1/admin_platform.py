@@ -28,6 +28,7 @@ from oziebot_api.schemas.platform_admin import (
     SettingValueBody,
     StrategyCatalogCreate,
     StrategyCatalogPatch,
+    TokenPolicyDefaultsResponse,
     SubscriptionPlanCreate,
     SubscriptionPlanPatch,
     TenantCoinbaseHealthPatch,
@@ -341,6 +342,44 @@ def list_token_policy_matrix(
     return TokenPolicyService(db).list_token_matrix(symbol=symbol)
 
 
+@router.post("/token-policy/initialize-defaults", response_model=TokenPolicyDefaultsResponse)
+def initialize_recommended_token_policy_defaults(
+    admin: RootAdminUser,
+    db: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    payload = TokenPolicyService(db).initialize_recommended_defaults(reset_existing=False)
+    _audit(
+        db,
+        admin,
+        action="token_policy.initialize_defaults",
+        resource_type="token_strategy_policy",
+        resource_id=None,
+        details=payload,
+        request=request,
+    )
+    return payload
+
+
+@router.post("/token-policy/reset-defaults", response_model=TokenPolicyDefaultsResponse)
+def reset_recommended_token_policy_defaults(
+    admin: RootAdminUser,
+    db: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    payload = TokenPolicyService(db).initialize_recommended_defaults(reset_existing=True)
+    _audit(
+        db,
+        admin,
+        action="token_policy.reset_defaults",
+        resource_type="token_strategy_policy",
+        resource_id=None,
+        details=payload,
+        request=request,
+    )
+    return payload
+
+
 @router.get("/token-policy/tokens/{token_id}", response_model=TokenPolicyDetailResponse)
 def get_token_policy_detail(
     token_id: uuid.UUID,
@@ -398,9 +437,12 @@ def patch_token_strategy_policy(
     payload = TokenPolicyService(db).update_policy_override(
         token=token,
         strategy_id=strategy_id.strip().lower(),
+        is_enabled=body.is_enabled,
         admin_enabled=body.admin_enabled,
         recommendation_status=body.recommendation_status,
         recommendation_reason=body.recommendation_reason,
+        size_multiplier=body.size_multiplier,
+        max_position_usd_override=body.max_position_usd_override,
         max_position_pct_override=body.max_position_pct_override,
         notes=body.notes,
     )

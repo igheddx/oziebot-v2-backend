@@ -22,6 +22,7 @@ from oziebot_api.schemas.tokens import (
     UserTradableTokensList,
 )
 from oziebot_api.services.audit import record_admin_action
+from oziebot_api.services.token_policy import TokenPolicyService
 from oziebot_api.services.token_permissions import TokenPermissionService
 
 router = APIRouter(tags=["tokens"])
@@ -184,6 +185,14 @@ def list_my_tokens(
         tradable_count=tradable_count,
         tokens=tokens_with_detail,
     )
+
+
+@router.get("/me/token-strategy-policy")
+def list_my_token_strategy_policy(
+    user: CurrentUser,
+    db: DbSession,
+) -> list[dict[str, Any]]:
+    return TokenPolicyService(db).list_user_matrix(user=user)
 
 
 @router.post("/me/tokens/{token_id}/enable")

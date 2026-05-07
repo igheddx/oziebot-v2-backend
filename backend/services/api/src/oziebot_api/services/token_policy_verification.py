@@ -117,6 +117,7 @@ class TokenPolicyVerificationService:
                         "original_size": None,
                         "final_size": None,
                         "size_multiplier": token_policy["size_multiplier"],
+                        "max_position_usd_override": token_policy["max_position_usd_override"],
                         "max_position_pct_override": token_policy["max_position_pct_override"],
                     },
                     "decision_outcome": "rejected",
@@ -156,6 +157,7 @@ class TokenPolicyVerificationService:
                         "original_size": signal.suggested_size,
                         "final_size": signal.suggested_size,
                         "size_multiplier": token_policy["size_multiplier"],
+                        "max_position_usd_override": token_policy["max_position_usd_override"],
                         "max_position_pct_override": token_policy["max_position_pct_override"],
                     },
                     "decision_outcome": "emitted",
@@ -219,6 +221,7 @@ class TokenPolicyVerificationService:
                         "original_size": row.original_size,
                         "final_size": row.final_size,
                         "size_multiplier": token_policy["size_multiplier"],
+                        "max_position_usd_override": token_policy["max_position_usd_override"],
                         "max_position_pct_override": token_policy["max_position_pct_override"],
                     },
                     "decision_outcome": self._map_risk_outcome(row.outcome),
@@ -282,6 +285,7 @@ class TokenPolicyVerificationService:
                         "original_size": risk_payload.get("final_size"),
                         "final_size": self._final_execution_size(row, intent_payload, risk_payload),
                         "size_multiplier": token_policy["size_multiplier"],
+                        "max_position_usd_override": token_policy["max_position_usd_override"],
                         "max_position_pct_override": token_policy["max_position_pct_override"],
                         "requested_quantity": row.quantity,
                     },
@@ -337,6 +341,7 @@ class TokenPolicyVerificationService:
         if "effective_recommendation_status" in policy:
             return {
                 "admin_enabled": bool(policy.get("admin_enabled", True)),
+                "is_enabled": bool(policy.get("is_enabled", policy.get("admin_enabled", True))),
                 "computed_recommendation_status": policy.get(
                     "computed_recommendation_status", "allowed"
                 ),
@@ -349,6 +354,10 @@ class TokenPolicyVerificationService:
                     policy.get("recommendation_reason"),
                 ),
                 "size_multiplier": cls._normalize_decimal(policy.get("size_multiplier"), "1"),
+                "max_position_usd_override": cls._normalize_decimal(
+                    policy.get("max_position_usd_override"),
+                    None,
+                ),
                 "max_position_pct_override": cls._normalize_decimal(
                     policy.get("max_position_pct_override"),
                     None,
@@ -357,12 +366,17 @@ class TokenPolicyVerificationService:
         if "computed_recommendation_status" in policy and "recommendation_status" in policy:
             return {
                 "admin_enabled": bool(policy.get("admin_enabled", True)),
+                "is_enabled": bool(policy.get("is_enabled", policy.get("admin_enabled", True))),
                 "computed_recommendation_status": policy.get(
                     "computed_recommendation_status", "allowed"
                 ),
                 "effective_recommendation_status": policy.get("recommendation_status", "allowed"),
                 "effective_recommendation_reason": policy.get("recommendation_reason"),
                 "size_multiplier": cls._normalize_decimal(policy.get("size_multiplier"), "1"),
+                "max_position_usd_override": cls._normalize_decimal(
+                    policy.get("max_position_usd_override"),
+                    None,
+                ),
                 "max_position_pct_override": cls._normalize_decimal(
                     policy.get("max_position_pct_override"),
                     None,
@@ -371,10 +385,15 @@ class TokenPolicyVerificationService:
         resolved = resolve_effective_token_policy(policy)
         return {
             "admin_enabled": resolved["admin_enabled"],
+            "is_enabled": resolved["is_enabled"],
             "computed_recommendation_status": resolved["computed_recommendation_status"],
             "effective_recommendation_status": resolved["effective_recommendation_status"],
             "effective_recommendation_reason": resolved["effective_recommendation_reason"],
             "size_multiplier": str(resolved["size_multiplier"]),
+            "max_position_usd_override": cls._normalize_decimal(
+                resolved["max_position_usd_override"],
+                None,
+            ),
             "max_position_pct_override": cls._normalize_decimal(
                 resolved["max_position_pct_override"],
                 None,

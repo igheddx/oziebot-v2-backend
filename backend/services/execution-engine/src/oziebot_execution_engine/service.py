@@ -366,10 +366,18 @@ class ExecutionService:
         intent_payload = dict(request.intent_payload)
         metadata = dict(intent_payload.get("metadata") or {})
         metadata["token_policy_execution"] = {
+            "is_enabled": effective["is_enabled"],
             "admin_enabled": effective["admin_enabled"],
+            "effective_recommendation_status": effective[
+                "effective_recommendation_status"
+            ],
             "recommendation_status": effective["effective_recommendation_status"],
             "recommendation_reason": effective["effective_recommendation_reason"],
             "size_multiplier": str(effective["size_multiplier"]),
+            "configured_size_multiplier": str(effective["configured_size_multiplier"]),
+            "max_position_usd_override": str(effective["max_position_usd_override"])
+            if effective["max_position_usd_override"] is not None
+            else None,
             "max_position_pct_override": str(effective["max_position_pct_override"])
             if effective["max_position_pct_override"] is not None
             else None,
@@ -400,8 +408,12 @@ class ExecutionService:
                     "Execution rejected: token strategy policy reduced size to zero",
                 )
 
+        max_position_usd_override = effective["max_position_usd_override"]
         max_position_pct_override = effective["max_position_pct_override"]
-        if max_position_pct_override is not None:
+        if (
+            max_position_usd_override is not None
+            or max_position_pct_override is not None
+        ):
             if request.price_hint is None or request.price_hint <= 0:
                 return (
                     request,
@@ -411,14 +423,22 @@ class ExecutionService:
                 user_id=request.user_id,
                 trading_mode=request.trading_mode,
             )
-            max_position_cents = int(
-                (
-                    Decimal(str(total_capital_cents)) * max_position_pct_override
-                ).quantize(
-                    Decimal("1"),
-                    rounding=ROUND_DOWN,
+            if max_position_usd_override is not None:
+                max_position_cents = int(
+                    (max_position_usd_override * Decimal("100")).quantize(
+                        Decimal("1"),
+                        rounding=ROUND_DOWN,
+                    )
                 )
-            )
+            else:
+                max_position_cents = int(
+                    (
+                        Decimal(str(total_capital_cents)) * max_position_pct_override
+                    ).quantize(
+                        Decimal("1"),
+                        rounding=ROUND_DOWN,
+                    )
+                )
             current_exposure_cents = self._load_strategy_token_exposure_cents(request)
             remaining_cents = max_position_cents - current_exposure_cents
             if remaining_cents <= 0:
@@ -469,6 +489,8 @@ class ExecutionService:
               tsp.recommendation_reason,
               tsp.recommendation_status_override,
               tsp.recommendation_reason_override,
+              tsp.size_multiplier,
+              tsp.max_position_usd_override,
               tsp.max_position_pct_override
             FROM platform_token_allowlist p
             LEFT JOIN token_strategy_policy tsp

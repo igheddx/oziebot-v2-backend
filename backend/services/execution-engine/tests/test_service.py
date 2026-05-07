@@ -219,7 +219,7 @@ def _setup_db(db_path: Path) -> None:
                 "id TEXT PRIMARY KEY, token_id TEXT, strategy_id TEXT, admin_enabled BOOLEAN,"
                 "suitability_score REAL, recommendation_status TEXT, recommendation_reason TEXT,"
                 "recommendation_status_override TEXT, recommendation_reason_override TEXT,"
-                "max_position_pct_override REAL, notes TEXT, computed_at TEXT, updated_at TEXT)"
+                "size_multiplier REAL, max_position_usd_override REAL, max_position_pct_override REAL, notes TEXT, created_at TEXT, computed_at TEXT, updated_at TEXT)"
             )
         )
         conn.execute(
@@ -282,6 +282,8 @@ def _insert_token_policy(
     recommendation_reason: str = "policy",
     recommendation_status_override: str | None = None,
     recommendation_reason_override: str | None = None,
+    size_multiplier: float | None = None,
+    max_position_usd_override: float | None = None,
     max_position_pct_override: float | None = None,
 ) -> None:
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
@@ -299,10 +301,10 @@ def _insert_token_policy(
             text(
                 "INSERT INTO token_strategy_policy ("
                 "id, token_id, strategy_id, admin_enabled, suitability_score, recommendation_status, recommendation_reason,"
-                "recommendation_status_override, recommendation_reason_override, max_position_pct_override, notes, computed_at, updated_at"
+                "recommendation_status_override, recommendation_reason_override, size_multiplier, max_position_usd_override, max_position_pct_override, notes, created_at, computed_at, updated_at"
                 ") VALUES ("
                 ":id, :token_id, :strategy_id, :admin_enabled, 80, :recommendation_status, :recommendation_reason,"
-                ":recommendation_status_override, :recommendation_reason_override, :max_position_pct_override, NULL, :computed_at, :updated_at)"
+                ":recommendation_status_override, :recommendation_reason_override, :size_multiplier, :max_position_usd_override, :max_position_pct_override, NULL, :created_at, :computed_at, :updated_at)"
             ),
             {
                 "id": str(uuid4()),
@@ -313,7 +315,10 @@ def _insert_token_policy(
                 "recommendation_reason": recommendation_reason,
                 "recommendation_status_override": recommendation_status_override,
                 "recommendation_reason_override": recommendation_reason_override,
+                "size_multiplier": size_multiplier,
+                "max_position_usd_override": max_position_usd_override,
                 "max_position_pct_override": max_position_pct_override,
+                "created_at": now,
                 "computed_at": now,
                 "updated_at": now,
             },
@@ -1099,13 +1104,13 @@ def test_execution_reduces_discouraged_token_strategy_size(tmp_path: Path):
 
     assert result.state == ExecutionOrderStatus.FILLED
     order = _last_order(db_path)
-    assert Decimal(str(order["quantity"])) == Decimal("0.60000000")
+    assert Decimal(str(order["quantity"])) == Decimal("0.50000000")
     position = _position(db_path)
     assert position is not None
-    assert Decimal(str(position["quantity"])) == Decimal("0.60000000")
+    assert Decimal(str(position["quantity"])) == Decimal("0.50000000")
 
 
-def test_execution_applies_token_strategy_position_cap(tmp_path: Path):
+def test_execution_applies_token_strategy_position_usd_cap(tmp_path: Path):
     db_path = tmp_path / "execution-token-policy-cap.sqlite"
     _setup_db(db_path)
     redis = FakeRedis()
@@ -1119,7 +1124,7 @@ def test_execution_applies_token_strategy_position_cap(tmp_path: Path):
     _insert_token_policy(
         db_path,
         strategy_id=strategy_id,
-        max_position_pct_override=0.10,
+        max_position_usd_override=200,
     )
     service, _ = _service(db_path, redis)
 
@@ -1131,4 +1136,4 @@ def test_execution_applies_token_strategy_position_cap(tmp_path: Path):
 
     assert result.state == ExecutionOrderStatus.FILLED
     order = _last_order(db_path)
-    assert Decimal(str(order["quantity"])) == Decimal("0.06000000")
+    assert Decimal(str(order["quantity"])) == Decimal("0.00400000")

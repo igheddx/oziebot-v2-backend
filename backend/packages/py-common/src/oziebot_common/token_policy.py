@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
 from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
 TOKEN_POLICY_STRATEGIES = ("momentum", "reversion", "day_trading", "dca")
 TOKEN_POLICY_RECOMMENDATIONS = ("preferred", "allowed", "discouraged", "blocked")
-DISCOURAGED_SIZE_MULTIPLIER = Decimal("0.60")
+DEFAULT_MISSING_POLICY_BEHAVIOR = "allowed"
+DISCOURAGED_SIZE_MULTIPLIER = Decimal("0.50")
 
 
 @dataclass(frozen=True)
@@ -101,6 +103,22 @@ def _recommendation_for_score(score: float) -> str:
     if score >= 40:
         return "discouraged"
     return "blocked"
+
+
+def normalize_missing_policy_behavior(raw: str | None) -> str:
+    value = str(raw or DEFAULT_MISSING_POLICY_BEHAVIOR).strip().lower()
+    if value not in {"allowed", "blocked"}:
+        return DEFAULT_MISSING_POLICY_BEHAVIOR
+    return value
+
+
+def default_size_multiplier_for_status(status: str) -> Decimal:
+    normalized = str(status or "allowed").strip().lower()
+    if normalized == "discouraged":
+        return DISCOURAGED_SIZE_MULTIPLIER
+    if normalized == "blocked":
+        return Decimal("0")
+    return Decimal("1")
 
 
 def compute_market_profile(
@@ -329,50 +347,83 @@ def score_strategy_suitability(
 
 
 def resolve_effective_token_policy(
-    policy: Mapping[str, Any] | None, *, trading_mode: str | None = None
+    policy: Mapping[str, Any] | None,
+    *,
+    trading_mode: str | None = None,
+    missing_policy_behavior: str | None = None,
 ) -> dict[str, Any]:
+    normalized_missing_behavior = normalize_missing_policy_behavior(
+        missing_policy_behavior
+        or os.environ.get("TOKEN_STRATEGY_POLICY_DEFAULT_BEHAVIOR")
+    )
     if not policy:
+        status = normalized_missing_behavior
+        size_multiplier = default_size_multiplier_for_status(status)
         return {
             "admin_enabled": True,
-            "computed_recommendation_status": "allowed",
-            "effective_recommendation_status": "allowed",
-            "computed_recommendation_reason": None,
-            "effective_recommendation_reason": None,
-            "size_multiplier": Decimal("1"),
+            "is_enabled": True,
+            "computed_recommendation_status": status,
+            "effective_recommendation_status": status,
+            "computed_recommendation_reason": (
+                "No token-strategy policy configured"
+                if normalized_missing_behavior == "blocked"
+                else None
+            ),
+            "effective_recommendation_reason": (
+                "No token-strategy policy configured"
+                if normalized_missing_behavior == "blocked"
+                else None
+            ),
+            "size_multiplier": size_multiplier,
+            "configured_size_multiplier": size_multiplier,
+            "recommendation_status": status,
+            "recommendation_reason": (
+                "No token-strategy policy configured"
+                if normalized_missing_behavior == "blocked"
+                else None
+            ),
             "max_position_pct_override": None,
+            "max_position_usd_override": None,
         }
 
     computed_status = str(policy.get("recommendation_status") or "allowed")
     override_status = policy.get("recommendation_status_override")
     effective_status = str(override_status or computed_status)
-    raw_admin_enabled = policy.get("admin_enabled", True)
+    raw_admin_enabled = policy.get("is_enabled", policy.get("admin_enabled", True))
     admin_enabled = True if raw_admin_enabled is None else bool(raw_admin_enabled)
     effective_reason = policy.get("recommendation_reason_override") or policy.get(
         "recommendation_reason"
     )
-    if (
-        admin_enabled
-        and override_status is None
-        and effective_status == "blocked"
-        and str(trading_mode or "").lower() == "paper"
-    ):
-        effective_status = "discouraged"
-    size_multiplier = Decimal("1")
+    configured_size_multiplier = policy.get("size_multiplier")
+    if configured_size_multiplier is None:
+        size_multiplier = default_size_multiplier_for_status(effective_status)
+    else:
+        size_multiplier = Decimal(str(configured_size_multiplier))
     if not admin_enabled or effective_status == "blocked":
         size_multiplier = Decimal("0")
-    elif effective_status == "discouraged":
-        size_multiplier = DISCOURAGED_SIZE_MULTIPLIER
 
     max_position_pct_override = policy.get("max_position_pct_override")
     if max_position_pct_override is not None:
         max_position_pct_override = Decimal(str(max_position_pct_override))
+    max_position_usd_override = policy.get("max_position_usd_override")
+    if max_position_usd_override is not None:
+        max_position_usd_override = Decimal(str(max_position_usd_override))
 
     return {
         "admin_enabled": admin_enabled,
+        "is_enabled": admin_enabled,
         "computed_recommendation_status": computed_status,
         "effective_recommendation_status": effective_status,
         "computed_recommendation_reason": policy.get("recommendation_reason"),
         "effective_recommendation_reason": effective_reason,
+        "recommendation_status": effective_status,
+        "recommendation_reason": effective_reason,
         "size_multiplier": size_multiplier,
+        "configured_size_multiplier": (
+            Decimal(str(configured_size_multiplier))
+            if configured_size_multiplier is not None
+            else default_size_multiplier_for_status(effective_status)
+        ),
         "max_position_pct_override": max_position_pct_override,
+        "max_position_usd_override": max_position_usd_override,
     }

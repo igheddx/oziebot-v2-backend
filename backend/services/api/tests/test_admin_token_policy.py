@@ -120,7 +120,50 @@ def test_admin_token_policy_recalculated_on_create(
     assert data["market_profile"]["liquidity_score"] > 0
     assert len(data["strategy_policies"]) == 4
     dca_policy = next(item for item in data["strategy_policies"] if item["strategy_id"] == "dca")
-    assert dca_policy["computed_recommendation_status"] in {"discouraged", "blocked"}
+    assert dca_policy["recommendation_status"] == "allowed"
+
+
+def test_admin_can_initialize_recommended_token_strategy_defaults(
+    client, root_user_and_token, db_session: Session
+):
+    _, token = root_user_and_token
+    for symbol in ("BTC-USD", "ETH-USD", "SOL-USD", "LINK-USD", "AVAX-USD", "SUI-USD", "AERO-USD"):
+        _seed_market_data(db_session, symbol)
+
+    response = client.post(
+        "/v1/admin/platform/token-policy/initialize-defaults",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["tokens_processed"] == 7
+
+    matrix = client.get(
+        "/v1/admin/platform/token-policy/matrix",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert matrix.status_code == 200, matrix.text
+    by_symbol = {item["token"]["symbol"]: item for item in matrix.json()}
+
+    btc = {
+        item["strategy_id"]: item["recommendation_status"]
+        for item in by_symbol["BTC-USD"]["strategy_policies"]
+    }
+    assert btc["momentum"] == "preferred"
+    assert btc["dca"] == "preferred"
+
+    aero = {
+        item["strategy_id"]: item["recommendation_status"]
+        for item in by_symbol["AERO-USD"]["strategy_policies"]
+    }
+    assert aero["reversion"] == "blocked"
+    assert aero["dca"] == "blocked"
+
+    sui = {
+        item["strategy_id"]: item["recommendation_status"]
+        for item in by_symbol["SUI-USD"]["strategy_policies"]
+    }
+    assert sui["momentum"] == "allowed"
+    assert sui["reversion"] == "blocked"
 
 
 def test_admin_can_override_effective_token_policy(
@@ -142,9 +185,11 @@ def test_admin_can_override_effective_token_policy(
         f"/v1/admin/platform/tokens/{token_id}/strategy-policies/day_trading",
         headers={"Authorization": f"Bearer {token}"},
         json={
+            "is_enabled": True,
             "recommendation_status": "blocked",
             "recommendation_reason": "manual review required",
-            "max_position_pct_override": 0.25,
+            "size_multiplier": 0,
+            "max_position_usd_override": 250,
             "notes": "cap this token",
         },
     )
@@ -158,7 +203,8 @@ def test_admin_can_override_effective_token_policy(
     }
     assert data["recommendation_status"] == "blocked"
     assert data["recommendation_reason"] == "manual review required"
-    assert data["max_position_pct_override"] == 0.25
+    assert data["size_multiplier"] == 0
+    assert data["max_position_usd_override"] == 250
     assert data["notes"] == "cap this token"
 
 
@@ -181,10 +227,11 @@ def test_admin_token_policy_matrix_exposes_effective_and_override_values(
         f"/v1/admin/platform/tokens/{token_id}/strategy-policies/momentum",
         headers={"Authorization": f"Bearer {token}"},
         json={
-            "admin_enabled": False,
+            "is_enabled": False,
             "recommendation_status": "blocked",
             "recommendation_reason": "admin override",
-            "max_position_pct_override": 0.15,
+            "size_multiplier": 0,
+            "max_position_usd_override": 150,
             "notes": "watch liquidity",
         },
     )
@@ -214,9 +261,10 @@ def test_admin_token_policy_matrix_exposes_effective_and_override_values(
         "blocked",
     }
     assert policy["effective_recommendation_status"] == "blocked"
-    assert policy["recommendation_status_override"] == "blocked"
+    assert policy["recommendation_status"] == "blocked"
+    assert policy["is_enabled"] is False
     assert policy["admin_enabled"] is False
-    assert policy["max_position_pct_override"] == 0.15
+    assert policy["max_position_usd_override"] == 150
     assert policy["notes"] == "watch liquidity"
 
     detail = client.get(
@@ -254,20 +302,24 @@ def test_admin_token_policy_decisions_show_live_enforcement_stages(
 
     now = datetime.now(UTC)
     blocked_policy = {
+        "is_enabled": True,
         "admin_enabled": True,
-        "recommendation_status": "allowed",
-        "recommendation_status_override": "blocked",
-        "recommendation_reason": "computed safe",
-        "recommendation_reason_override": "manual block",
-        "max_position_pct_override": 0.20,
+        "computed_recommendation_status": "allowed",
+        "effective_recommendation_status": "blocked",
+        "recommendation_status": "blocked",
+        "recommendation_reason": "manual block",
+        "size_multiplier": "0",
+        "max_position_usd_override": "200",
     }
     discouraged_policy = {
+        "is_enabled": True,
         "admin_enabled": True,
         "computed_recommendation_status": "preferred",
+        "effective_recommendation_status": "discouraged",
         "recommendation_status": "discouraged",
         "recommendation_reason": "manual caution",
         "size_multiplier": "0.5",
-        "max_position_pct_override": "0.20",
+        "max_position_usd_override": "200",
     }
     run_id = uuid.uuid4()
     signal_id = uuid.uuid4()
@@ -362,15 +414,16 @@ def test_admin_token_policy_decisions_show_live_enforcement_stages(
             intent_payload={
                 "metadata": {
                     "token_policy_execution": {
+                        "is_enabled": True,
                         "admin_enabled": True,
                         "computed_recommendation_status": "preferred",
                         "effective_recommendation_status": "discouraged",
                         "effective_recommendation_reason": "manual caution",
                         "size_multiplier": "0.5",
-                        "max_position_pct_override": "0.20",
+                        "max_position_usd_override": "200",
                     },
                     "adjusted_quantity": "40",
-                    "policy_adjustment_reason": "max_position_pct_override applied",
+                    "policy_adjustment_reason": "max_position_usd_override applied",
                 }
             },
             risk_payload={"signal_id": str(signal_id), "final_size": "50"},

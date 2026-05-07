@@ -639,6 +639,8 @@ class RiskEngineService:
                       tsp.recommendation_reason,
                       tsp.recommendation_status_override,
                       tsp.recommendation_reason_override,
+                      tsp.size_multiplier,
+                      tsp.max_position_usd_override,
                       tsp.max_position_pct_override
                     FROM platform_token_allowlist p
                     LEFT JOIN token_strategy_policy tsp
@@ -998,8 +1000,13 @@ class RiskEngineService:
         )
         total_capital_cents = int(total_capital.total if total_capital else 0)
         token_policy_max_position_cents = 0
+        max_position_usd_override = effective_token_policy["max_position_usd_override"]
         max_position_pct_override = effective_token_policy["max_position_pct_override"]
-        if max_position_pct_override is not None and total_capital_cents > 0:
+        if max_position_usd_override is not None:
+            token_policy_max_position_cents = int(
+                (max_position_usd_override * Decimal("100")).quantize(Decimal("1"))
+            )
+        elif max_position_pct_override is not None and total_capital_cents > 0:
             token_policy_max_position_cents = int(
                 (
                     Decimal(str(total_capital_cents)) * max_position_pct_override

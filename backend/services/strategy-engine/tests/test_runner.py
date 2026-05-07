@@ -74,7 +74,10 @@ def _setup_intelligence_db(db_path: Path) -> None:
         )
         conn.execute(
             text(
-                "CREATE TABLE token_strategy_policy (id TEXT PRIMARY KEY, token_id TEXT, strategy_id TEXT, admin_enabled BOOLEAN, recommendation_status TEXT, recommendation_reason TEXT, recommendation_status_override TEXT, recommendation_reason_override TEXT, max_position_pct_override REAL)"
+                "CREATE TABLE token_strategy_policy ("
+                "id TEXT PRIMARY KEY, token_id TEXT, strategy_id TEXT, admin_enabled BOOLEAN, recommendation_status TEXT, recommendation_reason TEXT, "
+                "recommendation_status_override TEXT, recommendation_reason_override TEXT, size_multiplier REAL, max_position_usd_override REAL, "
+                "max_position_pct_override REAL, created_at TEXT, computed_at TEXT, updated_at TEXT)"
             )
         )
         conn.execute(
@@ -85,6 +88,13 @@ def _setup_intelligence_db(db_path: Path) -> None:
         conn.execute(
             text(
                 "CREATE TABLE ai_inference_records (id TEXT PRIMARY KEY, signal_snapshot_id TEXT, model_name TEXT, model_version TEXT, recommendation TEXT, confidence_score REAL, explanation_json TEXT, created_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE worker_message_outbox ("
+                "id TEXT PRIMARY KEY, queue_name TEXT, payload TEXT, status TEXT, "
+                "attempt_count INTEGER, retry_after TEXT, lease_expires_at TEXT, created_at TEXT, updated_at TEXT)"
             )
         )
         conn.execute(
@@ -1257,11 +1267,15 @@ def test_apply_token_policy_to_signal_returns_updated_copy_for_frozen_signal():
     assert updated.metadata is not None
     assert updated.metadata["price"] == "50000"
     assert updated.metadata["token_policy"] == {
+        "is_enabled": True,
         "admin_enabled": True,
         "computed_recommendation_status": "allowed",
+        "effective_recommendation_status": "allowed",
         "recommendation_status": "allowed",
         "recommendation_reason": "healthy market",
-        "size_multiplier": "1",
+        "configured_size_multiplier": "0.75",
+        "size_multiplier": "0.75",
+        "max_position_usd_override": None,
         "max_position_pct_override": None,
     }
 

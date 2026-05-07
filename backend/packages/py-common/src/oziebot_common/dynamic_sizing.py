@@ -45,6 +45,7 @@ class DynamicSizingInput:
     realized_drawdown_pct: Decimal = Decimal("0")
     daily_loss_pct: Decimal = Decimal("0")
     token_policy_size_multiplier: Decimal = Decimal("1")
+    token_policy_max_position_usd_override: Decimal | None = None
     token_policy_max_position_pct_override: Decimal | None = None
 
 
@@ -153,7 +154,15 @@ def calculate_dynamic_trade_size(ctx: DynamicSizingInput) -> DynamicSizingResult
             reduction_reasons.append("max_trade_usd_cap")
 
     token_policy_max_position_remaining_usd: Decimal | None = None
+    token_position_cap_usd: Decimal | None = None
     if (
+        ctx.token_policy_max_position_usd_override is not None
+        and ctx.token_policy_max_position_usd_override > 0
+    ):
+        token_position_cap_usd = _clamp_non_negative(
+            ctx.token_policy_max_position_usd_override
+        )
+    elif (
         ctx.token_policy_max_position_pct_override is not None
         and ctx.token_policy_max_position_pct_override > 0
         and total_capital_usd > 0
@@ -161,6 +170,7 @@ def calculate_dynamic_trade_size(ctx: DynamicSizingInput) -> DynamicSizingResult
         token_position_cap_usd = total_capital_usd * _clamp_pct(
             ctx.token_policy_max_position_pct_override
         )
+    if token_position_cap_usd is not None:
         token_policy_max_position_remaining_usd = _clamp_non_negative(
             token_position_cap_usd - current_position_usd
         )

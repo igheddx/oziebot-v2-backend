@@ -802,6 +802,10 @@ class StrategyRunner:
             return signal
 
         token_policy = metadata.get("token_policy") or {}
+        override_usd_raw = self._dict_value(token_policy, "max_position_usd_override")
+        max_position_usd_override = (
+            self._to_decimal(override_usd_raw) if override_usd_raw is not None else None
+        )
         override_raw = self._dict_value(token_policy, "max_position_pct_override")
         max_position_pct_override = (
             self._to_decimal(override_raw) if override_raw is not None else None
@@ -838,6 +842,7 @@ class StrategyRunner:
                 token_policy_size_multiplier=self._to_decimal(
                     self._dict_value(token_policy, "size_multiplier"), Decimal("1")
                 ),
+                token_policy_max_position_usd_override=max_position_usd_override,
                 token_policy_max_position_pct_override=max_position_pct_override,
             )
         )
@@ -862,6 +867,11 @@ class StrategyRunner:
             "token_policy_max_position_remaining_usd": (
                 str(sizing.token_policy_max_position_remaining_usd)
                 if sizing.token_policy_max_position_remaining_usd is not None
+                else None
+            ),
+            "token_policy_max_position_usd_override": (
+                str(max_position_usd_override)
+                if max_position_usd_override is not None
                 else None
             ),
             "final_trade_usd": str(sizing.final_trade_usd),
@@ -1698,6 +1708,8 @@ class StrategyRunner:
               tsp.recommendation_reason,
               tsp.recommendation_status_override,
               tsp.recommendation_reason_override,
+              tsp.size_multiplier,
+              tsp.max_position_usd_override,
               tsp.max_position_pct_override
             FROM platform_token_allowlist p
             LEFT JOIN token_strategy_policy tsp
@@ -1748,13 +1760,21 @@ class StrategyRunner:
         )
         metadata = dict(signal.metadata or {})
         metadata["token_policy"] = {
+            "is_enabled": effective["is_enabled"],
             "admin_enabled": effective["admin_enabled"],
             "computed_recommendation_status": effective[
                 "computed_recommendation_status"
             ],
+            "effective_recommendation_status": effective[
+                "effective_recommendation_status"
+            ],
             "recommendation_status": effective["effective_recommendation_status"],
             "recommendation_reason": effective["effective_recommendation_reason"],
             "size_multiplier": str(effective["size_multiplier"]),
+            "configured_size_multiplier": str(effective["configured_size_multiplier"]),
+            "max_position_usd_override": str(effective["max_position_usd_override"])
+            if effective["max_position_usd_override"] is not None
+            else None,
             "max_position_pct_override": str(effective["max_position_pct_override"])
             if effective["max_position_pct_override"] is not None
             else None,
