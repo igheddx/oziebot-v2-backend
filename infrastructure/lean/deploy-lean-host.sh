@@ -74,8 +74,14 @@ mkdir -p "${LEAN_REPO_PATH}/infrastructure/aws"
 cd "${LEAN_REPO_PATH}"
 test -f .env.lean || { echo "::error::Missing .env.lean under ${LEAN_REPO_PATH} — create it on the host (.env.lean is not rsync'd). Copy from .env.lean.example and fill secrets."; exit 2; }
 
+# Serialize deploys on the host so concurrent workflow/manual runs do not race
+# while recreating the same compose containers.
+exec 9>/tmp/oziebot-lean-deploy.lock
+flock -w 600 9 || { echo "::error::Timed out waiting for /tmp/oziebot-lean-deploy.lock"; exit 3; }
+
 # Drop this compose project so rebuild can replace containers.
 ${COMPOSE} down --remove-orphans 2>/dev/null || true
+${COMPOSE} rm -f -s 2>/dev/null || true
 
 # Edge mode publishes host :80 and :443. Another compose project (or stray Caddy) often
 # still holds them — 'up' then fails with "Bind for 0.0.0.0:80 failed". Stop any
@@ -89,7 +95,7 @@ for _lp in 80 443; do
 done
 
 ${COMPOSE} build
-${COMPOSE} up -d
+${COMPOSE} up -d --force-recreate --remove-orphans
 ${COMPOSE} ps
 EOF
 }
