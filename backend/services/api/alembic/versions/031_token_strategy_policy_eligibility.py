@@ -1,7 +1,7 @@
 """token strategy policy eligibility fields
 
-Revision ID: 028_token_strategy_policy_eligibility
-Revises: 027_strategy_tuning_defaults
+Revision ID: 031_token_strategy_policy_elig
+Revises: 030_no_redis_outbox_kv
 Create Date: 2026-05-06 21:30:00.000000
 """
 
@@ -14,8 +14,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "028_token_strategy_policy_eligibility"
-down_revision: Union[str, None] = "027_strategy_tuning_defaults"
+revision: str = "031_token_strategy_policy_elig"
+down_revision: Union[str, None] = "030_no_redis_outbox_kv"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
