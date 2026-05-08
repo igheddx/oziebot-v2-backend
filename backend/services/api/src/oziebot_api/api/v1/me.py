@@ -534,11 +534,11 @@ def _live_coinbase_balance_snapshot(
 
 
 def _dashboard_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
-    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 3}
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 4}
 
 
 def _dashboard_summary_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
-    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 5}
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 6}
 
 
 def _dashboard_details_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
@@ -552,8 +552,10 @@ def _dashboard_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "availableBalance": payload.get("availableBalance", 0),
         "portfolioValue": payload.get("portfolioValue", 0),
         "pnlValue": payload.get("pnlValue", 0),
+        "realizedPnlValue": payload.get("realizedPnlValue", 0),
+        "unrealizedPnlValue": payload.get("unrealizedPnlValue", 0),
         "pnlPercent": payload.get("pnlPercent", 0),
-        "gainLossLabel": payload.get("gainLossLabel", "P&L"),
+        "gainLossLabel": payload.get("gainLossLabel", "Total P&L"),
         "growth": payload.get("growth") or [],
         "positionsCount": len(payload.get("positions") or []),
         "activeTradesCount": len(payload.get("activeTrades") or []),
@@ -880,9 +882,10 @@ def _build_dashboard_summary_payload(
             for b in buckets
         )
         unrealized_pnl_cents = sum(b.unrealized_pnl_cents for b in buckets)
-    pnl_cents = sum(b.realized_pnl_cents + b.unrealized_pnl_cents for b in buckets)
+    realized_pnl_cents = sum(b.realized_pnl_cents for b in buckets)
+    pnl_cents = realized_pnl_cents + unrealized_pnl_cents
     if mode == TradingMode.PAPER.value:
-        pnl_cents = sum(b.realized_pnl_cents for b in buckets) + unrealized_pnl_cents
+        pnl_cents = realized_pnl_cents + unrealized_pnl_cents
     portfolio_value = portfolio_cents / 100
     pnl_value = pnl_cents / 100
     base = max(1.0, portfolio_value - pnl_value)
@@ -902,8 +905,10 @@ def _build_dashboard_summary_payload(
         "availableBalance": round(available_balance_cents / 100, 2),
         "portfolioValue": round(portfolio_value, 2),
         "pnlValue": round(pnl_value, 2),
+        "realizedPnlValue": round(realized_pnl_cents / 100, 2),
+        "unrealizedPnlValue": round(unrealized_pnl_cents / 100, 2),
         "pnlPercent": round(pnl_percent, 4),
-        "gainLossLabel": "P&L",
+        "gainLossLabel": "Total P&L",
         "growth": growth,
         "positions": [],
         "activeTrades": [],
@@ -1125,7 +1130,8 @@ def _build_dashboard_payload(
             buckets=buckets,
             positions=all_positions_rows,
         )
-        pnl_cents = sum(b.realized_pnl_cents for b in buckets) + unrealized_pnl_cents
+        realized_pnl_cents = sum(b.realized_pnl_cents for b in buckets)
+        pnl_cents = realized_pnl_cents + unrealized_pnl_cents
     else:
         portfolio_cents = sum(
             b.available_cash_cents
@@ -1135,7 +1141,8 @@ def _build_dashboard_payload(
             for b in buckets
         )
         unrealized_pnl_cents = sum(b.unrealized_pnl_cents for b in buckets)
-        pnl_cents = sum(b.realized_pnl_cents + b.unrealized_pnl_cents for b in buckets)
+        realized_pnl_cents = sum(b.realized_pnl_cents for b in buckets)
+        pnl_cents = realized_pnl_cents + unrealized_pnl_cents
     portfolio_value = portfolio_cents / 100
     pnl_value = pnl_cents / 100
     base = max(1.0, portfolio_value - pnl_value)
@@ -1550,8 +1557,10 @@ def _build_dashboard_payload(
         "availableBalance": round(available_balance_cents / 100, 2),
         "portfolioValue": round(portfolio_value, 2),
         "pnlValue": round(pnl_value, 2),
+        "realizedPnlValue": round(realized_pnl_cents / 100, 2),
+        "unrealizedPnlValue": round(unrealized_pnl_cents / 100, 2),
         "pnlPercent": round(pnl_percent, 4),
-        "gainLossLabel": "P&L",
+        "gainLossLabel": "Total P&L",
         "growth": growth,
         "enabledStrategies": enabled_strategies,
         "positions": positions,

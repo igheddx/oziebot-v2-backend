@@ -190,6 +190,9 @@ def test_dashboard_summary_growth_can_finish_below_prior_peak(
 
     assert payload["portfolioValue"] == 108.5
     assert payload["pnlValue"] == 8.5
+    assert payload["realizedPnlValue"] == 30.0
+    assert payload["unrealizedPnlValue"] == -21.5
+    assert payload["gainLossLabel"] == "Total P&L"
     assert payload["growth"][-1] == 108.5
     assert max(payload["growth"]) > payload["growth"][-1]
 
@@ -825,6 +828,8 @@ def test_dashboard_summary_recomputes_paper_unrealized_from_positions(
     assert payload["availableBalance"] == 500.0
     assert payload["portfolioValue"] == 1100.0
     assert payload["pnlValue"] == 100.0
+    assert payload["realizedPnlValue"] == 0.0
+    assert payload["unrealizedPnlValue"] == 100.0
 
 
 def test_dashboard_details_does_not_fetch_live_coinbase_balances(
@@ -1301,6 +1306,9 @@ def test_dashboard_details_recomputes_paper_topline_from_position_marks(
     assert payload["availableBalance"] == 700.0
     assert payload["portfolioValue"] == 1060.0
     assert payload["pnlValue"] == 100.0
+    assert payload["realizedPnlValue"] == 40.0
+    assert payload["unrealizedPnlValue"] == 60.0
+    assert payload["gainLossLabel"] == "Total P&L"
     assert payload["positions"][0]["unrealizedPnl"] == 60.0
 
 
