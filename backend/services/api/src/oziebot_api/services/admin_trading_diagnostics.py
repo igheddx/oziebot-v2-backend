@@ -59,7 +59,9 @@ def build_trading_diagnostics_report(
     now = datetime.now(UTC)
     window_start = filters.window_start(now)
     trade_rows = _load_trade_rows(db, filters=filters, window_start=window_start)
-    trade_details = [_trade_row_to_payload(feat, trade, snapshot) for feat, trade, snapshot in trade_rows]
+    trade_details = [
+        _trade_row_to_payload(feat, trade, snapshot) for feat, trade, snapshot in trade_rows
+    ]
 
     signal_funnel = _build_signal_funnel(
         db,
@@ -133,7 +135,10 @@ def _load_trade_rows(
     stmt = (
         select(TradeOutcomeFeature, ExecutionTradeRecord, StrategySignalSnapshot)
         .join(ExecutionTradeRecord, TradeOutcomeFeature.trade_id == ExecutionTradeRecord.id)
-        .outerjoin(StrategySignalSnapshot, TradeOutcomeFeature.signal_snapshot_id == StrategySignalSnapshot.id)
+        .outerjoin(
+            StrategySignalSnapshot,
+            TradeOutcomeFeature.signal_snapshot_id == StrategySignalSnapshot.id,
+        )
         .where(TradeOutcomeFeature.created_at >= window_start)
         .order_by(TradeOutcomeFeature.created_at.desc())
         .limit(max(1, min(filters.limit, 100)))
@@ -173,9 +178,7 @@ def _trade_row_to_payload(
         if entry_price is not None and quantity is not None
         else None
     )
-    signal_confidence = (
-        _float_or_none(snapshot.confidence_score) if snapshot is not None else None
-    )
+    signal_confidence = _float_or_none(snapshot.confidence_score) if snapshot is not None else None
 
     return {
         "trade_id": str(feat.trade_id),
@@ -353,7 +356,9 @@ def _build_signal_funnel(
         state = (order.state or "").lower()
         if state in {"failed", "cancelled", "rejected"}:
             failed_orders.append(order)
-            rejection_reasons[_bucket_rejection_reason(order.failure_code or order.failure_detail or state)] += 1
+            rejection_reasons[
+                _bucket_rejection_reason(order.failure_code or order.failure_detail or state)
+            ] += 1
 
     signals_evaluated: int | None
     if runs:
@@ -404,7 +409,9 @@ def _build_signal_funnel(
                 rejection_reasons, "token_strategy_policy", signals_rejected
             ),
             "cooldown": _counter_or_none(rejection_reasons, "cooldown", signals_rejected),
-            "liquidity_hours": _counter_or_none(rejection_reasons, "liquidity_hours", signals_rejected),
+            "liquidity_hours": _counter_or_none(
+                rejection_reasons, "liquidity_hours", signals_rejected
+            ),
             "other": _counter_or_none(rejection_reasons, "other", signals_rejected),
         },
         "data_sources": {
@@ -429,19 +436,31 @@ def _build_capital_utilization(
     window_start: datetime,
 ) -> dict[str, Any]:
     bucket_stmt = select(StrategyCapitalBucket)
-    ledger_stmt = select(StrategyCapitalLedger).where(StrategyCapitalLedger.created_at >= window_start)
+    ledger_stmt = select(StrategyCapitalLedger).where(
+        StrategyCapitalLedger.created_at >= window_start
+    )
     if filters.normalized_strategy:
-        bucket_stmt = bucket_stmt.where(StrategyCapitalBucket.strategy_id == filters.normalized_strategy)
-        ledger_stmt = ledger_stmt.where(StrategyCapitalLedger.strategy_id == filters.normalized_strategy)
+        bucket_stmt = bucket_stmt.where(
+            StrategyCapitalBucket.strategy_id == filters.normalized_strategy
+        )
+        ledger_stmt = ledger_stmt.where(
+            StrategyCapitalLedger.strategy_id == filters.normalized_strategy
+        )
     if filters.normalized_mode:
-        bucket_stmt = bucket_stmt.where(StrategyCapitalBucket.trading_mode == filters.normalized_mode)
-        ledger_stmt = ledger_stmt.where(StrategyCapitalLedger.trading_mode == filters.normalized_mode)
+        bucket_stmt = bucket_stmt.where(
+            StrategyCapitalBucket.trading_mode == filters.normalized_mode
+        )
+        ledger_stmt = ledger_stmt.where(
+            StrategyCapitalLedger.trading_mode == filters.normalized_mode
+        )
     buckets = list(db.scalars(bucket_stmt).all())
     ledgers = list(db.scalars(ledger_stmt).all())
 
     note_parts: list[str] = []
     if filters.normalized_token:
-        note_parts.append("Capital buckets are strategy-scoped, so token filters do not change capital totals.")
+        note_parts.append(
+            "Capital buckets are strategy-scoped, so token filters do not change capital totals."
+        )
     if not buckets:
         return {
             "total_account_value": None,
@@ -454,13 +473,18 @@ def _build_capital_utilization(
                 "reversion": None,
                 "dca": None,
             },
-            "note": " ".join(note_parts) if note_parts else "No capital bucket data matched the selected filters.",
+            "note": " ".join(note_parts)
+            if note_parts
+            else "No capital bucket data matched the selected filters.",
         }
 
-    total_account_value = sum(
-        bucket.assigned_capital_cents + bucket.realized_pnl_cents + bucket.unrealized_pnl_cents
-        for bucket in buckets
-    ) / 100
+    total_account_value = (
+        sum(
+            bucket.assigned_capital_cents + bucket.realized_pnl_cents + bucket.unrealized_pnl_cents
+            for bucket in buckets
+        )
+        / 100
+    )
     deployed_pcts = []
     idle_pcts = []
     capital_by_strategy = {
@@ -486,10 +510,19 @@ def _build_capital_utilization(
     peak_capital_deployed_pct = max(deployed_pcts) if deployed_pcts else None
     if ledgers:
         for ledger in ledgers:
-            denominator = max(ledger.after_available_cash_cents + ledger.after_reserved_cash_cents + ledger.after_locked_capital_cents, 1)
+            denominator = max(
+                ledger.after_available_cash_cents
+                + ledger.after_reserved_cash_cents
+                + ledger.after_locked_capital_cents,
+                1,
+            )
             peak_capital_deployed_pct = max(
                 peak_capital_deployed_pct or 0,
-                ((ledger.after_locked_capital_cents + ledger.after_reserved_cash_cents) / denominator) * 100,
+                (
+                    (ledger.after_locked_capital_cents + ledger.after_reserved_cash_cents)
+                    / denominator
+                )
+                * 100,
             )
 
     return {
@@ -516,16 +549,19 @@ def _build_exit_analysis(trades: list[dict[str, Any]]) -> dict[str, Any]:
         }
 
     reasons = Counter((trade["exit_reason"] or "unknown") for trade in trades)
-    trailing_rows = [trade for trade in trades if _reason_contains(trade["exit_reason"], "trailing")]
+    trailing_rows = [
+        trade for trade in trades if _reason_contains(trade["exit_reason"], "trailing")
+    ]
     reversal_rows = [
-        trade for trade in trades if _reason_contains(trade["exit_reason"], "bearish") or _reason_contains(trade["exit_reason"], "reversal")
+        trade
+        for trade in trades
+        if _reason_contains(trade["exit_reason"], "bearish")
+        or _reason_contains(trade["exit_reason"], "reversal")
     ]
     partial_rows = [trade for trade in trades if trade["partial_profit_taken"]]
     losing_rows = [trade for trade in trades if (trade["net_pnl_usd"] or 0) < 0]
     losing_positive_before_loss = [
-        trade
-        for trade in losing_rows
-        if (trade["max_favorable_excursion_pct"] or 0) > 0
+        trade for trade in losing_rows if (trade["max_favorable_excursion_pct"] or 0) > 0
     ]
 
     return {
@@ -555,8 +591,7 @@ def _build_active_strategy_config(db: Session, settings: Settings) -> dict[str, 
     }
     token_export = TokenPolicyService(db).export_token_matrix()
     signal_rules = {
-        slug: (config or {}).get("signal_rules", {})
-        for slug, config in strategies.items()
+        slug: (config or {}).get("signal_rules", {}) for slug, config in strategies.items()
     }
     return {
         "momentum_config": strategies.get("momentum"),

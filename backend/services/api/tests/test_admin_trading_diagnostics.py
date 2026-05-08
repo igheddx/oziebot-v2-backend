@@ -41,7 +41,10 @@ def _ensure_platform_strategies(db_session: Session) -> None:
         },
     }
     for sort_order, (slug, config_schema) in enumerate(configs.items(), start=1):
-        if db_session.scalar(select(PlatformStrategy).where(PlatformStrategy.slug == slug)) is not None:
+        if (
+            db_session.scalar(select(PlatformStrategy).where(PlatformStrategy.slug == slug))
+            is not None
+        ):
             continue
         db_session.add(
             PlatformStrategy(
@@ -613,7 +616,9 @@ def test_admin_trading_diagnostics_returns_consistent_funnel_and_respects_filter
     assert payload["signal_funnel"]["rejection_reasons"]["allocation"] == 1
     assert payload["signal_funnel"]["rejection_reasons"]["confidence"] == 1
     assert payload["capital_utilization"]["total_account_value"] is not None
-    assert payload["active_strategy_config"]["momentum_config"]["risk_caps"]["max_position_usd"] == 300
+    assert (
+        payload["active_strategy_config"]["momentum_config"]["risk_caps"]["max_position_usd"] == 300
+    )
 
     filtered = client.get(
         "/v1/admin/trading-diagnostics?days=7&token=AERO-USD&strategy=momentum&trading_mode=live&limit=10",

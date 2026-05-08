@@ -87,7 +87,7 @@ def export_trading_diagnostics(
     if fmt == "json":
         return JSONResponse(report)
 
-    filename = f'trading-diagnostics-{report["generated_at"].replace(":", "-")}.csv'
+    filename = f"trading-diagnostics-{report['generated_at'].replace(':', '-')}.csv"
     return StreamingResponse(
         iter([render_trading_diagnostics_csv(report)]),
         media_type="text/csv",
