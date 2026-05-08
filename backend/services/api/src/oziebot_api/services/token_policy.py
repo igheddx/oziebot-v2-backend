@@ -71,7 +71,7 @@ RECOMMENDED_TOKEN_STRATEGY_MATRIX: dict[str, dict[str, str]] = {
     },
     "AERO-USD": {
         "momentum": "allowed",
-        "day_trading": "discouraged",
+        "day_trading": "blocked",
         "reversion": "blocked",
         "dca": "blocked",
     },

@@ -125,6 +125,130 @@ class TokenPolicyDetailResponse(BaseModel):
     strategy_policies: list[TokenStrategyPolicyResponse]
 
 
+class TradingDiagnosticsTradeDetail(BaseModel):
+    trade_id: str
+    strategy: str
+    token: str
+    trading_mode: str
+    entry_time: str | None = None
+    exit_time: str | None = None
+    hold_minutes: float | None = None
+    entry_price: float | None = None
+    exit_price: float | None = None
+    quantity: float | None = None
+    size_usd: float | None = None
+    fees_usd: float | None = None
+    gross_pnl_usd: float | None = None
+    net_pnl_usd: float | None = None
+    pnl_pct: float | None = None
+    exit_reason: str | None = None
+    partial_profit_taken: bool | None = None
+    max_favorable_excursion_pct: float | None = None
+    max_adverse_excursion_pct: float | None = None
+    peak_unrealized_pnl_pct: float | None = None
+    profit_giveback_pct: float | None = None
+    signal_confidence: float | None = None
+    volume_confirmation_passed: bool | None = None
+    rejected_before_execution: bool | None = None
+
+
+class TradingDiagnosticsStrategySummary(BaseModel):
+    strategy: str
+    total_trades: int
+    wins: int
+    losses: int
+    win_rate_pct: float | None = None
+    avg_win_pct: float | None = None
+    avg_loss_pct: float | None = None
+    profit_factor: float | None = None
+    total_net_pnl_usd: float | None = None
+    total_net_pnl_pct: float | None = None
+    max_drawdown_pct: float | None = None
+    avg_hold_minutes: float | None = None
+    stop_loss_exits: int
+    take_profit_exits: int
+    trailing_stop_exits: int
+    partial_profit_exits: int
+    max_hold_exits: int
+    bearish_signal_exits: int
+    avg_profit_giveback_pct: float | None = None
+
+
+class TradingDiagnosticsTokenSummary(BaseModel):
+    token: str
+    total_trades: int
+    win_rate_pct: float | None = None
+    total_net_pnl_usd: float | None = None
+    total_net_pnl_pct: float | None = None
+    avg_trade_return_pct: float | None = None
+    avg_hold_minutes: float | None = None
+    avg_profit_giveback_pct: float | None = None
+    best_strategy: str | None = None
+    worst_strategy: str | None = None
+
+
+class TradingDiagnosticsRejectionReasons(BaseModel):
+    confidence: int | None = None
+    volume: int | None = None
+    allocation: int | None = None
+    risk_engine: int | None = None
+    token_strategy_policy: int | None = None
+    cooldown: int | None = None
+    liquidity_hours: int | None = None
+    other: int | None = None
+
+
+class TradingDiagnosticsSignalFunnel(BaseModel):
+    signals_evaluated: int | None = None
+    signals_emitted: int | None = None
+    signals_rejected: int | None = None
+    trades_executed: int
+    rejection_reasons: TradingDiagnosticsRejectionReasons
+    data_sources: dict[str, str] = Field(default_factory=dict)
+    unavailable_metrics: list[str] = Field(default_factory=list)
+    note: str | None = None
+
+
+class TradingDiagnosticsCapitalUtilization(BaseModel):
+    total_account_value: float | None = None
+    avg_capital_deployed_pct: float | None = None
+    peak_capital_deployed_pct: float | None = None
+    avg_cash_idle_pct: float | None = None
+    capital_by_strategy: dict[str, float | None]
+    note: str | None = None
+
+
+class TradingDiagnosticsExitAnalysis(BaseModel):
+    most_common_exit_reason: str | None = None
+    stop_loss_rate_pct: float | None = None
+    avg_profit_before_trailing_exit_pct: float | None = None
+    avg_profit_before_reversal_pct: float | None = None
+    partial_take_profit_effectiveness_pct: float | None = None
+    trades_that_were_positive_before_loss_pct: float | None = None
+
+
+class TradingDiagnosticsActiveStrategyConfig(BaseModel):
+    momentum_config: dict[str, Any] | None = None
+    day_trading_config: dict[str, Any] | None = None
+    reversion_config: dict[str, Any] | None = None
+    dca_config: dict[str, Any] | None = None
+    signal_rules: dict[str, dict[str, Any]]
+    token_strategy_policy_matrix: dict[str, dict[str, TokenStrategyPolicyResponse]]
+    default_missing_policy_behavior: Literal["allowed", "blocked"]
+
+
+class TradingDiagnosticsResponse(BaseModel):
+    generated_at: str
+    trade_count: int
+    trade_details: list[TradingDiagnosticsTradeDetail]
+    strategy_summary: list[TradingDiagnosticsStrategySummary]
+    token_summary: list[TradingDiagnosticsTokenSummary]
+    signal_funnel: TradingDiagnosticsSignalFunnel
+    capital_utilization: TradingDiagnosticsCapitalUtilization
+    exit_analysis: TradingDiagnosticsExitAnalysis
+    active_strategy_config: TradingDiagnosticsActiveStrategyConfig
+
+
 class TokenPolicySizingImpact(BaseModel):
     original_size: str | None = None
     final_size: str | None = None

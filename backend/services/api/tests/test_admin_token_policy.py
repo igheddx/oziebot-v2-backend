@@ -155,6 +155,8 @@ def test_admin_can_initialize_recommended_token_strategy_defaults(
         item["strategy_id"]: item["recommendation_status"]
         for item in by_symbol["AERO-USD"]["strategy_policies"]
     }
+    assert aero["momentum"] == "allowed"
+    assert aero["day_trading"] == "blocked"
     assert aero["reversion"] == "blocked"
     assert aero["dca"] == "blocked"
 

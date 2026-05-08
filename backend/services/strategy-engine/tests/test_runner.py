@@ -1157,6 +1157,174 @@ def test_momentum_runner_skips_blocked_token_policy():
     assert runner.generated == 0
 
 
+def test_aero_day_trading_runner_skips_blocked_token_policy():
+    class PolicyRunner(StrategyRunner):
+        def __init__(self):
+            super().__init__(engine=None, runtime_kv=DummyRuntimeKV())  # type: ignore[arg-type]
+            self.generated = 0
+
+        def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
+            return [
+                {
+                    "user_id": str(uuid.uuid4()),
+                    "strategy_id": "day_trading",
+                    "tenant_id": uuid.uuid4(),
+                    "current_trading_mode": "paper",
+                    "config": {},
+                }
+            ]
+
+        def _load_platform_strategy_config(self, strategy_id: str) -> dict[str, object]:
+            return {}
+
+        def _load_allowed_symbols(self, user_id: str) -> list[str]:
+            return ["AERO-USD"]
+
+        def _load_market_snapshot(self, symbol: str) -> MarketSnapshot | None:
+            return MarketSnapshot(
+                timestamp=datetime.now(UTC),
+                symbol=symbol,
+                current_price=Decimal("1"),
+                bid_price=Decimal("0.99"),
+                ask_price=Decimal("1.01"),
+                volume_24h=Decimal("100"),
+                open_price=Decimal("1"),
+                high_price=Decimal("1.1"),
+                low_price=Decimal("0.9"),
+                close_price=Decimal("1"),
+            )
+
+        def _load_position_state(
+            self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str
+        ) -> PositionState:
+            return PositionState(symbol=symbol, quantity=Decimal("0"))
+
+        def _sync_position_runtime_state(
+            self,
+            *,
+            user_id: str,
+            strategy_name: str,
+            trading_mode: str,
+            position_state: PositionState,
+            market: MarketSnapshot,
+            now: datetime,
+        ) -> PositionState:
+            return position_state
+
+        def _load_token_strategy_policy(
+            self, *, symbol: str, strategy_name: str
+        ) -> dict[str, object] | None:
+            return {
+                "admin_enabled": True,
+                "recommendation_status": "blocked",
+                "recommendation_reason": "baseline block",
+            }
+
+        def _generate_signal(self, **kwargs) -> StrategySignal:
+            self.generated += 1
+            raise AssertionError("blocked AERO day trading should not reach generation")
+
+        def _persist_run(self, **kwargs) -> None:
+            return None
+
+        def _persist_signal(self, event: StrategySignalEvent) -> None:
+            raise AssertionError("blocked AERO day trading should not emit")
+
+    runner = PolicyRunner()
+    assert runner.run_once() == 0
+    assert runner.generated == 0
+
+
+def test_aero_momentum_runner_allows_signal_generation():
+    class PolicyRunner(StrategyRunner):
+        def __init__(self):
+            super().__init__(engine=None, runtime_kv=DummyRuntimeKV())  # type: ignore[arg-type]
+            self.generated = 0
+            self.events: list[StrategySignalEvent] = []
+
+        def _load_enabled_user_strategies(self) -> list[dict[str, str]]:
+            return [
+                {
+                    "user_id": str(uuid.uuid4()),
+                    "strategy_id": "momentum",
+                    "tenant_id": uuid.uuid4(),
+                    "current_trading_mode": "paper",
+                    "config": {},
+                }
+            ]
+
+        def _load_platform_strategy_config(self, strategy_id: str) -> dict[str, object]:
+            return {}
+
+        def _load_allowed_symbols(self, user_id: str) -> list[str]:
+            return ["AERO-USD"]
+
+        def _load_market_snapshot(self, symbol: str) -> MarketSnapshot | None:
+            return MarketSnapshot(
+                timestamp=datetime.now(UTC),
+                symbol=symbol,
+                current_price=Decimal("1"),
+                bid_price=Decimal("0.99"),
+                ask_price=Decimal("1.01"),
+                volume_24h=Decimal("100"),
+                open_price=Decimal("1"),
+                high_price=Decimal("1.1"),
+                low_price=Decimal("0.9"),
+                close_price=Decimal("1"),
+            )
+
+        def _load_position_state(
+            self, *, user_id: str, strategy_name: str, trading_mode: str, symbol: str
+        ) -> PositionState:
+            return PositionState(symbol=symbol, quantity=Decimal("0"))
+
+        def _sync_position_runtime_state(
+            self,
+            *,
+            user_id: str,
+            strategy_name: str,
+            trading_mode: str,
+            position_state: PositionState,
+            market: MarketSnapshot,
+            now: datetime,
+        ) -> PositionState:
+            return position_state
+
+        def _load_token_strategy_policy(
+            self, *, symbol: str, strategy_name: str
+        ) -> dict[str, object] | None:
+            return {
+                "admin_enabled": True,
+                "recommendation_status": "allowed",
+                "recommendation_reason": "baseline allow",
+            }
+
+        def _generate_signal(self, **kwargs) -> StrategySignal:
+            self.generated += 1
+            return StrategySignal(
+                signal_id=uuid.uuid4(),
+                correlation_id=uuid.uuid4(),
+                tenant_id=uuid.uuid4(),
+                strategy_id="momentum",
+                trading_mode=TradingMode.PAPER,
+                signal_type=SignalType.BUY,
+                confidence=0.7,
+                reason="allowed AERO momentum",
+            )
+
+        def _persist_run(self, **kwargs) -> None:
+            return None
+
+        def _persist_signal(self, event: StrategySignalEvent) -> None:
+            self.events.append(event)
+
+    runner = PolicyRunner()
+    assert runner.run_once() == 1
+    assert runner.generated == 1
+    assert len(runner.events) == 1
+    assert runner.events[0].symbol == "AERO-USD"
+
+
 def test_mean_reversion_runner_skips_admin_disabled_token_policy():
     class PolicyRunner(StrategyRunner):
         def __init__(self):
