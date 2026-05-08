@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from oziebot_common.token_policy import normalize_missing_policy_behavior
@@ -287,10 +287,10 @@ def _build_signal_funnel(
     window_start: datetime,
     trade_count: int,
 ) -> dict[str, Any]:
-    runs = _load_rows(
+    runs_count = _count_rows(
         db,
         _apply_signal_filters(
-            select(StrategyRun),
+            select(func.count()).select_from(StrategyRun),
             filters=filters,
             window_start=window_start,
             token_column=StrategyRun.symbol,
@@ -299,10 +299,10 @@ def _build_signal_funnel(
             timestamp_column=StrategyRun.started_at,
         ),
     )
-    signals = _load_rows(
+    signals_count = _count_rows(
         db,
         _apply_signal_filters(
-            select(StrategySignalRecord),
+            select(func.count()).select_from(StrategySignalRecord),
             filters=filters,
             window_start=window_start,
             token_column=StrategySignalRecord.symbol,
@@ -311,10 +311,10 @@ def _build_signal_funnel(
             timestamp_column=StrategySignalRecord.timestamp,
         ),
     )
-    risk_events = _load_rows(
+    risk_events_count = _count_rows(
         db,
         _apply_signal_filters(
-            select(RiskEvent),
+            select(func.count()).select_from(RiskEvent),
             filters=filters,
             window_start=window_start,
             token_column=RiskEvent.symbol,
@@ -323,10 +323,10 @@ def _build_signal_funnel(
             timestamp_column=RiskEvent.created_at,
         ),
     )
-    orders = _load_rows(
+    orders_count = _count_rows(
         db,
         _apply_signal_filters(
-            select(ExecutionOrder),
+            select(func.count()).select_from(ExecutionOrder),
             filters=filters,
             window_start=window_start,
             token_column=ExecutionOrder.symbol,
@@ -336,49 +336,82 @@ def _build_signal_funnel(
         ),
     )
 
-    suppressed_runs = []
     rejection_reasons: Counter[str] = Counter()
-    for run in runs:
-        metadata = run.run_metadata or {}
-        if metadata.get("suppressed"):
-            suppressed_runs.append(run)
-            rejection_reasons[_bucket_rejection_reason(metadata.get("suppression_reason"))] += 1
+    suppressed_count = 0
+    suppressed_rows = db.execute(
+        _apply_signal_filters(
+            select(
+                StrategyRun.run_metadata["suppression_reason"].as_string(),
+            )
+            .select_from(StrategyRun)
+            .where(StrategyRun.run_metadata["suppressed"].as_boolean().is_(True)),
+            filters=filters,
+            window_start=window_start,
+            token_column=StrategyRun.symbol,
+            strategy_column=StrategyRun.strategy_name,
+            mode_column=StrategyRun.trading_mode,
+            timestamp_column=StrategyRun.started_at,
+        )
+    ).all()
+    for (reason,) in suppressed_rows:
+        suppressed_count += 1
+        rejection_reasons[_bucket_rejection_reason(reason)] += 1
 
-    risk_rejects = []
-    for event in risk_events:
-        outcome = (event.outcome or "").lower()
-        if outcome.startswith("reject"):
-            risk_rejects.append(event)
-            rejection_reasons[_bucket_rejection_reason(event.reason or event.detail)] += 1
+    risk_rejects_count = 0
+    risk_reject_rows = db.execute(
+        _apply_signal_filters(
+            select(RiskEvent.reason, RiskEvent.detail)
+            .select_from(RiskEvent)
+            .where(RiskEvent.outcome.ilike("reject%")),
+            filters=filters,
+            window_start=window_start,
+            token_column=RiskEvent.symbol,
+            strategy_column=RiskEvent.strategy_name,
+            mode_column=RiskEvent.trading_mode,
+            timestamp_column=RiskEvent.created_at,
+        )
+    ).all()
+    for reason, detail in risk_reject_rows:
+        risk_rejects_count += 1
+        rejection_reasons[_bucket_rejection_reason(reason or detail)] += 1
 
-    failed_orders = []
-    for order in orders:
-        state = (order.state or "").lower()
-        if state in {"failed", "cancelled", "rejected"}:
-            failed_orders.append(order)
-            rejection_reasons[
-                _bucket_rejection_reason(order.failure_code or order.failure_detail or state)
-            ] += 1
+    failed_orders_count = 0
+    failed_order_rows = db.execute(
+        _apply_signal_filters(
+            select(ExecutionOrder.failure_code, ExecutionOrder.failure_detail, ExecutionOrder.state)
+            .select_from(ExecutionOrder)
+            .where(ExecutionOrder.state.in_(("failed", "cancelled", "rejected"))),
+            filters=filters,
+            window_start=window_start,
+            token_column=ExecutionOrder.symbol,
+            strategy_column=ExecutionOrder.strategy_id,
+            mode_column=ExecutionOrder.trading_mode,
+            timestamp_column=ExecutionOrder.created_at,
+        )
+    ).all()
+    for failure_code, failure_detail, state in failed_order_rows:
+        failed_orders_count += 1
+        rejection_reasons[_bucket_rejection_reason(failure_code or failure_detail or state)] += 1
 
     signals_evaluated: int | None
-    if runs:
-        signals_evaluated = len(runs)
-    elif trade_count > 0 or signals or risk_events or orders:
+    if runs_count:
+        signals_evaluated = runs_count
+    elif trade_count > 0 or signals_count or risk_events_count or orders_count:
         signals_evaluated = None
     else:
         signals_evaluated = 0
 
-    if signals:
-        signals_emitted: int | None = len(signals)
-    elif trade_count > 0 or runs or risk_events or orders:
+    if signals_count:
+        signals_emitted: int | None = signals_count
+    elif trade_count > 0 or runs_count or risk_events_count or orders_count:
         signals_emitted = None
     else:
         signals_emitted = 0
 
-    rejected_count = len(suppressed_runs) + len(risk_rejects) + len(failed_orders)
+    rejected_count = suppressed_count + risk_rejects_count + failed_orders_count
     if rejected_count:
         signals_rejected: int | None = rejected_count
-    elif runs or signals or risk_events:
+    elif runs_count or signals_count or risk_events_count:
         signals_rejected = 0
     elif trade_count > 0:
         signals_rejected = None
@@ -454,7 +487,27 @@ def _build_capital_utilization(
             StrategyCapitalLedger.trading_mode == filters.normalized_mode
         )
     buckets = list(db.scalars(bucket_stmt).all())
-    ledgers = list(db.scalars(ledger_stmt).all())
+    peak_ledger_deployed_pct = db.scalar(
+        ledger_stmt.with_only_columns(
+            func.max(
+                (
+                    (
+                        StrategyCapitalLedger.after_locked_capital_cents
+                        + StrategyCapitalLedger.after_reserved_cash_cents
+                    )
+                    * 100.0
+                )
+                / func.nullif(
+                    (
+                        StrategyCapitalLedger.after_available_cash_cents
+                        + StrategyCapitalLedger.after_reserved_cash_cents
+                        + StrategyCapitalLedger.after_locked_capital_cents
+                    ),
+                    0,
+                )
+            )
+        )
+    )
 
     note_parts: list[str] = []
     if filters.normalized_token:
@@ -508,22 +561,11 @@ def _build_capital_utilization(
         )
 
     peak_capital_deployed_pct = max(deployed_pcts) if deployed_pcts else None
-    if ledgers:
-        for ledger in ledgers:
-            denominator = max(
-                ledger.after_available_cash_cents
-                + ledger.after_reserved_cash_cents
-                + ledger.after_locked_capital_cents,
-                1,
-            )
-            peak_capital_deployed_pct = max(
-                peak_capital_deployed_pct or 0,
-                (
-                    (ledger.after_locked_capital_cents + ledger.after_reserved_cash_cents)
-                    / denominator
-                )
-                * 100,
-            )
+    if peak_ledger_deployed_pct is not None:
+        peak_capital_deployed_pct = max(
+            peak_capital_deployed_pct or 0,
+            float(peak_ledger_deployed_pct),
+        )
 
     return {
         "total_account_value": round(total_account_value, 6),
@@ -626,8 +668,8 @@ def _apply_signal_filters(
     return stmt
 
 
-def _load_rows(db: Session, stmt: Select[Any]) -> list[Any]:
-    return list(db.scalars(stmt).all())
+def _count_rows(db: Session, stmt: Select[Any]) -> int:
+    return int(db.scalar(stmt) or 0)
 
 
 def _bucket_rejection_reason(reason: str | None) -> str:
