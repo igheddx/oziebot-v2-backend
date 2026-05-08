@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.execution import ExecutionOrder, ExecutionTradeRecord
+from oziebot_api.models.execution import ExecutionOrder, ExecutionPosition, ExecutionTradeRecord
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.platform_strategy import PlatformStrategy
 from oziebot_api.models.risk_event import RiskEvent
@@ -368,6 +368,22 @@ def _seed_diagnostics_data(db_session: Session, user: User, membership: TenantMe
                 executed_at=now - timedelta(minutes=50),
                 raw_payload={},
             ),
+            ExecutionPosition(
+                id=uuid.uuid4(),
+                tenant_id=membership.tenant_id,
+                user_id=user.id,
+                strategy_id="dca",
+                symbol="ETH-USD",
+                trading_mode="paper",
+                quantity="0.45",
+                avg_entry_price="2400",
+                realized_pnl_cents=320,
+                created_at=now - timedelta(days=2),
+                updated_at=now - timedelta(minutes=5),
+                opened_at=now - timedelta(days=2),
+                last_trade_at=now - timedelta(minutes=5),
+                closed_at=None,
+            ),
             TradeOutcomeFeature(
                 trade_id=btc_trade_id,
                 signal_snapshot_id=btc_snapshot_id,
@@ -608,6 +624,10 @@ def test_admin_trading_diagnostics_returns_consistent_funnel_and_respects_filter
     payload = response.json()
 
     assert payload["trade_count"] == 2
+    assert payload["execution_activity"]["execution_count"] == 2
+    assert payload["execution_activity"]["flattened_trade_count"] == 2
+    assert payload["open_positions"]["position_count"] == 1
+    assert payload["open_positions"]["positions"][0]["token"] == "ETH-USD"
     assert payload["signal_funnel"]["trades_executed"] == payload["trade_count"]
     assert payload["signal_funnel"]["signals_evaluated"] == 2
     assert payload["signal_funnel"]["signals_emitted"] == 2
@@ -630,6 +650,8 @@ def test_admin_trading_diagnostics_returns_consistent_funnel_and_respects_filter
     assert filtered_payload["trade_details"][0]["token"] == "AERO-USD"
     assert filtered_payload["trade_details"][0]["strategy"] == "momentum"
     assert filtered_payload["trade_details"][0]["trading_mode"] == "live"
+    assert filtered_payload["execution_activity"]["execution_count"] == 1
+    assert filtered_payload["open_positions"]["position_count"] == 0
 
     json_export = client.get(
         "/v1/admin/trading-diagnostics/export?format=json&days=7&token=AERO-USD",
@@ -646,6 +668,7 @@ def test_admin_trading_diagnostics_returns_consistent_funnel_and_respects_filter
     csv_text = csv_export.text
     assert "AERO-USD" in csv_text
     assert "BTC-USD" not in csv_text
+    assert "execution_detail" in csv_text
 
 
 def test_admin_trading_diagnostics_marks_missing_signal_stage_data_unavailable(
@@ -672,6 +695,8 @@ def test_admin_trading_diagnostics_marks_missing_signal_stage_data_unavailable(
     payload = response.json()
 
     assert payload["trade_count"] == 1
+    assert payload["execution_activity"]["execution_count"] == 1
+    assert payload["open_positions"]["position_count"] == 0
     assert payload["signal_funnel"]["trades_executed"] == 1
     assert payload["signal_funnel"]["signals_evaluated"] is None
     assert payload["signal_funnel"]["signals_emitted"] is None

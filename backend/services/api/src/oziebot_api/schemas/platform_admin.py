@@ -187,6 +187,91 @@ class TradingDiagnosticsTokenSummary(BaseModel):
     worst_strategy: str | None = None
 
 
+class TradingDiagnosticsExecutionDetail(BaseModel):
+    execution_trade_id: str
+    order_id: str
+    strategy: str
+    token: str
+    trading_mode: str
+    side: str
+    executed_at: str | None = None
+    quantity: float | None = None
+    price_usd: float | None = None
+    notional_usd: float | None = None
+    fees_usd: float | None = None
+    realized_pnl_usd: float | None = None
+    position_quantity_after: float | None = None
+    position_closed: bool
+
+
+class TradingDiagnosticsExecutionStrategySummary(BaseModel):
+    strategy: str
+    trading_mode: str
+    total_executions: int
+    buy_executions: int
+    sell_executions: int
+    flattened_executions: int
+    total_notional_usd: float | None = None
+    total_fees_usd: float | None = None
+    total_realized_pnl_usd: float | None = None
+    last_executed_at: str | None = None
+
+
+class TradingDiagnosticsExecutionTokenSummary(BaseModel):
+    token: str
+    trading_mode: str
+    total_executions: int
+    buy_executions: int
+    sell_executions: int
+    flattened_executions: int
+    total_notional_usd: float | None = None
+    total_fees_usd: float | None = None
+    total_realized_pnl_usd: float | None = None
+    last_executed_at: str | None = None
+
+
+class TradingDiagnosticsExecutionActivity(BaseModel):
+    execution_count: int
+    flattened_trade_count: int
+    buy_count: int
+    sell_count: int
+    unique_tokens: int
+    total_notional_usd: float | None = None
+    total_fees_usd: float | None = None
+    total_realized_pnl_usd: float | None = None
+    data_source: str
+    note: str | None = None
+    strategy_summary: list[TradingDiagnosticsExecutionStrategySummary]
+    token_summary: list[TradingDiagnosticsExecutionTokenSummary]
+    execution_details: list[TradingDiagnosticsExecutionDetail]
+
+
+class TradingDiagnosticsOpenPosition(BaseModel):
+    position_id: str
+    strategy: str
+    token: str
+    trading_mode: str
+    quantity: float | None = None
+    avg_entry_price: float | None = None
+    position_notional_usd: float | None = None
+    realized_pnl_usd: float | None = None
+    opened_at: str | None = None
+    last_trade_at: str | None = None
+    updated_at: str | None = None
+    closed_at: str | None = None
+
+
+class TradingDiagnosticsOpenPositions(BaseModel):
+    position_count: int
+    unique_tokens: int
+    total_position_notional_usd: float | None = None
+    total_realized_pnl_usd: float | None = None
+    exposure_by_strategy: dict[str, float | None]
+    data_source: str
+    note: str | None = None
+    positions: list[TradingDiagnosticsOpenPosition]
+
+
 class TradingDiagnosticsRejectionReasons(BaseModel):
     confidence: int | None = None
     volume: int | None = None
@@ -243,6 +328,8 @@ class TradingDiagnosticsResponse(BaseModel):
     trade_details: list[TradingDiagnosticsTradeDetail]
     strategy_summary: list[TradingDiagnosticsStrategySummary]
     token_summary: list[TradingDiagnosticsTokenSummary]
+    execution_activity: TradingDiagnosticsExecutionActivity
+    open_positions: TradingDiagnosticsOpenPositions
     signal_funnel: TradingDiagnosticsSignalFunnel
     capital_utilization: TradingDiagnosticsCapitalUtilization
     exit_analysis: TradingDiagnosticsExitAnalysis

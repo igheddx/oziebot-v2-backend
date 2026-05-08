@@ -9,12 +9,12 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Numeric, Select, case, cast, func, select
 from sqlalchemy.orm import Session
 
 from oziebot_common.token_policy import normalize_missing_policy_behavior
 from oziebot_api.config import Settings
-from oziebot_api.models.execution import ExecutionOrder, ExecutionTradeRecord
+from oziebot_api.models.execution import ExecutionOrder, ExecutionPosition, ExecutionTradeRecord
 from oziebot_api.models.platform_strategy import PlatformStrategy
 from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.strategy_allocation import StrategyCapitalBucket, StrategyCapitalLedger
@@ -62,6 +62,15 @@ def build_trading_diagnostics_report(
     trade_details = [
         _trade_row_to_payload(feat, trade, snapshot) for feat, trade, snapshot in trade_rows
     ]
+    execution_activity = _build_execution_activity(
+        db,
+        filters=filters,
+        window_start=window_start,
+    )
+    open_positions = _build_open_positions(
+        db,
+        filters=filters,
+    )
 
     signal_funnel = _build_signal_funnel(
         db,
@@ -82,6 +91,8 @@ def build_trading_diagnostics_report(
         "trade_details": trade_details,
         "strategy_summary": _build_strategy_summary(trade_details),
         "token_summary": _build_token_summary(trade_details),
+        "execution_activity": execution_activity,
+        "open_positions": open_positions,
         "signal_funnel": signal_funnel,
         "capital_utilization": capital_utilization,
         "exit_analysis": _build_exit_analysis(trade_details),
@@ -94,20 +105,31 @@ def render_trading_diagnostics_csv(report: dict[str, Any]) -> str:
     writer = csv.DictWriter(
         buf,
         fieldnames=[
-            "trade_id",
+            "section",
+            "label",
+            "id",
             "strategy",
             "token",
             "trading_mode",
+            "side",
+            "event_time",
+            "opened_at",
+            "updated_at",
             "entry_time",
             "exit_time",
             "hold_minutes",
+            "price_usd",
+            "avg_entry_price_usd",
             "entry_price",
             "exit_price",
             "quantity",
             "size_usd",
+            "notional_usd",
             "fees_usd",
             "gross_pnl_usd",
             "net_pnl_usd",
+            "realized_pnl_usd",
+            "unrealized_pnl_usd",
             "pnl_pct",
             "exit_reason",
             "partial_profit_taken",
@@ -118,11 +140,146 @@ def render_trading_diagnostics_csv(report: dict[str, Any]) -> str:
             "signal_confidence",
             "volume_confirmation_passed",
             "rejected_before_execution",
+            "position_closed",
+            "value_1",
+            "value_2",
+            "value_3",
+            "value_4",
+            "note",
         ],
     )
     writer.writeheader()
+    writer.writerow(
+        {
+            "section": "overview",
+            "label": "report_overview",
+            "value_1": report.get("trade_count"),
+            "value_2": report.get("execution_activity", {}).get("execution_count"),
+            "value_3": report.get("open_positions", {}).get("position_count"),
+            "note": "value_1=closed_trade_count,value_2=execution_count,value_3=open_position_count",
+        }
+    )
     for row in report["trade_details"]:
-        writer.writerow(row)
+        writer.writerow(
+            {
+                "section": "closed_trade_detail",
+                "label": "closed_trade",
+                "id": row.get("trade_id"),
+                "strategy": row.get("strategy"),
+                "token": row.get("token"),
+                "trading_mode": row.get("trading_mode"),
+                "entry_time": row.get("entry_time"),
+                "exit_time": row.get("exit_time"),
+                "hold_minutes": row.get("hold_minutes"),
+                "entry_price": row.get("entry_price"),
+                "exit_price": row.get("exit_price"),
+                "quantity": row.get("quantity"),
+                "size_usd": row.get("size_usd"),
+                "fees_usd": row.get("fees_usd"),
+                "gross_pnl_usd": row.get("gross_pnl_usd"),
+                "net_pnl_usd": row.get("net_pnl_usd"),
+                "pnl_pct": row.get("pnl_pct"),
+                "exit_reason": row.get("exit_reason"),
+                "partial_profit_taken": row.get("partial_profit_taken"),
+                "max_favorable_excursion_pct": row.get("max_favorable_excursion_pct"),
+                "max_adverse_excursion_pct": row.get("max_adverse_excursion_pct"),
+                "peak_unrealized_pnl_pct": row.get("peak_unrealized_pnl_pct"),
+                "profit_giveback_pct": row.get("profit_giveback_pct"),
+                "signal_confidence": row.get("signal_confidence"),
+                "volume_confirmation_passed": row.get("volume_confirmation_passed"),
+                "rejected_before_execution": row.get("rejected_before_execution"),
+            }
+        )
+    for row in report.get("strategy_summary", []):
+        writer.writerow(
+            {
+                "section": "closed_trade_strategy_summary",
+                "label": row.get("strategy"),
+                "strategy": row.get("strategy"),
+                "value_1": row.get("total_trades"),
+                "value_2": row.get("win_rate_pct"),
+                "value_3": row.get("total_net_pnl_usd"),
+                "value_4": row.get("profit_factor"),
+                "note": "value_1=total_trades,value_2=win_rate_pct,value_3=total_net_pnl_usd,value_4=profit_factor",
+            }
+        )
+    for row in report.get("token_summary", []):
+        writer.writerow(
+            {
+                "section": "closed_trade_token_summary",
+                "label": row.get("token"),
+                "token": row.get("token"),
+                "value_1": row.get("total_trades"),
+                "value_2": row.get("win_rate_pct"),
+                "value_3": row.get("total_net_pnl_usd"),
+                "note": "value_1=total_trades,value_2=win_rate_pct,value_3=total_net_pnl_usd",
+            }
+        )
+    for row in report.get("execution_activity", {}).get("execution_details", []):
+        writer.writerow(
+            {
+                "section": "execution_detail",
+                "label": "execution_trade",
+                "id": row.get("execution_trade_id"),
+                "strategy": row.get("strategy"),
+                "token": row.get("token"),
+                "trading_mode": row.get("trading_mode"),
+                "side": row.get("side"),
+                "event_time": row.get("executed_at"),
+                "quantity": row.get("quantity"),
+                "price_usd": row.get("price_usd"),
+                "notional_usd": row.get("notional_usd"),
+                "fees_usd": row.get("fees_usd"),
+                "realized_pnl_usd": row.get("realized_pnl_usd"),
+                "position_closed": row.get("position_closed"),
+            }
+        )
+    for row in report.get("execution_activity", {}).get("strategy_summary", []):
+        writer.writerow(
+            {
+                "section": "execution_strategy_summary",
+                "label": row.get("strategy"),
+                "strategy": row.get("strategy"),
+                "trading_mode": row.get("trading_mode"),
+                "value_1": row.get("total_executions"),
+                "value_2": row.get("flattened_executions"),
+                "value_3": row.get("total_notional_usd"),
+                "value_4": row.get("total_realized_pnl_usd"),
+                "note": "value_1=total_executions,value_2=flattened_executions,value_3=total_notional_usd,value_4=total_realized_pnl_usd",
+            }
+        )
+    for row in report.get("execution_activity", {}).get("token_summary", []):
+        writer.writerow(
+            {
+                "section": "execution_token_summary",
+                "label": row.get("token"),
+                "token": row.get("token"),
+                "trading_mode": row.get("trading_mode"),
+                "value_1": row.get("total_executions"),
+                "value_2": row.get("flattened_executions"),
+                "value_3": row.get("total_notional_usd"),
+                "value_4": row.get("total_realized_pnl_usd"),
+                "note": "value_1=total_executions,value_2=flattened_executions,value_3=total_notional_usd,value_4=total_realized_pnl_usd",
+            }
+        )
+    for row in report.get("open_positions", {}).get("positions", []):
+        writer.writerow(
+            {
+                "section": "open_position",
+                "label": "current_open_position",
+                "id": row.get("position_id"),
+                "strategy": row.get("strategy"),
+                "token": row.get("token"),
+                "trading_mode": row.get("trading_mode"),
+                "opened_at": row.get("opened_at"),
+                "updated_at": row.get("updated_at"),
+                "quantity": row.get("quantity"),
+                "avg_entry_price_usd": row.get("avg_entry_price"),
+                "notional_usd": row.get("position_notional_usd"),
+                "realized_pnl_usd": row.get("realized_pnl_usd"),
+                "note": row.get("last_trade_at"),
+            }
+        )
     return buf.getvalue()
 
 
@@ -205,6 +362,277 @@ def _trade_row_to_payload(
         "signal_confidence": signal_confidence,
         "volume_confirmation_passed": None,
         "rejected_before_execution": False,
+    }
+
+
+def _build_execution_activity(
+    db: Session,
+    *,
+    filters: TradingDiagnosticsFilters,
+    window_start: datetime,
+) -> dict[str, Any]:
+    numeric_position_after = _numeric_string_expr(ExecutionTradeRecord.position_quantity_after)
+    base_count_stmt = _apply_signal_filters(
+        select(func.count()).select_from(ExecutionTradeRecord),
+        filters=filters,
+        window_start=window_start,
+        token_column=ExecutionTradeRecord.symbol,
+        strategy_column=ExecutionTradeRecord.strategy_id,
+        mode_column=ExecutionTradeRecord.trading_mode,
+        timestamp_column=ExecutionTradeRecord.executed_at,
+    )
+    execution_count = _count_rows(db, base_count_stmt)
+    flattened_count = _count_rows(
+        db,
+        _apply_signal_filters(
+            select(func.count())
+            .select_from(ExecutionTradeRecord)
+            .where(numeric_position_after == 0),
+            filters=filters,
+            window_start=window_start,
+            token_column=ExecutionTradeRecord.symbol,
+            strategy_column=ExecutionTradeRecord.strategy_id,
+            mode_column=ExecutionTradeRecord.trading_mode,
+            timestamp_column=ExecutionTradeRecord.executed_at,
+        ),
+    )
+    aggregate_row = db.execute(
+        _apply_signal_filters(
+            select(
+                func.count(func.distinct(ExecutionTradeRecord.symbol)),
+                func.sum(case((ExecutionTradeRecord.side == "buy", 1), else_=0)),
+                func.sum(case((ExecutionTradeRecord.side == "sell", 1), else_=0)),
+                func.sum(ExecutionTradeRecord.gross_notional_cents),
+                func.sum(ExecutionTradeRecord.fee_cents),
+                func.sum(ExecutionTradeRecord.realized_pnl_cents),
+            ).select_from(ExecutionTradeRecord),
+            filters=filters,
+            window_start=window_start,
+            token_column=ExecutionTradeRecord.symbol,
+            strategy_column=ExecutionTradeRecord.strategy_id,
+            mode_column=ExecutionTradeRecord.trading_mode,
+            timestamp_column=ExecutionTradeRecord.executed_at,
+        )
+    ).one()
+    detail_rows = list(
+        db.scalars(
+            _apply_signal_filters(
+                select(ExecutionTradeRecord)
+                .order_by(ExecutionTradeRecord.executed_at.desc())
+                .limit(max(1, min(filters.limit, 100))),
+                filters=filters,
+                window_start=window_start,
+                token_column=ExecutionTradeRecord.symbol,
+                strategy_column=ExecutionTradeRecord.strategy_id,
+                mode_column=ExecutionTradeRecord.trading_mode,
+                timestamp_column=ExecutionTradeRecord.executed_at,
+            )
+        ).all()
+    )
+    strategy_rows = db.execute(
+        _apply_signal_filters(
+            select(
+                ExecutionTradeRecord.strategy_id,
+                ExecutionTradeRecord.trading_mode,
+                func.count(),
+                func.sum(case((ExecutionTradeRecord.side == "buy", 1), else_=0)),
+                func.sum(case((ExecutionTradeRecord.side == "sell", 1), else_=0)),
+                func.sum(case((numeric_position_after == 0, 1), else_=0)),
+                func.sum(ExecutionTradeRecord.gross_notional_cents),
+                func.sum(ExecutionTradeRecord.fee_cents),
+                func.sum(ExecutionTradeRecord.realized_pnl_cents),
+                func.max(ExecutionTradeRecord.executed_at),
+            )
+            .select_from(ExecutionTradeRecord)
+            .group_by(ExecutionTradeRecord.strategy_id, ExecutionTradeRecord.trading_mode),
+            filters=filters,
+            window_start=window_start,
+            token_column=ExecutionTradeRecord.symbol,
+            strategy_column=ExecutionTradeRecord.strategy_id,
+            mode_column=ExecutionTradeRecord.trading_mode,
+            timestamp_column=ExecutionTradeRecord.executed_at,
+        )
+    ).all()
+    token_rows = db.execute(
+        _apply_signal_filters(
+            select(
+                ExecutionTradeRecord.symbol,
+                ExecutionTradeRecord.trading_mode,
+                func.count(),
+                func.sum(case((ExecutionTradeRecord.side == "buy", 1), else_=0)),
+                func.sum(case((ExecutionTradeRecord.side == "sell", 1), else_=0)),
+                func.sum(case((numeric_position_after == 0, 1), else_=0)),
+                func.sum(ExecutionTradeRecord.gross_notional_cents),
+                func.sum(ExecutionTradeRecord.fee_cents),
+                func.sum(ExecutionTradeRecord.realized_pnl_cents),
+                func.max(ExecutionTradeRecord.executed_at),
+            )
+            .select_from(ExecutionTradeRecord)
+            .group_by(ExecutionTradeRecord.symbol, ExecutionTradeRecord.trading_mode),
+            filters=filters,
+            window_start=window_start,
+            token_column=ExecutionTradeRecord.symbol,
+            strategy_column=ExecutionTradeRecord.strategy_id,
+            mode_column=ExecutionTradeRecord.trading_mode,
+            timestamp_column=ExecutionTradeRecord.executed_at,
+        )
+    ).all()
+
+    note_parts: list[str] = []
+    if execution_count > len(detail_rows):
+        note_parts.append(
+            "Execution details are capped by the selected limit, while execution summary metrics cover the full filtered window."
+        )
+
+    return {
+        "execution_count": execution_count,
+        "flattened_trade_count": flattened_count,
+        "buy_count": int(aggregate_row[1] or 0),
+        "sell_count": int(aggregate_row[2] or 0),
+        "unique_tokens": int(aggregate_row[0] or 0),
+        "total_notional_usd": _cents_to_usd(aggregate_row[3]),
+        "total_fees_usd": _cents_to_usd(aggregate_row[4]),
+        "total_realized_pnl_usd": _cents_to_usd(aggregate_row[5]),
+        "data_source": "execution_trades",
+        "note": " ".join(note_parts) if note_parts else None,
+        "strategy_summary": [
+            {
+                "strategy": strategy,
+                "trading_mode": trading_mode,
+                "total_executions": int(total or 0),
+                "buy_executions": int(buys or 0),
+                "sell_executions": int(sells or 0),
+                "flattened_executions": int(flattened or 0),
+                "total_notional_usd": _cents_to_usd(notional_cents),
+                "total_fees_usd": _cents_to_usd(fee_cents),
+                "total_realized_pnl_usd": _cents_to_usd(realized_pnl_cents),
+                "last_executed_at": _aware_iso(last_executed_at),
+            }
+            for strategy, trading_mode, total, buys, sells, flattened, notional_cents, fee_cents, realized_pnl_cents, last_executed_at in sorted(
+                strategy_rows,
+                key=lambda row: (
+                    row[9] if row[9] is not None else datetime.min.replace(tzinfo=UTC),
+                    row[0],
+                    row[1],
+                ),
+                reverse=True,
+            )
+        ],
+        "token_summary": [
+            {
+                "token": token,
+                "trading_mode": trading_mode,
+                "total_executions": int(total or 0),
+                "buy_executions": int(buys or 0),
+                "sell_executions": int(sells or 0),
+                "flattened_executions": int(flattened or 0),
+                "total_notional_usd": _cents_to_usd(notional_cents),
+                "total_fees_usd": _cents_to_usd(fee_cents),
+                "total_realized_pnl_usd": _cents_to_usd(realized_pnl_cents),
+                "last_executed_at": _aware_iso(last_executed_at),
+            }
+            for token, trading_mode, total, buys, sells, flattened, notional_cents, fee_cents, realized_pnl_cents, last_executed_at in sorted(
+                token_rows,
+                key=lambda row: (
+                    row[9] if row[9] is not None else datetime.min.replace(tzinfo=UTC),
+                    row[0],
+                    row[1],
+                ),
+                reverse=True,
+            )
+        ],
+        "execution_details": [_execution_trade_to_payload(row) for row in detail_rows],
+    }
+
+
+def _execution_trade_to_payload(trade: ExecutionTradeRecord) -> dict[str, Any]:
+    quantity = _float_or_none(trade.quantity)
+    price_usd = _float_or_none(trade.price)
+    return {
+        "execution_trade_id": str(trade.id),
+        "order_id": str(trade.order_id),
+        "strategy": trade.strategy_id,
+        "token": trade.symbol,
+        "trading_mode": trade.trading_mode,
+        "side": trade.side,
+        "executed_at": _aware_iso(trade.executed_at),
+        "quantity": quantity,
+        "price_usd": price_usd,
+        "notional_usd": _cents_to_usd(trade.gross_notional_cents),
+        "fees_usd": _cents_to_usd(trade.fee_cents),
+        "realized_pnl_usd": _cents_to_usd(trade.realized_pnl_cents),
+        "position_quantity_after": _float_or_none(trade.position_quantity_after),
+        "position_closed": _string_numeric_is_zero(trade.position_quantity_after),
+    }
+
+
+def _build_open_positions(
+    db: Session,
+    *,
+    filters: TradingDiagnosticsFilters,
+) -> dict[str, Any]:
+    stmt = select(ExecutionPosition).where(_numeric_string_expr(ExecutionPosition.quantity) > 0)
+    if filters.normalized_token:
+        stmt = stmt.where(ExecutionPosition.symbol == filters.normalized_token)
+    if filters.normalized_strategy:
+        stmt = stmt.where(ExecutionPosition.strategy_id == filters.normalized_strategy)
+    if filters.normalized_mode:
+        stmt = stmt.where(ExecutionPosition.trading_mode == filters.normalized_mode)
+    positions = list(db.scalars(stmt.order_by(ExecutionPosition.updated_at.desc())).all())
+    exposure_by_strategy = {
+        "momentum": 0.0,
+        "day_trading": 0.0,
+        "reversion": 0.0,
+        "dca": 0.0,
+    }
+    position_rows = [_open_position_to_payload(row) for row in positions]
+    total_notional = 0.0
+    total_realized_pnl = 0.0
+    for row in position_rows:
+        total_notional += row["position_notional_usd"] or 0.0
+        total_realized_pnl += row["realized_pnl_usd"] or 0.0
+        exposure_by_strategy[row["strategy"]] = round(
+            exposure_by_strategy.get(row["strategy"], 0.0) + (row["position_notional_usd"] or 0.0),
+            6,
+        )
+
+    note = "Open positions are a current snapshot from execution_positions; the days filter does not narrow this section."
+    if not position_rows:
+        note = "No current open positions matched the selected token, strategy, and trading-mode filters."
+
+    return {
+        "position_count": len(position_rows),
+        "unique_tokens": len({row["token"] for row in position_rows}),
+        "total_position_notional_usd": round(total_notional, 6),
+        "total_realized_pnl_usd": round(total_realized_pnl, 6),
+        "exposure_by_strategy": exposure_by_strategy,
+        "data_source": "execution_positions",
+        "note": note,
+        "positions": position_rows,
+    }
+
+
+def _open_position_to_payload(position: ExecutionPosition) -> dict[str, Any]:
+    quantity = _float_or_none(position.quantity)
+    avg_entry_price = _float_or_none(position.avg_entry_price)
+    notional = (
+        round((quantity or 0.0) * (avg_entry_price or 0.0), 6)
+        if quantity is not None and avg_entry_price is not None
+        else None
+    )
+    return {
+        "position_id": str(position.id),
+        "strategy": position.strategy_id,
+        "token": position.symbol,
+        "trading_mode": position.trading_mode,
+        "quantity": quantity,
+        "avg_entry_price": avg_entry_price,
+        "position_notional_usd": notional,
+        "realized_pnl_usd": _cents_to_usd(position.realized_pnl_cents),
+        "opened_at": _aware_iso(position.opened_at),
+        "last_trade_at": _aware_iso(position.last_trade_at),
+        "updated_at": _aware_iso(position.updated_at),
+        "closed_at": _aware_iso(position.closed_at),
     }
 
 
@@ -451,7 +879,7 @@ def _build_signal_funnel(
             "signals_evaluated": "strategy_runs",
             "signals_emitted": "strategy_signal_records",
             "signals_rejected": "strategy_runs.run_metadata + risk_events + execution_orders",
-            "trades_executed": "trade_outcome_features",
+            "trades_executed": "trade_outcome_features (closed trade outcomes)",
         },
         "unavailable_metrics": unavailable_metrics,
         "note": (
@@ -711,6 +1139,12 @@ def _float_or_none(value: Any) -> float | None:
     return round(float(Decimal(str(value))), 6)
 
 
+def _cents_to_usd(value: Any) -> float | None:
+    if value is None:
+        return None
+    return round(float(Decimal(str(value)) / Decimal("100")), 6)
+
+
 def _pct(value: Any) -> float | None:
     if value is None:
         return None
@@ -756,3 +1190,13 @@ def _max_drawdown_pct(pnls: list[float]) -> float | None:
         return 0.0
     denominator = peak if peak > 0 else 1.0
     return round(abs(max_drawdown) / denominator * 100, 6)
+
+
+def _numeric_string_expr(column: Any) -> Any:
+    return func.coalesce(cast(func.nullif(column, ""), Numeric(28, 10)), 0)
+
+
+def _string_numeric_is_zero(value: str | None) -> bool:
+    if value is None:
+        return True
+    return Decimal(str(value or "0")) == 0
