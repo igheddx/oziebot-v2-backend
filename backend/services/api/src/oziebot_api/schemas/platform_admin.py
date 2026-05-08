@@ -106,6 +106,19 @@ class TokenPolicyDefaultsResponse(BaseModel):
     updated_symbols: list[str]
 
 
+class TokenPolicyExportTokenEntry(BaseModel):
+    token: TokenPolicyTokenSummary
+    market_profile: TokenMarketProfileResponse | None = None
+    strategies: dict[str, TokenStrategyPolicyResponse]
+
+
+class TokenPolicyExportResponse(BaseModel):
+    generated_at: str
+    default_missing_policy_behavior: Literal["allowed", "blocked"]
+    tokens: list[TokenPolicyExportTokenEntry]
+    matrix: dict[str, dict[str, TokenStrategyPolicyResponse]]
+
+
 class TokenPolicyDetailResponse(BaseModel):
     token: TokenPolicyTokenSummary
     market_profile: TokenMarketProfileResponse | None = None

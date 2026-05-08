@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -118,6 +119,32 @@ class TokenPolicyService:
             stmt = stmt.where(PlatformTokenAllowlist.symbol.ilike(f"%{symbol.strip().upper()}%"))
         tokens = self._db.scalars(stmt).all()
         return [self.describe_token(token) for token in tokens]
+
+    def export_token_matrix(self) -> dict[str, Any]:
+        default_missing_policy_behavior = normalize_missing_policy_behavior(
+            os.environ.get("TOKEN_STRATEGY_POLICY_DEFAULT_BEHAVIOR")
+        )
+        tokens = self.list_token_matrix()
+        export_tokens: list[dict[str, Any]] = []
+        matrix: dict[str, dict[str, Any]] = {}
+
+        for entry in tokens:
+            strategy_map = {policy["strategy_id"]: policy for policy in entry["strategy_policies"]}
+            export_tokens.append(
+                {
+                    "token": entry["token"],
+                    "market_profile": entry["market_profile"],
+                    "strategies": strategy_map,
+                }
+            )
+            matrix[entry["token"]["symbol"]] = strategy_map
+
+        return {
+            "generated_at": datetime.now(UTC).isoformat(),
+            "default_missing_policy_behavior": default_missing_policy_behavior,
+            "tokens": export_tokens,
+            "matrix": matrix,
+        }
 
     def list_user_matrix(self, *, user: User) -> list[dict[str, Any]]:
         tokens = self._db.scalars(

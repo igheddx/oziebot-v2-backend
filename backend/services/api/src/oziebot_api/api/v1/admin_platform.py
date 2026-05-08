@@ -29,6 +29,7 @@ from oziebot_api.schemas.platform_admin import (
     StrategyCatalogCreate,
     StrategyCatalogPatch,
     TokenPolicyDefaultsResponse,
+    TokenPolicyExportResponse,
     SubscriptionPlanCreate,
     SubscriptionPlanPatch,
     TenantCoinbaseHealthPatch,
@@ -340,6 +341,14 @@ def list_token_policy_matrix(
     symbol: str | None = Query(default=None, min_length=1),
 ) -> list[dict[str, Any]]:
     return TokenPolicyService(db).list_token_matrix(symbol=symbol)
+
+
+@router.get("/token-policy/export", response_model=TokenPolicyExportResponse)
+def export_token_policy_matrix(
+    _admin: RootAdminUser,
+    db: DbSession,
+) -> dict[str, Any]:
+    return TokenPolicyService(db).export_token_matrix()
 
 
 @router.post("/token-policy/initialize-defaults", response_model=TokenPolicyDefaultsResponse)

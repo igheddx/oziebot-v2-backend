@@ -275,6 +275,56 @@ def test_admin_token_policy_matrix_exposes_effective_and_override_values(
     assert detail.json()["token"]["symbol"] == symbol
 
 
+def test_admin_token_policy_export_returns_full_json_matrix(
+    client, root_user_and_token, db_session: Session
+):
+    _, token = root_user_and_token
+    symbol = "BTC-USD"
+    _seed_market_data(db_session, symbol)
+
+    create = client.post(
+        "/v1/admin/platform/tokens",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"symbol": symbol, "display_name": "Bitcoin"},
+    )
+    assert create.status_code == 201, create.text
+    token_id = create.json()["id"]
+
+    update = client.patch(
+        f"/v1/admin/platform/tokens/{token_id}/strategy-policies/momentum",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "is_enabled": True,
+            "recommendation_status": "preferred",
+            "recommendation_reason": "Best fit for trend continuation",
+            "size_multiplier": 1,
+            "max_position_usd_override": 500,
+            "notes": "Export me",
+        },
+    )
+    assert update.status_code == 200, update.text
+
+    export = client.get(
+        "/v1/admin/platform/token-policy/export",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert export.status_code == 200, export.text
+    payload = export.json()
+
+    assert payload["default_missing_policy_behavior"] == "allowed"
+    assert payload["generated_at"]
+    assert payload["tokens"]
+    assert payload["matrix"]["BTC-USD"]["momentum"]["recommendation_status"] == "preferred"
+    assert (
+        payload["matrix"]["BTC-USD"]["momentum"]["recommendation_reason"]
+        == "Best fit for trend continuation"
+    )
+    assert payload["matrix"]["BTC-USD"]["momentum"]["max_position_usd_override"] == 500
+    assert payload["matrix"]["BTC-USD"]["momentum"]["notes"] == "Export me"
+    first_token = next(item for item in payload["tokens"] if item["token"]["symbol"] == "BTC-USD")
+    assert first_token["strategies"]["momentum"]["recommendation_status"] == "preferred"
+
+
 def test_admin_token_policy_decisions_show_live_enforcement_stages(
     client,
     root_user_and_token,
