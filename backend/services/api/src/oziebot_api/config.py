@@ -57,6 +57,10 @@ class Settings(BaseSettings):
         default=10.0,
         description="Warn when rolling API SLO breach rate exceeds this percentage.",
     )
+    ai_diagnostic_provider_api_key: str | None = None
+    ai_diagnostic_provider_base_url: str | None = None
+    ai_diagnostic_model_name: str = "gpt-4.1-mini"
+    ai_diagnostic_prompt_version: str = "ai-diagnostics-v1"
 
 
 def get_settings() -> Settings:

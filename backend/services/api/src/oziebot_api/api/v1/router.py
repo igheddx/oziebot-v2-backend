@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from oziebot_api.api.v1 import (
     admin,
+    admin_ai_diagnostics,
     admin_strategy_lifecycle,
     admin_trading_diagnostics,
     admin_platform,
@@ -31,6 +32,7 @@ api_router.include_router(integrations_coinbase.router)
 api_router.include_router(logs.router)
 api_router.include_router(admin.router)
 api_router.include_router(admin_platform.router)
+api_router.include_router(admin_ai_diagnostics.router)
 api_router.include_router(admin_strategy_lifecycle.router)
 api_router.include_router(admin_trading_diagnostics.router)
 api_router.include_router(tenants.router)

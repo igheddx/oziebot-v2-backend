@@ -1,4 +1,10 @@
 from oziebot_api.models.admin_audit_log import AdminAuditLog
+from oziebot_api.models.ai_diagnostics import (
+    AiDiagnosticFinding,
+    AiDiagnosticRecommendationAudit,
+    AiDiagnosticReview,
+    DiagnosticSnapshot,
+)
 from oziebot_api.models.auth_session import AuthSession
 from oziebot_api.models.backtesting import (
     BacktestPerformanceSnapshot,
@@ -65,6 +71,9 @@ from oziebot_api.models.user_strategy import (
 
 __all__ = [
     "AdminAuditLog",
+    "AiDiagnosticFinding",
+    "AiDiagnosticRecommendationAudit",
+    "AiDiagnosticReview",
     "AIInferenceRecord",
     "AuthSession",
     "BacktestPerformanceSnapshot",
@@ -76,6 +85,7 @@ __all__ = [
     "ExecutionPosition",
     "ExecutionReconciliationEvent",
     "ExecutionTradeRecord",
+    "DiagnosticSnapshot",
     "ExchangeConnection",
     "MarketDataBboSnapshot",
     "MarketDataCandle",

@@ -513,3 +513,102 @@ class TenantCoinbaseHealthPatch(BaseModel):
     )
     last_error: str | None = None
     connected: bool | None = None
+
+
+class DiagnosticSnapshotResponse(BaseModel):
+    id: str
+    generated_at: str
+    trading_mode: str
+    strategy_filter: str
+    token_filter: str | None = None
+    days_filter: int
+    created_at: str
+
+
+class DiagnosticSnapshotListResponse(BaseModel):
+    snapshots: list[DiagnosticSnapshotResponse]
+
+
+class AiDiagnosticReviewCreate(BaseModel):
+    snapshot_id: str | None = None
+    trading_mode: Literal["paper", "live", "all"] = "all"
+    strategy: str = "all"
+    token: str | None = None
+    days: int = Field(default=7, ge=1, le=365)
+
+
+class AiDiagnosticReviewCreateResponse(BaseModel):
+    review_id: str
+    status: Literal["queued", "running", "completed", "failed"]
+
+
+class AiDiagnosticFindingResponse(BaseModel):
+    id: str
+    review_id: str
+    severity: Literal["critical", "warning", "info"]
+    category: str
+    strategy: str | None = None
+    token: str | None = None
+    finding_title: str
+    finding_detail: str
+    evidence_json: dict[str, Any] = Field(default_factory=dict)
+    recommendation: str
+    risk_if_ignored: str | None = None
+    confidence_score: float | None = None
+    automation_eligibility: Literal[
+        "not_eligible",
+        "future_human_approval_required",
+        "future_auto_tune_candidate",
+    ]
+    status: Literal["new", "acknowledged", "dismissed", "resolved"]
+    future_config_change_candidate: bool
+    proposed_config_change_json: dict[str, Any] | None = None
+    approval_required: bool
+    eligible_for_auto_tune: bool
+    rollback_plan: str | None = None
+    expected_impact: str | None = None
+    risk_level: str | None = None
+    affected_strategy: str | None = None
+    affected_token: str | None = None
+    parameter_name: str | None = None
+    current_value_json: dict[str, Any] | None = None
+    proposed_value_json: dict[str, Any] | None = None
+    created_at: str
+    updated_at: str
+
+
+class AiDiagnosticFindingStatusPatch(BaseModel):
+    status: Literal["acknowledged", "dismissed", "resolved"]
+    note: str | None = None
+
+
+class AiDiagnosticReviewSummaryResponse(BaseModel):
+    id: str
+    snapshot_id: str
+    status: Literal["queued", "running", "completed", "failed"]
+    overall_health: Literal["healthy", "warning", "critical"] | None = None
+    confidence_score: float | None = None
+    summary: str | None = None
+    model_name: str
+    prompt_version: str
+    started_at: str | None = None
+    completed_at: str | None = None
+    error_message: str | None = None
+    created_at: str
+    updated_at: str
+    generated_at: str | None = None
+    finding_count: int
+    critical_count: int
+    warning_count: int
+    info_count: int
+    status_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class AiDiagnosticReviewListResponse(BaseModel):
+    reviews: list[AiDiagnosticReviewSummaryResponse]
+
+
+class AiDiagnosticReviewDetailResponse(AiDiagnosticReviewSummaryResponse):
+    snapshot: DiagnosticSnapshotResponse
+    snapshot_raw_json: dict[str, Any] = Field(default_factory=dict)
+    findings: list[AiDiagnosticFindingResponse]
