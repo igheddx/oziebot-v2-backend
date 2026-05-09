@@ -23,8 +23,11 @@ from oziebot_common.token_policy import resolve_effective_token_policy
 from oziebot_common.trade_intelligence import (
     DecisionAuditDecision,
     DecisionAuditStage,
+    LifecycleEventStatus,
+    StrategyLifecycleStage,
     extract_signal_snapshot_id,
     persist_decision_audit,
+    persist_strategy_lifecycle_event,
 )
 from oziebot_domain.events import NotificationEvent, NotificationEventType
 from oziebot_domain.intents import TradeIntent
@@ -72,6 +75,14 @@ class RiskEngineService:
         facts = self._load_facts(signal, now)
         signal = self._apply_market_data_degradation(signal, facts)
         self._maybe_emit_global_loss_alert(signal, facts, now, trace_id)
+        self._persist_lifecycle_event(
+            signal,
+            stage=StrategyLifecycleStage.RISK_VALIDATION,
+            status=LifecycleEventStatus.OBSERVED,
+            occurred_at=now,
+            correlation_id=trace_id,
+            metadata={"suggested_size": str(signal.suggested_size)},
+        )
         size = Decimal(str(signal.suggested_size))
         if signal.action.value == "hold":
             decision = RiskDecision(
@@ -98,6 +109,14 @@ class RiskEngineService:
             )
             self._persist_risk_event(signal, decision)
             self._persist_decision_audit_record(signal, decision, created_at=now)
+            self._persist_lifecycle_event(
+                signal,
+                stage=StrategyLifecycleStage.RISK_VALIDATION,
+                status=LifecycleEventStatus.SUCCEEDED,
+                occurred_at=now,
+                correlation_id=trace_id,
+                metadata={"rules_evaluated": []},
+            )
             self._record_metric()
             self._log_decision(signal, decision)
             return decision, None
@@ -127,6 +146,16 @@ class RiskEngineService:
             )
             self._persist_risk_event(signal, decision)
             self._persist_decision_audit_record(signal, decision, created_at=now)
+            self._persist_lifecycle_event(
+                signal,
+                stage=StrategyLifecycleStage.RISK_VALIDATION,
+                status=LifecycleEventStatus.FAILED,
+                occurred_at=now,
+                correlation_id=trace_id,
+                reason_code="signal_size_positive",
+                reason_detail=decision.detail,
+                metadata=decision.metadata,
+            )
             self._record_metric(rejected=True, rejection_reason="signal_size_positive")
             self._log_decision(signal, decision)
             return decision, None
@@ -254,6 +283,16 @@ class RiskEngineService:
             )
             self._persist_risk_event(signal, decision)
             self._persist_decision_audit_record(signal, decision, created_at=now)
+            self._persist_lifecycle_event(
+                signal,
+                stage=StrategyLifecycleStage.RISK_VALIDATION,
+                status=LifecycleEventStatus.FAILED,
+                occurred_at=now,
+                correlation_id=trace_id,
+                reason_code=reject_result.rule_name,
+                reason_detail=decision.detail,
+                metadata=decision.metadata | {"rules_evaluated": rules_evaluated},
+            )
             self._record_metric(
                 rejected=True,
                 rejection_reason=reject_result.rule_name,
@@ -287,6 +326,18 @@ class RiskEngineService:
         intent = self._to_intent(signal, final_size)
         self._persist_risk_event(signal, decision)
         self._persist_decision_audit_record(signal, decision, created_at=now)
+        self._persist_lifecycle_event(
+            signal,
+            stage=StrategyLifecycleStage.RISK_VALIDATION,
+            status=LifecycleEventStatus.SUCCEEDED,
+            occurred_at=now,
+            correlation_id=trace_id,
+            metadata={
+                "rules_evaluated": rules_evaluated,
+                "final_size": str(final_size),
+                **decision.metadata,
+            },
+        )
         self._record_metric()
         self._log_decision(signal, decision)
         return decision, intent
@@ -442,13 +493,10 @@ class RiskEngineService:
             decision_kind = DecisionAuditDecision.REDUCED
         elif decision.outcome == RiskOutcome.REJECT:
             decision_kind = DecisionAuditDecision.REJECTED
-        reason_code = (
-            decision.metadata.get("rejection_reason_code")
-            or (
-                decision.reason.value
-                if decision.reason is not None
-                else decision.outcome.value
-            )
+        reason_code = decision.metadata.get("rejection_reason_code") or (
+            decision.reason.value
+            if decision.reason is not None
+            else decision.outcome.value
         )
         persist_decision_audit(
             self._engine,
@@ -460,6 +508,36 @@ class RiskEngineService:
             size_before=Decimal(str(decision.original_size)),
             size_after=Decimal(str(decision.final_size)),
             created_at=created_at,
+        )
+
+    def _persist_lifecycle_event(
+        self,
+        signal: StrategySignalEvent,
+        *,
+        stage: StrategyLifecycleStage,
+        status: LifecycleEventStatus,
+        occurred_at: datetime,
+        correlation_id: str,
+        reason_code: str | None = None,
+        reason_detail: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        persist_strategy_lifecycle_event(
+            self._engine,
+            correlation_id=correlation_id,
+            user_id=str(signal.user_id),
+            strategy_name=signal.strategy_name,
+            token_symbol=signal.symbol,
+            trading_mode=signal.trading_mode.value,
+            stage=stage.value,
+            status=status.value,
+            occurred_at=occurred_at,
+            signal_snapshot_id=extract_signal_snapshot_id(signal.reasoning_metadata),
+            run_id=str(signal.run_id),
+            signal_id=str(signal.signal_id),
+            reason_code=reason_code,
+            reason_detail=reason_detail,
+            metadata=metadata,
         )
 
     def _strategy_quality_controls(
@@ -1189,9 +1267,7 @@ class RiskEngineService:
                     "rules_evaluated": json.dumps(
                         {
                             "rules": decision.rules_evaluated,
-                            "rejection_stage": decision.metadata.get(
-                                "rejection_stage"
-                            ),
+                            "rejection_stage": decision.metadata.get("rejection_stage"),
                             "rejection_reason_code": decision.metadata.get(
                                 "rejection_reason_code"
                             ),

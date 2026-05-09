@@ -135,6 +135,12 @@ def _setup_db(db_path: Path) -> None:
         )
         conn.execute(
             text(
+                "CREATE TABLE strategy_lifecycle_events ("
+                "id TEXT PRIMARY KEY, correlation_id TEXT, user_id TEXT, tenant_id TEXT, strategy_name TEXT, symbol TEXT, trading_mode TEXT, side TEXT, stage TEXT, status TEXT, signal_snapshot_id TEXT, run_id TEXT, signal_id TEXT, intent_id TEXT, order_id TEXT, trade_id TEXT, reason_code TEXT, reason_detail TEXT, metadata TEXT, occurred_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
                 "CREATE TABLE user_strategy_states ("
                 "id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, trading_mode TEXT, state TEXT, created_at TEXT, updated_at TEXT,"
                 "UNIQUE(user_id, strategy_id, trading_mode))"
@@ -434,6 +440,34 @@ def test_risk_rejections_store_exact_reason_metadata(tmp_path: Path):
     assert payload["rejection_stage"] == "risk"
     assert payload["rejection_reason_code"] == "signal_size_positive"
     assert payload["rejection_metrics"]["suggested_size"] == "0"
+
+
+def test_risk_persists_lifecycle_validation_events(tmp_path: Path):
+    db_path = tmp_path / "risk-lifecycle.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = _risk_svc(settings, _redis_with_fresh_market())
+    decision, intent = svc.evaluate(
+        _signal(user_id, size="0"), trace_id="risk-lifecycle"
+    )
+
+    assert decision.outcome == RiskOutcome.REJECT
+    assert intent is None
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT stage, status, reason_code FROM strategy_lifecycle_events WHERE correlation_id = 'risk-lifecycle' ORDER BY occurred_at ASC, stage ASC"
+            )
+        ).all()
+
+    assert ("risk_validation", "observed", None) in rows
+    assert ("risk_validation", "failed", "signal_size_positive") in rows
 
 
 def test_risk_reduces_size_by_buying_power(tmp_path: Path):

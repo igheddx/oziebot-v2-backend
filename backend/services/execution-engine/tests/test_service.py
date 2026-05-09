@@ -186,6 +186,12 @@ def _setup_db(db_path: Path) -> None:
         )
         conn.execute(
             text(
+                "CREATE TABLE strategy_lifecycle_events ("
+                "id TEXT PRIMARY KEY, correlation_id TEXT, user_id TEXT, tenant_id TEXT, strategy_name TEXT, symbol TEXT, trading_mode TEXT, side TEXT, stage TEXT, status TEXT, signal_snapshot_id TEXT, run_id TEXT, signal_id TEXT, intent_id TEXT, order_id TEXT, trade_id TEXT, reason_code TEXT, reason_detail TEXT, metadata TEXT, occurred_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
                 "CREATE TABLE trade_outcome_features ("
                 "id TEXT PRIMARY KEY, trade_id TEXT, signal_snapshot_id TEXT, trading_mode TEXT, strategy_name TEXT, token_symbol TEXT,"
                 "entry_price TEXT, exit_price TEXT, filled_size TEXT, fee_paid TEXT, slippage_realized TEXT, hold_seconds INTEGER,"
@@ -530,6 +536,22 @@ def _last_decision_audit(db_path: Path) -> dict:
             .one()
         )
     return dict(row)
+
+
+def _lifecycle_events(db_path: Path, correlation_id: str) -> list[dict]:
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        rows = (
+            conn.execute(
+                text(
+                    "SELECT stage, status, reason_code, reason_detail FROM strategy_lifecycle_events WHERE correlation_id = :correlation_id ORDER BY occurred_at ASC, stage ASC"
+                ),
+                {"correlation_id": correlation_id},
+            )
+            .mappings()
+            .all()
+        )
+    return [dict(row) for row in rows]
 
 
 def test_duplicate_intent_prevents_duplicate_order_and_fill(tmp_path: Path):
@@ -1240,6 +1262,64 @@ def test_execution_reduces_discouraged_token_strategy_size(tmp_path: Path):
     position = _position(db_path)
     assert position is not None
     assert Decimal(str(position["quantity"])) == Decimal("0.50000000")
+
+
+def test_execution_persists_lifecycle_events_for_entry_and_exit(tmp_path: Path):
+    db_path = tmp_path / "execution-lifecycle.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "momentum"
+    _seed_bucket(db_path, user_id, tenant_id, strategy_id, TradingMode.PAPER.value)
+    service, _ = _service(db_path, redis)
+
+    buy_request = _request(
+        user_id, tenant_id, strategy_id, TradingMode.PAPER
+    ).model_copy(update={"trace_id": "trace-entry"})
+    sell_base = _request(
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER,
+        side=Side.SELL,
+        price_hint=Decimal("51000"),
+    )
+    sell_request = sell_base.model_copy(
+        update={
+            "trace_id": "trace-exit",
+            "intent_payload": {
+                **sell_base.intent_payload,
+                "metadata": {
+                    **dict(sell_base.intent_payload.get("metadata") or {}),
+                    "reason_code": "stop_loss",
+                },
+            },
+        }
+    )
+
+    service.process_request(buy_request)
+    service.process_request(sell_request)
+
+    entry_events = _lifecycle_events(db_path, "trace-entry")
+    exit_events = _lifecycle_events(db_path, "trace-exit")
+
+    assert {row["stage"] for row in entry_events} >= {
+        "execution_requested",
+        "execution_succeeded",
+        "position_opened",
+        "exit_monitoring_started",
+    }
+    assert {row["stage"] for row in exit_events} >= {
+        "stop_loss_triggered",
+        "exit_execution_requested",
+        "execution_requested",
+        "execution_succeeded",
+        "position_closed",
+    }
 
 
 def test_execution_applies_token_strategy_position_usd_cap(tmp_path: Path):

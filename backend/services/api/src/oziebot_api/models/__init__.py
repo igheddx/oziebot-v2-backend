@@ -40,6 +40,7 @@ from oziebot_api.models.strategy_allocation import (
     StrategyCapitalBucket,
     StrategyCapitalLedger,
 )
+from oziebot_api.models.strategy_lifecycle import StrategyLifecycleEvent
 from oziebot_api.models.strategy_signal_pipeline import StrategyRun, StrategySignalRecord
 from oziebot_api.models.subscription_plan import SubscriptionPlan
 from oziebot_api.models.tenant import Tenant
@@ -97,6 +98,7 @@ __all__ = [
     "StrategyAnalyticsArtifactRecord",
     "StrategyCapitalBucket",
     "StrategyCapitalLedger",
+    "StrategyLifecycleEvent",
     "StrategyDecisionAudit",
     "StrategyRun",
     "StrategySignalSnapshot",

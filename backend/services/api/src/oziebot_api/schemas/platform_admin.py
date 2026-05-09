@@ -336,6 +336,91 @@ class TradingDiagnosticsResponse(BaseModel):
     active_strategy_config: TradingDiagnosticsActiveStrategyConfig
 
 
+class StrategyLifecycleFunnelStage(BaseModel):
+    stage: str
+    trace_count: int
+    failed_count: int
+    conversion_from_previous_pct: float | None = None
+
+
+class StrategyLifecycleFailureReason(BaseModel):
+    reason_code: str
+    failure_count: int
+
+
+class StrategyLifecycleStageFailure(BaseModel):
+    stage: str
+    failure_count: int
+    top_reasons: list[StrategyLifecycleFailureReason]
+
+
+class StrategyLifecycleOpenPosition(BaseModel):
+    position_id: str
+    strategy: str
+    token: str
+    trading_mode: str
+    quantity: float | None = None
+    avg_entry_price: float | None = None
+    opened_at: str | None = None
+    updated_at: str | None = None
+    last_trade_at: str | None = None
+    latest_correlation_id: str | None = None
+    has_exit_request: bool
+    is_stuck_open: bool
+
+
+class StrategyLifecycleSummary(BaseModel):
+    trace_count: int
+    blocked_by_policy: int
+    blocked_by_risk: int
+    execution_failures: int
+    exit_engine_failures: int
+    positions_without_exits: int
+    stuck_open_positions: int
+    closed_positions: int
+
+
+class StrategyLifecycleTraceEvent(BaseModel):
+    stage: str
+    status: str
+    occurred_at: str
+    side: str | None = None
+    reason_code: str | None = None
+    reason_detail: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StrategyLifecycleTrace(BaseModel):
+    correlation_id: str
+    strategy: str
+    token: str
+    trading_mode: str
+    current_stage: str
+    current_status: str
+    started_at: str | None = None
+    last_event_at: str | None = None
+    latest_reason_code: str | None = None
+    latest_reason_detail: str | None = None
+    events: list[StrategyLifecycleTraceEvent]
+
+
+class StrategyLifecycleDiagnosticsResponse(BaseModel):
+    generated_at: str
+    summary: StrategyLifecycleSummary
+    funnel: list[StrategyLifecycleFunnelStage]
+    stage_failures: list[StrategyLifecycleStageFailure]
+    open_positions: list[StrategyLifecycleOpenPosition]
+    latest_traces: list[StrategyLifecycleTrace]
+    data_sources: list[str] = Field(default_factory=list)
+    note: str | None = None
+
+
+class StrategyLifecycleTraceListResponse(BaseModel):
+    generated_at: str
+    trace_count: int
+    traces: list[StrategyLifecycleTrace]
+
+
 class TokenPolicySizingImpact(BaseModel):
     original_size: str | None = None
     final_size: str | None = None

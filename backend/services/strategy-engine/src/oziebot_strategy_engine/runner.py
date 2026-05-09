@@ -31,9 +31,12 @@ from oziebot_common.token_policy import resolve_effective_token_policy
 from oziebot_common.trade_intelligence import (
     DecisionAuditDecision,
     DecisionAuditStage,
+    LifecycleEventStatus,
     PlaceholderTradeIntelligenceScorer,
+    StrategyLifecycleStage,
     persist_ai_inference_record,
     persist_decision_audit,
+    persist_strategy_lifecycle_event,
     persist_signal_snapshot,
     upsert_intelligence_metadata,
 )
@@ -239,6 +242,33 @@ class StrategyRunner:
                             token_policy, trading_mode=mode
                         )
                         if policy_reason is not None:
+                            self._persist_lifecycle_event(
+                                correlation_id=trace_id,
+                                user_id=user_id,
+                                tenant_id=str(tenant_id),
+                                strategy_name=strategy_name,
+                                symbol=symbol,
+                                trading_mode=mode,
+                                stage=StrategyLifecycleStage.VALIDATION_STARTED,
+                                status=LifecycleEventStatus.OBSERVED,
+                                occurred_at=now,
+                                run_id=run_id,
+                            )
+                            self._persist_lifecycle_event(
+                                correlation_id=trace_id,
+                                user_id=user_id,
+                                tenant_id=str(tenant_id),
+                                strategy_name=strategy_name,
+                                symbol=symbol,
+                                trading_mode=mode,
+                                stage=StrategyLifecycleStage.POLICY_VALIDATION,
+                                status=LifecycleEventStatus.FAILED,
+                                occurred_at=now,
+                                run_id=run_id,
+                                reason_code=policy_reason,
+                                reason_detail="Signal blocked before strategy evaluation",
+                                metadata={"token_policy": token_policy},
+                            )
                             self._record_signal_metric(
                                 rejected=True, rejection_reason=policy_reason
                             )
@@ -289,12 +319,38 @@ class StrategyRunner:
                         )
                         if schedule_reason is not None:
                             reason_code = str(
-                                schedule_reason.get("reason_code")
-                                or "scheduled_out"
+                                schedule_reason.get("reason_code") or "scheduled_out"
                             )
                             reason_detail = str(
                                 schedule_reason.get("reason_detail")
                                 or "Signal scheduled out before strategy evaluation"
+                            )
+                            self._persist_lifecycle_event(
+                                correlation_id=trace_id,
+                                user_id=user_id,
+                                tenant_id=str(tenant_id),
+                                strategy_name=strategy_name,
+                                symbol=symbol,
+                                trading_mode=mode,
+                                stage=StrategyLifecycleStage.VALIDATION_STARTED,
+                                status=LifecycleEventStatus.OBSERVED,
+                                occurred_at=now,
+                                run_id=run_id,
+                            )
+                            self._persist_lifecycle_event(
+                                correlation_id=trace_id,
+                                user_id=user_id,
+                                tenant_id=str(tenant_id),
+                                strategy_name=strategy_name,
+                                symbol=symbol,
+                                trading_mode=mode,
+                                stage=StrategyLifecycleStage.COOLDOWN_VALIDATION,
+                                status=LifecycleEventStatus.FAILED,
+                                occurred_at=now,
+                                run_id=run_id,
+                                reason_code=reason_code,
+                                reason_detail=reason_detail,
+                                metadata=dict(schedule_reason.get("metadata") or {}),
                             )
                             self._persist_decision_audit_record(
                                 signal_snapshot_id=None,
@@ -379,6 +435,40 @@ class StrategyRunner:
                             config=mode_config,
                             risk_caps=mode_risk_caps,
                         )
+                        self._persist_lifecycle_event(
+                            correlation_id=trace_id,
+                            user_id=user_id,
+                            tenant_id=str(tenant_id),
+                            strategy_name=strategy_name,
+                            symbol=symbol,
+                            trading_mode=mode,
+                            stage=StrategyLifecycleStage.SIGNAL_GENERATED,
+                            status=LifecycleEventStatus.OBSERVED,
+                            occurred_at=now,
+                            run_id=run_id,
+                            signal=signal,
+                            reason_code=self._signal_reason_code(signal),
+                            reason_detail=signal.reason,
+                            metadata={
+                                "confidence": float(signal.confidence),
+                                "sizing": dict(
+                                    (signal.metadata or {}).get("sizing") or {}
+                                ),
+                            },
+                        )
+                        self._persist_lifecycle_event(
+                            correlation_id=trace_id,
+                            user_id=user_id,
+                            tenant_id=str(tenant_id),
+                            strategy_name=strategy_name,
+                            symbol=symbol,
+                            trading_mode=mode,
+                            stage=StrategyLifecycleStage.VALIDATION_STARTED,
+                            status=LifecycleEventStatus.OBSERVED,
+                            occurred_at=now,
+                            run_id=run_id,
+                            signal=signal,
+                        )
                         suppress_reason = self._suppression_reason(
                             user_id=user_id,
                             strategy_name=strategy_name,
@@ -389,6 +479,29 @@ class StrategyRunner:
                             signal_rules=mode_signal_rules,
                             risk_caps=mode_risk_caps,
                         )
+                        for outcome in self._validation_stage_outcomes(
+                            strategy_name=strategy_name,
+                            signal=signal,
+                            signal_rules=mode_signal_rules,
+                            risk_caps=mode_risk_caps,
+                            suppress_reason=suppress_reason,
+                        ):
+                            self._persist_lifecycle_event(
+                                correlation_id=trace_id,
+                                user_id=user_id,
+                                tenant_id=str(tenant_id),
+                                strategy_name=strategy_name,
+                                symbol=symbol,
+                                trading_mode=mode,
+                                stage=outcome["stage"],
+                                status=outcome["status"],
+                                occurred_at=now,
+                                run_id=run_id,
+                                signal=signal,
+                                reason_code=outcome["reason_code"],
+                                reason_detail=outcome["reason_detail"],
+                                metadata=outcome["metadata"],
+                            )
                         if suppress_reason is not None:
                             self._record_signal_metric(
                                 rejected=True,
@@ -484,6 +597,38 @@ class StrategyRunner:
                             completed_at=datetime.now(UTC),
                         )
                         self._persist_signal(event)
+                        self._persist_lifecycle_event(
+                            correlation_id=trace_id,
+                            user_id=user_id,
+                            tenant_id=str(tenant_id),
+                            strategy_name=strategy_name,
+                            symbol=symbol,
+                            trading_mode=mode,
+                            stage=StrategyLifecycleStage.SIGNAL_EMITTED,
+                            status=LifecycleEventStatus.OBSERVED,
+                            occurred_at=now,
+                            run_id=run_id,
+                            signal=signal,
+                            reason_code=self._signal_reason_code(signal),
+                            reason_detail=signal.reason,
+                        )
+                        trigger_stage = self._exit_trigger_stage(signal)
+                        if trigger_stage is not None:
+                            self._persist_lifecycle_event(
+                                correlation_id=trace_id,
+                                user_id=user_id,
+                                tenant_id=str(tenant_id),
+                                strategy_name=strategy_name,
+                                symbol=symbol,
+                                trading_mode=mode,
+                                stage=trigger_stage,
+                                status=LifecycleEventStatus.OBSERVED,
+                                occurred_at=now,
+                                run_id=run_id,
+                                signal=signal,
+                                reason_code=self._signal_reason_code(signal),
+                                reason_detail=signal.reason,
+                            )
                         self._persist_decision_audit_record(
                             signal_snapshot_id=self._signal_snapshot_id(signal),
                             stage=DecisionAuditStage.STRATEGY,
@@ -635,6 +780,192 @@ class StrategyRunner:
             return str(reason_code)
         raw = getattr(signal.signal_type, "value", signal.signal_type)
         return str(raw)
+
+    def _persist_lifecycle_event(
+        self,
+        *,
+        correlation_id: str,
+        user_id: str,
+        tenant_id: str | None,
+        strategy_name: str,
+        symbol: str,
+        trading_mode: TradingMode,
+        stage: StrategyLifecycleStage,
+        status: LifecycleEventStatus,
+        occurred_at: datetime,
+        run_id: uuid.UUID | None = None,
+        signal: StrategySignal | None = None,
+        reason_code: str | None = None,
+        reason_detail: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if self._engine is None:
+            return
+        persist_strategy_lifecycle_event(
+            self._engine,
+            correlation_id=correlation_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            strategy_name=strategy_name,
+            token_symbol=symbol,
+            trading_mode=trading_mode.value,
+            stage=stage.value,
+            status=status.value,
+            occurred_at=occurred_at,
+            run_id=str(run_id) if run_id is not None else None,
+            signal_snapshot_id=self._signal_snapshot_id(signal)
+            if signal is not None
+            else None,
+            reason_code=reason_code,
+            reason_detail=reason_detail,
+            metadata=metadata,
+        )
+
+    def _validation_stage_outcomes(
+        self,
+        *,
+        strategy_name: str,
+        signal: StrategySignal,
+        signal_rules: dict[str, Any],
+        risk_caps: dict[str, Any],
+        suppress_reason: str | None,
+    ) -> list[dict[str, Any]]:
+        outcomes: list[dict[str, Any]] = []
+        action = self._signal_action(signal)
+        normalized_reason = (suppress_reason or "").lower()
+        min_confidence = self._to_decimal(signal_rules.get("min_confidence"))
+        require_volume = bool(signal_rules.get("require_volume_confirmation", False))
+        cooldown_enabled = int(signal_rules.get("cooldown_seconds") or 0) > 0
+        confidence_failed = "confidence" in normalized_reason
+        volume_failed = "volume" in normalized_reason
+        trend_failed = action == "hold"
+        cooldown_failed = normalized_reason in {
+            "cooldown active",
+            "skipped_due_to_interval",
+        }
+        allocation_failed = self._is_allocation_suppression_reason(normalized_reason)
+        policy_failed = normalized_reason == "paper_only strategy"
+
+        outcomes.append(
+            self._stage_outcome(
+                StrategyLifecycleStage.CONFIDENCE_VALIDATION,
+                LifecycleEventStatus.FAILED
+                if confidence_failed
+                else LifecycleEventStatus.SUCCEEDED
+                if min_confidence > 0
+                else LifecycleEventStatus.SKIPPED,
+                reason_code="below_min_confidence" if confidence_failed else None,
+                reason_detail=suppress_reason if confidence_failed else None,
+                metadata={"min_confidence": str(min_confidence)}
+                if min_confidence > 0
+                else {},
+            )
+        )
+        outcomes.append(
+            self._stage_outcome(
+                StrategyLifecycleStage.VOLUME_VALIDATION,
+                LifecycleEventStatus.FAILED
+                if volume_failed
+                else LifecycleEventStatus.SUCCEEDED
+                if require_volume
+                else LifecycleEventStatus.SKIPPED,
+                reason_code="volume_confirmation_failed" if volume_failed else None,
+                reason_detail=suppress_reason if volume_failed else None,
+            )
+        )
+        outcomes.append(
+            self._stage_outcome(
+                StrategyLifecycleStage.TREND_VALIDATION,
+                LifecycleEventStatus.FAILED
+                if trend_failed
+                else LifecycleEventStatus.SUCCEEDED,
+                reason_code=self._signal_reason_code(signal),
+                reason_detail=signal.reason,
+            )
+        )
+        outcomes.append(
+            self._stage_outcome(
+                StrategyLifecycleStage.COOLDOWN_VALIDATION,
+                LifecycleEventStatus.FAILED
+                if cooldown_failed
+                else LifecycleEventStatus.SUCCEEDED
+                if cooldown_enabled or strategy_name == "dca"
+                else LifecycleEventStatus.SKIPPED,
+                reason_code="cooldown_active"
+                if normalized_reason == "cooldown active"
+                else suppress_reason,
+                reason_detail=suppress_reason if cooldown_failed else None,
+            )
+        )
+        outcomes.append(
+            self._stage_outcome(
+                StrategyLifecycleStage.ALLOCATION_VALIDATION,
+                LifecycleEventStatus.FAILED
+                if allocation_failed
+                else LifecycleEventStatus.SUCCEEDED
+                if action == "buy"
+                else LifecycleEventStatus.SKIPPED,
+                reason_code=suppress_reason if allocation_failed else None,
+                reason_detail=suppress_reason if allocation_failed else None,
+                metadata={"risk_caps": risk_caps} if action == "buy" else {},
+            )
+        )
+        outcomes.append(
+            self._stage_outcome(
+                StrategyLifecycleStage.POLICY_VALIDATION,
+                LifecycleEventStatus.FAILED
+                if policy_failed
+                else LifecycleEventStatus.SUCCEEDED,
+                reason_code="paper_only_strategy" if policy_failed else None,
+                reason_detail=suppress_reason if policy_failed else None,
+            )
+        )
+        return outcomes
+
+    @staticmethod
+    def _stage_outcome(
+        stage: StrategyLifecycleStage,
+        status: LifecycleEventStatus,
+        *,
+        reason_code: str | None = None,
+        reason_detail: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "stage": stage,
+            "status": status,
+            "reason_code": reason_code,
+            "reason_detail": reason_detail,
+            "metadata": metadata or {},
+        }
+
+    @staticmethod
+    def _is_allocation_suppression_reason(reason: str | None) -> bool:
+        if not reason:
+            return False
+        return reason.startswith("sizing blocked") or reason in {
+            "max_open_positions reached",
+            "max_position_usd exceeded",
+            "max_daily_loss_pct reached",
+            "max_signals_per_day reached",
+            "max_position_usd required for usd-normalized sizing",
+            "market price unavailable for usd-normalized sizing",
+        }
+
+    @staticmethod
+    def _exit_trigger_stage(
+        signal: StrategySignal,
+    ) -> StrategyLifecycleStage | None:
+        reason = (
+            str((signal.metadata or {}).get("reason_code") or signal.reason or "")
+        ).lower()
+        if "trailing" in reason:
+            return StrategyLifecycleStage.TRAILING_STOP_TRIGGERED
+        if "take" in reason or "profit" in reason:
+            return StrategyLifecycleStage.TAKE_PROFIT_TRIGGERED
+        if "stop" in reason or "loss" in reason:
+            return StrategyLifecycleStage.STOP_LOSS_TRIGGERED
+        return None
 
     def _to_decimal(self, value: Any, default: Decimal = Decimal("0")) -> Decimal:
         if value is None:

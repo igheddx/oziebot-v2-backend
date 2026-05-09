@@ -87,6 +87,11 @@ def _setup_intelligence_db(db_path: Path) -> None:
         )
         conn.execute(
             text(
+                "CREATE TABLE strategy_lifecycle_events (id TEXT PRIMARY KEY, correlation_id TEXT, user_id TEXT, tenant_id TEXT, strategy_name TEXT, symbol TEXT, trading_mode TEXT, side TEXT, stage TEXT, status TEXT, signal_snapshot_id TEXT, run_id TEXT, signal_id TEXT, intent_id TEXT, order_id TEXT, trade_id TEXT, reason_code TEXT, reason_detail TEXT, metadata TEXT, occurred_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
                 "CREATE TABLE ai_inference_records (id TEXT PRIMARY KEY, signal_snapshot_id TEXT, model_name TEXT, model_version TEXT, recommendation TEXT, confidence_score REAL, explanation_json TEXT, created_at TEXT)"
             )
         )
@@ -107,6 +112,23 @@ def _setup_intelligence_db(db_path: Path) -> None:
                 "CREATE TABLE strategy_capital_ledger (id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, trading_mode TEXT, event_type TEXT, metadata TEXT, created_at TEXT)"
             )
         )
+
+
+def _lifecycle_rows(
+    db_path: Path, correlation_id: str
+) -> list[tuple[str, str, str | None]]:
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT stage, status, reason_code FROM strategy_lifecycle_events WHERE correlation_id = :correlation_id ORDER BY occurred_at ASC, stage ASC"
+            ),
+            {"correlation_id": correlation_id},
+        ).all()
+    return [
+        (str(stage), str(status), None if reason_code is None else str(reason_code))
+        for stage, status, reason_code in rows
+    ]
 
 
 def test_schedule_pattern_intervals():
@@ -981,6 +1003,15 @@ def test_run_once_persists_suppression_audit(tmp_path: Path):
     assert all(row[0] == "suppression" for row in rows)
     assert all(row[1] == "rejected" for row in rows)
     assert all(row[2] == "min_confidence" for row in rows)
+    with eng.begin() as conn:
+        lifecycle_rows = conn.execute(
+            text(
+                "SELECT stage, status, reason_code FROM strategy_lifecycle_events ORDER BY occurred_at ASC, stage ASC"
+            )
+        ).all()
+    assert ("signal_generated", "observed", "buy") in lifecycle_rows
+    assert ("validation_started", "observed", None) in lifecycle_rows
+    assert ("confidence_validation", "failed", "below_min_confidence") in lifecycle_rows
 
 
 def test_dca_scheduler_enforces_buy_interval_from_runtime_state():

@@ -26,6 +26,36 @@ class DecisionAuditDecision(StrEnum):
     EXECUTED = "executed"
 
 
+class StrategyLifecycleStage(StrEnum):
+    SIGNAL_GENERATED = "signal_generated"
+    SIGNAL_EMITTED = "signal_emitted"
+    VALIDATION_STARTED = "validation_started"
+    CONFIDENCE_VALIDATION = "confidence_validation"
+    VOLUME_VALIDATION = "volume_validation"
+    TREND_VALIDATION = "trend_validation"
+    COOLDOWN_VALIDATION = "cooldown_validation"
+    ALLOCATION_VALIDATION = "allocation_validation"
+    POLICY_VALIDATION = "policy_validation"
+    RISK_VALIDATION = "risk_validation"
+    EXECUTION_REQUESTED = "execution_requested"
+    EXECUTION_SUCCEEDED = "execution_succeeded"
+    EXECUTION_FAILED = "execution_failed"
+    POSITION_OPENED = "position_opened"
+    EXIT_MONITORING_STARTED = "exit_monitoring_started"
+    TAKE_PROFIT_TRIGGERED = "take_profit_triggered"
+    STOP_LOSS_TRIGGERED = "stop_loss_triggered"
+    TRAILING_STOP_TRIGGERED = "trailing_stop_triggered"
+    EXIT_EXECUTION_REQUESTED = "exit_execution_requested"
+    POSITION_CLOSED = "position_closed"
+
+
+class LifecycleEventStatus(StrEnum):
+    OBSERVED = "observed"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
 class AIRecommendation(StrEnum):
     ALLOW = "allow"
     REDUCE_SIZE = "reduce_size"
@@ -275,6 +305,73 @@ def persist_trade_outcome_feature(
             },
         )
     return outcome_id
+
+
+def persist_strategy_lifecycle_event(
+    engine: Engine,
+    *,
+    correlation_id: str,
+    user_id: str,
+    strategy_name: str,
+    token_symbol: str,
+    trading_mode: str,
+    stage: str,
+    status: str,
+    occurred_at: datetime,
+    tenant_id: str | None = None,
+    side: str | None = None,
+    signal_snapshot_id: str | None = None,
+    run_id: str | None = None,
+    signal_id: str | None = None,
+    intent_id: str | None = None,
+    order_id: str | None = None,
+    trade_id: str | None = None,
+    reason_code: str | None = None,
+    reason_detail: str | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> str:
+    event_id = str(uuid.uuid4())
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO strategy_lifecycle_events (
+                  id, correlation_id, user_id, tenant_id, strategy_name, symbol,
+                  trading_mode, side, stage, status, signal_snapshot_id,
+                  run_id, signal_id, intent_id, order_id, trade_id,
+                  reason_code, reason_detail, metadata, occurred_at
+                ) VALUES (
+                  :id, :correlation_id, :user_id, :tenant_id, :strategy_name, :symbol,
+                  :trading_mode, :side, :stage, :status, :signal_snapshot_id,
+                  :run_id, :signal_id, :intent_id, :order_id, :trade_id,
+                  :reason_code, :reason_detail, :metadata, :occurred_at
+                )
+                """
+            ),
+            {
+                "id": event_id,
+                "correlation_id": correlation_id,
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "strategy_name": strategy_name,
+                "symbol": token_symbol,
+                "trading_mode": trading_mode,
+                "side": side,
+                "stage": stage,
+                "status": status,
+                "signal_snapshot_id": signal_snapshot_id,
+                "run_id": run_id,
+                "signal_id": signal_id,
+                "intent_id": intent_id,
+                "order_id": order_id,
+                "trade_id": trade_id,
+                "reason_code": reason_code,
+                "reason_detail": reason_detail,
+                "metadata": json.dumps(dict(metadata or {}), default=str),
+                "occurred_at": occurred_at,
+            },
+        )
+    return event_id
 
 
 def persist_ai_inference_record(

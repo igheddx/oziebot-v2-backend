@@ -27,8 +27,11 @@ from oziebot_common.token_policy import resolve_effective_token_policy
 from oziebot_common.trade_intelligence import (
     DecisionAuditDecision,
     DecisionAuditStage,
+    LifecycleEventStatus,
+    StrategyLifecycleStage,
     extract_signal_snapshot_id,
     persist_decision_audit,
+    persist_strategy_lifecycle_event,
     persist_trade_outcome_feature,
 )
 from oziebot_domain.events import NotificationEvent, NotificationEventType
@@ -173,6 +176,36 @@ class ExecutionService:
         )
         now = _utcnow()
         order_id = str(uuid.uuid4())
+        self._persist_lifecycle_event(
+            request=request,
+            stage=StrategyLifecycleStage.EXECUTION_REQUESTED,
+            status=LifecycleEventStatus.OBSERVED,
+            occurred_at=now,
+            order_id=order_id,
+            metadata={"quantity": str(request.quantity)},
+        )
+        if request.side == Side.SELL:
+            exit_reason = self._resolve_exit_reason(request)
+            trigger_stage = self._exit_trigger_stage(exit_reason)
+            if trigger_stage is not None:
+                self._persist_lifecycle_event(
+                    request=request,
+                    stage=trigger_stage,
+                    status=LifecycleEventStatus.OBSERVED,
+                    occurred_at=now,
+                    order_id=order_id,
+                    reason_code=exit_reason,
+                    reason_detail=exit_reason,
+                )
+            self._persist_lifecycle_event(
+                request=request,
+                stage=StrategyLifecycleStage.EXIT_EXECUTION_REQUESTED,
+                status=LifecycleEventStatus.OBSERVED,
+                occurred_at=now,
+                order_id=order_id,
+                reason_code=exit_reason,
+                reason_detail=exit_reason,
+            )
         insert_stmt = text(
             """
             INSERT INTO execution_orders (
@@ -216,7 +249,8 @@ class ExecutionService:
                         "venue": request.venue.value,
                         "state": (
                             ExecutionOrderStatus.FAILED.value
-                            if policy_failure is not None or validation_failure is not None
+                            if policy_failure is not None
+                            or validation_failure is not None
                             else ExecutionOrderStatus.CREATED.value
                         ),
                         "quantity": str(request.quantity),
@@ -287,6 +321,15 @@ class ExecutionService:
             )
 
         if policy_failure is not None:
+            self._persist_lifecycle_event(
+                request=request,
+                stage=StrategyLifecycleStage.POLICY_VALIDATION,
+                status=LifecycleEventStatus.FAILED,
+                occurred_at=now,
+                order_id=order_id,
+                reason_code="token_strategy_policy",
+                reason_detail=policy_failure,
+            )
             self._persist_decision_audit_record(
                 request=request,
                 decision=DecisionAuditDecision.REJECTED,
@@ -299,6 +342,15 @@ class ExecutionService:
             self._record_metric(
                 rejected=True,
                 rejection_reason="token_strategy_policy",
+            )
+            self._persist_lifecycle_event(
+                request=request,
+                stage=StrategyLifecycleStage.EXECUTION_FAILED,
+                status=LifecycleEventStatus.FAILED,
+                occurred_at=now,
+                order_id=order_id,
+                reason_code="token_strategy_policy",
+                reason_detail=policy_failure,
             )
             self._emit_event(
                 order_id,
@@ -326,6 +378,15 @@ class ExecutionService:
             self._record_metric(
                 rejected=True,
                 rejection_reason=validation_failure.code,
+            )
+            self._persist_lifecycle_event(
+                request=request,
+                stage=StrategyLifecycleStage.EXECUTION_FAILED,
+                status=LifecycleEventStatus.FAILED,
+                occurred_at=now,
+                order_id=order_id,
+                reason_code=validation_failure.code,
+                reason_detail=validation_failure.detail,
             )
             self._emit_event(
                 order_id,
@@ -885,6 +946,15 @@ class ExecutionService:
                 rejected=True,
                 rejection_reason="execution_cancelled",
             )
+            self._persist_lifecycle_event(
+                request=request,
+                stage=StrategyLifecycleStage.EXECUTION_FAILED,
+                status=LifecycleEventStatus.FAILED,
+                occurred_at=_utcnow(),
+                order_id=order_id,
+                reason_code="execution_cancelled",
+                reason_detail=submission.failure_detail or "Order cancelled",
+            )
             self._persist_decision_audit_record(
                 request=request,
                 decision=DecisionAuditDecision.REJECTED,
@@ -963,6 +1033,15 @@ class ExecutionService:
         self._record_metric(
             rejected=True,
             rejection_reason=submission.failure_code or "execution_failed",
+        )
+        self._persist_lifecycle_event(
+            request=request,
+            stage=StrategyLifecycleStage.EXECUTION_FAILED,
+            status=LifecycleEventStatus.FAILED,
+            occurred_at=_utcnow(),
+            order_id=order_id,
+            reason_code=submission.failure_code or "execution_failed",
+            reason_detail=submission.failure_detail or "Execution failed",
         )
         self._persist_decision_audit_record(
             request=request,
@@ -1114,6 +1193,49 @@ class ExecutionService:
             fill_notional_cents,
             fill_fee_cents,
         )
+        self._persist_lifecycle_event(
+            request=request,
+            stage=StrategyLifecycleStage.EXECUTION_SUCCEEDED,
+            status=LifecycleEventStatus.SUCCEEDED,
+            occurred_at=fill.occurred_at,
+            order_id=order_id,
+            trade_id=trade_id,
+            metadata={
+                "fill_id": fill.fill_id,
+                "quantity": str(fill.quantity),
+                "price": str(fill.price),
+            },
+        )
+        if request.side == Side.BUY and qty_before <= 0 and qty_after > 0:
+            self._persist_lifecycle_event(
+                request=request,
+                stage=StrategyLifecycleStage.POSITION_OPENED,
+                status=LifecycleEventStatus.OBSERVED,
+                occurred_at=fill.occurred_at,
+                order_id=order_id,
+                trade_id=trade_id,
+                metadata={"quantity_after": str(qty_after)},
+            )
+            self._persist_lifecycle_event(
+                request=request,
+                stage=StrategyLifecycleStage.EXIT_MONITORING_STARTED,
+                status=LifecycleEventStatus.OBSERVED,
+                occurred_at=fill.occurred_at,
+                order_id=order_id,
+                trade_id=trade_id,
+            )
+        if request.side == Side.SELL and close_qty > 0 and qty_after == 0:
+            self._persist_lifecycle_event(
+                request=request,
+                stage=StrategyLifecycleStage.POSITION_CLOSED,
+                status=LifecycleEventStatus.OBSERVED,
+                occurred_at=fill.occurred_at,
+                order_id=order_id,
+                trade_id=trade_id,
+                reason_code=self._resolve_exit_reason(request),
+                reason_detail=self._resolve_exit_reason(request),
+                metadata={"close_quantity": str(close_qty)},
+            )
         self._record_trade_outcome_feature(
             trade_id=trade_id,
             request=request,
@@ -1599,6 +1721,58 @@ class ExecutionService:
             size_after=size_after,
             created_at=created_at,
         )
+
+    def _persist_lifecycle_event(
+        self,
+        *,
+        request: ExecutionRequest,
+        stage: StrategyLifecycleStage,
+        status: LifecycleEventStatus,
+        occurred_at: datetime,
+        order_id: str | None = None,
+        trade_id: str | None = None,
+        reason_code: str | None = None,
+        reason_detail: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if self._engine is None:
+            return
+        persist_strategy_lifecycle_event(
+            self._engine,
+            correlation_id=request.trace_id,
+            user_id=str(request.user_id),
+            tenant_id=str(request.tenant_id),
+            strategy_name=request.strategy_id,
+            token_symbol=request.symbol,
+            trading_mode=request.trading_mode.value,
+            side=request.side.value,
+            stage=stage.value,
+            status=status.value,
+            occurred_at=occurred_at,
+            signal_snapshot_id=extract_signal_snapshot_id(
+                dict(request.intent_payload.get("metadata") or {})
+            ),
+            run_id=str(request.risk.run_id),
+            intent_id=str(request.intent_id),
+            order_id=order_id,
+            trade_id=trade_id,
+            reason_code=reason_code,
+            reason_detail=reason_detail,
+            metadata=metadata or dict(request.intent_payload.get("metadata") or {}),
+        )
+
+    @staticmethod
+    def _exit_trigger_stage(
+        exit_reason: str | None,
+    ) -> StrategyLifecycleStage | None:
+        reason = (exit_reason or "").lower()
+        if "trailing" in reason:
+            return StrategyLifecycleStage.TRAILING_STOP_TRIGGERED
+        if "take" in reason or "profit" in reason:
+            return StrategyLifecycleStage.TAKE_PROFIT_TRIGGERED
+        if "stop" in reason or "loss" in reason:
+            return StrategyLifecycleStage.STOP_LOSS_TRIGGERED
+        return None
 
     def _record_trade_outcome_feature(
         self,
