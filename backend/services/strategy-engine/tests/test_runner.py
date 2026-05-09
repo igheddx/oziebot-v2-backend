@@ -43,6 +43,13 @@ class DummyRuntimeKV:
                 out.append(str(val[i]))
         return out
 
+    def set_if_absent(self, key: str, ttl_seconds: int, value: str) -> bool:
+        existing = self.get(key)
+        if existing is not None:
+            return False
+        self._kv[key] = value
+        return True
+
 
 def _setup_intelligence_db(db_path: Path) -> None:
     eng = create_engine(f"sqlite+pysqlite:///{db_path}")
@@ -110,6 +117,11 @@ def _setup_intelligence_db(db_path: Path) -> None:
         conn.execute(
             text(
                 "CREATE TABLE strategy_capital_ledger (id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, trading_mode TEXT, event_type TEXT, metadata TEXT, created_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE execution_trades (id TEXT PRIMARY KEY, user_id TEXT, strategy_id TEXT, symbol TEXT, trading_mode TEXT, side TEXT, executed_at TEXT)"
             )
         )
 
@@ -1113,6 +1125,7 @@ def test_dca_scheduler_reason_reports_next_eligible_buy_time():
     runner = StrategyRunner(engine=None, runtime_kv=DummyRuntimeKV())  # type: ignore[arg-type]
     now = datetime(2025, 1, 5, 12, 0, tzinfo=UTC)
     reason = runner._scheduler_reason(
+        user_id=str(uuid.uuid4()),
         strategy_name="dca",
         config={"buy_interval_hours": 24},
         trading_mode=TradingMode.PAPER,
@@ -1128,6 +1141,63 @@ def test_dca_scheduler_reason_reports_next_eligible_buy_time():
     assert reason is not None
     assert reason["reason_code"] == "skipped_due_to_interval"
     assert reason["metadata"]["next_eligible_buy_time"] == "2025-01-06T10:00:00+00:00"
+
+
+def test_dca_scheduler_uses_last_successful_execution_timestamp(tmp_path: Path):
+    db_path = tmp_path / "runner-dca-last-execution.sqlite"
+    _setup_intelligence_db(db_path)
+    engine = create_engine(f"sqlite+pysqlite:///{db_path}")
+    runner = StrategyRunner(engine=engine, runtime_kv=DummyRuntimeKV())
+    user_id = str(uuid.uuid4())
+    last_buy_at = datetime(2025, 1, 5, 10, 0, tzinfo=UTC)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO execution_trades (id, user_id, strategy_id, symbol, trading_mode, side, executed_at) "
+                "VALUES (:id, :user_id, 'dca', 'BTC-USD', 'paper', 'buy', :executed_at)"
+            ),
+            {
+                "id": uuid.uuid4().hex,
+                "user_id": user_id.replace("-", ""),
+                "executed_at": last_buy_at.isoformat(),
+            },
+        )
+
+    reason = runner._scheduler_reason(
+        user_id=user_id,
+        strategy_name="dca",
+        config={"buy_interval_hours": 24},
+        trading_mode=TradingMode.PAPER,
+        symbol="BTC-USD",
+        runtime_state={},
+        now=datetime(2025, 1, 5, 12, 0, tzinfo=UTC),
+    )
+
+    assert reason is not None
+    assert reason["reason_code"] == "skipped_due_to_interval"
+    assert reason["metadata"]["last_buy_at"] == last_buy_at.isoformat()
+
+
+def test_dca_scheduler_skips_duplicate_worker_lease():
+    user_id = str(uuid.uuid4())
+    lease_key = f"oziebot:dca-execution-lease:{user_id.replace('-', '')}:paper:BTC-USD"
+    runner = StrategyRunner(
+        engine=None,
+        runtime_kv=DummyRuntimeKV({lease_key: datetime.now(UTC).isoformat()}),
+    )  # type: ignore[arg-type]
+
+    reason = runner._scheduler_reason(
+        user_id=user_id,
+        strategy_name="dca",
+        config={"buy_interval_hours": 24},
+        trading_mode=TradingMode.PAPER,
+        symbol="BTC-USD",
+        runtime_state={},
+        now=datetime(2025, 1, 5, 12, 0, tzinfo=UTC),
+    )
+
+    assert reason is not None
+    assert reason["reason_code"] == "duplicate_worker_execution"
 
 
 def test_momentum_runner_skips_blocked_token_policy():

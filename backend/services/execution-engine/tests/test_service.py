@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -36,6 +37,12 @@ class FakeRedis:
 
     def set(self, key: str, value: str) -> None:
         self._kv[key] = value
+
+    def set_if_absent(self, key: str, ttl_seconds: int, value: str) -> bool:
+        if key in self._kv:
+            return False
+        self._kv[key] = value
+        return True
 
     def list_len(self, key: str) -> int:
         return sum(1 for queue_name, _ in self.enqueued if queue_name == key)
@@ -331,7 +338,9 @@ def _insert_token_policy(
         )
 
 
-def _risk(user_id: str, strategy_id: str, mode: TradingMode) -> RiskDecision:
+def _risk(
+    user_id: str, strategy_id: str, mode: TradingMode, *, symbol: str = "BTC-USD"
+) -> RiskDecision:
     return RiskDecision(
         outcome=RiskOutcome.APPROVE,
         approved=True,
@@ -339,7 +348,7 @@ def _risk(user_id: str, strategy_id: str, mode: TradingMode) -> RiskDecision:
         run_id=uuid4(),
         user_id=user_id,
         strategy_name=strategy_id,
-        symbol="BTC-USD",
+        symbol=symbol,
         original_size="0.5",
         final_size="0.5",
         trading_mode=mode,
@@ -356,17 +365,18 @@ def _request(
     side: Side = Side.BUY,
     quantity: Decimal = Decimal("0.5"),
     price_hint: Decimal = Decimal("50000"),
+    symbol: str = "BTC-USD",
 ) -> ExecutionRequest:
     intent_id = uuid4()
     return ExecutionRequest(
         intent_id=intent_id,
         trace_id="trace-test",
         user_id=user_id,
-        risk=_risk(user_id, strategy_id, mode),
+        risk=_risk(user_id, strategy_id, mode, symbol=symbol),
         tenant_id=tenant_id,
         trading_mode=mode,
         strategy_id=strategy_id,
-        symbol="BTC-USD",
+        symbol=symbol,
         side=side,
         order_type=OrderType.MARKET,
         quantity=quantity,
@@ -397,7 +407,7 @@ def _request(
             "tenant_id": tenant_id,
             "trading_mode": mode.value,
             "strategy_id": strategy_id,
-            "instrument": {"symbol": "BTC-USD"},
+            "instrument": {"symbol": symbol},
             "side": side.value,
             "order_type": OrderType.MARKET.value,
             "quantity": {"amount": str(quantity)},
@@ -1104,7 +1114,232 @@ def test_execution_rejects_blocked_token_strategy_policy(tmp_path: Path):
     order = _last_order(db_path)
     assert order["failure_code"] == "token_strategy_policy"
     assert "blocked" in str(order["failure_detail"])
+    intent_payload = json.loads(str(order["intent_payload"]))
+    token_policy = intent_payload["metadata"]["token_policy_execution"]
+    assert token_policy["policy_id"] is not None
+    assert token_policy["policy_updated_at"] is not None
     assert _count(db_path, "execution_fills") == 0
+
+
+def test_execution_rechecks_blocked_policy_before_submission(tmp_path: Path):
+    db_path = tmp_path / "execution-token-policy-pre-submit.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "day_trading"
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.LIVE.value,
+        available_cash_cents=3_100_000,
+    )
+    _insert_token_policy(db_path, strategy_id=strategy_id)
+    service, live_client = _service(db_path, redis)
+    service._pre_submit_policy_check = (  # type: ignore[method-assign]
+        lambda request: {
+            "snapshot": {
+                "policy_id": "late-policy",
+                "policy_updated_at": datetime.now(UTC).isoformat(),
+                "checked_at": datetime.now(UTC).isoformat(),
+                "admin_enabled": True,
+                "effective_recommendation_status": "blocked",
+                "effective_recommendation_reason": "blocked right before submit",
+            },
+            "failure": "Execution rejected: token strategy blocked (blocked right before submit)",
+        }
+    )
+
+    result = service.process_request(
+        _request(user_id, tenant_id, strategy_id, TradingMode.LIVE)
+    )
+
+    assert result.state == ExecutionOrderStatus.FAILED
+    assert live_client.place_calls == 0
+    order = _last_order(db_path)
+    assert order["failure_code"] == "token_strategy_policy"
+    assert "blocked right before submit" in str(order["failure_detail"])
+    adapter_payload = json.loads(str(order["adapter_payload"]))
+    assert adapter_payload["policy_check"]["policy_id"] == "late-policy"
+    bucket = _bucket(db_path, user_id, strategy_id, TradingMode.LIVE.value)
+    assert int(bucket["reserved_cash_cents"]) == 0
+    assert int(bucket["locked_capital_cents"]) == 0
+
+
+def test_execution_validation_failure_records_under_umbrella_reason(tmp_path: Path):
+    db_path = tmp_path / "execution-validation-codes.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    quotes = {
+        "BTC-USD": ("49990", "50000", Decimal("0.00000001")),
+        "ETH-USD": ("2499", "2500", Decimal("0.00000001")),
+        "AERO-USD": ("0.6999", "0.7000", Decimal("0.00000001")),
+    }
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "dca"
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER.value,
+        available_cash_cents=3_100_000,
+    )
+    service, _ = _service(db_path, redis)
+
+    for symbol, (bid, ask, quantity) in quotes.items():
+        redis.set(
+            f"oziebot:md:bbo:{symbol}",
+            json.dumps({"best_bid_price": bid, "best_ask_price": ask}),
+        )
+        result = service.process_request(
+            _request(
+                user_id,
+                tenant_id,
+                strategy_id,
+                TradingMode.PAPER,
+                quantity=quantity,
+                price_hint=Decimal(ask),
+                symbol=symbol,
+            )
+        )
+        assert result.state == ExecutionOrderStatus.FAILED
+        order = _last_order(db_path)
+        assert order["failure_code"] == "execution_validation_failed"
+        intent_payload = json.loads(str(order["intent_payload"]))
+        validation = intent_payload["metadata"]["execution_validation_failure"]
+        assert validation["code"] in {
+            "notional_rounded_to_zero",
+            "below_minimum_notional",
+        }
+
+
+def test_reconciliation_report_matches_open_partial_and_closed_positions(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "execution-reconciliation-report.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "momentum"
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER.value,
+        available_cash_cents=3_100_000,
+    )
+    service, _ = _service(db_path, redis)
+
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    service.process_request(
+        _request(user_id, tenant_id, strategy_id, TradingMode.PAPER)
+    )
+    open_report = service.build_reconciliation_report(
+        user_id=user_id,
+        strategy_id=strategy_id,
+        trading_mode=TradingMode.PAPER,
+    )
+    assert open_report["mismatch_count"] == 0
+
+    mixed_request = _request(
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER,
+        quantity=Decimal("0.1"),
+    )
+    mixed_request = mixed_request.model_copy(
+        update={
+            "order_type": OrderType.LIMIT,
+            "intent_payload": {
+                **mixed_request.intent_payload,
+                "order_type": OrderType.LIMIT.value,
+            },
+        }
+    )
+    service.process_request(mixed_request)
+    partial_report = service.build_reconciliation_report(
+        user_id=user_id,
+        strategy_id=strategy_id,
+        trading_mode=TradingMode.PAPER,
+    )
+    assert partial_report["mismatch_count"] == 0
+
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"51000","best_ask_price":"51010"}'
+    )
+    service.process_request(
+        _request(
+            user_id,
+            tenant_id,
+            strategy_id,
+            TradingMode.PAPER,
+            side=Side.SELL,
+            quantity=Decimal("0.6"),
+            price_hint=Decimal("51000"),
+        )
+    )
+    closed_report = service.build_reconciliation_report(
+        user_id=user_id,
+        strategy_id=strategy_id,
+        trading_mode=TradingMode.PAPER,
+    )
+    assert closed_report["mismatch_count"] == 0
+
+
+def test_reconciliation_report_surfaces_exact_mismatches(tmp_path: Path):
+    db_path = tmp_path / "execution-reconciliation-mismatch.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "momentum"
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER.value,
+        available_cash_cents=3_100_000,
+    )
+    service, _ = _service(db_path, redis)
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    service.process_request(
+        _request(user_id, tenant_id, strategy_id, TradingMode.PAPER)
+    )
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE execution_positions SET quantity = '0.1', realized_pnl_cents = 999 WHERE user_id = :user_id"
+            ),
+            {"user_id": _compact_id(user_id)},
+        )
+
+    report = service.build_reconciliation_report(
+        user_id=user_id,
+        strategy_id=strategy_id,
+        trading_mode=TradingMode.PAPER,
+    )
+
+    assert report["mismatch_count"] >= 2
+    mismatch_types = {row["type"] for row in report["mismatches"]}
+    assert "position_quantity_mismatch" in mismatch_types
+    assert "realized_pnl_mismatch" in mismatch_types
 
 
 def test_execution_rejects_buy_when_notional_rounds_to_zero(tmp_path: Path):
@@ -1140,12 +1375,12 @@ def test_execution_rejects_buy_when_notional_rounds_to_zero(tmp_path: Path):
 
     assert result.state == ExecutionOrderStatus.FAILED
     order = _last_order(db_path)
-    assert order["failure_code"] == "notional_rounded_to_zero"
+    assert order["failure_code"] == "execution_validation_failed"
     assert _count(db_path, "execution_fills") == 0
     assert _count(db_path, "execution_trades") == 0
     assert _position(db_path) is None
     audit = _last_decision_audit(db_path)
-    assert audit["reason_code"] == "notional_rounded_to_zero"
+    assert audit["reason_code"] == "execution_validation_failed"
 
 
 def test_execution_rejects_buy_when_buying_power_is_insufficient(tmp_path: Path):
@@ -1181,7 +1416,7 @@ def test_execution_rejects_buy_when_buying_power_is_insufficient(tmp_path: Path)
 
     assert result.state == ExecutionOrderStatus.FAILED
     order = _last_order(db_path)
-    assert order["failure_code"] == "insufficient_allocation"
+    assert order["failure_code"] == "execution_validation_failed"
     assert _count(db_path, "execution_fills") == 0
     bucket = _bucket(db_path, user_id, strategy_id, TradingMode.PAPER.value)
     assert int(bucket["available_cash_cents"]) == 50
@@ -1220,7 +1455,7 @@ def test_execution_rejects_quantity_precision_beyond_coinbase_limit(tmp_path: Pa
 
     assert result.state == ExecutionOrderStatus.FAILED
     order = _last_order(db_path)
-    assert order["failure_code"] == "quantity_precision_exceeded"
+    assert order["failure_code"] == "execution_validation_failed"
     assert _count(db_path, "execution_fills") == 0
 
 

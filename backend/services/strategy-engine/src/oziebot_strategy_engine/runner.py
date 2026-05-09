@@ -59,6 +59,12 @@ STRATEGY_INTERVAL_SECONDS: dict[str, int] = {
     "dca": 300,
 }
 
+DCA_EXECUTION_LEASE_SECONDS = 120
+
+
+def _compact_uuid(value: Any) -> str:
+    return str(value).replace("-", "")
+
 
 @dataclass
 class StrategyScheduleState:
@@ -310,6 +316,7 @@ class StrategyRunner:
                             )
                             continue
                         schedule_reason = self._scheduler_reason(
+                            user_id=user_id,
                             strategy_name=strategy_name,
                             config=mode_config,
                             trading_mode=mode,
@@ -2007,6 +2014,7 @@ class StrategyRunner:
     def _scheduler_reason(
         self,
         *,
+        user_id: str,
         strategy_name: str,
         config: dict[str, Any],
         trading_mode: TradingMode,
@@ -2017,15 +2025,21 @@ class StrategyRunner:
         if strategy_name != "dca":
             return None
 
-        symbol_state = self._coerce_symbol_runtime_states(runtime_state).get(symbol, {})
-        last_buy_at_raw = symbol_state.get("last_buy_at")
-        if not last_buy_at_raw:
-            return None
-
-        if isinstance(last_buy_at_raw, str):
-            last_buy_at = datetime.fromisoformat(last_buy_at_raw.replace("Z", "+00:00"))
-        else:
-            last_buy_at = last_buy_at_raw
+        last_buy_at = self._last_successful_dca_buy_at(
+            user_id=user_id,
+            symbol=symbol,
+            trading_mode=trading_mode,
+            runtime_state=runtime_state,
+        )
+        if last_buy_at is None:
+            return self._duplicate_dca_execution_reason(
+                user_id=user_id,
+                symbol=symbol,
+                trading_mode=trading_mode,
+                now=now,
+                last_buy_at=None,
+                next_due_at=None,
+            )
 
         interval_hours = int(config.get("buy_interval_hours", 24) or 24)
         next_due_at = last_buy_at + timedelta(hours=interval_hours)
@@ -2040,7 +2054,135 @@ class StrategyRunner:
                     "next_eligible_buy_time": next_due_at.isoformat(),
                 },
             }
+        return self._duplicate_dca_execution_reason(
+            user_id=user_id,
+            symbol=symbol,
+            trading_mode=trading_mode,
+            now=now,
+            last_buy_at=last_buy_at,
+            next_due_at=next_due_at,
+        )
+
+    def _last_successful_dca_buy_at(
+        self,
+        *,
+        user_id: str,
+        symbol: str,
+        trading_mode: TradingMode,
+        runtime_state: dict[str, Any],
+    ) -> datetime | None:
+        runtime_buy_at = self._runtime_last_buy_at(runtime_state, symbol=symbol)
+        db_buy_at = self._load_last_successful_dca_buy_at(
+            user_id=user_id,
+            symbol=symbol,
+            trading_mode=trading_mode,
+        )
+        candidates = [
+            value for value in (db_buy_at, runtime_buy_at) if value is not None
+        ]
+        if not candidates:
+            return None
+        return max(candidates)
+
+    def _runtime_last_buy_at(
+        self, runtime_state: dict[str, Any], *, symbol: str
+    ) -> datetime | None:
+        symbol_state = self._coerce_symbol_runtime_states(runtime_state).get(symbol, {})
+        raw_value = symbol_state.get("last_buy_at")
+        if raw_value is None:
+            return None
+        if isinstance(raw_value, datetime):
+            return raw_value
+        if isinstance(raw_value, str):
+            return datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
         return None
+
+    def _load_last_successful_dca_buy_at(
+        self,
+        *,
+        user_id: str,
+        symbol: str,
+        trading_mode: TradingMode,
+    ) -> datetime | None:
+        if self._engine is None:
+            return None
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT executed_at
+                    FROM execution_trades
+                    WHERE user_id = :user_id
+                      AND strategy_id = 'dca'
+                      AND symbol = :symbol
+                      AND trading_mode = :trading_mode
+                      AND side = 'buy'
+                    ORDER BY executed_at DESC
+                    LIMIT 1
+                    """
+                ),
+                {
+                    "user_id": _compact_uuid(user_id),
+                    "symbol": symbol,
+                    "trading_mode": trading_mode.value,
+                },
+            ).first()
+        if row is None or row.executed_at is None:
+            return None
+        raw_value = row.executed_at
+        if isinstance(raw_value, datetime):
+            return raw_value
+        return datetime.fromisoformat(str(raw_value).replace("Z", "+00:00"))
+
+    def _duplicate_dca_execution_reason(
+        self,
+        *,
+        user_id: str,
+        symbol: str,
+        trading_mode: TradingMode,
+        now: datetime,
+        last_buy_at: datetime | None,
+        next_due_at: datetime | None,
+    ) -> dict[str, Any] | None:
+        if self._acquire_dca_execution_lease(
+            user_id=user_id,
+            symbol=symbol,
+            trading_mode=trading_mode,
+            now=now,
+        ):
+            return None
+        metadata: dict[str, Any] = {
+            "lease_expires_in_seconds": DCA_EXECUTION_LEASE_SECONDS,
+        }
+        if last_buy_at is not None:
+            metadata["last_buy_at"] = last_buy_at.isoformat()
+        if next_due_at is not None:
+            metadata["next_eligible_buy_time"] = next_due_at.isoformat()
+        return {
+            "reason_code": "duplicate_worker_execution",
+            "reason_detail": "DCA execution skipped because another worker already leased this cycle",
+            "metadata": metadata,
+        }
+
+    def _acquire_dca_execution_lease(
+        self,
+        *,
+        user_id: str,
+        symbol: str,
+        trading_mode: TradingMode,
+        now: datetime,
+    ) -> bool:
+        setter = getattr(self._kv, "set_if_absent", None)
+        if not callable(setter):
+            return True
+        return bool(
+            setter(
+                "oziebot:dca-execution-lease:"
+                f"{_compact_uuid(user_id)}:{trading_mode.value}:{symbol}",
+                DCA_EXECUTION_LEASE_SECONDS,
+                now.isoformat(),
+            )
+        )
 
     def _load_token_strategy_policy(
         self,

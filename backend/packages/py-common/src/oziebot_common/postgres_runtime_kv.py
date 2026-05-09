@@ -63,6 +63,27 @@ class PostgresRuntimeKV:
                 {"k": key, "v": value, "exp": expires},
             )
 
+    def set_if_absent(self, key: str, ttl_seconds: int, value: str) -> bool:
+        ttl = max(1, int(ttl_seconds))
+        now = datetime.now(UTC)
+        expires = now + timedelta(seconds=ttl)
+        with self._engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM runtime_kv WHERE expires_at < :now"),
+                {"now": now},
+            )
+            result = conn.execute(
+                text(
+                    """
+                    INSERT INTO runtime_kv (cache_key, value_text, expires_at)
+                    VALUES (:k, :v, :exp)
+                    ON CONFLICT (cache_key) DO NOTHING
+                    """
+                ),
+                {"k": key, "v": value, "exp": expires},
+            )
+        return bool(result.rowcount)
+
     def list_prepend_trim(
         self, key: str, element_json: str, *, max_len: int, ttl_seconds: int
     ) -> None:

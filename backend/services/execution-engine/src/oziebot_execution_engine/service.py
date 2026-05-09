@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 import uuid
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
@@ -53,6 +53,7 @@ log = logging.getLogger("execution-engine.service")
 
 MAX_COINBASE_DECIMAL_PLACES = 8
 COINBASE_MIN_NOTIONAL_USD = Decimal("1.00")
+EXECUTION_VALIDATION_FAILURE_CODE = "execution_validation_failed"
 
 
 def _utcnow() -> datetime:
@@ -174,6 +175,8 @@ class ExecutionService:
             request=request,
             reserve_cents=reserve_cents,
         )
+        if validation_failure is not None:
+            request = self._annotate_validation_failure(request, validation_failure)
         now = _utcnow()
         order_id = str(uuid.uuid4())
         self._persist_lifecycle_event(
@@ -275,7 +278,9 @@ class ExecutionService:
                         "failure_code": (
                             "token_strategy_policy"
                             if policy_failure is not None
-                            else validation_failure.code
+                            else self._validation_failure_reason_code(
+                                validation_failure
+                            )
                             if validation_failure is not None
                             else None
                         ),
@@ -296,7 +301,12 @@ class ExecutionService:
                         "adapter_payload": json.dumps({}, default=str),
                         "created_at": now,
                         "updated_at": now,
-                        "failed_at": now if policy_failure is not None else None,
+                        "failed_at": (
+                            now
+                            if policy_failure is not None
+                            or validation_failure is not None
+                            else None
+                        ),
                     },
                 )
         except IntegrityError:
@@ -369,7 +379,7 @@ class ExecutionService:
             self._persist_decision_audit_record(
                 request=request,
                 decision=DecisionAuditDecision.REJECTED,
-                reason_code=validation_failure.code,
+                reason_code=self._validation_failure_reason_code(validation_failure),
                 reason_detail=validation_failure.detail,
                 size_before=original_quantity,
                 size_after=Decimal("0"),
@@ -377,7 +387,9 @@ class ExecutionService:
             )
             self._record_metric(
                 rejected=True,
-                rejection_reason=validation_failure.code,
+                rejection_reason=self._validation_failure_reason_code(
+                    validation_failure
+                ),
             )
             self._persist_lifecycle_event(
                 request=request,
@@ -385,15 +397,24 @@ class ExecutionService:
                 status=LifecycleEventStatus.FAILED,
                 occurred_at=now,
                 order_id=order_id,
-                reason_code=validation_failure.code,
+                reason_code=self._validation_failure_reason_code(validation_failure),
                 reason_detail=validation_failure.detail,
+                metadata={
+                    "validation_code": validation_failure.code,
+                    "validation_detail": validation_failure.detail,
+                },
             )
             self._emit_event(
                 order_id,
                 request,
                 ExecutionOrderStatus.FAILED,
                 detail=validation_failure.detail,
-                payload={"failure_code": validation_failure.code},
+                payload={
+                    "failure_code": self._validation_failure_reason_code(
+                        validation_failure
+                    ),
+                    "validation_code": validation_failure.code,
+                },
             )
             return ProcessResult(
                 order_id=order_id,
@@ -428,12 +449,41 @@ class ExecutionService:
                 detail="Capital reserved",
             )
 
+        pre_submit_policy = self._pre_submit_policy_check(request)
+        if pre_submit_policy["failure"] is not None:
+            failure_detail = str(pre_submit_policy["failure"])
+            self._handle_failure(
+                order_id,
+                request,
+                reserve_cents,
+                ExecutionSubmission(
+                    status=ExecutionOrderStatus.FAILED,
+                    venue=request.venue,
+                    raw_payload={"policy_check": pre_submit_policy["snapshot"]},
+                    failure_code="token_strategy_policy",
+                    failure_detail=failure_detail,
+                ),
+            )
+            return ProcessResult(
+                order_id=order_id,
+                state=ExecutionOrderStatus.FAILED,
+                duplicated=False,
+            )
+
         adapter = (
             self._paper_adapter
             if request.trading_mode == TradingMode.PAPER
             else self._live_adapter
         )
         submission = adapter.submit(request)
+        submission = submission.model_copy(
+            update={
+                "raw_payload": self._merge_payloads(
+                    submission.raw_payload,
+                    {"policy_check": pre_submit_policy["snapshot"]},
+                )
+            }
+        )
         return self._apply_submission(request, order_id, reserve_cents, submission)
 
     def metrics_snapshot(self) -> dict[str, Any]:
@@ -463,9 +513,6 @@ class ExecutionService:
         self,
         request: ExecutionRequest,
     ) -> tuple[ExecutionRequest, str | None]:
-        if request.side != Side.BUY:
-            return request, None
-
         policy_row = self._load_token_strategy_policy(
             symbol=request.symbol,
             strategy_id=request.strategy_id,
@@ -477,6 +524,10 @@ class ExecutionService:
         intent_payload = dict(request.intent_payload)
         metadata = dict(intent_payload.get("metadata") or {})
         metadata["token_policy_execution"] = {
+            "policy_id": policy_row.get("policy_id") if policy_row else None,
+            "policy_updated_at": str(policy_row.get("policy_updated_at"))
+            if policy_row and policy_row.get("policy_updated_at") is not None
+            else None,
             "is_enabled": effective["is_enabled"],
             "admin_enabled": effective["admin_enabled"],
             "effective_recommendation_status": effective[
@@ -492,9 +543,13 @@ class ExecutionService:
             "max_position_pct_override": str(effective["max_position_pct_override"])
             if effective["max_position_pct_override"] is not None
             else None,
+            "checked_at": _utcnow().isoformat(),
         }
         intent_payload["metadata"] = metadata
         request = request.model_copy(update={"intent_payload": intent_payload})
+
+        if request.side != Side.BUY:
+            return request, None
 
         if not effective["admin_enabled"]:
             return request, "Execution rejected: token strategy disabled by admin"
@@ -595,6 +650,8 @@ class ExecutionService:
         stmt = text(
             """
             SELECT
+              tsp.id AS policy_id,
+              tsp.updated_at AS policy_updated_at,
               tsp.admin_enabled,
               tsp.recommendation_status,
               tsp.recommendation_reason,
@@ -849,9 +906,75 @@ class ExecutionService:
         return None
 
     @staticmethod
+    def _validation_failure_reason_code(
+        failure: ExecutionValidationFailure | None,
+    ) -> str:
+        return EXECUTION_VALIDATION_FAILURE_CODE
+
+    def _annotate_validation_failure(
+        self,
+        request: ExecutionRequest,
+        failure: ExecutionValidationFailure,
+    ) -> ExecutionRequest:
+        intent_payload = dict(request.intent_payload)
+        metadata = dict(intent_payload.get("metadata") or {})
+        metadata["execution_validation_failure"] = {
+            "code": failure.code,
+            "detail": failure.detail,
+            "checked_at": _utcnow().isoformat(),
+        }
+        intent_payload["metadata"] = metadata
+        return request.model_copy(update={"intent_payload": intent_payload})
+
+    @staticmethod
     def _decimal_places(value: Decimal) -> int:
         exponent = value.normalize().as_tuple().exponent
         return 0 if exponent >= 0 else -exponent
+
+    def _pre_submit_policy_check(self, request: ExecutionRequest) -> dict[str, Any]:
+        policy_row = self._load_token_strategy_policy(
+            symbol=request.symbol,
+            strategy_id=request.strategy_id,
+        )
+        effective = resolve_effective_token_policy(
+            policy_row,
+            trading_mode=request.trading_mode.value,
+        )
+        snapshot = {
+            "policy_id": policy_row.get("policy_id") if policy_row else None,
+            "policy_updated_at": str(policy_row.get("policy_updated_at"))
+            if policy_row and policy_row.get("policy_updated_at") is not None
+            else None,
+            "checked_at": _utcnow().isoformat(),
+            "admin_enabled": effective["admin_enabled"],
+            "effective_recommendation_status": effective[
+                "effective_recommendation_status"
+            ],
+            "effective_recommendation_reason": effective[
+                "effective_recommendation_reason"
+            ],
+        }
+        failure: str | None = None
+        if request.side == Side.BUY:
+            if not effective["admin_enabled"]:
+                failure = "Execution rejected: token strategy disabled by admin"
+            elif effective["effective_recommendation_status"] == "blocked":
+                reason = (
+                    effective["effective_recommendation_reason"]
+                    or "blocked by token strategy policy"
+                )
+                failure = f"Execution rejected: token strategy blocked ({reason})"
+        return {"snapshot": snapshot, "failure": failure}
+
+    @staticmethod
+    def _merge_payloads(
+        base_payload: dict[str, Any] | None,
+        extra_payload: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        merged = dict(base_payload or {})
+        if extra_payload:
+            merged.update(extra_payload)
+        return merged
 
     def _has_sufficient_buying_power(
         self, request: ExecutionRequest, reserve_cents: int
@@ -888,6 +1011,245 @@ class ExecutionService:
                 .first()
             )
         return dict(row) if row is not None else None
+
+    def build_reconciliation_report(
+        self,
+        *,
+        user_id: uuid.UUID | str | None = None,
+        strategy_id: str | None = None,
+        symbol: str | None = None,
+        trading_mode: TradingMode | str | None = None,
+    ) -> dict[str, Any]:
+        if self._engine is None:
+            raise RuntimeError("DATABASE_URL is required")
+
+        filters: list[str] = []
+        params: dict[str, Any] = {}
+        if user_id is not None:
+            filters.append("user_id = :user_id")
+            params["user_id"] = _to_hex(user_id)
+        if strategy_id is not None:
+            filters.append("strategy_id = :strategy_id")
+            params["strategy_id"] = strategy_id
+        if symbol is not None:
+            filters.append("symbol = :symbol")
+            params["symbol"] = symbol
+        if trading_mode is not None:
+            filters.append("trading_mode = :trading_mode")
+            params["trading_mode"] = (
+                trading_mode.value
+                if isinstance(trading_mode, TradingMode)
+                else str(trading_mode)
+            )
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+
+        with self._engine.begin() as conn:
+            trade_rows = [
+                dict(row)
+                for row in conn.execute(
+                    text(
+                        f"""
+                        SELECT user_id, strategy_id, symbol, trading_mode, side, quantity,
+                               position_quantity_after, realized_pnl_cents, executed_at
+                        FROM execution_trades
+                        {where_clause}
+                        ORDER BY executed_at ASC
+                        """
+                    ),
+                    params,
+                )
+                .mappings()
+                .all()
+            ]
+            position_rows = [
+                dict(row)
+                for row in conn.execute(
+                    text(
+                        f"""
+                        SELECT user_id, strategy_id, symbol, trading_mode, quantity,
+                               avg_entry_price, realized_pnl_cents, updated_at
+                        FROM execution_positions
+                        {where_clause}
+                        """
+                    ),
+                    params,
+                )
+                .mappings()
+                .all()
+            ]
+            bucket_filters = [
+                clause for clause in filters if not clause.startswith("symbol =")
+            ]
+            bucket_params = {
+                key: value for key, value in params.items() if key != "symbol"
+            }
+            bucket_where = (
+                f"WHERE {' AND '.join(bucket_filters)}" if bucket_filters else ""
+            )
+            bucket_rows = [
+                dict(row)
+                for row in conn.execute(
+                    text(
+                        f"""
+                        SELECT user_id, strategy_id, trading_mode, locked_capital_cents,
+                               realized_pnl_cents, unrealized_pnl_cents,
+                               available_cash_cents, available_buying_power_cents
+                        FROM strategy_capital_buckets
+                        {bucket_where}
+                        """
+                    ),
+                    bucket_params,
+                )
+                .mappings()
+                .all()
+            ]
+
+        trades_by_scope: defaultdict[
+            tuple[str, str, str, str], list[dict[str, Any]]
+        ] = defaultdict(list)
+        for row in trade_rows:
+            trades_by_scope[
+                (
+                    str(row["user_id"]),
+                    str(row["strategy_id"]),
+                    str(row["symbol"]),
+                    str(row["trading_mode"]),
+                )
+            ].append(row)
+        positions_by_scope = {
+            (
+                str(row["user_id"]),
+                str(row["strategy_id"]),
+                str(row["symbol"]),
+                str(row["trading_mode"]),
+            ): row
+            for row in position_rows
+        }
+        mismatches: list[dict[str, Any]] = []
+        scopes = sorted(set(trades_by_scope) | set(positions_by_scope))
+        per_bucket_expected: defaultdict[tuple[str, str, str], dict[str, int]] = (
+            defaultdict(lambda: {"locked_capital_cents": 0, "realized_pnl_cents": 0})
+        )
+
+        for scope in scopes:
+            scoped_trades = trades_by_scope.get(scope, [])
+            position = positions_by_scope.get(scope)
+            expected_quantity = Decimal("0")
+            expected_realized_pnl_cents = 0
+            latest_trade_quantity: Decimal | None = None
+            for trade in scoped_trades:
+                quantity = Decimal(str(trade["quantity"]))
+                if str(trade["side"]).lower() == Side.BUY.value:
+                    expected_quantity += quantity
+                else:
+                    expected_quantity -= quantity
+                    expected_realized_pnl_cents += int(trade["realized_pnl_cents"] or 0)
+                latest_trade_quantity = Decimal(str(trade["position_quantity_after"]))
+            actual_quantity = (
+                Decimal(str(position["quantity"]))
+                if position is not None
+                else Decimal("0")
+            )
+            actual_realized_pnl_cents = (
+                int(position["realized_pnl_cents"] or 0) if position is not None else 0
+            )
+            avg_entry_price = (
+                Decimal(str(position["avg_entry_price"]))
+                if position is not None
+                else Decimal("0")
+            )
+            if abs(expected_quantity - actual_quantity) > Decimal("0.00000001"):
+                mismatches.append(
+                    {
+                        "type": "position_quantity_mismatch",
+                        "user_id": scope[0],
+                        "strategy_id": scope[1],
+                        "symbol": scope[2],
+                        "trading_mode": scope[3],
+                        "expected_quantity": str(expected_quantity),
+                        "actual_quantity": str(actual_quantity),
+                    }
+                )
+            if latest_trade_quantity is not None and abs(
+                latest_trade_quantity - actual_quantity
+            ) > Decimal("0.00000001"):
+                mismatches.append(
+                    {
+                        "type": "latest_trade_quantity_mismatch",
+                        "user_id": scope[0],
+                        "strategy_id": scope[1],
+                        "symbol": scope[2],
+                        "trading_mode": scope[3],
+                        "latest_trade_quantity_after": str(latest_trade_quantity),
+                        "actual_quantity": str(actual_quantity),
+                    }
+                )
+            if expected_realized_pnl_cents != actual_realized_pnl_cents:
+                mismatches.append(
+                    {
+                        "type": "realized_pnl_mismatch",
+                        "user_id": scope[0],
+                        "strategy_id": scope[1],
+                        "symbol": scope[2],
+                        "trading_mode": scope[3],
+                        "expected_realized_pnl_cents": expected_realized_pnl_cents,
+                        "actual_realized_pnl_cents": actual_realized_pnl_cents,
+                    }
+                )
+
+            bucket_scope = (scope[0], scope[1], scope[3])
+            per_bucket_expected[bucket_scope]["realized_pnl_cents"] += (
+                actual_realized_pnl_cents
+            )
+            if actual_quantity > 0 and avg_entry_price > 0:
+                per_bucket_expected[bucket_scope]["locked_capital_cents"] += (
+                    _money_to_cents(actual_quantity * avg_entry_price)
+                )
+
+        for row in bucket_rows:
+            bucket_scope = (
+                str(row["user_id"]),
+                str(row["strategy_id"]),
+                str(row["trading_mode"]),
+            )
+            expected = per_bucket_expected[bucket_scope]
+            if (
+                int(row["locked_capital_cents"] or 0)
+                != expected["locked_capital_cents"]
+            ):
+                mismatches.append(
+                    {
+                        "type": "bucket_locked_capital_mismatch",
+                        "user_id": bucket_scope[0],
+                        "strategy_id": bucket_scope[1],
+                        "trading_mode": bucket_scope[2],
+                        "expected_locked_capital_cents": expected[
+                            "locked_capital_cents"
+                        ],
+                        "actual_locked_capital_cents": int(
+                            row["locked_capital_cents"] or 0
+                        ),
+                    }
+                )
+            if int(row["realized_pnl_cents"] or 0) != expected["realized_pnl_cents"]:
+                mismatches.append(
+                    {
+                        "type": "bucket_realized_pnl_mismatch",
+                        "user_id": bucket_scope[0],
+                        "strategy_id": bucket_scope[1],
+                        "trading_mode": bucket_scope[2],
+                        "expected_realized_pnl_cents": expected["realized_pnl_cents"],
+                        "actual_realized_pnl_cents": int(
+                            row["realized_pnl_cents"] or 0
+                        ),
+                    }
+                )
+        return {
+            "scope_count": len(scopes),
+            "bucket_count": len(bucket_rows),
+            "mismatch_count": len(mismatches),
+            "mismatches": mismatches,
+        }
 
     def _apply_submission(
         self,

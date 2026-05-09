@@ -142,6 +142,12 @@ class RiskEngineService:
                     "rejection_metrics": {"suggested_size": str(signal.suggested_size)},
                     "sizing": self._json_dict(signal.reasoning_metadata.get("sizing")),
                     "fee_economics": facts.get("fee_economics", {}),
+                    "token_policy": {
+                        "policy_id": facts.get("token_policy_id"),
+                        "policy_updated_at": facts.get("token_policy_updated_at"),
+                        "status": facts.get("token_policy_status"),
+                        "reason": facts.get("token_policy_reason"),
+                    },
                 },
             )
             self._persist_risk_event(signal, decision)
@@ -279,6 +285,12 @@ class RiskEngineService:
                     },
                     "sizing": self._json_dict(signal.reasoning_metadata.get("sizing")),
                     "fee_economics": facts.get("fee_economics", {}),
+                    "token_policy": {
+                        "policy_id": facts.get("token_policy_id"),
+                        "policy_updated_at": facts.get("token_policy_updated_at"),
+                        "status": facts.get("token_policy_status"),
+                        "reason": facts.get("token_policy_reason"),
+                    },
                 },
             )
             self._persist_risk_event(signal, decision)
@@ -320,6 +332,12 @@ class RiskEngineService:
             metadata={
                 "sizing": self._json_dict(signal.reasoning_metadata.get("sizing")),
                 "fee_economics": facts.get("fee_economics", {}),
+                "token_policy": {
+                    "policy_id": facts.get("token_policy_id"),
+                    "policy_updated_at": facts.get("token_policy_updated_at"),
+                    "status": facts.get("token_policy_status"),
+                    "reason": facts.get("token_policy_reason"),
+                },
             },
         )
 
@@ -728,6 +746,8 @@ class RiskEngineService:
                     text(
                         """
                     SELECT
+                      tsp.id AS token_policy_id,
+                      tsp.updated_at AS token_policy_updated_at,
                       tsp.admin_enabled,
                       tsp.recommendation_status,
                       tsp.recommendation_reason,
@@ -1117,6 +1137,13 @@ class RiskEngineService:
                 token_user_enabled and token_user_enabled.is_enabled
             ),
             "token_policy_admin_enabled": bool(effective_token_policy["admin_enabled"]),
+            "token_policy_id": token_policy_row["token_policy_id"]
+            if token_policy_row
+            else None,
+            "token_policy_updated_at": str(token_policy_row["token_policy_updated_at"])
+            if token_policy_row
+            and token_policy_row["token_policy_updated_at"] is not None
+            else None,
             "token_policy_status": str(
                 effective_token_policy["effective_recommendation_status"]
             ),
