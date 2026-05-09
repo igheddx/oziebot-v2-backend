@@ -162,21 +162,55 @@ class RuleBasedDiagnosticProvider:
             )
         if not violations:
             return []
+        report_generated_at = _parse_dt(report.get("generated_at"))
+        latest_violation_at = max(
+            (_parse_dt(item.get("executed_at")) for item in violations),
+            default=None,
+        )
+        latest_violation_age_hours = (
+            (report_generated_at - latest_violation_at).total_seconds() / 3600
+            if report_generated_at is not None and latest_violation_at is not None
+            else None
+        )
+        violation_is_active = (
+            latest_violation_age_hours is None or latest_violation_age_hours < buy_interval_hours
+        )
+        severity = "critical" if violation_is_active else "warning"
+        title = (
+            "DCA interval is being violated"
+            if violation_is_active
+            else "Historical DCA interval violations detected"
+        )
+        detail = (
+            (
+                f"DCA is configured for every {buy_interval_hours:g} hours, but "
+                f"{len(violations)} buy executions landed sooner than that interval."
+            )
+            if violation_is_active
+            else (
+                f"DCA is configured for every {buy_interval_hours:g} hours, and "
+                f"{len(violations)} earlier buys in the selected review window landed sooner than that interval. "
+                "No recent violation appears in the latest interval window."
+            )
+        )
+        recommendation = (
+            "Inspect the scheduler and worker dedupe path, then compare emitted DCA buy timestamps "
+            "against the last successful execution before allowing the next order."
+            if violation_is_active
+            else (
+                "Confirm the fix by reviewing only fresh post-deploy diagnostics data or a shorter days window, "
+                "then keep the scheduler and worker dedupe checks in place."
+            )
+        )
         return [
             _finding(
-                severity="critical",
+                severity=severity,
                 category="dca_interval",
                 strategy="dca",
                 token=violations[0].get("token"),
-                title="DCA interval is being violated",
-                detail=(
-                    f"DCA is configured for every {buy_interval_hours:g} hours, but "
-                    f"{len(violations)} buy executions landed sooner than that interval."
-                ),
-                recommendation=(
-                    "Inspect the scheduler and worker dedupe path, then compare emitted DCA buy timestamps "
-                    "against the last successful execution before allowing the next order."
-                ),
+                title=title,
+                detail=detail,
+                recommendation=recommendation,
                 risk_if_ignored=(
                     "Capital can be deployed much faster than intended and the diagnostics will no longer "
                     "reflect the configured DCA policy."
@@ -186,10 +220,15 @@ class RuleBasedDiagnosticProvider:
                 evidence={
                     "buy_interval_hours": buy_interval_hours,
                     "violation_count": len(violations),
+                    "violation_is_active": violation_is_active,
+                    "latest_violation_at": _iso(latest_violation_at),
+                    "latest_violation_age_hours": round(latest_violation_age_hours, 4)
+                    if latest_violation_age_hours is not None
+                    else None,
                     "violations": violations[:20],
                 },
                 affected_strategy="dca",
-                risk_level="critical",
+                risk_level=severity,
             )
         ]
 

@@ -276,6 +276,38 @@ def test_rule_based_provider_generates_expected_findings():
     assert "capital_utilization" in categories
 
 
+def test_rule_based_provider_downgrades_stale_dca_interval_violations():
+    provider = RuleBasedDiagnosticProvider()
+    snapshot_payload = _raw_snapshot()
+    snapshot_payload["generated_at"] = "2026-05-09T12:00:00+00:00"
+    snapshot_payload["execution_activity"]["execution_details"][0]["executed_at"] = (
+        "2026-05-07T08:00:00+00:00"
+    )
+    snapshot_payload["execution_activity"]["execution_details"][1]["executed_at"] = (
+        "2026-05-07T09:00:00+00:00"
+    )
+    snapshot = DiagnosticSnapshot(
+        id=uuid.uuid4(),
+        tenant_id=None,
+        generated_at=datetime.now(UTC),
+        trading_mode=None,
+        token_filter=None,
+        strategy_filter=None,
+        days_filter=7,
+        raw_json=snapshot_payload,
+        created_at=datetime.now(UTC),
+    )
+
+    result = provider.review_diagnostics(snapshot, context={})
+
+    dca_finding = next(
+        finding for finding in result["findings"] if finding["category"] == "dca_interval"
+    )
+    assert dca_finding["severity"] == "warning"
+    assert dca_finding["finding_title"] == "Historical DCA interval violations detected"
+    assert dca_finding["evidence_json"]["violation_is_active"] is False
+
+
 def test_create_review_endpoint_persists_findings(client, db_session, tenant_root_user_and_token):
     _, token = tenant_root_user_and_token
     user = db_session.scalar(select(User).where(User.email == "tenant-root@example.com"))
