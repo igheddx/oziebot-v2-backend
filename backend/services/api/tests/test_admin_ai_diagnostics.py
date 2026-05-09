@@ -308,6 +308,88 @@ def test_rule_based_provider_downgrades_stale_dca_interval_violations():
     assert dca_finding["evidence_json"]["violation_is_active"] is False
 
 
+def test_rule_based_provider_downgrades_stale_zero_value_executions():
+    provider = RuleBasedDiagnosticProvider()
+    snapshot_payload = _raw_snapshot()
+    snapshot_payload["execution_activity"]["execution_details"][2]["executed_at"] = (
+        "2026-05-07T08:00:00+00:00"
+    )
+    snapshot = DiagnosticSnapshot(
+        id=uuid.uuid4(),
+        tenant_id=None,
+        generated_at=datetime.now(UTC),
+        trading_mode=None,
+        token_filter=None,
+        strategy_filter=None,
+        days_filter=7,
+        raw_json=snapshot_payload,
+        created_at=datetime.now(UTC),
+    )
+
+    result = provider.review_diagnostics(snapshot, context={})
+
+    finding = next(
+        item for item in result["findings"] if item["category"] == "execution_accounting"
+    )
+    assert finding["severity"] == "warning"
+    assert finding["evidence_json"]["offender_is_recent"] is False
+
+
+def test_rule_based_provider_downgrades_stale_token_policy_conflicts():
+    provider = RuleBasedDiagnosticProvider()
+    snapshot_payload = _raw_snapshot()
+    snapshot_payload["execution_activity"]["execution_details"][3]["executed_at"] = (
+        "2026-05-07T03:00:00+00:00"
+    )
+    snapshot = DiagnosticSnapshot(
+        id=uuid.uuid4(),
+        tenant_id=None,
+        generated_at=datetime.now(UTC),
+        trading_mode=None,
+        token_filter=None,
+        strategy_filter=None,
+        days_filter=7,
+        raw_json=snapshot_payload,
+        created_at=datetime.now(UTC),
+    )
+
+    result = provider.review_diagnostics(snapshot, context={})
+
+    finding = next(item for item in result["findings"] if item["category"] == "token_policy")
+    assert finding["severity"] == "warning"
+    assert finding["evidence_json"]["conflict_is_recent"] is False
+
+
+def test_rule_based_provider_downgrades_positions_outside_review_window():
+    provider = RuleBasedDiagnosticProvider()
+    snapshot_payload = _raw_snapshot()
+    snapshot_payload["open_positions"]["positions"][0]["quantity"] = 0.004
+    snapshot_payload["open_positions"]["positions"][1]["opened_at"] = "2026-05-01T01:00:00+00:00"
+    snapshot_payload["open_positions"]["positions"][1]["last_trade_at"] = (
+        "2026-05-01T01:00:00+00:00"
+    )
+    snapshot_payload["open_positions"]["positions"][1]["updated_at"] = "2026-05-01T01:00:00+00:00"
+    snapshot = DiagnosticSnapshot(
+        id=uuid.uuid4(),
+        tenant_id=None,
+        generated_at=datetime.now(UTC),
+        trading_mode=None,
+        token_filter=None,
+        strategy_filter=None,
+        days_filter=7,
+        raw_json=snapshot_payload,
+        created_at=datetime.now(UTC),
+    )
+
+    result = provider.review_diagnostics(snapshot, context={})
+
+    finding = next(
+        item for item in result["findings"] if item["category"] == "position_reconciliation"
+    )
+    assert finding["severity"] == "warning"
+    assert finding["evidence_json"]["active_mismatch_count"] == 0
+
+
 def test_create_review_endpoint_persists_findings(client, db_session, tenant_root_user_and_token):
     _, token = tenant_root_user_and_token
     user = db_session.scalar(select(User).where(User.email == "tenant-root@example.com"))

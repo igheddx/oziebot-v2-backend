@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from sqlalchemy import select
@@ -27,6 +27,7 @@ REVIEW_STATUSES = {"queued", "running", "completed", "failed"}
 FINDING_STATUSES = {"new", "acknowledged", "dismissed", "resolved"}
 SEVERITY_ORDER = {"critical": 3, "warning": 2, "info": 1}
 PROMPT_VERSION = "ai-diagnostics-v1"
+RECENT_EXECUTION_FINDING_HOURS = 24
 
 
 @dataclass(slots=True)
@@ -83,14 +84,32 @@ class RuleBasedDiagnosticProvider:
         self, snapshot: DiagnosticSnapshot, *, context: dict[str, Any]
     ) -> dict[str, Any]:
         report = snapshot.raw_json or {}
+        report_generated_at = _parse_dt(snapshot.generated_at) or _parse_dt(
+            report.get("generated_at")
+        )
+        window_start = (
+            report_generated_at - timedelta(days=max(1, snapshot.days_filter))
+            if report_generated_at is not None
+            else None
+        )
         findings: list[dict[str, Any]] = []
         findings.extend(self._check_dca_over_execution(report))
-        findings.extend(self._check_zero_value_executions(report))
+        findings.extend(
+            self._check_zero_value_executions(report, report_generated_at=report_generated_at)
+        )
         findings.extend(self._check_strategy_execution_gap(report))
         findings.extend(self._check_closed_trade_gap(report))
         findings.extend(self._check_generic_rejections(report))
-        findings.extend(self._check_token_policy_conflicts(report))
-        findings.extend(self._check_position_reconciliation(report))
+        findings.extend(
+            self._check_token_policy_conflicts(report, report_generated_at=report_generated_at)
+        )
+        findings.extend(
+            self._check_position_reconciliation(
+                report,
+                report_generated_at=report_generated_at,
+                window_start=window_start,
+            )
+        )
         findings.extend(self._check_capital_utilization(report))
 
         severity_counts = Counter(finding["severity"] for finding in findings)
@@ -232,7 +251,12 @@ class RuleBasedDiagnosticProvider:
             )
         ]
 
-    def _check_zero_value_executions(self, report: dict[str, Any]) -> list[dict[str, Any]]:
+    def _check_zero_value_executions(
+        self,
+        report: dict[str, Any],
+        *,
+        report_generated_at: datetime | None,
+    ) -> list[dict[str, Any]]:
         offenders = [
             row
             for row in (report.get("execution_activity") or {}).get("execution_details", [])
@@ -243,30 +267,58 @@ class RuleBasedDiagnosticProvider:
         ]
         if not offenders:
             return []
+        latest_offender_at = max(
+            (_parse_dt(row.get("executed_at")) for row in offenders),
+            default=None,
+        )
+        offender_is_recent = _is_recent_issue(
+            latest_event_at=latest_offender_at,
+            report_generated_at=report_generated_at,
+            threshold_hours=RECENT_EXECUTION_FINDING_HOURS,
+        )
+        severity = "critical" if offender_is_recent else "warning"
         return [
             _finding(
-                severity="critical",
+                severity=severity,
                 category="execution_accounting",
                 strategy=offenders[0].get("strategy"),
                 token=offenders[0].get("token"),
-                title="Executions contain zero quantity or notional",
+                title=(
+                    "Executions contain zero quantity or notional"
+                    if offender_is_recent
+                    else "Historical executions contained zero quantity or notional"
+                ),
                 detail=(
                     f"{len(offenders)} execution records show a non-positive quantity or notional, "
-                    "which indicates accounting drift or execution validation leakage."
+                    + (
+                        "which indicates accounting drift or execution validation leakage."
+                        if offender_is_recent
+                        else "but no recent offender appears in the latest review freshness window."
+                    )
                 ),
                 recommendation=(
                     "Trace the affected orders from signal sizing through execution reservation and "
                     "position mutation, and block any request whose quantity or notional is not strictly positive."
+                    if offender_is_recent
+                    else (
+                        "Confirm the fix with a fresh post-deploy review window and keep strict pre-execution "
+                        "validation enabled."
+                    )
                 ),
                 risk_if_ignored=(
                     "PnL, balances, and trade history can diverge even when positions continue to accumulate."
                 ),
                 confidence_score=0.98,
                 automation_eligibility="not_eligible",
-                evidence={"execution_count": len(offenders), "executions": offenders[:20]},
+                evidence={
+                    "execution_count": len(offenders),
+                    "offender_is_recent": offender_is_recent,
+                    "latest_offender_at": _iso(latest_offender_at),
+                    "executions": offenders[:20],
+                },
                 affected_strategy=offenders[0].get("strategy"),
                 affected_token=offenders[0].get("token"),
-                risk_level="critical",
+                risk_level=severity,
             )
         ]
 
@@ -380,7 +432,12 @@ class RuleBasedDiagnosticProvider:
             )
         ]
 
-    def _check_token_policy_conflicts(self, report: dict[str, Any]) -> list[dict[str, Any]]:
+    def _check_token_policy_conflicts(
+        self,
+        report: dict[str, Any],
+        *,
+        report_generated_at: datetime | None,
+    ) -> list[dict[str, Any]]:
         matrix = (
             (report.get("active_strategy_config") or {}).get("token_strategy_policy_matrix")
         ) or {}
@@ -405,34 +462,68 @@ class RuleBasedDiagnosticProvider:
         if not conflicts:
             return []
         first = conflicts[0]
+        latest_conflict_at = max(
+            (_parse_dt(item.get("executed_at")) for item in conflicts),
+            default=None,
+        )
+        conflict_is_recent = _is_recent_issue(
+            latest_event_at=latest_conflict_at,
+            report_generated_at=report_generated_at,
+            threshold_hours=RECENT_EXECUTION_FINDING_HOURS,
+        )
+        severity = "critical" if conflict_is_recent else "warning"
         return [
             _finding(
-                severity="critical",
+                severity=severity,
                 category="token_policy",
                 strategy=first.get("strategy"),
                 token=first.get("token"),
-                title="Trades executed against a blocked token policy",
+                title=(
+                    "Trades executed against a blocked token policy"
+                    if conflict_is_recent
+                    else "Historical trades conflict with the current blocked token policy"
+                ),
                 detail=(
                     f"{len(conflicts)} executions were recorded for token/strategy pairs whose effective policy "
-                    "status is currently blocked."
+                    + (
+                        "status is currently blocked."
+                        if conflict_is_recent
+                        else "status is currently blocked, but the latest conflicting execution is not recent."
+                    )
                 ),
                 recommendation=(
                     "Verify policy enforcement in the strategy and risk pipeline, and compare execution timestamps "
                     "with the active token policy state used during evaluation."
+                    if conflict_is_recent
+                    else (
+                        "Review policy snapshots around the historical executions and rerun the review on fresh data "
+                        "to confirm the current pipeline is no longer bypassing blocked pairs."
+                    )
                 ),
                 risk_if_ignored=(
                     "Trades can bypass explicit platform controls and undermine trust in policy enforcement."
                 ),
                 confidence_score=0.93,
                 automation_eligibility="future_human_approval_required",
-                evidence={"conflict_count": len(conflicts), "conflicts": conflicts[:20]},
+                evidence={
+                    "conflict_count": len(conflicts),
+                    "conflict_is_recent": conflict_is_recent,
+                    "latest_conflict_at": _iso(latest_conflict_at),
+                    "conflicts": conflicts[:20],
+                },
                 affected_strategy=first.get("strategy"),
                 affected_token=first.get("token"),
-                risk_level="critical",
+                risk_level=severity,
             )
         ]
 
-    def _check_position_reconciliation(self, report: dict[str, Any]) -> list[dict[str, Any]]:
+    def _check_position_reconciliation(
+        self,
+        report: dict[str, Any],
+        *,
+        report_generated_at: datetime | None,
+        window_start: datetime | None,
+    ) -> list[dict[str, Any]]:
         executions = defaultdict(list)
         for trade in (report.get("execution_activity") or {}).get("execution_details", []):
             key = (trade.get("strategy"), trade.get("token"), trade.get("trading_mode"))
@@ -445,6 +536,21 @@ class RuleBasedDiagnosticProvider:
                 key=lambda row: row.get("executed_at") or "",
             )
             if not scoped:
+                last_trade_at = _parse_dt(position.get("last_trade_at")) or _parse_dt(
+                    position.get("opened_at")
+                )
+                if (
+                    window_start is not None
+                    and last_trade_at is not None
+                    and last_trade_at < window_start
+                ):
+                    mismatches.append(
+                        {
+                            "type": "history_outside_review_window",
+                            "position": position,
+                        }
+                    )
+                    continue
                 mismatches.append(
                     {
                         "type": "missing_execution_history",
@@ -467,9 +573,12 @@ class RuleBasedDiagnosticProvider:
                 )
         if not mismatches:
             return []
+        active_mismatches = [
+            item for item in mismatches if item["type"] != "history_outside_review_window"
+        ]
         severity = (
             "critical"
-            if any(item["type"] == "missing_execution_history" for item in mismatches)
+            if any(item["type"] == "missing_execution_history" for item in active_mismatches)
             else "warning"
         )
         return [
@@ -481,18 +590,33 @@ class RuleBasedDiagnosticProvider:
                 title="Open positions do not fully reconcile with execution history",
                 detail=(
                     f"{len(mismatches)} open positions are missing matching execution history or differ from the "
-                    "latest recorded post-trade quantity."
+                    + (
+                        "latest recorded post-trade quantity."
+                        if active_mismatches
+                        else "latest recorded post-trade quantity, but the gaps appear to be outside the selected review window."
+                    )
                 ),
                 recommendation=(
                     "Run an execution-to-position reconciliation pass and log the exact position, execution, and "
                     "PnL rows that disagree."
+                    if active_mismatches
+                    else (
+                        "Use a broader review window or inspect the dedicated reconciliation report before treating "
+                        "these older positions as active accounting drift."
+                    )
                 ),
                 risk_if_ignored=(
                     "Portfolio state can drift away from the trade ledger and distort both exposure and P&L."
                 ),
                 confidence_score=0.9,
                 automation_eligibility="not_eligible",
-                evidence={"mismatch_count": len(mismatches), "mismatches": mismatches[:20]},
+                evidence={
+                    "mismatch_count": len(mismatches),
+                    "active_mismatch_count": len(active_mismatches),
+                    "report_generated_at": _iso(report_generated_at),
+                    "window_start": _iso(window_start),
+                    "mismatches": mismatches[:20],
+                },
                 risk_level=severity,
             )
         ]
@@ -880,7 +1004,10 @@ def _parse_dt(value: Any) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed
     except ValueError:
         return None
 
@@ -891,6 +1018,17 @@ def _hours_between(previous: str, current: str) -> float | None:
     if previous_dt is None or current_dt is None:
         return None
     return (current_dt - previous_dt).total_seconds() / 3600
+
+
+def _is_recent_issue(
+    *,
+    latest_event_at: datetime | None,
+    report_generated_at: datetime | None,
+    threshold_hours: float,
+) -> bool:
+    if latest_event_at is None or report_generated_at is None:
+        return True
+    return (report_generated_at - latest_event_at).total_seconds() / 3600 < threshold_hours
 
 
 def _iso(value: datetime | None) -> str | None:
