@@ -118,6 +118,9 @@ class RiskEngineService:
                 rules_evaluated=["signal_size_positive"],
                 trace_id=trace_id,
                 metadata={
+                    "rejection_stage": "risk",
+                    "rejection_reason_code": "signal_size_positive",
+                    "rejection_metrics": {"suggested_size": str(signal.suggested_size)},
                     "sizing": self._json_dict(signal.reasoning_metadata.get("sizing")),
                     "fee_economics": facts.get("fee_economics", {}),
                 },
@@ -235,6 +238,16 @@ class RiskEngineService:
                 rules_evaluated=rules_evaluated,
                 trace_id=trace_id,
                 metadata={
+                    "rejection_stage": "risk",
+                    "rejection_reason_code": reject_result.rule_name,
+                    "rejection_metrics": {
+                        "suggested_size": str(signal.suggested_size),
+                        "mid_price": str(facts["mid_price"]),
+                        "spread_pct": str(facts["spread_pct"]),
+                        "estimated_fee_bps": facts["estimated_fee_bps"],
+                        "estimated_slippage_bps": facts["estimated_slippage_bps"],
+                        "token_policy_status": facts["token_policy_status"],
+                    },
                     "sizing": self._json_dict(signal.reasoning_metadata.get("sizing")),
                     "fee_economics": facts.get("fee_economics", {}),
                 },
@@ -430,9 +443,12 @@ class RiskEngineService:
         elif decision.outcome == RiskOutcome.REJECT:
             decision_kind = DecisionAuditDecision.REJECTED
         reason_code = (
-            decision.reason.value
-            if decision.reason is not None
-            else decision.outcome.value
+            decision.metadata.get("rejection_reason_code")
+            or (
+                decision.reason.value
+                if decision.reason is not None
+                else decision.outcome.value
+            )
         )
         persist_decision_audit(
             self._engine,
@@ -1170,7 +1186,20 @@ class RiskEngineService:
                     "original_size": decision.original_size,
                     "final_size": decision.final_size,
                     "trace_id": decision.trace_id,
-                    "rules_evaluated": json.dumps({"rules": decision.rules_evaluated}),
+                    "rules_evaluated": json.dumps(
+                        {
+                            "rules": decision.rules_evaluated,
+                            "rejection_stage": decision.metadata.get(
+                                "rejection_stage"
+                            ),
+                            "rejection_reason_code": decision.metadata.get(
+                                "rejection_reason_code"
+                            ),
+                            "rejection_metrics": decision.metadata.get(
+                                "rejection_metrics"
+                            ),
+                        }
+                    ),
                     "signal_payload": json.dumps(
                         signal.model_dump(mode="json"), default=str
                     ),

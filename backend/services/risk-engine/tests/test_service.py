@@ -401,6 +401,41 @@ def test_risk_records_decision_audit(tmp_path: Path):
     assert row[2] == "snapshot-1"
 
 
+def test_risk_rejections_store_exact_reason_metadata(tmp_path: Path):
+    db_path = tmp_path / "risk-rejection-metadata.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = _risk_svc(settings, _redis_with_fresh_market())
+    decision, intent = svc.evaluate(_signal(user_id, size="0"), trace_id="risk-reject")
+
+    assert decision.outcome == RiskOutcome.REJECT
+    assert intent is None
+
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        audit = conn.execute(
+            text(
+                "SELECT reason_code, reason_detail FROM strategy_decision_audits LIMIT 1"
+            )
+        ).first()
+        event = conn.execute(
+            text("SELECT rules_evaluated FROM risk_events LIMIT 1")
+        ).first()
+
+    assert audit is not None
+    assert audit[0] == "signal_size_positive"
+    assert "positive" in str(audit[1])
+    assert event is not None
+    payload = json.loads(str(event[0]))
+    assert payload["rejection_stage"] == "risk"
+    assert payload["rejection_reason_code"] == "signal_size_positive"
+    assert payload["rejection_metrics"]["suggested_size"] == "0"
+
+
 def test_risk_reduces_size_by_buying_power(tmp_path: Path):
     db_path = tmp_path / "risk3.sqlite"
     _setup_db(db_path)

@@ -1039,7 +1039,7 @@ def test_dca_scheduler_enforces_buy_interval_from_runtime_state():
         def _load_strategy_runtime_state(
             self, *, user_id: str, strategy_name: str, trading_mode: str
         ) -> dict[str, object]:
-            last_buy_at = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+            last_buy_at = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
             return {"symbols": {"BTC-USD": {"last_buy_at": last_buy_at}}}
 
         def _generate_signal(
@@ -1076,6 +1076,27 @@ def test_dca_scheduler_enforces_buy_interval_from_runtime_state():
 
     assert processed == 0
     assert runner.generated == 0
+
+
+def test_dca_scheduler_reason_reports_next_eligible_buy_time():
+    runner = StrategyRunner(engine=None, runtime_kv=DummyRuntimeKV())  # type: ignore[arg-type]
+    now = datetime(2025, 1, 5, 12, 0, tzinfo=UTC)
+    reason = runner._scheduler_reason(
+        strategy_name="dca",
+        config={"buy_interval_hours": 24},
+        trading_mode=TradingMode.PAPER,
+        symbol="BTC-USD",
+        runtime_state={
+            "symbols": {
+                "BTC-USD": {"last_buy_at": datetime(2025, 1, 5, 10, 0, tzinfo=UTC)}
+            }
+        },
+        now=now,
+    )
+
+    assert reason is not None
+    assert reason["reason_code"] == "skipped_due_to_interval"
+    assert reason["metadata"]["next_eligible_buy_time"] == "2025-01-06T10:00:00+00:00"
 
 
 def test_momentum_runner_skips_blocked_token_policy():

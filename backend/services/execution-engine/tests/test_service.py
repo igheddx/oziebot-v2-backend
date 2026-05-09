@@ -517,6 +517,21 @@ def _last_trade(db_path: Path) -> dict:
     return dict(row)
 
 
+def _last_decision_audit(db_path: Path) -> dict:
+    eng = create_engine(f"sqlite+pysqlite:///{db_path}")
+    with eng.begin() as conn:
+        row = (
+            conn.execute(
+                text(
+                    "SELECT * FROM strategy_decision_audits ORDER BY created_at DESC LIMIT 1"
+                )
+            )
+            .mappings()
+            .one()
+        )
+    return dict(row)
+
+
 def test_duplicate_intent_prevents_duplicate_order_and_fill(tmp_path: Path):
     db_path = tmp_path / "execution1.sqlite"
     _setup_db(db_path)
@@ -1067,6 +1082,123 @@ def test_execution_rejects_blocked_token_strategy_policy(tmp_path: Path):
     order = _last_order(db_path)
     assert order["failure_code"] == "token_strategy_policy"
     assert "blocked" in str(order["failure_detail"])
+    assert _count(db_path, "execution_fills") == 0
+
+
+def test_execution_rejects_buy_when_notional_rounds_to_zero(tmp_path: Path):
+    db_path = tmp_path / "execution-zero-notional.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "dca"
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER.value,
+        available_cash_cents=3_100_000,
+    )
+    service, _ = _service(db_path, redis)
+
+    result = service.process_request(
+        _request(
+            user_id,
+            tenant_id,
+            strategy_id,
+            TradingMode.PAPER,
+            quantity=Decimal("0.00000001"),
+            price_hint=Decimal("50000"),
+        )
+    )
+
+    assert result.state == ExecutionOrderStatus.FAILED
+    order = _last_order(db_path)
+    assert order["failure_code"] == "notional_rounded_to_zero"
+    assert _count(db_path, "execution_fills") == 0
+    assert _count(db_path, "execution_trades") == 0
+    assert _position(db_path) is None
+    audit = _last_decision_audit(db_path)
+    assert audit["reason_code"] == "notional_rounded_to_zero"
+
+
+def test_execution_rejects_buy_when_buying_power_is_insufficient(tmp_path: Path):
+    db_path = tmp_path / "execution-insufficient-allocation.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "dca"
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER.value,
+        available_cash_cents=50,
+    )
+    service, _ = _service(db_path, redis)
+
+    result = service.process_request(
+        _request(
+            user_id,
+            tenant_id,
+            strategy_id,
+            TradingMode.PAPER,
+            quantity=Decimal("0.01"),
+            price_hint=Decimal("50000"),
+        )
+    )
+
+    assert result.state == ExecutionOrderStatus.FAILED
+    order = _last_order(db_path)
+    assert order["failure_code"] == "insufficient_allocation"
+    assert _count(db_path, "execution_fills") == 0
+    bucket = _bucket(db_path, user_id, strategy_id, TradingMode.PAPER.value)
+    assert int(bucket["available_cash_cents"]) == 50
+
+
+def test_execution_rejects_quantity_precision_beyond_coinbase_limit(tmp_path: Path):
+    db_path = tmp_path / "execution-precision.sqlite"
+    _setup_db(db_path)
+    redis = FakeRedis()
+    redis.set(
+        "oziebot:md:bbo:BTC-USD", '{"best_bid_price":"49990","best_ask_price":"50000"}'
+    )
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    strategy_id = "dca"
+    _seed_bucket(
+        db_path,
+        user_id,
+        tenant_id,
+        strategy_id,
+        TradingMode.PAPER.value,
+        available_cash_cents=3_100_000,
+    )
+    service, _ = _service(db_path, redis)
+
+    result = service.process_request(
+        _request(
+            user_id,
+            tenant_id,
+            strategy_id,
+            TradingMode.PAPER,
+            quantity=Decimal("0.123456789"),
+            price_hint=Decimal("50000"),
+        )
+    )
+
+    assert result.state == ExecutionOrderStatus.FAILED
+    order = _last_order(db_path)
+    assert order["failure_code"] == "quantity_precision_exceeded"
     assert _count(db_path, "execution_fills") == 0
 
 

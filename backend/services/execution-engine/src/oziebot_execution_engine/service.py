@@ -48,6 +48,9 @@ from oziebot_execution_engine.state_machine import ensure_transition
 
 log = logging.getLogger("execution-engine.service")
 
+MAX_COINBASE_DECIMAL_PLACES = 8
+COINBASE_MIN_NOTIONAL_USD = Decimal("1.00")
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -69,6 +72,12 @@ class ProcessResult:
     order_id: str
     state: ExecutionOrderStatus
     duplicated: bool
+
+
+@dataclass(frozen=True)
+class ExecutionValidationFailure:
+    code: str
+    detail: str
 
 
 class ExecutionService:
@@ -158,6 +167,10 @@ class ExecutionService:
         original_quantity = request.quantity
         request, policy_failure = self._apply_token_strategy_policy(request)
         reserve_cents = self._estimate_reserve_cents(request)
+        validation_failure = self._validate_request(
+            request=request,
+            reserve_cents=reserve_cents,
+        )
         now = _utcnow()
         order_id = str(uuid.uuid4())
         insert_stmt = text(
@@ -203,7 +216,7 @@ class ExecutionService:
                         "venue": request.venue.value,
                         "state": (
                             ExecutionOrderStatus.FAILED.value
-                            if policy_failure is not None
+                            if policy_failure is not None or validation_failure is not None
                             else ExecutionOrderStatus.CREATED.value
                         ),
                         "quantity": str(request.quantity),
@@ -225,10 +238,20 @@ class ExecutionService:
                         "fallback_triggered": False,
                         "idempotency_key": request.idempotency_key,
                         "client_order_id": request.client_order_id,
-                        "failure_code": "token_strategy_policy"
-                        if policy_failure is not None
-                        else None,
-                        "failure_detail": policy_failure,
+                        "failure_code": (
+                            "token_strategy_policy"
+                            if policy_failure is not None
+                            else validation_failure.code
+                            if validation_failure is not None
+                            else None
+                        ),
+                        "failure_detail": (
+                            policy_failure
+                            if policy_failure is not None
+                            else validation_failure.detail
+                            if validation_failure is not None
+                            else None
+                        ),
                         "trace_id": request.trace_id,
                         "intent_payload": json.dumps(
                             request.intent_payload, default=str
@@ -283,6 +306,33 @@ class ExecutionService:
                 ExecutionOrderStatus.FAILED,
                 detail=policy_failure,
                 payload={"failure_code": "token_strategy_policy"},
+            )
+            return ProcessResult(
+                order_id=order_id,
+                state=ExecutionOrderStatus.FAILED,
+                duplicated=False,
+            )
+
+        if validation_failure is not None:
+            self._persist_decision_audit_record(
+                request=request,
+                decision=DecisionAuditDecision.REJECTED,
+                reason_code=validation_failure.code,
+                reason_detail=validation_failure.detail,
+                size_before=original_quantity,
+                size_after=Decimal("0"),
+                created_at=now,
+            )
+            self._record_metric(
+                rejected=True,
+                rejection_reason=validation_failure.code,
+            )
+            self._emit_event(
+                order_id,
+                request,
+                ExecutionOrderStatus.FAILED,
+                detail=validation_failure.detail,
+                payload={"failure_code": validation_failure.code},
             )
             return ProcessResult(
                 order_id=order_id,
@@ -655,6 +705,128 @@ class ExecutionService:
         if price <= 0:
             return 0
         return _money_to_cents(request.quantity * price)
+
+    def _validate_request(
+        self,
+        *,
+        request: ExecutionRequest,
+        reserve_cents: int,
+    ) -> ExecutionValidationFailure | None:
+        if not request.quantity.is_finite():
+            return ExecutionValidationFailure(
+                code="non_finite_quantity",
+                detail="Execution rejected: quantity must be finite",
+            )
+        if request.quantity <= 0:
+            return ExecutionValidationFailure(
+                code="invalid_quantity",
+                detail="Execution rejected: quantity must be greater than zero",
+            )
+        if self._decimal_places(request.quantity) > MAX_COINBASE_DECIMAL_PLACES:
+            return ExecutionValidationFailure(
+                code="quantity_precision_exceeded",
+                detail=(
+                    "Execution rejected: quantity precision exceeds Coinbase-supported "
+                    f"{MAX_COINBASE_DECIMAL_PLACES} decimal places"
+                ),
+            )
+        if request.side != Side.BUY:
+            return None
+
+        price = request.price_hint
+        if price is None:
+            return ExecutionValidationFailure(
+                code="missing_price_hint",
+                detail="Execution rejected: missing price hint for buy execution",
+            )
+        if not price.is_finite():
+            return ExecutionValidationFailure(
+                code="non_finite_price_hint",
+                detail="Execution rejected: price hint must be finite",
+            )
+        if price <= 0:
+            return ExecutionValidationFailure(
+                code="invalid_price_hint",
+                detail="Execution rejected: price hint must be greater than zero",
+            )
+
+        requested_notional = request.quantity * price
+        if not requested_notional.is_finite():
+            return ExecutionValidationFailure(
+                code="non_finite_notional",
+                detail="Execution rejected: requested notional must be finite",
+            )
+        if requested_notional <= 0:
+            return ExecutionValidationFailure(
+                code="invalid_notional",
+                detail="Execution rejected: requested notional must be greater than zero",
+            )
+        if reserve_cents <= 0:
+            return ExecutionValidationFailure(
+                code="notional_rounded_to_zero",
+                detail=(
+                    "Execution rejected: requested notional rounded to zero cents after "
+                    "precision checks"
+                ),
+            )
+        if reserve_cents < _money_to_cents(COINBASE_MIN_NOTIONAL_USD):
+            return ExecutionValidationFailure(
+                code="below_minimum_notional",
+                detail=(
+                    "Execution rejected: requested notional is below Coinbase minimum "
+                    f"order size of ${COINBASE_MIN_NOTIONAL_USD}"
+                ),
+            )
+        if not self._has_sufficient_buying_power(request, reserve_cents):
+            return ExecutionValidationFailure(
+                code="insufficient_allocation",
+                detail=(
+                    "Execution rejected: insufficient available cash or buying power "
+                    "for requested notional"
+                ),
+            )
+        return None
+
+    @staticmethod
+    def _decimal_places(value: Decimal) -> int:
+        exponent = value.normalize().as_tuple().exponent
+        return 0 if exponent >= 0 else -exponent
+
+    def _has_sufficient_buying_power(
+        self, request: ExecutionRequest, reserve_cents: int
+    ) -> bool:
+        bucket = self._load_capital_bucket(request)
+        if bucket is None:
+            return False
+        return reserve_cents <= min(
+            int(bucket["available_cash_cents"]),
+            int(bucket["available_buying_power_cents"]),
+        )
+
+    def _load_capital_bucket(self, request: ExecutionRequest) -> dict[str, Any] | None:
+        with self._engine.begin() as conn:
+            row = (
+                conn.execute(
+                    text(
+                        """
+                        SELECT available_cash_cents, reserved_cash_cents, available_buying_power_cents
+                        FROM strategy_capital_buckets
+                        WHERE user_id = :user_id
+                          AND strategy_id = :strategy_id
+                          AND trading_mode = :trading_mode
+                        LIMIT 1
+                        """
+                    ),
+                    {
+                        "user_id": _to_hex(request.user_id),
+                        "strategy_id": request.strategy_id,
+                        "trading_mode": request.trading_mode.value,
+                    },
+                )
+                .mappings()
+                .first()
+            )
+        return dict(row) if row is not None else None
 
     def _apply_submission(
         self,

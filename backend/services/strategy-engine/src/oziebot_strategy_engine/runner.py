@@ -288,12 +288,20 @@ class StrategyRunner:
                             now=now,
                         )
                         if schedule_reason is not None:
+                            reason_code = str(
+                                schedule_reason.get("reason_code")
+                                or "scheduled_out"
+                            )
+                            reason_detail = str(
+                                schedule_reason.get("reason_detail")
+                                or "Signal scheduled out before strategy evaluation"
+                            )
                             self._persist_decision_audit_record(
                                 signal_snapshot_id=None,
                                 stage=DecisionAuditStage.SUPPRESSION,
                                 decision=DecisionAuditDecision.REJECTED,
-                                reason_code=schedule_reason,
-                                reason_detail="Signal scheduled out before strategy evaluation",
+                                reason_code=reason_code,
+                                reason_detail=reason_detail,
                                 size_before=None,
                                 size_after=None,
                                 created_at=now,
@@ -308,8 +316,9 @@ class StrategyRunner:
                                 trace_id=trace_id,
                                 metadata={
                                     "suppressed": True,
-                                    "suppression_reason": schedule_reason,
+                                    "suppression_reason": reason_code,
                                     "scheduler": True,
+                                    **dict(schedule_reason.get("metadata") or {}),
                                 },
                                 started_at=now,
                                 completed_at=datetime.now(UTC),
@@ -320,9 +329,10 @@ class StrategyRunner:
                                 symbol=symbol,
                                 trading_mode=mode,
                                 signal_generated=False,
-                                rejection_reason=schedule_reason,
+                                rejection_reason=reason_code,
                                 confidence_score=None,
                                 final_decision="scheduled_out",
+                                extra=dict(schedule_reason.get("metadata") or {}),
                             )
                             continue
 
@@ -1672,7 +1682,7 @@ class StrategyRunner:
         symbol: str,
         runtime_state: dict[str, Any],
         now: datetime,
-    ) -> str | None:
+    ) -> dict[str, Any] | None:
         if strategy_name != "dca":
             return None
 
@@ -1689,7 +1699,16 @@ class StrategyRunner:
         interval_hours = int(config.get("buy_interval_hours", 24) or 24)
         next_due_at = last_buy_at + timedelta(hours=interval_hours)
         if now < next_due_at:
-            return f"dca interval active until {next_due_at.isoformat()}"
+            return {
+                "reason_code": "skipped_due_to_interval",
+                "reason_detail": (
+                    f"DCA buy interval active until {next_due_at.isoformat()}"
+                ),
+                "metadata": {
+                    "last_buy_at": last_buy_at.isoformat(),
+                    "next_eligible_buy_time": next_due_at.isoformat(),
+                },
+            }
         return None
 
     def _load_token_strategy_policy(
@@ -1898,7 +1917,7 @@ class StrategyRunner:
             buy_interval_hours = int(
                 adjusted_config.get("buy_interval_hours", 24) or 24
             )
-            adjusted_config["buy_interval_hours"] = min(buy_interval_hours, 1)
+            adjusted_config["buy_interval_hours"] = max(buy_interval_hours, 1)
 
         return adjusted_config, adjusted_signal_rules, adjusted_risk_caps
 
