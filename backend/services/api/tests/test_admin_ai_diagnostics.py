@@ -165,8 +165,17 @@ def _raw_snapshot() -> dict:
         "signal_funnel": {
             "signals_evaluated": 20,
             "signals_emitted": 12,
+            "non_hold_signals_emitted": 10,
             "signals_rejected": 10,
             "trades_executed": 1,
+            "signal_actions": {
+                "buy": 7,
+                "sell": 1,
+                "close": 2,
+                "hold": 2,
+                "other": 0,
+                "non_hold": 10,
+            },
             "rejection_reasons": {
                 "confidence": 1,
                 "volume": 1,
@@ -178,8 +187,77 @@ def _raw_snapshot() -> dict:
                 "other": 5,
             },
             "data_sources": {},
+            "strategy_breakdown": {
+                "momentum": {
+                    "signals_evaluated": 8,
+                    "signals_rejected": 0,
+                    "signal_actions": {
+                        "buy": 0,
+                        "sell": 0,
+                        "close": 0,
+                        "hold": 8,
+                        "other": 0,
+                        "non_hold": 0,
+                    },
+                    "rejection_reasons": {
+                        "confidence": 0,
+                        "volume": 0,
+                        "allocation": 0,
+                        "risk_engine": 0,
+                        "token_strategy_policy": 0,
+                        "cooldown": 0,
+                        "liquidity_hours": 0,
+                        "other": 0,
+                    },
+                    "top_hold_reasons": [
+                        {
+                            "reason": "Neutral momentum=1.1% (threshold ±2.0%)",
+                            "count": 5,
+                        },
+                        {
+                            "reason": "Volume filter blocked entry: latest=80 avg=100 min_multiplier=1.20",
+                            "count": 3,
+                        },
+                    ],
+                    "top_non_hold_reasons": [],
+                    "top_rejection_reasons": [],
+                },
+                "day_trading": {
+                    "signals_evaluated": 6,
+                    "signals_rejected": 4,
+                    "signal_actions": {
+                        "buy": 1,
+                        "sell": 0,
+                        "close": 0,
+                        "hold": 1,
+                        "other": 0,
+                        "non_hold": 1,
+                    },
+                    "rejection_reasons": {
+                        "confidence": 0,
+                        "volume": 1,
+                        "allocation": 1,
+                        "risk_engine": 1,
+                        "token_strategy_policy": 1,
+                        "cooldown": 0,
+                        "liquidity_hours": 0,
+                        "other": 0,
+                    },
+                    "top_hold_reasons": [
+                        {
+                            "reason": "Volume filter blocked entry: latest=90 avg=100 min_multiplier=1.80",
+                            "count": 1,
+                        }
+                    ],
+                    "top_non_hold_reasons": [{"reason": "Breakout confirmed", "count": 1}],
+                    "top_rejection_reasons": [
+                        {"reason": "allocation", "count": 1},
+                        {"reason": "risk_engine", "count": 1},
+                    ],
+                },
+            },
             "unavailable_metrics": [],
-            "note": None,
+            "note": "signals_emitted counts stored strategy signal records and may include HOLD decisions; use non_hold_signals_emitted and signal_actions for actionable emissions.",
         },
         "capital_utilization": {
             "total_account_value": 1000.0,
@@ -274,6 +352,35 @@ def test_rule_based_provider_generates_expected_findings():
     assert "token_policy" in categories
     assert "position_reconciliation" in categories
     assert "capital_utilization" in categories
+
+
+def test_rule_based_provider_surfaces_hold_and_rejection_context_for_inert_strategies():
+    provider = RuleBasedDiagnosticProvider()
+    snapshot = DiagnosticSnapshot(
+        id=uuid.uuid4(),
+        tenant_id=None,
+        generated_at=datetime.now(UTC),
+        trading_mode=None,
+        strategy_filter=None,
+        token_filter=None,
+        days_filter=7,
+        raw_json=_raw_snapshot(),
+        created_at=datetime.now(UTC),
+    )
+
+    result = provider.review_diagnostics(snapshot, context={})
+
+    finding = next(
+        item
+        for item in result["findings"]
+        if item["strategy"] == "momentum" and item["category"] == "signal_funnel"
+    )
+    assert "8 HOLD decisions" in finding["finding_detail"]
+    assert "Top HOLD reasons" in finding["finding_detail"]
+    assert (
+        finding["evidence_json"]["strategy_signal_breakdown"]["top_hold_reasons"][0]["reason"]
+        == "Neutral momentum=1.1% (threshold ±2.0%)"
+    )
 
 
 def test_rule_based_provider_downgrades_stale_dca_interval_violations():

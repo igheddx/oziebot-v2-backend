@@ -764,11 +764,67 @@ def _build_signal_funnel(
         ),
     )
 
+    signal_actions: Counter[str] = Counter()
     rejection_reasons: Counter[str] = Counter()
+    strategy_breakdown: dict[str, dict[str, Any]] = defaultdict(_empty_strategy_breakdown)
+
+    evaluated_rows = db.execute(
+        _apply_signal_filters(
+            select(
+                StrategyRun.strategy_name,
+                func.count(),
+            )
+            .select_from(StrategyRun)
+            .group_by(StrategyRun.strategy_name),
+            filters=filters,
+            window_start=window_start,
+            token_column=StrategyRun.symbol,
+            strategy_column=StrategyRun.strategy_name,
+            mode_column=StrategyRun.trading_mode,
+            timestamp_column=StrategyRun.started_at,
+        )
+    ).all()
+    for strategy_name, count in evaluated_rows:
+        bucket = strategy_breakdown[str(strategy_name)]
+        bucket["signals_evaluated"] = int(count or 0)
+
+    signal_rows = db.execute(
+        _apply_signal_filters(
+            select(
+                StrategySignalRecord.strategy_name,
+                StrategySignalRecord.action,
+                StrategySignalRecord.reasoning_metadata["reason"].as_string(),
+                func.count(),
+            )
+            .select_from(StrategySignalRecord)
+            .group_by(
+                StrategySignalRecord.strategy_name,
+                StrategySignalRecord.action,
+                StrategySignalRecord.reasoning_metadata["reason"].as_string(),
+            ),
+            filters=filters,
+            window_start=window_start,
+            token_column=StrategySignalRecord.symbol,
+            strategy_column=StrategySignalRecord.strategy_name,
+            mode_column=StrategySignalRecord.trading_mode,
+            timestamp_column=StrategySignalRecord.timestamp,
+        )
+    ).all()
+    for strategy_name, action, reason, count in signal_rows:
+        bucket = strategy_breakdown[str(strategy_name)]
+        action_name = _bucket_signal_action(action)
+        bucket["signal_actions"][action_name] += int(count or 0)
+        signal_actions[action_name] += int(count or 0)
+        if action_name == "hold":
+            bucket["hold_reason_counts"][_reason_label(reason)] += int(count or 0)
+        else:
+            bucket["non_hold_reason_counts"][_reason_label(reason)] += int(count or 0)
+
     suppressed_count = 0
     suppressed_rows = db.execute(
         _apply_signal_filters(
             select(
+                StrategyRun.strategy_name,
                 StrategyRun.run_metadata["suppression_reason"].as_string(),
             )
             .select_from(StrategyRun)
@@ -781,14 +837,16 @@ def _build_signal_funnel(
             timestamp_column=StrategyRun.started_at,
         )
     ).all()
-    for (reason,) in suppressed_rows:
+    for strategy_name, reason in suppressed_rows:
         suppressed_count += 1
-        rejection_reasons[_bucket_rejection_reason(reason)] += 1
+        bucket_reason = _bucket_rejection_reason(reason)
+        rejection_reasons[bucket_reason] += 1
+        strategy_breakdown[str(strategy_name)]["rejection_reasons"][bucket_reason] += 1
 
     risk_rejects_count = 0
     risk_reject_rows = db.execute(
         _apply_signal_filters(
-            select(RiskEvent.reason, RiskEvent.detail)
+            select(RiskEvent.strategy_name, RiskEvent.reason, RiskEvent.detail)
             .select_from(RiskEvent)
             .where(RiskEvent.outcome.ilike("reject%")),
             filters=filters,
@@ -799,14 +857,21 @@ def _build_signal_funnel(
             timestamp_column=RiskEvent.created_at,
         )
     ).all()
-    for reason, detail in risk_reject_rows:
+    for strategy_name, reason, detail in risk_reject_rows:
         risk_rejects_count += 1
-        rejection_reasons[_bucket_rejection_reason(reason or detail)] += 1
+        bucket_reason = _bucket_rejection_reason(reason or detail)
+        rejection_reasons[bucket_reason] += 1
+        strategy_breakdown[str(strategy_name)]["rejection_reasons"][bucket_reason] += 1
 
     failed_orders_count = 0
     failed_order_rows = db.execute(
         _apply_signal_filters(
-            select(ExecutionOrder.failure_code, ExecutionOrder.failure_detail, ExecutionOrder.state)
+            select(
+                ExecutionOrder.strategy_id,
+                ExecutionOrder.failure_code,
+                ExecutionOrder.failure_detail,
+                ExecutionOrder.state,
+            )
             .select_from(ExecutionOrder)
             .where(ExecutionOrder.state.in_(("failed", "cancelled", "rejected"))),
             filters=filters,
@@ -817,9 +882,11 @@ def _build_signal_funnel(
             timestamp_column=ExecutionOrder.created_at,
         )
     ).all()
-    for failure_code, failure_detail, state in failed_order_rows:
+    for strategy_name, failure_code, failure_detail, state in failed_order_rows:
         failed_orders_count += 1
-        rejection_reasons[_bucket_rejection_reason(failure_code or failure_detail or state)] += 1
+        bucket_reason = _bucket_rejection_reason(failure_code or failure_detail or state)
+        rejection_reasons[bucket_reason] += 1
+        strategy_breakdown[str(strategy_name)]["rejection_reasons"][bucket_reason] += 1
 
     signals_evaluated: int | None
     if runs_count:
@@ -846,6 +913,9 @@ def _build_signal_funnel(
     else:
         signals_rejected = 0
 
+    for bucket in strategy_breakdown.values():
+        bucket["signals_rejected"] = int(sum(bucket["rejection_reasons"].values()))
+
     unavailable_metrics = [
         metric
         for metric, value in (
@@ -856,11 +926,27 @@ def _build_signal_funnel(
         if value is None
     ]
 
+    signal_actions_payload = _serialize_signal_actions(signal_actions)
+    strategy_breakdown_payload = {
+        strategy: {
+            "signals_evaluated": bucket["signals_evaluated"],
+            "signals_rejected": bucket["signals_rejected"],
+            "signal_actions": _serialize_signal_actions(bucket["signal_actions"]),
+            "rejection_reasons": _serialize_rejection_reasons(bucket["rejection_reasons"]),
+            "top_hold_reasons": _top_counter_rows(bucket["hold_reason_counts"]),
+            "top_non_hold_reasons": _top_counter_rows(bucket["non_hold_reason_counts"]),
+            "top_rejection_reasons": _top_counter_rows(bucket["rejection_reasons"]),
+        }
+        for strategy, bucket in sorted(strategy_breakdown.items())
+    }
+
     return {
         "signals_evaluated": signals_evaluated,
         "signals_emitted": signals_emitted,
         "signals_rejected": signals_rejected,
+        "non_hold_signals_emitted": signal_actions_payload["non_hold"],
         "trades_executed": trade_count,
+        "signal_actions": signal_actions_payload,
         "rejection_reasons": {
             "confidence": _counter_or_none(rejection_reasons, "confidence", signals_rejected),
             "volume": _counter_or_none(rejection_reasons, "volume", signals_rejected),
@@ -881,9 +967,17 @@ def _build_signal_funnel(
             "signals_rejected": "strategy_runs.run_metadata + risk_events + execution_orders",
             "trades_executed": "trade_outcome_features (closed trade outcomes)",
         },
+        "strategy_breakdown": strategy_breakdown_payload,
         "unavailable_metrics": unavailable_metrics,
         "note": (
-            "Signals were executed or completed, but earlier-stage telemetry is unavailable for some metrics."
+            "signals_emitted counts stored strategy signal records and may include HOLD decisions; "
+            "use non_hold_signals_emitted and signal_actions for actionable emissions."
+            if not unavailable_metrics
+            else "Signals were executed or completed, but earlier-stage telemetry is unavailable for some metrics."
+        ),
+        "telemetry_note": (
+            "signals_emitted counts stored strategy signal records and may include HOLD decisions; "
+            "use non_hold_signals_emitted and signal_actions for actionable emissions."
             if unavailable_metrics
             else None
         ),
@@ -1117,6 +1211,58 @@ def _bucket_rejection_reason(reason: str | None) -> str:
     if "risk" in text or "fee_economics" in text:
         return "risk_engine"
     return "other"
+
+
+def _bucket_signal_action(action: str | None) -> str:
+    normalized = (action or "").strip().lower()
+    if normalized in {"buy", "sell", "close", "hold"}:
+        return normalized
+    return "other"
+
+
+def _reason_label(reason: str | None) -> str:
+    value = (reason or "").strip()
+    return value or "unspecified"
+
+
+def _empty_strategy_breakdown() -> dict[str, Any]:
+    return {
+        "signals_evaluated": 0,
+        "signals_rejected": 0,
+        "signal_actions": Counter(),
+        "rejection_reasons": Counter(),
+        "hold_reason_counts": Counter(),
+        "non_hold_reason_counts": Counter(),
+    }
+
+
+def _serialize_signal_actions(counter: Counter[str]) -> dict[str, int]:
+    counts = {
+        "buy": int(counter.get("buy", 0)),
+        "sell": int(counter.get("sell", 0)),
+        "close": int(counter.get("close", 0)),
+        "hold": int(counter.get("hold", 0)),
+        "other": int(counter.get("other", 0)),
+    }
+    counts["non_hold"] = counts["buy"] + counts["sell"] + counts["close"] + counts["other"]
+    return counts
+
+
+def _serialize_rejection_reasons(counter: Counter[str]) -> dict[str, int]:
+    return {
+        "confidence": int(counter.get("confidence", 0)),
+        "volume": int(counter.get("volume", 0)),
+        "allocation": int(counter.get("allocation", 0)),
+        "risk_engine": int(counter.get("risk_engine", 0)),
+        "token_strategy_policy": int(counter.get("token_strategy_policy", 0)),
+        "cooldown": int(counter.get("cooldown", 0)),
+        "liquidity_hours": int(counter.get("liquidity_hours", 0)),
+        "other": int(counter.get("other", 0)),
+    }
+
+
+def _top_counter_rows(counter: Counter[str], *, limit: int = 3) -> list[dict[str, Any]]:
+    return [{"reason": reason, "count": int(count)} for reason, count in counter.most_common(limit)]
 
 
 def _counter_or_none(counter: Counter[str], key: str, signals_rejected: int | None) -> int | None:

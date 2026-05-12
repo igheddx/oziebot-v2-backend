@@ -325,6 +325,8 @@ class RuleBasedDiagnosticProvider:
     def _check_strategy_execution_gap(self, report: dict[str, Any]) -> list[dict[str, Any]]:
         active_config = report.get("active_strategy_config") or {}
         matrix = active_config.get("token_strategy_policy_matrix") or {}
+        signal_funnel = report.get("signal_funnel") or {}
+        strategy_breakdown = signal_funnel.get("strategy_breakdown") or {}
         execution_summary = {
             row.get("strategy"): int(row.get("total_executions") or 0)
             for row in (report.get("execution_activity") or {}).get("strategy_summary", [])
@@ -339,6 +341,22 @@ class RuleBasedDiagnosticProvider:
             ]
             if not mapped_tokens or execution_summary.get(strategy, 0) > 0:
                 continue
+            strategy_funnel = strategy_breakdown.get(strategy) or {}
+            action_counts = strategy_funnel.get("signal_actions") or {}
+            hold_count = int(action_counts.get("hold") or 0)
+            non_hold_count = int(action_counts.get("non_hold") or 0)
+            signals_evaluated = strategy_funnel.get("signals_evaluated")
+            signals_rejected = int(strategy_funnel.get("signals_rejected") or 0)
+            top_hold_reasons = strategy_funnel.get("top_hold_reasons") or []
+            top_rejection_reasons = strategy_funnel.get("top_rejection_reasons") or []
+            diagnostics_summary = _strategy_gap_summary(
+                signals_evaluated=signals_evaluated,
+                hold_count=hold_count,
+                non_hold_count=non_hold_count,
+                signals_rejected=signals_rejected,
+                top_hold_reasons=top_hold_reasons,
+                top_rejection_reasons=top_rejection_reasons,
+            )
             findings.append(
                 _finding(
                     severity="warning",
@@ -348,11 +366,12 @@ class RuleBasedDiagnosticProvider:
                     title=f"{strategy.replace('_', ' ').title()} has no executions",
                     detail=(
                         f"{strategy.replace('_', ' ').title()} is mapped to {len(mapped_tokens)} non-blocked "
-                        "tokens in the active policy matrix, but the diagnostics window shows zero executions."
+                        "tokens in the active policy matrix, but the diagnostics window shows zero executions. "
+                        f"{diagnostics_summary}"
                     ),
                     recommendation=(
-                        "Compare emitted signals, risk rejects, and lifecycle failures for this strategy to find "
-                        "the stage where it stops converting into orders."
+                        "Use the strategy signal breakdown to compare HOLD decisions, non-HOLD emissions, and "
+                        "rejection reasons before changing any parameters."
                     ),
                     risk_if_ignored=(
                         "Capital allocation and strategy health can look normal while a strategy is effectively inert."
@@ -363,6 +382,7 @@ class RuleBasedDiagnosticProvider:
                         "mapped_token_count": len(mapped_tokens),
                         "mapped_tokens": mapped_tokens[:20],
                         "total_executions": 0,
+                        "strategy_signal_breakdown": strategy_funnel,
                     },
                     affected_strategy=strategy,
                     risk_level="warning",
@@ -372,7 +392,11 @@ class RuleBasedDiagnosticProvider:
 
     def _check_closed_trade_gap(self, report: dict[str, Any]) -> list[dict[str, Any]]:
         signal_funnel = report.get("signal_funnel") or {}
-        signals_emitted = int(signal_funnel.get("signals_emitted") or 0)
+        signals_emitted = int(
+            signal_funnel.get("non_hold_signals_emitted")
+            or signal_funnel.get("signals_emitted")
+            or 0
+        )
         trade_count = int(report.get("trade_count") or 0)
         if signals_emitted < 5 or trade_count > 1:
             return []
@@ -384,8 +408,9 @@ class RuleBasedDiagnosticProvider:
                 token=None,
                 title="Signals are not converting into closed trades",
                 detail=(
-                    f"The window shows {signals_emitted} emitted signals but only {trade_count} closed trade "
-                    "records, which suggests strategies are failing before exit completion."
+                    f"The window shows {signals_emitted} actionable (non-HOLD) emitted signals but only "
+                    f"{trade_count} closed trade records, which suggests strategies are failing before "
+                    "exit completion."
                 ),
                 recommendation=(
                     "Inspect lifecycle traces for execution failures, missing exits, and positions that remain open "
@@ -396,7 +421,10 @@ class RuleBasedDiagnosticProvider:
                 ),
                 confidence_score=0.84,
                 automation_eligibility="future_human_approval_required",
-                evidence={"signals_emitted": signals_emitted, "closed_trade_count": trade_count},
+                evidence={
+                    "non_hold_signals_emitted": signals_emitted,
+                    "closed_trade_count": trade_count,
+                },
                 risk_level="warning",
             )
         ]
@@ -989,6 +1017,49 @@ def _finding(
         "current_value_json": None,
         "proposed_value_json": None,
     }
+
+
+def _strategy_gap_summary(
+    *,
+    signals_evaluated: Any,
+    hold_count: int,
+    non_hold_count: int,
+    signals_rejected: int,
+    top_hold_reasons: list[dict[str, Any]],
+    top_rejection_reasons: list[dict[str, Any]],
+) -> str:
+    parts: list[str] = []
+    if signals_evaluated is not None:
+        parts.append(f"The strategy evaluated {int(signals_evaluated)} runs")
+    if hold_count > 0 or non_hold_count > 0:
+        parts.append(
+            f"recorded {hold_count} HOLD decisions and {non_hold_count} actionable signals"
+        )
+    if signals_rejected > 0:
+        parts.append(f"and hit {signals_rejected} rejected attempts")
+    summary = ", ".join(parts).strip()
+    if summary:
+        summary = summary[0].upper() + summary[1:] + "."
+
+    hold_summary = _format_top_reason_summary(top_hold_reasons)
+    rejection_summary = _format_top_reason_summary(top_rejection_reasons)
+    extras: list[str] = []
+    if hold_summary:
+        extras.append(f"Top HOLD reasons: {hold_summary}.")
+    if rejection_summary:
+        extras.append(f"Top rejection reasons: {rejection_summary}.")
+    return " ".join(part for part in [summary, *extras] if part).strip()
+
+
+def _format_top_reason_summary(rows: list[dict[str, Any]]) -> str:
+    items: list[str] = []
+    for row in rows[:2]:
+        reason = (row.get("reason") or "").strip()
+        if not reason:
+            continue
+        count = int(row.get("count") or 0)
+        items.append(f"{reason} ({count})")
+    return "; ".join(items)
 
 
 def _safe_float(value: Any) -> float | None:

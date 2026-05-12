@@ -71,6 +71,7 @@ def _seed_diagnostics_data(db_session: Session, user: User, membership: TenantMe
     aero_snapshot_id = uuid.uuid4()
     btc_run_id = uuid.uuid4()
     aero_run_id = uuid.uuid4()
+    sol_hold_run_id = uuid.uuid4()
     btc_order_id = uuid.uuid4()
     aero_order_id = uuid.uuid4()
     failed_order_id = uuid.uuid4()
@@ -143,6 +144,18 @@ def _seed_diagnostics_data(db_session: Session, user: User, membership: TenantMe
                 started_at=now - timedelta(minutes=45),
                 completed_at=now - timedelta(minutes=45),
             ),
+            StrategyRun(
+                run_id=sol_hold_run_id,
+                user_id=user.id,
+                strategy_name="day_trading",
+                symbol="SOL-USD",
+                trading_mode="paper",
+                status="completed",
+                trace_id="sol-hold",
+                run_metadata={"confidence": 0.61},
+                started_at=now - timedelta(minutes=30),
+                completed_at=now - timedelta(minutes=30),
+            ),
             StrategySignalRecord(
                 signal_id=uuid.uuid4(),
                 run_id=btc_run_id,
@@ -168,6 +181,21 @@ def _seed_diagnostics_data(db_session: Session, user: User, membership: TenantMe
                 reasoning_metadata={"reason": "breakout"},
                 trading_mode="live",
                 timestamp=now - timedelta(minutes=50),
+            ),
+            StrategySignalRecord(
+                signal_id=uuid.uuid4(),
+                run_id=sol_hold_run_id,
+                user_id=user.id,
+                strategy_name="day_trading",
+                symbol="SOL-USD",
+                action="hold",
+                confidence=0.61,
+                suggested_size="0",
+                reasoning_metadata={
+                    "reason": "Volume filter blocked entry: latest=80 avg=100 min_multiplier=1.80"
+                },
+                trading_mode="paper",
+                timestamp=now - timedelta(minutes=30),
             ),
             RiskEvent(
                 id=uuid.uuid4(),
@@ -629,12 +657,24 @@ def test_admin_trading_diagnostics_returns_consistent_funnel_and_respects_filter
     assert payload["open_positions"]["position_count"] == 1
     assert payload["open_positions"]["positions"][0]["token"] == "ETH-USD"
     assert payload["signal_funnel"]["trades_executed"] == payload["trade_count"]
-    assert payload["signal_funnel"]["signals_evaluated"] == 2
-    assert payload["signal_funnel"]["signals_emitted"] == 2
+    assert payload["signal_funnel"]["signals_evaluated"] == 3
+    assert payload["signal_funnel"]["signals_emitted"] == 3
+    assert payload["signal_funnel"]["non_hold_signals_emitted"] == 2
     assert payload["signal_funnel"]["signals_rejected"] == 3
+    assert payload["signal_funnel"]["signal_actions"]["buy"] == 2
+    assert payload["signal_funnel"]["signal_actions"]["hold"] == 1
     assert payload["signal_funnel"]["rejection_reasons"]["token_strategy_policy"] == 1
     assert payload["signal_funnel"]["rejection_reasons"]["allocation"] == 1
     assert payload["signal_funnel"]["rejection_reasons"]["confidence"] == 1
+    assert (
+        payload["signal_funnel"]["strategy_breakdown"]["day_trading"]["signal_actions"]["hold"] == 1
+    )
+    assert (
+        payload["signal_funnel"]["strategy_breakdown"]["day_trading"]["top_hold_reasons"][0][
+            "reason"
+        ]
+        == "Volume filter blocked entry: latest=80 avg=100 min_multiplier=1.80"
+    )
     assert payload["capital_utilization"]["total_account_value"] is not None
     assert (
         payload["active_strategy_config"]["momentum_config"]["risk_caps"]["max_position_usd"] == 300

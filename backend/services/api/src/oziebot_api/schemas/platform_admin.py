@@ -287,11 +287,15 @@ class TradingDiagnosticsSignalFunnel(BaseModel):
     signals_evaluated: int | None = None
     signals_emitted: int | None = None
     signals_rejected: int | None = None
+    non_hold_signals_emitted: int | None = None
     trades_executed: int
+    signal_actions: dict[str, int] = Field(default_factory=dict)
     rejection_reasons: TradingDiagnosticsRejectionReasons
     data_sources: dict[str, str] = Field(default_factory=dict)
+    strategy_breakdown: dict[str, dict[str, Any]] = Field(default_factory=dict)
     unavailable_metrics: list[str] = Field(default_factory=list)
     note: str | None = None
+    telemetry_note: str | None = None
 
 
 class TradingDiagnosticsCapitalUtilization(BaseModel):
