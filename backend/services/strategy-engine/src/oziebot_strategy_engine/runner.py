@@ -2744,13 +2744,32 @@ class StrategyRunner:
         history_raw = self._kv.lrange_strings(
             f"oziebot:md:candles:{self._candle_granularity_sec}:{symbol}", 0, 49
         )
+        history_by_bucket: dict[str, dict[str, object]] = {}
+        for raw in history_raw:
+            try:
+                candle_entry = json.loads(raw)
+            except Exception:
+                continue
+            if not isinstance(candle_entry, dict):
+                continue
+            bucket_key = str(
+                candle_entry.get("bucket_start") or candle_entry.get("start") or ""
+            )
+            if not bucket_key:
+                continue
+            if bucket_key not in history_by_bucket:
+                history_by_bucket[bucket_key] = candle_entry
+
         candle_closes: list[float] = []
         candle_volumes: list[float] = []
         candle_highs: list[float] = []
         candle_lows: list[float] = []
-        for raw in reversed(history_raw):  # reverse to chronological order
+        ordered_history = sorted(
+            history_by_bucket.values(),
+            key=lambda entry: str(entry.get("bucket_start") or entry.get("start") or ""),
+        )
+        for c in ordered_history:
             try:
-                c = json.loads(raw)
                 candle_closes.append(float(c["close"]))
                 candle_volumes.append(float(c.get("volume", 0)))
                 candle_highs.append(float(c["high"]))

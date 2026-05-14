@@ -205,6 +205,74 @@ def test_runner_load_market_snapshot_from_normalized_cache():
     assert snap.volume_24h == Decimal("1234.5")
 
 
+def test_runner_load_market_snapshot_sorts_and_deduplicates_candle_history():
+    symbol = "BTC-USD"
+    kv = DummyRuntimeKV(
+        {
+            f"oziebot:md:bbo:{symbol}": json.dumps(
+                {
+                    "best_bid_price": "50000.0",
+                    "best_ask_price": "50010.0",
+                }
+            ),
+            f"oziebot:md:candle:60:{symbol}": json.dumps(
+                {
+                    "open": "49000",
+                    "high": "50500",
+                    "low": "48500",
+                    "close": "50000",
+                    "volume": "1234.5",
+                }
+            ),
+            f"oziebot:md:candles:60:{symbol}": [
+                json.dumps(
+                    {
+                        "bucket_start": "2026-01-01T00:02:00+00:00",
+                        "high": "103",
+                        "low": "99",
+                        "close": "102",
+                        "volume": "12",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "bucket_start": "2026-01-01T00:01:00+00:00",
+                        "high": "102",
+                        "low": "98",
+                        "close": "101",
+                        "volume": "11",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "bucket_start": "2026-01-01T00:02:00+00:00",
+                        "high": "999",
+                        "low": "999",
+                        "close": "999",
+                        "volume": "999",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "bucket_start": "2026-01-01T00:00:00+00:00",
+                        "high": "101",
+                        "low": "97",
+                        "close": "100",
+                        "volume": "10",
+                    }
+                ),
+            ],
+        }
+    )
+
+    runner = StrategyRunner(engine=None, runtime_kv=kv)  # type: ignore[arg-type]
+    snap = runner._load_market_snapshot(symbol)
+
+    assert snap is not None
+    assert snap.metadata["candle_closes"] == [100.0, 101.0, 102.0]
+    assert snap.metadata["candle_volumes"] == [10.0, 11.0, 12.0]
+
+
 def test_signal_event_schema_fields_include_trading_mode_and_size():
     signal = StrategySignal(
         signal_id=uuid.uuid4(),
