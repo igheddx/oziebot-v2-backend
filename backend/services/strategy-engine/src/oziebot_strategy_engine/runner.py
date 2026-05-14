@@ -2766,7 +2766,9 @@ class StrategyRunner:
         candle_lows: list[float] = []
         ordered_history = sorted(
             history_by_bucket.values(),
-            key=lambda entry: str(entry.get("bucket_start") or entry.get("start") or ""),
+            key=lambda entry: str(
+                entry.get("bucket_start") or entry.get("start") or ""
+            ),
         )
         for c in ordered_history:
             try:
