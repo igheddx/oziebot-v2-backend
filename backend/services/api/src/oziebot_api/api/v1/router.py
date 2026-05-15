@@ -15,6 +15,7 @@ from oziebot_api.api.v1 import (
     integrations_coinbase,
     logs,
     me,
+    strategic_aggressive_allocation,
     tenants,
     tokens,
     strategies,
@@ -25,6 +26,7 @@ api_router = APIRouter(prefix="/v1")
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(me.router)
+api_router.include_router(strategic_aggressive_allocation.router)
 api_router.include_router(alerts.router)
 api_router.include_router(backtests.router)
 api_router.include_router(billing.router)

@@ -120,6 +120,23 @@ _BASELINE_PLATFORM_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {
         },
         "risk_caps": {},
     },
+    "strategic_aggressive_allocation": {
+        "strategy_params": {
+            "evaluation_interval_minutes": 60,
+            "minimum_order_size_usd": 25,
+            "max_total_open_positions": 10,
+            "target_bucket_utilization_pct": 0.85,
+            "drawdown_size_reduction_enabled": False,
+            "drawdown_reduction_multiplier": 1.0,
+        },
+        "signal_rules": {
+            **GLOBAL_SIGNAL_RULE_DEFAULTS,
+            "min_confidence": 0.6,
+        },
+        "risk_caps": {
+            "max_open_positions": 10,
+        },
+    },
 }
 
 _STRATEGY_PARAM_ALIASES: dict[str, dict[str, str]] = {

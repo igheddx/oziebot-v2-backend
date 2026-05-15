@@ -47,21 +47,29 @@ class StrategyRegistry:
     @classmethod
     def _ensure_builtins_loaded(cls) -> None:
         """Load built-in strategies once, in an idempotent way."""
-        if {"momentum", "day_trading", "dca", "reversion"}.issubset(
-            cls._strategies.keys()
-        ):
+        if {
+            "momentum",
+            "day_trading",
+            "dca",
+            "reversion",
+            "strategic_aggressive_allocation",
+        }.issubset(cls._strategies.keys()):
             return
 
         from oziebot_strategy_engine.strategies.dca import DCAStrategy
         from oziebot_strategy_engine.strategies.day_trading import DayTradingStrategy
         from oziebot_strategy_engine.strategies.momentum import MomentumStrategy
         from oziebot_strategy_engine.strategies.reversion import ReversionStrategy
+        from oziebot_strategy_engine.strategies.strategic_aggressive_allocation import (
+            StrategicAggressiveAllocationStrategy,
+        )
 
         for strategy_class in (
             MomentumStrategy,
             DayTradingStrategy,
             DCAStrategy,
             ReversionStrategy,
+            StrategicAggressiveAllocationStrategy,
         ):
             strategy_id = strategy_class().strategy_id
             if strategy_id not in cls._strategies:

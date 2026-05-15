@@ -46,6 +46,10 @@ from oziebot_api.models.strategy_allocation import (
     StrategyCapitalBucket,
     StrategyCapitalLedger,
 )
+from oziebot_api.models.strategic_aggressive_allocation import (
+    StrategicAggressiveAllocationConfig,
+    StrategicAggressiveAllocationProfitEvent,
+)
 from oziebot_api.models.strategy_lifecycle import StrategyLifecycleEvent
 from oziebot_api.models.strategy_signal_pipeline import StrategyRun, StrategySignalRecord
 from oziebot_api.models.subscription_plan import SubscriptionPlan
@@ -108,6 +112,8 @@ __all__ = [
     "StrategyAnalyticsArtifactRecord",
     "StrategyCapitalBucket",
     "StrategyCapitalLedger",
+    "StrategicAggressiveAllocationConfig",
+    "StrategicAggressiveAllocationProfitEvent",
     "StrategyLifecycleEvent",
     "StrategyDecisionAudit",
     "StrategyRun",

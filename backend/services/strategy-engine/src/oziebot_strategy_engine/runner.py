@@ -50,6 +50,11 @@ from oziebot_strategy_engine.strategy import (
     PositionState,
     StrategyContext,
 )
+from oziebot_strategy_engine.strategies.strategic_aggressive_allocation import (
+    STRATEGY_ID as STRATEGIC_AGGRESSIVE_ALLOCATION_ID,
+    build_portfolio_plan,
+    selected_trade_symbols,
+)
 
 log = logging.getLogger("strategy-engine.runner")
 
@@ -57,6 +62,7 @@ STRATEGY_INTERVAL_SECONDS: dict[str, int] = {
     "momentum": 30,
     "day_trading": 60,
     "dca": 300,
+    "strategic_aggressive_allocation": 3600,
 }
 
 DCA_EXECUTION_LEASE_SECONDS = 120
@@ -151,14 +157,7 @@ class StrategyRunner:
             if not isinstance(risk_caps, dict):
                 risk_caps = {}
 
-            # Platform strategy_params are authoritative defaults, while user config can still
-            # provide optional overrides (e.g. symbol) for keys not set at platform level.
-            config = {**user_config, **strategy_params}
-
             allowed_symbols = self._load_allowed_symbols(user_id)
-            entry_symbols = self._resolve_symbols(
-                config=config, allowed_symbols=allowed_symbols
-            )
 
             modes_to_run = [active_mode]
             for candidate_mode in TradingMode:
@@ -173,20 +172,93 @@ class StrategyRunner:
                     modes_to_run.append(candidate_mode)
 
             for mode in modes_to_run:
+                mode_user_config = self._resolve_mode_user_config(
+                    strategy_name=strategy_name,
+                    user_config=user_config,
+                    trading_mode=mode.value,
+                )
+                # Platform strategy_params are authoritative defaults, while user config can still
+                # provide optional overrides (e.g. symbol) for keys not set at platform level.
+                config = {**mode_user_config, **strategy_params}
+                requested_entry_symbols = self._resolve_strategy_symbols(
+                    strategy_name=strategy_name,
+                    config=mode_user_config,
+                    allowed_symbols=allowed_symbols,
+                )
                 open_position_symbols = self._load_open_position_symbols(
                     user_id=user_id,
                     strategy_name=strategy_name,
                     trading_mode=mode.value,
                 )
                 symbols = self._merge_managed_symbols(
-                    entry_symbols=entry_symbols if mode == active_mode else [],
+                    entry_symbols=requested_entry_symbols
+                    if mode == active_mode
+                    else [],
                     open_position_symbols=open_position_symbols,
                 )
                 if not symbols:
                     continue
 
+                runtime_state: dict[str, Any] = {}
+                if strategy_name in {"dca", STRATEGIC_AGGRESSIVE_ALLOCATION_ID}:
+                    runtime_state = self._load_strategy_runtime_state(
+                        user_id=user_id,
+                        strategy_name=strategy_name,
+                        trading_mode=mode.value,
+                    )
+                runtime_symbol_states = self._coerce_symbol_runtime_states(
+                    runtime_state
+                )
+
+                market_map = {
+                    symbol: market
+                    for symbol in symbols
+                    if (market := self._load_market_snapshot(symbol)) is not None
+                }
+                if not market_map:
+                    continue
+
+                position_state_map: dict[str, PositionState] = {}
+                for symbol, market in market_map.items():
+                    position_state = self._load_position_state(
+                        user_id=user_id,
+                        strategy_name=strategy_name,
+                        trading_mode=mode.value,
+                        symbol=symbol,
+                    )
+                    position_state_map[symbol] = self._sync_position_runtime_state(
+                        user_id=user_id,
+                        strategy_name=strategy_name,
+                        trading_mode=mode.value,
+                        position_state=position_state,
+                        market=market,
+                        now=now,
+                    )
+
+                strategy_symbol_contexts: dict[str, dict[str, Any]] = {}
+                if strategy_name == STRATEGIC_AGGRESSIVE_ALLOCATION_ID:
+                    strategy_symbol_contexts = dict(
+                        (
+                            build_portfolio_plan(
+                                config=config,
+                                market_map=market_map,
+                                positions=position_state_map,
+                                runtime_state=runtime_symbol_states,
+                                token_profiles=self._load_token_profiles(
+                                    list(market_map.keys())
+                                ),
+                                capital_context=self._load_strategy_capital_context(
+                                    user_id=user_id,
+                                    strategy_name=strategy_name,
+                                    trading_mode=mode.value,
+                                ),
+                            ).get("symbol_contexts")
+                            or {}
+                        )
+                    )
+
                 for symbol in symbols:
-                    market = self._load_market_snapshot(symbol)
+                    market = market_map.get(symbol)
                     if market is None:
                         continue
                     token_policy = self._load_token_strategy_policy(
@@ -194,7 +266,10 @@ class StrategyRunner:
                         strategy_name=strategy_name,
                     )
 
-                    interval = STRATEGY_INTERVAL_SECONDS.get(strategy_name, 60)
+                    interval = self._strategy_interval_seconds(
+                        strategy_name=strategy_name,
+                        config=config,
+                    )
                     if not self._schedule.should_run(
                         user_id=user_id,
                         strategy_name=strategy_name,
@@ -220,27 +295,9 @@ class StrategyRunner:
                             risk_caps=mode_risk_caps,
                         )
 
-                    position_state = self._load_position_state(
-                        user_id=user_id,
-                        strategy_name=strategy_name,
-                        trading_mode=mode.value,
-                        symbol=symbol,
+                    position_state = position_state_map.get(symbol) or PositionState(
+                        symbol=symbol
                     )
-                    position_state = self._sync_position_runtime_state(
-                        user_id=user_id,
-                        strategy_name=strategy_name,
-                        trading_mode=mode.value,
-                        position_state=position_state,
-                        market=market,
-                        now=now,
-                    )
-                    runtime_state: dict[str, Any] = {}
-                    if strategy_name == "dca":
-                        runtime_state = self._load_strategy_runtime_state(
-                            user_id=user_id,
-                            strategy_name=strategy_name,
-                            trading_mode=mode.value,
-                        )
                     run_id = uuid.uuid4()
                     trace_id = str(run_id)
                     try:
@@ -399,14 +456,29 @@ class StrategyRunner:
                             )
                             continue
 
-                        signal = self._generate_signal(
-                            tenant_id=tenant_id,
-                            strategy_name=strategy_name,
-                            trading_mode=mode,
-                            market=market,
-                            position_state=position_state,
-                            config=mode_config,
-                        )
+                        extra_context = {
+                            key: value
+                            for key, value in {
+                                "strategic_allocation": strategy_symbol_contexts.get(
+                                    symbol, {}
+                                ),
+                                "runtime_symbol_state": runtime_symbol_states.get(
+                                    symbol, {}
+                                ),
+                            }.items()
+                            if value
+                        }
+                        generate_signal_kwargs = {
+                            "tenant_id": tenant_id,
+                            "strategy_name": strategy_name,
+                            "trading_mode": mode,
+                            "market": market,
+                            "position_state": position_state,
+                            "config": mode_config,
+                        }
+                        if extra_context:
+                            generate_signal_kwargs["extra_context"] = extra_context
+                        signal = self._generate_signal(**generate_signal_kwargs)
                         signal = self._apply_token_policy_to_signal(
                             signal=signal,
                             token_policy=token_policy,
@@ -581,6 +653,20 @@ class StrategyRunner:
                                 strategy_name=strategy_name,
                                 trading_mode=mode.value,
                                 symbol=symbol,
+                            )
+                        runtime_state_patch = (signal.metadata or {}).get(
+                            "runtime_state_patch"
+                        )
+                        if (
+                            isinstance(runtime_state_patch, dict)
+                            and runtime_state_patch
+                        ):
+                            self._apply_runtime_state_patch(
+                                user_id=user_id,
+                                strategy_name=strategy_name,
+                                trading_mode=mode.value,
+                                symbol=symbol,
+                                patch=runtime_state_patch,
                             )
                         self._persist_run(
                             run_id=run_id,
@@ -2368,6 +2454,49 @@ class StrategyRunner:
 
         return allowed_symbols
 
+    def _resolve_mode_user_config(
+        self,
+        *,
+        strategy_name: str,
+        user_config: dict[str, Any],
+        trading_mode: str,
+    ) -> dict[str, Any]:
+        if (
+            strategy_name == STRATEGIC_AGGRESSIVE_ALLOCATION_ID
+            and isinstance(user_config, dict)
+            and isinstance(user_config.get(trading_mode), dict)
+        ):
+            return dict(user_config.get(trading_mode) or {})
+        return dict(user_config or {})
+
+    def _resolve_strategy_symbols(
+        self,
+        *,
+        strategy_name: str,
+        config: dict[str, Any],
+        allowed_symbols: list[str],
+    ) -> list[str]:
+        if strategy_name == STRATEGIC_AGGRESSIVE_ALLOCATION_ID:
+            requested = set(selected_trade_symbols(config))
+            return [symbol for symbol in allowed_symbols if symbol in requested]
+        return self._resolve_symbols(config=config, allowed_symbols=allowed_symbols)
+
+    @staticmethod
+    def _strategy_interval_seconds(
+        *, strategy_name: str, config: dict[str, Any]
+    ) -> int:
+        if strategy_name == STRATEGIC_AGGRESSIVE_ALLOCATION_ID:
+            mode_settings = (
+                config.get("mode_settings")
+                if isinstance(config.get("mode_settings"), dict)
+                else {}
+            )
+            interval_minutes = int(
+                mode_settings.get("evaluation_interval_minutes", 60) or 60
+            )
+            return max(interval_minutes, 15) * 60
+        return STRATEGY_INTERVAL_SECONDS.get(strategy_name, 60)
+
     @staticmethod
     def _paper_relaxed_controls(
         *,
@@ -2452,16 +2581,30 @@ class StrategyRunner:
                 entry_quantity = position_state.quantity
             partial_profit_taken = bool(existing.get("partial_profit_taken", False))
             partial_profit_pending = bool(existing.get("partial_profit_pending", False))
+            previous_seen_quantity = Decimal(
+                str(existing.get("last_seen_quantity") or entry_quantity)
+            )
+            pending_profit_event = str(existing.get("pending_profit_event") or "")
+            completed_profit_events = {
+                str(value) for value in existing.get("completed_profit_events") or []
+            }
             if position_state.quantity < entry_quantity:
                 partial_profit_taken = True
+            if position_state.quantity < previous_seen_quantity:
                 partial_profit_pending = False
+                if pending_profit_event:
+                    completed_profit_events.add(pending_profit_event)
+                    existing.pop("pending_profit_event", None)
             position_state.partial_profit_taken = partial_profit_taken
             position_state.partial_profit_pending = partial_profit_pending
             existing["peak_price"] = str(position_state.peak_price)
             existing["opened_at"] = position_state.opened_at.isoformat()
             existing["entry_quantity"] = str(entry_quantity)
+            existing["last_seen_quantity"] = str(position_state.quantity)
             existing["partial_profit_taken"] = partial_profit_taken
             existing["partial_profit_pending"] = partial_profit_pending
+            if completed_profit_events:
+                existing["completed_profit_events"] = sorted(completed_profit_events)
             merged[position_state.symbol] = existing
             return merged
 
@@ -2472,13 +2615,140 @@ class StrategyRunner:
         existing.pop("peak_price", None)
         existing.pop("opened_at", None)
         existing.pop("entry_quantity", None)
+        existing.pop("last_seen_quantity", None)
         existing.pop("partial_profit_taken", None)
         existing.pop("partial_profit_pending", None)
+        existing.pop("pending_profit_event", None)
+        existing.pop("completed_profit_events", None)
         if existing:
             merged[position_state.symbol] = existing
         else:
             merged.pop(position_state.symbol, None)
         return merged
+
+    def _apply_runtime_state_patch(
+        self,
+        *,
+        user_id: str,
+        strategy_name: str,
+        trading_mode: str,
+        symbol: str,
+        patch: dict[str, Any],
+    ) -> None:
+        runtime_state = self._load_strategy_runtime_state(
+            user_id=user_id,
+            strategy_name=strategy_name,
+            trading_mode=trading_mode,
+        )
+        symbol_states = self._coerce_symbol_runtime_states(runtime_state)
+        symbol_state = dict(symbol_states.get(symbol, {}))
+        symbol_state.update(patch)
+        if symbol_state.get("pending_profit_event"):
+            symbol_state["partial_profit_pending"] = True
+        symbol_states[symbol] = symbol_state
+        state = {"symbols": symbol_states} if symbol_states else {}
+        now = datetime.now(UTC)
+        stmt = text(
+            """
+            INSERT INTO user_strategy_states (id, user_id, strategy_id, trading_mode, state, created_at, updated_at)
+            VALUES (:id, :user_id, :strategy_id, :trading_mode, CAST(:state AS JSON), :created_at, :updated_at)
+            ON CONFLICT (user_id, strategy_id, trading_mode)
+            DO UPDATE SET state = CAST(:state AS JSON), updated_at = :updated_at
+            """
+        )
+        with self._engine.begin() as conn:
+            conn.execute(
+                stmt,
+                {
+                    "id": str(uuid.uuid4()),
+                    "user_id": user_id,
+                    "strategy_id": strategy_name,
+                    "trading_mode": trading_mode,
+                    "state": json.dumps(state),
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+
+    def _load_token_profiles(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
+        normalized_symbols = sorted({str(symbol) for symbol in symbols if str(symbol)})
+        if not normalized_symbols:
+            return {}
+        stmt = text(
+            """
+            SELECT
+              p.symbol,
+              p.extra,
+              tmp.trend_score,
+              tmp.liquidity_score,
+              tmp.raw_metrics_json
+            FROM platform_token_allowlist p
+            LEFT JOIN token_market_profile tmp ON tmp.token_id = p.id
+            WHERE p.symbol = ANY(:symbols)
+            """
+        )
+        with self._engine.begin() as conn:
+            rows = conn.execute(stmt, {"symbols": normalized_symbols}).mappings().all()
+        profiles: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            extra = row.get("extra")
+            if isinstance(extra, str):
+                try:
+                    extra = json.loads(extra)
+                except Exception:
+                    extra = {}
+            profiles[str(row["symbol"])] = {
+                "trend_score": float(row["trend_score"] or 0),
+                "liquidity_score": float(row["liquidity_score"] or 0),
+                "ecosystem": (extra or {}).get("ecosystem"),
+                "tags": list((extra or {}).get("tags") or []),
+                "raw_metrics": row.get("raw_metrics_json") or {},
+            }
+        return profiles
+
+    def _load_strategy_capital_context(
+        self,
+        *,
+        user_id: str,
+        strategy_name: str,
+        trading_mode: str,
+    ) -> dict[str, Any]:
+        stmt = text(
+            """
+            SELECT assigned_capital_cents, available_cash_cents, available_buying_power_cents
+            FROM strategy_capital_buckets
+            WHERE user_id = :user_id
+              AND strategy_id = :strategy_name
+              AND trading_mode = :trading_mode
+            LIMIT 1
+            """
+        )
+        with self._engine.begin() as conn:
+            row = (
+                conn.execute(
+                    stmt,
+                    {
+                        "user_id": user_id,
+                        "strategy_name": strategy_name,
+                        "trading_mode": trading_mode,
+                    },
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return {}
+        return {
+            "assigned_capital_usd": float(
+                Decimal(str(row["assigned_capital_cents"] or 0)) / Decimal("100")
+            ),
+            "available_capital_usd": float(
+                Decimal(str(row["available_cash_cents"] or 0)) / Decimal("100")
+            ),
+            "buying_power_usd": float(
+                Decimal(str(row["available_buying_power_cents"] or 0)) / Decimal("100")
+            ),
+        }
 
     def _load_strategy_runtime_state(
         self,
@@ -2808,6 +3078,7 @@ class StrategyRunner:
         market: MarketSnapshot,
         position_state: PositionState,
         config: dict[str, Any],
+        extra_context: dict[str, Any] | None = None,
     ) -> StrategySignal:
         strategy = StrategyRegistry.get_strategy(strategy_name)
         signal = strategy.generate_signal(
@@ -2816,6 +3087,7 @@ class StrategyRunner:
                 trading_mode=trading_mode,
                 market_snapshot=market,
                 position_state=position_state,
+                **dict(extra_context or {}),
             ),
             config,
             signal_id=uuid.uuid4(),
