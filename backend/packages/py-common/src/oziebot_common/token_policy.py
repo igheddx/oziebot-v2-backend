@@ -5,7 +5,13 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
-TOKEN_POLICY_STRATEGIES = ("momentum", "reversion", "day_trading", "dca")
+TOKEN_POLICY_STRATEGIES = (
+    "momentum",
+    "reversion",
+    "day_trading",
+    "dca",
+    "strategic_aggressive_allocation",
+)
 TOKEN_POLICY_RECOMMENDATIONS = ("preferred", "allowed", "discouraged", "blocked")
 DEFAULT_MISSING_POLICY_BEHAVIOR = "allowed"
 DISCOURAGED_SIZE_MULTIPLIER = Decimal("0.50")
@@ -333,6 +339,27 @@ def score_strategy_suitability(
             )
         reason = (
             "Favors liquid, lower-instability core tokens for scheduled accumulation"
+        )
+    elif strategy_id == "strategic_aggressive_allocation":
+        score = (
+            (profile.trend_score * 0.30)
+            + (relative_volume_score * 0.20)
+            + (profile.volatility_score * 0.15)
+            + (profile.liquidity_score * 0.15)
+            + (profile.slippage_score * 0.10)
+            + (profile.spread_score * 0.10)
+        )
+        ecosystem = str(token_extra.get("ecosystem") or "").strip().lower()
+        tags = {str(value).strip().lower() for value in token_extra.get("tags") or []}
+        if ecosystem == "base" or "base" in tags:
+            score += 8.0
+        if severe_downtrend:
+            score -= 12.0
+        elif bearish_regime:
+            score -= 6.0
+        reason = (
+            "Favors aggressive tokens with trend strength, relative volume, "
+            "volatility, and optional Base ecosystem preference"
         )
     else:
         raise ValueError(f"Unsupported strategy_id: {strategy_id}")
