@@ -1,6 +1,6 @@
 """add strategic aggressive allocation strategy tables
 
-Revision ID: 034_strategic_aggressive_allocation
+Revision ID: 034_strategic_allocation
 Revises: 033_ai_diagnostic_reviews
 Create Date: 2026-05-15 00:00:00.000000
 """
@@ -14,7 +14,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "034_strategic_aggressive_allocation"
+revision: str = "034_strategic_allocation"
 down_revision: Union[str, None] = "033_ai_diagnostic_reviews"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
