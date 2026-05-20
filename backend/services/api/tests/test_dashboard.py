@@ -10,6 +10,11 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.models.exchange_connection import ExchangeConnection
 from oziebot_api.models.execution import ExecutionOrder, ExecutionPosition, ExecutionTradeRecord
+from oziebot_api.models.ai_diagnostics import (
+    AiDiagnosticFinding,
+    AiDiagnosticReview,
+    DiagnosticSnapshot,
+)
 from oziebot_api.models.market_data import MarketDataBboSnapshot
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.risk_event import RiskEvent
@@ -853,6 +858,268 @@ def test_dashboard_details_exposes_bot_health_and_strategy_wait_reasons(
     assert dca_health["nextEligibleAt"] == next_due.isoformat()
 
 
+def test_dashboard_paper_live_validation_uses_recent_failure_window(
+    client,
+    regular_user_and_token,
+    db_session: Session,
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    for age, key_prefix, trace_id in (
+        (timedelta(hours=6), "recent-validation-failure", "trace-recent-validation-failure"),
+        (timedelta(days=30), "old-validation-failure", "trace-old-validation-failure"),
+    ):
+        created_at = now - age
+        db_session.add(
+            ExecutionOrder(
+                id=uuid.uuid4(),
+                intent_id=uuid.uuid4(),
+                correlation_id=uuid.uuid4(),
+                tenant_id=membership.tenant_id,
+                user_id=user.id,
+                strategy_id="momentum",
+                symbol="BTC-USD",
+                side="buy",
+                order_type="market",
+                trading_mode="paper",
+                venue="paper",
+                state="failed",
+                quantity="0",
+                requested_notional_cents=0,
+                reserved_cash_cents=0,
+                locked_cash_cents=0,
+                filled_quantity="0",
+                avg_fill_price=None,
+                fees_cents=0,
+                expected_gross_edge_bps=0,
+                estimated_fee_bps=0,
+                estimated_slippage_bps=0,
+                estimated_total_cost_bps=0,
+                expected_net_edge_bps=0,
+                execution_preference="maker_preferred",
+                fallback_behavior="convert_to_taker",
+                maker_timeout_seconds=0,
+                limit_price_offset_bps=0,
+                actual_fill_type=None,
+                fallback_triggered=False,
+                idempotency_key=f"{key_prefix}-idempotency",
+                client_order_id=f"{key_prefix}-client-order",
+                venue_order_id=None,
+                failure_code="execution_validation_failed",
+                failure_detail="quantity must be positive",
+                trace_id=trace_id,
+                intent_payload={},
+                risk_payload={},
+                adapter_payload=None,
+                created_at=created_at,
+                updated_at=created_at,
+                submitted_at=None,
+                completed_at=None,
+                cancelled_at=None,
+                failed_at=created_at,
+            )
+        )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/details?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    validation_item = next(
+        item
+        for item in payload["botHealth"]["paperLive"]["checklist"]
+        if item["id"] == "execution_validation"
+    )
+    assert validation_item["label"] == "No recent execution validation failures (7d)"
+    assert validation_item["passed"] is False
+    assert "1 validation failure(s) were recorded in the last 7 days" in validation_item["detail"]
+    assert "last seen" in validation_item["detail"]
+
+
+def test_dashboard_details_counts_critical_findings_from_latest_review_only(
+    client,
+    regular_user_and_token,
+    db_session: Session,
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    older_snapshot = DiagnosticSnapshot(
+        tenant_id=membership.tenant_id,
+        generated_at=now - timedelta(days=2),
+        trading_mode="paper",
+        strategy_filter=None,
+        token_filter=None,
+        days_filter=7,
+        raw_json={},
+        created_at=now - timedelta(days=2),
+    )
+    latest_snapshot = DiagnosticSnapshot(
+        tenant_id=membership.tenant_id,
+        generated_at=now,
+        trading_mode="paper",
+        strategy_filter=None,
+        token_filter=None,
+        days_filter=7,
+        raw_json={},
+        created_at=now,
+    )
+    db_session.add_all([older_snapshot, latest_snapshot])
+    db_session.flush()
+
+    older_review = AiDiagnosticReview(
+        tenant_id=membership.tenant_id,
+        snapshot_id=older_snapshot.id,
+        status="completed",
+        overall_health="critical",
+        confidence_score=0.8,
+        summary="Older review",
+        model_name="rule-based",
+        prompt_version="ai-diagnostics-v1",
+        created_by_admin_id=user.id,
+        started_at=now - timedelta(days=2),
+        completed_at=now - timedelta(days=2),
+        error_message=None,
+        created_at=now - timedelta(days=2),
+        updated_at=now - timedelta(days=2),
+    )
+    latest_review = AiDiagnosticReview(
+        tenant_id=membership.tenant_id,
+        snapshot_id=latest_snapshot.id,
+        status="completed",
+        overall_health="warning",
+        confidence_score=0.8,
+        summary="Latest review",
+        model_name="rule-based",
+        prompt_version="ai-diagnostics-v1",
+        created_by_admin_id=user.id,
+        started_at=now,
+        completed_at=now,
+        error_message=None,
+        created_at=now,
+        updated_at=now,
+    )
+    db_session.add_all([older_review, latest_review])
+    db_session.flush()
+
+    db_session.add_all(
+        [
+            AiDiagnosticFinding(
+                review_id=older_review.id,
+                severity="critical",
+                category="trading_safety",
+                strategy="momentum",
+                token="BTC-USD",
+                finding_title="Older critical finding",
+                finding_detail="Should not be counted once a newer review exists.",
+                evidence_json={},
+                recommendation="Review it",
+                risk_if_ignored="Risk",
+                confidence_score=0.9,
+                automation_eligibility="not_eligible",
+                status="new",
+                future_config_change_candidate=False,
+                proposed_config_change_json=None,
+                approval_required=False,
+                eligible_for_auto_tune=False,
+                rollback_plan=None,
+                expected_impact=None,
+                risk_level="high",
+                affected_strategy="momentum",
+                affected_token="BTC-USD",
+                parameter_name=None,
+                current_value_json=None,
+                proposed_value_json=None,
+                created_at=now - timedelta(days=2),
+                updated_at=now - timedelta(days=2),
+            ),
+            AiDiagnosticFinding(
+                review_id=older_review.id,
+                severity="critical",
+                category="trading_safety",
+                strategy="day_trading",
+                token="ETH-USD",
+                finding_title="Older critical finding 2",
+                finding_detail="Should not be counted once a newer review exists.",
+                evidence_json={},
+                recommendation="Review it",
+                risk_if_ignored="Risk",
+                confidence_score=0.9,
+                automation_eligibility="not_eligible",
+                status="acknowledged",
+                future_config_change_candidate=False,
+                proposed_config_change_json=None,
+                approval_required=False,
+                eligible_for_auto_tune=False,
+                rollback_plan=None,
+                expected_impact=None,
+                risk_level="high",
+                affected_strategy="day_trading",
+                affected_token="ETH-USD",
+                parameter_name=None,
+                current_value_json=None,
+                proposed_value_json=None,
+                created_at=now - timedelta(days=2),
+                updated_at=now - timedelta(days=2),
+            ),
+            AiDiagnosticFinding(
+                review_id=latest_review.id,
+                severity="critical",
+                category="lifecycle_visibility",
+                strategy="reversion",
+                token="SOL-USD",
+                finding_title="Latest critical finding",
+                finding_detail="This one should be counted.",
+                evidence_json={},
+                recommendation="Review it",
+                risk_if_ignored="Risk",
+                confidence_score=0.9,
+                automation_eligibility="not_eligible",
+                status="new",
+                future_config_change_candidate=False,
+                proposed_config_change_json=None,
+                approval_required=False,
+                eligible_for_auto_tune=False,
+                rollback_plan=None,
+                expected_impact=None,
+                risk_level="high",
+                affected_strategy="reversion",
+                affected_token="SOL-USD",
+                parameter_name=None,
+                current_value_json=None,
+                proposed_value_json=None,
+                created_at=now,
+                updated_at=now,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/details?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["botHealth"]["criticalDiagnosticsCount"] == 1
+
+
 def test_dashboard_details_surfaces_reconciliation_mismatches(
     client,
     root_user_and_token,
@@ -904,6 +1171,173 @@ def test_dashboard_details_surfaces_reconciliation_mismatches(
     assert reconciliation["topMismatchTypes"] == [
         {"type": "bucket_locked_capital_mismatch", "count": 1}
     ]
+
+
+def test_dashboard_reconciliation_counts_unique_scope_issues_not_mismatch_types(
+    client,
+    regular_user_and_token,
+    db_session: Session,
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    order_id = uuid.uuid4()
+    db_session.add(
+        UserStrategy(
+            user_id=user.id,
+            strategy_id="momentum",
+            is_enabled=True,
+            config={},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.add(
+        ExecutionTradeRecord(
+            id=uuid.uuid4(),
+            order_id=order_id,
+            fill_id=None,
+            tenant_id=membership.tenant_id,
+            user_id=user.id,
+            strategy_id="momentum",
+            symbol="BTC-USD",
+            trading_mode="paper",
+            side="buy",
+            quantity="1.0",
+            price="50000",
+            gross_notional_cents=50_000,
+            fee_cents=0,
+            realized_pnl_cents=0,
+            position_quantity_after="1.0",
+            avg_entry_price_after="50000",
+            executed_at=now - timedelta(hours=1),
+            raw_payload={},
+        )
+    )
+    db_session.add(
+        ExecutionPosition(
+            id=uuid.uuid4(),
+            tenant_id=membership.tenant_id,
+            user_id=user.id,
+            strategy_id="momentum",
+            symbol="BTC-USD",
+            trading_mode="paper",
+            quantity="0.5",
+            avg_entry_price="50000",
+            realized_pnl_cents=0,
+            created_at=now - timedelta(hours=1),
+            updated_at=now,
+            opened_at=now - timedelta(hours=1),
+            last_trade_at=now - timedelta(hours=1),
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/details?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    reconciliation = response.json()["botHealth"]["reconciliation"]
+    assert reconciliation["mismatchCount"] == 1
+    assert reconciliation["topMismatchTypes"] == [
+        {"type": "position_quantity_mismatch", "count": 1},
+        {"type": "latest_trade_quantity_mismatch", "count": 1},
+    ]
+
+
+def test_dashboard_treats_allocation_constraints_as_waiting_not_blocked(
+    client,
+    regular_user_and_token,
+    db_session: Session,
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+
+    now = datetime.now(UTC)
+    db_session.add(
+        UserStrategy(
+            user_id=user.id,
+            strategy_id="momentum",
+            is_enabled=True,
+            config={},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.add(
+        StrategyCapitalBucket(
+            user_id=user.id,
+            strategy_id="momentum",
+            trading_mode="paper",
+            assigned_capital_cents=25_000,
+            available_cash_cents=0,
+            reserved_cash_cents=0,
+            locked_capital_cents=0,
+            realized_pnl_cents=0,
+            unrealized_pnl_cents=0,
+            available_buying_power_cents=0,
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.add(
+        StrategyRun(
+            run_id=uuid.uuid4(),
+            user_id=user.id,
+            strategy_name="momentum",
+            symbol="BTC-USD",
+            trading_mode="paper",
+            status="completed",
+            trace_id="trace-allocation-unavailable",
+            run_metadata={
+                "suppressed": True,
+                "suppression_reason": "allocation_unavailable",
+            },
+            started_at=now,
+            completed_at=now,
+        )
+    )
+    db_session.add(
+        MarketDataBboSnapshot(
+            source="coinbase",
+            product_id="BTC-USD",
+            best_bid_price=65000,
+            best_bid_size=5,
+            best_ask_price=65010,
+            best_ask_size=5,
+            event_time=now,
+            ingest_time=now,
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/details?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    strategy_health = next(
+        row for row in response.json()["strategyHealth"] if row["id"] == "momentum"
+    )
+    assert strategy_health["blockingReasonCode"] == "allocation_unavailable"
+    assert strategy_health["currentStatus"] == "waiting"
+    lifecycle_item = next(
+        item
+        for item in response.json()["botHealth"]["paperLive"]["checklist"]
+        if item["id"] == "strategy_lifecycle"
+    )
+    assert lifecycle_item["passed"] is True
 
 
 def test_dashboard_details_surfaces_exit_monitoring_and_stalled_positions(

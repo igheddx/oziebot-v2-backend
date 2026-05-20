@@ -85,6 +85,19 @@ DASHBOARD_POSITION_DUST_NOTIONAL_USD = Decimal("1")
 DASHBOARD_MARK_LOOKBACK_MINUTES = 30
 DASHBOARD_MARKET_DATA_STALE_SECONDS = 120
 DASHBOARD_CRITICAL_FINDING_OPEN_STATUSES = ("new", "acknowledged")
+PAPER_LIVE_VALIDATION_LOOKBACK_DAYS = 7
+STRATEGY_WAITING_REASON_CODES = {
+    "allocation_unavailable",
+    "cooldown_active",
+    "existing_open_position",
+    "insufficient_buying_power",
+    "insufficient_confidence",
+    "insufficient_volume",
+    "liquidity_window_closed",
+    "max_exposure_reached",
+    "spread_too_wide",
+    "stale_market_data",
+}
 ANALYTICS_DEFAULT_LOOKBACK_DAYS = 30
 ANALYTICS_MAX_LOOKBACK_DAYS = 90
 
@@ -399,6 +412,8 @@ def _build_reconciliation_health(
 
     positions_by_scope = {(str(row.strategy_id), str(row.symbol)): row for row in positions_rows}
     mismatch_types: Counter[str] = Counter()
+    mismatched_scopes: set[tuple[str, str]] = set()
+    mismatched_buckets: set[str] = set()
     scopes = sorted(set(trades_by_scope) | set(positions_by_scope))
     per_bucket_expected: defaultdict[str, dict[str, int]] = defaultdict(
         lambda: {"locked_capital_cents": 0, "realized_pnl_cents": 0}
@@ -429,12 +444,15 @@ def _build_reconciliation_health(
 
         if abs(expected_quantity - actual_quantity) > Decimal("0.00000001"):
             mismatch_types["position_quantity_mismatch"] += 1
+            mismatched_scopes.add(scope)
         if latest_trade_quantity is not None and abs(
             latest_trade_quantity - actual_quantity
         ) > Decimal("0.00000001"):
             mismatch_types["latest_trade_quantity_mismatch"] += 1
+            mismatched_scopes.add(scope)
         if expected_realized_pnl_cents != actual_realized_pnl_cents:
             mismatch_types["realized_pnl_mismatch"] += 1
+            mismatched_scopes.add(scope)
 
         expected_bucket = per_bucket_expected[str(scope[0])]
         expected_bucket["realized_pnl_cents"] += actual_realized_pnl_cents
@@ -445,8 +463,10 @@ def _build_reconciliation_health(
         expected = per_bucket_expected[str(bucket.strategy_id)]
         if int(bucket.locked_capital_cents or 0) != expected["locked_capital_cents"]:
             mismatch_types["bucket_locked_capital_mismatch"] += 1
+            mismatched_buckets.add(str(bucket.strategy_id))
         if int(bucket.realized_pnl_cents or 0) != expected["realized_pnl_cents"]:
             mismatch_types["bucket_realized_pnl_mismatch"] += 1
+            mismatched_buckets.add(str(bucket.strategy_id))
 
     recent_reconcile_cutoff = datetime.now(UTC) - timedelta(days=7)
     recent_events = (
@@ -461,7 +481,7 @@ def _build_reconciliation_health(
         .all()
     )
     external_errors = sum(1 for event in recent_events if event.status == "error")
-    mismatch_count = int(sum(mismatch_types.values()))
+    mismatch_count = len(mismatched_scopes) + len(mismatched_buckets)
     if mismatch_count > 0 or external_errors > 0:
         status = "critical" if mismatch_count >= 3 or external_errors > 0 else "warning"
     else:
@@ -773,13 +793,7 @@ def _build_strategy_health(
                     blocking_reason_detail = latest_exit_reason_detail
             else:
                 current_status = "managing_position"
-        elif blocking_reason_code in {
-            "insufficient_confidence",
-            "insufficient_volume",
-            "stale_market_data",
-            "spread_too_wide",
-            "cooldown_active",
-        }:
+        elif blocking_reason_code in STRATEGY_WAITING_REASON_CODES:
             current_status = "waiting"
         elif blocking_reason_code is not None:
             current_status = "blocked"
@@ -906,19 +920,27 @@ def _build_bot_health(
     market_data_health = _latest_market_data_health(runtime_payload, now=now)
     critical_diagnostics_count = 0
     if tenant_id is not None:
-        critical_diagnostics_count = int(
-            db.scalar(
-                select(func.count(AiDiagnosticFinding.id))
-                .select_from(AiDiagnosticFinding)
-                .join(AiDiagnosticReview, AiDiagnosticReview.id == AiDiagnosticFinding.review_id)
-                .join(DiagnosticSnapshot, DiagnosticSnapshot.id == AiDiagnosticReview.snapshot_id)
-                .where(AiDiagnosticReview.tenant_id == tenant_id)
-                .where(DiagnosticSnapshot.trading_mode == trading_mode)
-                .where(AiDiagnosticFinding.severity == "critical")
-                .where(AiDiagnosticFinding.status.in_(DASHBOARD_CRITICAL_FINDING_OPEN_STATUSES))
+        latest_review_id = db.scalar(
+            select(AiDiagnosticReview.id)
+            .join(DiagnosticSnapshot, DiagnosticSnapshot.id == AiDiagnosticReview.snapshot_id)
+            .where(AiDiagnosticReview.tenant_id == tenant_id)
+            .where(DiagnosticSnapshot.trading_mode == trading_mode)
+            .order_by(
+                DiagnosticSnapshot.generated_at.desc(),
+                AiDiagnosticReview.created_at.desc(),
             )
-            or 0
+            .limit(1)
         )
+        if latest_review_id is not None:
+            critical_diagnostics_count = int(
+                db.scalar(
+                    select(func.count(AiDiagnosticFinding.id))
+                    .where(AiDiagnosticFinding.review_id == latest_review_id)
+                    .where(AiDiagnosticFinding.severity == "critical")
+                    .where(AiDiagnosticFinding.status.in_(DASHBOARD_CRITICAL_FINDING_OPEN_STATUSES))
+                )
+                or 0
+            )
 
     paper_live = _build_paper_live_health(
         user=user,
@@ -1009,6 +1031,7 @@ def _build_paper_live_health(
     critical_diagnostics_count: int,
     market_data_health: dict[str, Any],
 ) -> dict[str, Any]:
+    now = datetime.now(UTC)
     live_mode = TradingMode.LIVE
     live_ready = False
     live_reason: str | None = "Tenant context required for live readiness"
@@ -1037,21 +1060,28 @@ def _build_paper_live_health(
                 else "Coinbase connection exists but is not fully validated for live trading."
             )
 
-    validation_failures = int(
-        db.scalar(
-            select(func.count(ExecutionOrder.id)).where(
-                ExecutionOrder.user_id == user.id,
-                ExecutionOrder.trading_mode == trading_mode,
-                ExecutionOrder.failure_code == "execution_validation_failed",
-            )
+    validation_cutoff = now - timedelta(days=PAPER_LIVE_VALIDATION_LOOKBACK_DAYS)
+    validation_failure_row = db.execute(
+        select(
+            func.count(ExecutionOrder.id).label("count"),
+            func.max(ExecutionOrder.created_at).label("last_at"),
+        ).where(
+            ExecutionOrder.user_id == user.id,
+            ExecutionOrder.trading_mode == trading_mode,
+            ExecutionOrder.failure_code == "execution_validation_failed",
+            ExecutionOrder.created_at >= validation_cutoff,
         )
-        or 0
-    )
+    ).one()
+    validation_failures = int(validation_failure_row.count or 0)
+    validation_last_at = _as_utc(validation_failure_row.last_at)
     lifecycle_healthy = not any(
         bool(item.get("enabled"))
         and (
             int(item.get("stalledExitCount") or 0) > 0
-            or str(item.get("currentStatus")) == "blocked"
+            or (
+                str(item.get("currentStatus")) == "blocked"
+                and str(item.get("blockingReasonCode") or "") not in STRATEGY_WAITING_REASON_CODES
+            )
         )
         for item in strategy_health
     )
@@ -1082,12 +1112,23 @@ def _build_paper_live_health(
         },
         {
             "id": "execution_validation",
-            "label": "No execution validation failures",
+            "label": f"No recent execution validation failures ({PAPER_LIVE_VALIDATION_LOOKBACK_DAYS}d)",
             "passed": validation_failures == 0,
             "detail": (
-                "No zero-value or precision validation failures were recorded."
+                (
+                    "No zero-value or precision validation failures were recorded in the "
+                    f"last {PAPER_LIVE_VALIDATION_LOOKBACK_DAYS} days."
+                )
                 if validation_failures == 0
-                else f"{validation_failures} execution validation failure(s) were recorded."
+                else (
+                    f"{validation_failures} validation failure(s) were recorded in the last "
+                    f"{PAPER_LIVE_VALIDATION_LOOKBACK_DAYS} days"
+                    + (
+                        f"; last seen {validation_last_at.isoformat()}."
+                        if validation_last_at is not None
+                        else "."
+                    )
+                )
             ),
         },
         {
