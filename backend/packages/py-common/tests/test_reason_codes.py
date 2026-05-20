@@ -9,8 +9,14 @@ def test_normalize_reason_code_maps_known_aliases() -> None:
     assert normalize_reason_code("token_strategy_policy") == "policy_blocked"
     assert normalize_reason_code("below min_confidence") == "insufficient_confidence"
     assert normalize_reason_code("max_position_usd exceeded") == "max_exposure_reached"
-    assert normalize_reason_code("outside liquid-hours window") == "liquidity_window_closed"
-    assert normalize_reason_code("quantity_precision_exceeded") == "execution_validation_failed"
+    assert (
+        normalize_reason_code("outside liquid-hours window")
+        == "liquidity_window_closed"
+    )
+    assert (
+        normalize_reason_code("quantity_precision_exceeded")
+        == "execution_validation_failed"
+    )
 
 
 def test_normalize_reason_code_uses_reason_detail_fallback() -> None:

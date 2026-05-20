@@ -1091,7 +1091,11 @@ def test_run_once_persists_suppression_audit(tmp_path: Path):
         ).all()
     assert ("signal_generated", "observed", "buy") in lifecycle_rows
     assert ("validation_started", "observed", None) in lifecycle_rows
-    assert ("confidence_validation", "failed", "insufficient_confidence") in lifecycle_rows
+    assert (
+        "confidence_validation",
+        "failed",
+        "insufficient_confidence",
+    ) in lifecycle_rows
 
 
 def test_dca_scheduler_enforces_buy_interval_from_runtime_state():

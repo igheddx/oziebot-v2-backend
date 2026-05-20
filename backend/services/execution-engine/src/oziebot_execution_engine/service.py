@@ -386,7 +386,8 @@ class ExecutionService:
             self._persist_decision_audit_record(
                 request=request,
                 decision=DecisionAuditDecision.REJECTED,
-                reason_code=validation_failure_code or EXECUTION_VALIDATION_FAILURE_CODE,
+                reason_code=validation_failure_code
+                or EXECUTION_VALIDATION_FAILURE_CODE,
                 reason_detail=validation_failure.detail,
                 size_before=original_quantity,
                 size_after=Decimal("0"),
@@ -394,7 +395,8 @@ class ExecutionService:
             )
             self._record_metric(
                 rejected=True,
-                rejection_reason=validation_failure_code or EXECUTION_VALIDATION_FAILURE_CODE,
+                rejection_reason=validation_failure_code
+                or EXECUTION_VALIDATION_FAILURE_CODE,
             )
             self._persist_lifecycle_event(
                 request=request,
@@ -402,7 +404,8 @@ class ExecutionService:
                 status=LifecycleEventStatus.FAILED,
                 occurred_at=now,
                 order_id=order_id,
-                reason_code=validation_failure_code or EXECUTION_VALIDATION_FAILURE_CODE,
+                reason_code=validation_failure_code
+                or EXECUTION_VALIDATION_FAILURE_CODE,
                 reason_detail=validation_failure.detail,
                 metadata={
                     "validation_code": validation_failure.code,

@@ -78,7 +78,9 @@ def normalize_reason_code(
 
     text = " ".join(part for part in (reason_code, reason_detail) if part)
     normalized_text = _normalize_text(text)
-    return _map_text_to_code(normalized_text, fallback=raw_code or "unspecified_blocker")
+    return _map_text_to_code(
+        normalized_text, fallback=raw_code or "unspecified_blocker"
+    )
 
 
 def summarize_rejection_reason(reason_code: str | None) -> str:
@@ -100,12 +102,10 @@ def summarize_rejection_reason(reason_code: str | None) -> str:
     return normalized
 
 
-def top_reason_rows(reason_counts: dict[str, int] | Iterable[tuple[str, int]], *, limit: int = 3) -> list[dict[str, int | str]]:
-    items = (
-        reason_counts.items()
-        if isinstance(reason_counts, dict)
-        else reason_counts
-    )
+def top_reason_rows(
+    reason_counts: dict[str, int] | Iterable[tuple[str, int]], *, limit: int = 3
+) -> list[dict[str, int | str]]:
+    items = reason_counts.items() if isinstance(reason_counts, dict) else reason_counts
     rows = sorted(
         ((reason, int(count)) for reason, count in items if int(count) > 0),
         key=lambda item: (-item[1], item[0]),
@@ -180,7 +180,10 @@ def _map_text_to_code(text: str, *, fallback: str) -> str:
         )
     ):
         return "liquidity_window_closed"
-    if any(token in text for token in ("spread", "slippage", "fee economics", "fee_economics")):
+    if any(
+        token in text
+        for token in ("spread", "slippage", "fee economics", "fee_economics")
+    ):
         return "spread_too_wide"
     if any(
         token in text

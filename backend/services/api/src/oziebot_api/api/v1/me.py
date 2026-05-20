@@ -358,11 +358,7 @@ def _latest_market_data_health(runtime_payload: dict[str, Any], *, now: datetime
             last_at = _as_utc(datetime.fromisoformat(str(raw_last_at).replace("Z", "+00:00")))
         except ValueError:
             last_at = None
-    age_seconds = (
-        round(max((now - last_at).total_seconds(), 0), 2)
-        if last_at is not None
-        else None
-    )
+    age_seconds = round(max((now - last_at).total_seconds(), 0), 2) if last_at is not None else None
     if age_seconds is None:
         status = "unknown"
     elif age_seconds <= DASHBOARD_MARKET_DATA_STALE_SECONDS:
@@ -424,14 +420,18 @@ def _build_reconciliation_health(
             latest_trade_quantity = _to_decimal(trade.position_quantity_after)
 
         actual_quantity = _to_decimal(position.quantity) if position is not None else Decimal("0")
-        actual_realized_pnl_cents = int(position.realized_pnl_cents or 0) if position is not None else 0
-        avg_entry_price = _to_decimal(position.avg_entry_price) if position is not None else Decimal("0")
+        actual_realized_pnl_cents = (
+            int(position.realized_pnl_cents or 0) if position is not None else 0
+        )
+        avg_entry_price = (
+            _to_decimal(position.avg_entry_price) if position is not None else Decimal("0")
+        )
 
         if abs(expected_quantity - actual_quantity) > Decimal("0.00000001"):
             mismatch_types["position_quantity_mismatch"] += 1
-        if latest_trade_quantity is not None and abs(latest_trade_quantity - actual_quantity) > Decimal(
-            "0.00000001"
-        ):
+        if latest_trade_quantity is not None and abs(
+            latest_trade_quantity - actual_quantity
+        ) > Decimal("0.00000001"):
             mismatch_types["latest_trade_quantity_mismatch"] += 1
         if expected_realized_pnl_cents != actual_realized_pnl_cents:
             mismatch_types["realized_pnl_mismatch"] += 1
@@ -639,9 +639,7 @@ def _build_strategy_health(
         strategy_id = str(strategy["id"])
         strategy_config = strategy.get("config") or {}
         strategy_params = (
-            strategy_config.get("strategy_params")
-            if isinstance(strategy_config, dict)
-            else {}
+            strategy_config.get("strategy_params") if isinstance(strategy_config, dict) else {}
         )
         if not isinstance(strategy_params, dict):
             strategy_params = {}
@@ -665,7 +663,8 @@ def _build_strategy_health(
             else None
         )
         latest_exit_reason_detail = (
-            getattr(latest_exit_event, "reason_detail", None) or getattr(latest_exit_event, "reason_code", None)
+            getattr(latest_exit_event, "reason_detail", None)
+            or getattr(latest_exit_event, "reason_code", None)
             if latest_exit_event is not None
             else None
         )
@@ -674,7 +673,11 @@ def _build_strategy_health(
         dca_interval_hours = (
             int(
                 strategy_params.get("buy_interval_hours")
-                or (strategy_config.get("buy_interval_hours") if isinstance(strategy_config, dict) else 0)
+                or (
+                    strategy_config.get("buy_interval_hours")
+                    if isinstance(strategy_config, dict)
+                    else 0
+                )
                 or 24
             )
             if strategy_id == "dca"
@@ -692,7 +695,9 @@ def _build_strategy_health(
                 str(run_metadata.get("suppression_reason") or "suppressed"),
                 reason_detail=str(run_metadata.get("suppression_reason") or ""),
             )
-            blocking_reason_detail = str(run_metadata.get("suppression_reason") or "Strategy suppressed")
+            blocking_reason_detail = str(
+                run_metadata.get("suppression_reason") or "Strategy suppressed"
+            )
             blocker_observed_at = _as_utc(last_run.started_at)
             next_eligible_at = (
                 str(run_metadata.get("next_eligible_buy_time"))
@@ -709,10 +714,14 @@ def _build_strategy_health(
                     last_failed_event.reason_code,
                     reason_detail=last_failed_event.reason_detail,
                 )
-                blocking_reason_detail = last_failed_event.reason_detail or last_failed_event.reason_code
+                blocking_reason_detail = (
+                    last_failed_event.reason_detail or last_failed_event.reason_code
+                )
                 blocker_observed_at = failed_at
                 event_metadata = last_failed_event.event_metadata or {}
-                next_eligible_at = str(event_metadata.get("next_eligible_buy_time") or next_eligible_at)
+                next_eligible_at = str(
+                    event_metadata.get("next_eligible_buy_time") or next_eligible_at
+                )
 
         if (
             strategy_id == "dca"
@@ -726,8 +735,14 @@ def _build_strategy_health(
                 if computed_next_eligible > datetime.now(UTC):
                     next_eligible_at = computed_next_eligible.isoformat()
 
-        if blocking_reason_code is None and last_signal is not None and str(last_signal.action).lower() == "hold":
-            signal_reason = str((last_signal.reasoning_metadata or {}).get("reason") or "Waiting for setup")
+        if (
+            blocking_reason_code is None
+            and last_signal is not None
+            and str(last_signal.action).lower() == "hold"
+        ):
+            signal_reason = str(
+                (last_signal.reasoning_metadata or {}).get("reason") or "Waiting for setup"
+            )
             signal_reason_code = str(
                 (last_signal.reasoning_metadata or {}).get("reason_code") or "hold_signal"
             )
@@ -743,7 +758,8 @@ def _build_strategy_health(
             blocking_reason_detail = "Strategy is turned off."
         elif open_positions > 0:
             if exit_monitored_positions > 0 or (
-                latest_lifecycle is not None and str(latest_lifecycle.stage) in EXIT_VISIBILITY_STAGES
+                latest_lifecycle is not None
+                and str(latest_lifecycle.stage) in EXIT_VISIBILITY_STAGES
             ):
                 current_status = "exit_monitoring"
                 if stalled_exit_count > 0:
@@ -778,8 +794,12 @@ def _build_strategy_health(
                 "name": strategy["name"],
                 "enabled": bool(strategy.get("enabled")),
                 "allocationPct": float(strategy.get("allocationPct") or 0),
-                "assignedCapital": round(int(bucket.assigned_capital_cents or 0) / 100, 2) if bucket else 0.0,
-                "availableCash": round(int(bucket.available_cash_cents or 0) / 100, 2) if bucket else 0.0,
+                "assignedCapital": round(int(bucket.assigned_capital_cents or 0) / 100, 2)
+                if bucket
+                else 0.0,
+                "availableCash": round(int(bucket.available_cash_cents or 0) / 100, 2)
+                if bucket
+                else 0.0,
                 "deployedCapital": (
                     round(
                         (
@@ -807,19 +827,29 @@ def _build_strategy_health(
                     if bucket and int(bucket.assigned_capital_cents or 0) > 0
                     else 0.0
                 ),
-                "realizedPnl": round(int(bucket.realized_pnl_cents or 0) / 100, 2) if bucket else 0.0,
-                "unrealizedPnl": round(int(bucket.unrealized_pnl_cents or 0) / 100, 2) if bucket else 0.0,
+                "realizedPnl": round(int(bucket.realized_pnl_cents or 0) / 100, 2)
+                if bucket
+                else 0.0,
+                "unrealizedPnl": round(int(bucket.unrealized_pnl_cents or 0) / 100, 2)
+                if bucket
+                else 0.0,
                 "currentStatus": current_status,
                 "openPositions": open_positions,
                 "lastEvaluatedAt": _safe_iso(last_run.started_at if last_run is not None else None),
-                "lastSignalAt": _safe_iso(last_signal.timestamp if last_signal is not None else None),
-                "lastSignalAction": (str(last_signal.action).lower() if last_signal is not None else None),
+                "lastSignalAt": _safe_iso(
+                    last_signal.timestamp if last_signal is not None else None
+                ),
+                "lastSignalAction": (
+                    str(last_signal.action).lower() if last_signal is not None else None
+                ),
                 "lastSignalReason": (
                     str((last_signal.reasoning_metadata or {}).get("reason"))
                     if last_signal is not None
                     else None
                 ),
-                "lastTradeAt": _safe_iso(last_trade.executed_at if last_trade is not None else None),
+                "lastTradeAt": _safe_iso(
+                    last_trade.executed_at if last_trade is not None else None
+                ),
                 "lastBuyAt": _safe_iso(last_buy.executed_at if last_buy is not None else None),
                 "dcaIntervalHours": dca_interval_hours,
                 "exitMonitoredPositions": exit_monitored_positions,
@@ -910,7 +940,9 @@ def _build_bot_health(
         quiet_reason = f"{len(active_trades)} order(s) are still working through execution."
     elif recent_activity:
         quiet_reason_code = "recent_trade_completed"
-        quiet_reason = "Recent trade activity exists; strategies may be waiting for the next valid setup."
+        quiet_reason = (
+            "Recent trade activity exists; strategies may be waiting for the next valid setup."
+        )
     else:
         blocker = next(
             (
@@ -931,9 +963,7 @@ def _build_bot_health(
             )
         elif any(item.get("enabled") for item in strategy_health):
             quiet_reason_code = "waiting_for_valid_setups"
-            quiet_reason = (
-                "Strategies are evaluating, but no setup has recently passed policy, risk, and execution gates."
-            )
+            quiet_reason = "Strategies are evaluating, but no setup has recently passed policy, risk, and execution gates."
         else:
             quiet_reason_code = "no_strategies_enabled"
             quiet_reason = "No strategies are enabled in this trading mode."
@@ -988,9 +1018,7 @@ def _build_paper_live_health(
     connection_detail: str | None = "No validated Coinbase connection found."
 
     if tenant_id is not None:
-        live_ready, live_reason = can_set_trading_mode(
-            db, tenant_id=tenant_id, new_mode=live_mode
-        )
+        live_ready, live_reason = can_set_trading_mode(db, tenant_id=tenant_id, new_mode=live_mode)
         has_billing = has_live_trading_billing(db, tenant_id)
         coinbase_ready = coinbase_valid_for_live_trading(db, tenant_id)
         connection = db.scalars(
@@ -1003,13 +1031,10 @@ def _build_paper_live_health(
         ).first()
         if connection is not None:
             connection_status = str(connection.health_status or connection.validation_status)
-            connection_detail = (
-                connection.last_error
-                or (
-                    "Validated Coinbase connection is ready for balances and trading."
-                    if coinbase_ready
-                    else "Coinbase connection exists but is not fully validated for live trading."
-                )
+            connection_detail = connection.last_error or (
+                "Validated Coinbase connection is ready for balances and trading."
+                if coinbase_ready
+                else "Coinbase connection exists but is not fully validated for live trading."
             )
 
     validation_failures = int(

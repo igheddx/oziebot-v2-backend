@@ -843,8 +843,7 @@ def test_dashboard_details_exposes_bot_health_and_strategy_wait_reasons(
     assert payload["botHealth"]["paperLive"]["currentMode"] == "paper"
     assert payload["botHealth"]["paperLive"]["paperWarning"].startswith("Paper results may not")
     assert any(
-        item["id"] == "market_data"
-        for item in payload["botHealth"]["paperLive"]["checklist"]
+        item["id"] == "market_data" for item in payload["botHealth"]["paperLive"]["checklist"]
     )
     dca_health = next(row for row in payload["strategyHealth"] if row["id"] == "dca")
     assert dca_health["currentStatus"] == "waiting"
@@ -1001,9 +1000,7 @@ def test_dashboard_details_surfaces_exit_monitoring_and_stalled_positions(
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    strategy_health = next(
-        row for row in payload["strategyHealth"] if row["id"] == "momentum"
-    )
+    strategy_health = next(row for row in payload["strategyHealth"] if row["id"] == "momentum")
     assert strategy_health["currentStatus"] == "exit_monitoring"
     assert strategy_health["exitMonitoredPositions"] == 1
     assert strategy_health["stalledExitCount"] == 1
