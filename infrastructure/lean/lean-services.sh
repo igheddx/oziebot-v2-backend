@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start/stop/restart lean stack (local or on server from repo root).
-# Usage: ./infrastructure/lean/lean-services.sh start|stop|restart|ps
+# Usage: ./infrastructure/lean/lean-services.sh start|stop|restart|ps|status|down
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "${ROOT}"
@@ -20,11 +20,14 @@ case "${CMD}" in
   ps)
     "${COMPOSE[@]}" ps
     ;;
+  status)
+    "${ROOT}/infrastructure/lean/lean-status.sh"
+    ;;
   down)
     "${COMPOSE[@]}" down
     ;;
   *)
-    echo "Usage: $0 start|stop|restart|ps|down" >&2
+    echo "Usage: $0 start|stop|restart|ps|status|down" >&2
     exit 1
     ;;
  esac

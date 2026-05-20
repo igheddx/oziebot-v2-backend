@@ -2,6 +2,12 @@
 
 from oziebot_common.health import HealthState, start_health_server
 from oziebot_common.postgres_runtime_kv import PostgresRuntimeKV
+from oziebot_common.reason_codes import (
+    CANONICAL_REASON_CODES,
+    normalize_reason_code,
+    summarize_rejection_reason,
+    top_reason_rows,
+)
 from oziebot_common.fee_model import (
     DEFAULT_FEE_MODEL_SETTINGS,
     SETTING_EXECUTION_FEE_MODEL,
@@ -109,6 +115,7 @@ __all__ = [
     "AIRecommendation",
     "DEFAULT_TRADE_LOG_RETENTION_SECONDS",
     "PlaceholderTradeIntelligenceScorer",
+    "CANONICAL_REASON_CODES",
     "StrategyLifecycleStage",
     "TradeIntelligenceScorer",
     "append_trade_log_event",
@@ -117,6 +124,7 @@ __all__ = [
     "build_trade_log_event",
     "build_market_signal_snapshot",
     "calculate_round_trip_cost_bps",
+    "normalize_reason_code",
     "default_fee_model_settings",
     "estimate_signal_expected_edge_bps",
     "extract_signal_snapshot_id",
@@ -137,6 +145,8 @@ __all__ = [
     "read_trade_log_summaries",
     "resolve_effective_token_policy",
     "resolve_fee_profile",
+    "summarize_rejection_reason",
+    "top_reason_rows",
     "score_strategy_suitability",
     "start_health_server",
     "strategy_platform_config",

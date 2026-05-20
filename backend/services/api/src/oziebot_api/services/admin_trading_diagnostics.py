@@ -12,6 +12,11 @@ from typing import Any
 from sqlalchemy import Numeric, Select, case, cast, func, select
 from sqlalchemy.orm import Session
 
+from oziebot_common.reason_codes import (
+    normalize_reason_code,
+    summarize_rejection_reason,
+    top_reason_rows,
+)
 from oziebot_common.token_policy import normalize_missing_policy_behavior
 from oziebot_api.config import Settings
 from oziebot_api.models.execution import ExecutionOrder, ExecutionPosition, ExecutionTradeRecord
@@ -765,7 +770,7 @@ def _build_signal_funnel(
     )
 
     signal_actions: Counter[str] = Counter()
-    rejection_reasons: Counter[str] = Counter()
+    rejection_reason_codes: Counter[str] = Counter()
     strategy_breakdown: dict[str, dict[str, Any]] = defaultdict(_empty_strategy_breakdown)
 
     evaluated_rows = db.execute(
@@ -839,9 +844,9 @@ def _build_signal_funnel(
     ).all()
     for strategy_name, reason in suppressed_rows:
         suppressed_count += 1
-        bucket_reason = _bucket_rejection_reason(reason)
-        rejection_reasons[bucket_reason] += 1
-        strategy_breakdown[str(strategy_name)]["rejection_reasons"][bucket_reason] += 1
+        normalized_reason = normalize_reason_code(reason)
+        rejection_reason_codes[normalized_reason] += 1
+        strategy_breakdown[str(strategy_name)]["rejection_reasons"][normalized_reason] += 1
 
     risk_rejects_count = 0
     risk_reject_rows = db.execute(
@@ -859,9 +864,9 @@ def _build_signal_funnel(
     ).all()
     for strategy_name, reason, detail in risk_reject_rows:
         risk_rejects_count += 1
-        bucket_reason = _bucket_rejection_reason(reason or detail)
-        rejection_reasons[bucket_reason] += 1
-        strategy_breakdown[str(strategy_name)]["rejection_reasons"][bucket_reason] += 1
+        normalized_reason = normalize_reason_code(reason, reason_detail=detail)
+        rejection_reason_codes[normalized_reason] += 1
+        strategy_breakdown[str(strategy_name)]["rejection_reasons"][normalized_reason] += 1
 
     failed_orders_count = 0
     failed_order_rows = db.execute(
@@ -884,9 +889,12 @@ def _build_signal_funnel(
     ).all()
     for strategy_name, failure_code, failure_detail, state in failed_order_rows:
         failed_orders_count += 1
-        bucket_reason = _bucket_rejection_reason(failure_code or failure_detail or state)
-        rejection_reasons[bucket_reason] += 1
-        strategy_breakdown[str(strategy_name)]["rejection_reasons"][bucket_reason] += 1
+        normalized_reason = normalize_reason_code(
+            failure_code or state,
+            reason_detail=failure_detail,
+        )
+        rejection_reason_codes[normalized_reason] += 1
+        strategy_breakdown[str(strategy_name)]["rejection_reasons"][normalized_reason] += 1
 
     signals_evaluated: int | None
     if runs_count:
@@ -927,15 +935,21 @@ def _build_signal_funnel(
     ]
 
     signal_actions_payload = _serialize_signal_actions(signal_actions)
+    rejection_reasons = Counter(
+        {
+            summarize_rejection_reason(reason): count
+            for reason, count in rejection_reason_codes.items()
+        }
+    )
     strategy_breakdown_payload = {
         strategy: {
             "signals_evaluated": bucket["signals_evaluated"],
             "signals_rejected": bucket["signals_rejected"],
             "signal_actions": _serialize_signal_actions(bucket["signal_actions"]),
-            "rejection_reasons": _serialize_rejection_reasons(bucket["rejection_reasons"]),
+            "rejection_reasons": dict(sorted(bucket["rejection_reasons"].items())),
             "top_hold_reasons": _top_counter_rows(bucket["hold_reason_counts"]),
             "top_non_hold_reasons": _top_counter_rows(bucket["non_hold_reason_counts"]),
-            "top_rejection_reasons": _top_counter_rows(bucket["rejection_reasons"]),
+            "top_rejection_reasons": top_reason_rows(bucket["rejection_reasons"]),
         }
         for strategy, bucket in sorted(strategy_breakdown.items())
     }
@@ -959,8 +973,9 @@ def _build_signal_funnel(
             "liquidity_hours": _counter_or_none(
                 rejection_reasons, "liquidity_hours", signals_rejected
             ),
-            "other": _counter_or_none(rejection_reasons, "other", signals_rejected),
+            "other": None,
         },
+        "top_rejection_reasons": top_reason_rows(rejection_reason_codes),
         "data_sources": {
             "signals_evaluated": "strategy_runs",
             "signals_emitted": "strategy_signal_records",
@@ -1194,25 +1209,6 @@ def _count_rows(db: Session, stmt: Select[Any]) -> int:
     return int(db.scalar(stmt) or 0)
 
 
-def _bucket_rejection_reason(reason: str | None) -> str:
-    text = (reason or "").lower()
-    if "confidence" in text:
-        return "confidence"
-    if "volume" in text:
-        return "volume"
-    if "allocation" in text or "position_limit" in text or "capital" in text:
-        return "allocation"
-    if "token_strategy_policy" in text or "blocked token" in text:
-        return "token_strategy_policy"
-    if "cooldown" in text:
-        return "cooldown"
-    if "liquid" in text or "hours" in text:
-        return "liquidity_hours"
-    if "risk" in text or "fee_economics" in text:
-        return "risk_engine"
-    return "other"
-
-
 def _bucket_signal_action(action: str | None) -> str:
     normalized = (action or "").strip().lower()
     if normalized in {"buy", "sell", "close", "hold"}:
@@ -1246,19 +1242,6 @@ def _serialize_signal_actions(counter: Counter[str]) -> dict[str, int]:
     }
     counts["non_hold"] = counts["buy"] + counts["sell"] + counts["close"] + counts["other"]
     return counts
-
-
-def _serialize_rejection_reasons(counter: Counter[str]) -> dict[str, int]:
-    return {
-        "confidence": int(counter.get("confidence", 0)),
-        "volume": int(counter.get("volume", 0)),
-        "allocation": int(counter.get("allocation", 0)),
-        "risk_engine": int(counter.get("risk_engine", 0)),
-        "token_strategy_policy": int(counter.get("token_strategy_policy", 0)),
-        "cooldown": int(counter.get("cooldown", 0)),
-        "liquidity_hours": int(counter.get("liquidity_hours", 0)),
-        "other": int(counter.get("other", 0)),
-    }
 
 
 def _top_counter_rows(counter: Counter[str], *, limit: int = 3) -> list[dict[str, Any]]:

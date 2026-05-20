@@ -19,6 +19,7 @@ from oziebot_common.dynamic_sizing import (
 )
 from oziebot_common.postgres_runtime_kv import PostgresRuntimeKV
 from oziebot_common.queues import QueueNames, strategy_signal_to_json
+from oziebot_common.reason_codes import normalize_reason_code
 from oziebot_common.worker_outbox import enqueue_worker_payload
 from oziebot_common.fee_model import (
     SETTING_EXECUTION_FEE_MODEL,
@@ -305,6 +306,7 @@ class StrategyRunner:
                             token_policy, trading_mode=mode
                         )
                         if policy_reason is not None:
+                            policy_reason_code = normalize_reason_code(policy_reason)
                             self._persist_lifecycle_event(
                                 correlation_id=trace_id,
                                 user_id=user_id,
@@ -328,18 +330,18 @@ class StrategyRunner:
                                 status=LifecycleEventStatus.FAILED,
                                 occurred_at=now,
                                 run_id=run_id,
-                                reason_code=policy_reason,
+                                reason_code=policy_reason_code,
                                 reason_detail="Signal blocked before strategy evaluation",
                                 metadata={"token_policy": token_policy},
                             )
                             self._record_signal_metric(
-                                rejected=True, rejection_reason=policy_reason
+                                rejected=True, rejection_reason=policy_reason_code
                             )
                             self._persist_decision_audit_record(
                                 signal_snapshot_id=None,
                                 stage=DecisionAuditStage.SUPPRESSION,
                                 decision=DecisionAuditDecision.REJECTED,
-                                reason_code=policy_reason,
+                                reason_code=policy_reason_code,
                                 reason_detail="Signal blocked before strategy evaluation",
                                 size_before=None,
                                 size_after=None,
@@ -356,6 +358,7 @@ class StrategyRunner:
                                 metadata={
                                     "suppressed": True,
                                     "suppression_reason": policy_reason,
+                                    "suppression_reason_code": policy_reason_code,
                                     "token_policy": token_policy,
                                 },
                                 started_at=now,
@@ -367,7 +370,7 @@ class StrategyRunner:
                                 symbol=symbol,
                                 trading_mode=mode,
                                 signal_generated=False,
-                                rejection_reason=policy_reason,
+                                rejection_reason=policy_reason_code,
                                 confidence_score=None,
                                 final_decision="rejected",
                             )
@@ -577,20 +580,31 @@ class StrategyRunner:
                                 occurred_at=now,
                                 run_id=run_id,
                                 signal=signal,
-                                reason_code=outcome["reason_code"],
+                                reason_code=(
+                                    normalize_reason_code(
+                                        outcome["reason_code"],
+                                        reason_detail=outcome["reason_detail"],
+                                    )
+                                    if outcome["reason_code"] is not None
+                                    else None
+                                ),
                                 reason_detail=outcome["reason_detail"],
                                 metadata=outcome["metadata"],
                             )
                         if suppress_reason is not None:
+                            suppress_reason_code = normalize_reason_code(
+                                suppress_reason,
+                                reason_detail=signal.reason,
+                            )
                             self._record_signal_metric(
                                 rejected=True,
-                                rejection_reason=suppress_reason,
+                                rejection_reason=suppress_reason_code,
                             )
                             self._persist_decision_audit_record(
                                 signal_snapshot_id=self._signal_snapshot_id(signal),
                                 stage=DecisionAuditStage.SUPPRESSION,
                                 decision=DecisionAuditDecision.REJECTED,
-                                reason_code=suppress_reason,
+                                reason_code=suppress_reason_code,
                                 reason_detail=signal.reason,
                                 size_before=self._signal_size(signal),
                                 size_after=Decimal("0"),
@@ -607,6 +621,7 @@ class StrategyRunner:
                                 metadata={
                                     "suppressed": True,
                                     "suppression_reason": suppress_reason,
+                                    "suppression_reason_code": suppress_reason_code,
                                     "confidence": float(signal.confidence),
                                     "token_policy": (signal.metadata or {}).get(
                                         "token_policy"
@@ -625,7 +640,7 @@ class StrategyRunner:
                                 symbol=symbol,
                                 trading_mode=mode,
                                 signal_generated=False,
-                                rejection_reason=suppress_reason,
+                                rejection_reason=suppress_reason_code,
                                 confidence_score=signal.confidence,
                                 final_decision="rejected",
                             )

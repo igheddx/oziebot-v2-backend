@@ -93,7 +93,8 @@ docker compose -f docker-compose.lean.yml -f docker-compose.lean.edge.yml --env-
 | `.env.lean.example` | Copy → `.env.lean` (gitignored) |
 | `infrastructure/lean/bootstrap-lean-env-from-aws.sh` | Build **`.env.lean`** from Secrets Manager (hex DB password for local Postgres); `LEAN_BOOTSTRAP_OVERWRITE=1` to replace |
 | `infrastructure/lean/deploy-lean-host.sh` | SSH + `compose up` (optional `--rsync`, `LEAN_USE_EDGE=1` for Caddy TLS) |
-| `infrastructure/lean/lean-services.sh` | `start` / `stop` / `restart` / `ps` / `down` |
+| `infrastructure/lean/lean-services.sh` | `start` / `stop` / `restart` / `ps` / `status` / `down` |
+| `infrastructure/lean/lean-status.sh` | Print active topology, env-file protection, compose status, latest backup, and health checks |
 | `infrastructure/lean/healthcheck-lean.sh` | API `/v1/ready`, Redis, Postgres |
 | `infrastructure/lean/pg-backup.sh` | `pg_dump` → `backups/lean-pg/` |
 | `infrastructure/lean/pg-restore.sh` | Restore from `.sql.gz` (**destructive**) |
@@ -104,6 +105,8 @@ docker compose -f docker-compose.lean.yml -f docker-compose.lean.edge.yml --env-
 **Host sizing:** **≥ 4 GB RAM** minimum (**8 GB** comfortable) for seven Python services + Postgres + Redis. Lightsail **8 GB** or **EC2 t3.large**/similar.
 
 **API bind:** Default **`LEAN_API_BIND=127.0.0.1`** (curl from host for debug). Public traffic uses **Caddy → `api:8000`** inside Docker; avoid exposing **8000** on `0.0.0.0` unless required.
+
+**Operational status:** Run `./infrastructure/lean/lean-status.sh` after deploys or before cutovers. It summarizes whether the host is running direct API bind vs Caddy edge, prints the active compose services, highlights broad `.env.lean` permissions, shows the latest Postgres backup, and runs the lean health checks in one place. `deploy-lean-host.sh` now runs it automatically after remote deploys succeed.
 
 ---
 

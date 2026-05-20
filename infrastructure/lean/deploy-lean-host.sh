@@ -94,9 +94,11 @@ for _lp in 80 443; do
   fi
 done
 
-${COMPOSE} build
-${COMPOSE} up -d --force-recreate --remove-orphans
-${COMPOSE} ps
+ ${COMPOSE} build
+ ${COMPOSE} up -d --force-recreate --remove-orphans
+ ${COMPOSE} ps
+ ./infrastructure/lean/healthcheck-lean.sh
+ ./infrastructure/lean/lean-status.sh
 EOF
 }
 
@@ -109,6 +111,6 @@ sync_only)
   echo "Rsync complete (compose skipped)."
   ;;
 sync_and_deploy | remote_only)
-  echo "Deploy complete. Run ./infrastructure/lean/healthcheck-lean.sh remotely or via SSH."
+  echo "Deploy complete and health checks passed."
   ;;
 esac

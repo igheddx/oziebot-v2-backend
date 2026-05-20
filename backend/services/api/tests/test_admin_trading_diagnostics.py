@@ -666,6 +666,11 @@ def test_admin_trading_diagnostics_returns_consistent_funnel_and_respects_filter
     assert payload["signal_funnel"]["rejection_reasons"]["token_strategy_policy"] == 1
     assert payload["signal_funnel"]["rejection_reasons"]["allocation"] == 1
     assert payload["signal_funnel"]["rejection_reasons"]["confidence"] == 1
+    assert payload["signal_funnel"]["top_rejection_reasons"] == [
+        {"reason": "allocation_unavailable", "count": 1},
+        {"reason": "insufficient_confidence", "count": 1},
+        {"reason": "policy_blocked", "count": 1},
+    ]
     assert (
         payload["signal_funnel"]["strategy_breakdown"]["day_trading"]["signal_actions"]["hold"] == 1
     )
@@ -675,6 +680,12 @@ def test_admin_trading_diagnostics_returns_consistent_funnel_and_respects_filter
         ]
         == "Volume filter blocked entry: latest=80 avg=100 min_multiplier=1.80"
     )
+    assert payload["signal_funnel"]["strategy_breakdown"]["day_trading"][
+        "top_rejection_reasons"
+    ] == [
+        {"reason": "allocation_unavailable", "count": 1},
+        {"reason": "policy_blocked", "count": 1},
+    ]
     assert payload["capital_utilization"]["total_account_value"] is not None
     assert (
         payload["active_strategy_config"]["momentum_config"]["risk_caps"]["max_position_usd"] == 300

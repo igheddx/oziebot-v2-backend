@@ -1082,7 +1082,7 @@ def test_run_once_persists_suppression_audit(tmp_path: Path):
     assert rows
     assert all(row[0] == "suppression" for row in rows)
     assert all(row[1] == "rejected" for row in rows)
-    assert all(row[2] == "min_confidence" for row in rows)
+    assert all(row[2] == "insufficient_confidence" for row in rows)
     with eng.begin() as conn:
         lifecycle_rows = conn.execute(
             text(
@@ -1091,7 +1091,7 @@ def test_run_once_persists_suppression_audit(tmp_path: Path):
         ).all()
     assert ("signal_generated", "observed", "buy") in lifecycle_rows
     assert ("validation_started", "observed", None) in lifecycle_rows
-    assert ("confidence_validation", "failed", "below_min_confidence") in lifecycle_rows
+    assert ("confidence_validation", "failed", "insufficient_confidence") in lifecycle_rows
 
 
 def test_dca_scheduler_enforces_buy_interval_from_runtime_state():
@@ -1718,9 +1718,4 @@ def test_runner_requires_max_position_usd_for_fractional_sizing():
     assert runner.run_once() == 0
     assert runner.generated == 1
     assert runner.metrics_snapshot()["signals_rejected"] == 1
-    assert (
-        runner.metrics_snapshot()["rejection_reasons"][
-            "max_position_usd required for usd-normalized sizing"
-        ]
-        == 1
-    )
+    assert runner.metrics_snapshot()["rejection_reasons"]["max_exposure_reached"] == 1

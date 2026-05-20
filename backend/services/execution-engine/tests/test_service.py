@@ -1112,7 +1112,7 @@ def test_execution_rejects_blocked_token_strategy_policy(tmp_path: Path):
 
     assert result.state == ExecutionOrderStatus.FAILED
     order = _last_order(db_path)
-    assert order["failure_code"] == "token_strategy_policy"
+    assert order["failure_code"] == "policy_blocked"
     assert "blocked" in str(order["failure_detail"])
     intent_payload = json.loads(str(order["intent_payload"]))
     token_policy = intent_payload["metadata"]["token_policy_execution"]
@@ -1162,7 +1162,7 @@ def test_execution_rechecks_blocked_policy_before_submission(tmp_path: Path):
     assert result.state == ExecutionOrderStatus.FAILED
     assert live_client.place_calls == 0
     order = _last_order(db_path)
-    assert order["failure_code"] == "token_strategy_policy"
+    assert order["failure_code"] == "policy_blocked"
     assert "blocked right before submit" in str(order["failure_detail"])
     adapter_payload = json.loads(str(order["adapter_payload"]))
     assert adapter_payload["policy_check"]["policy_id"] == "late-policy"

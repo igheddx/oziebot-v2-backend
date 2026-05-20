@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from decimal import Decimal, InvalidOperation
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -12,24 +12,36 @@ from fastapi.responses import Response
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import joinedload
 
+from oziebot_common.reason_codes import normalize_reason_code
 from oziebot_api.config import Settings
 from oziebot_api.deps import DbSession, settings_dep
 from oziebot_api.deps.auth import CurrentUser
 from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.execution import ExecutionOrder, ExecutionPosition, ExecutionTradeRecord
+from oziebot_api.models.exchange_connection import ExchangeConnection
+from oziebot_api.models.execution_reconciliation import ExecutionReconciliationEvent
 from oziebot_api.models.market_data import MarketDataBboSnapshot
 from oziebot_api.models.platform_strategy import PlatformStrategy
+from oziebot_api.models.strategy_lifecycle import StrategyLifecycleEvent
 from oziebot_api.models.strategy_allocation import StrategyCapitalBucket
+from oziebot_api.models.strategy_signal_pipeline import StrategyRun, StrategySignalRecord
 from oziebot_api.models.trade_intelligence import (
     StrategyDecisionAudit,
     StrategySignalSnapshot,
+)
+from oziebot_api.models.ai_diagnostics import (
+    AiDiagnosticFinding,
+    AiDiagnosticReview,
+    DiagnosticSnapshot,
 )
 from oziebot_api.models.tenant import Tenant
 from oziebot_api.models.user import User
 from oziebot_api.models.user_strategy import UserStrategy
 from oziebot_api.schemas.me import MeOut, TenantBrief, TradingModePatch
 from oziebot_api.services.entitlements import tenant_strategy_entitlement_gate
+from oziebot_api.services.coinbase import coinbase_valid_for_live_trading
+from oziebot_api.services.entitlements import has_live_trading_billing
 from oziebot_api.services.live_coinbase import (
     CASH_EQUIVALENT_CURRENCIES,
     load_live_coinbase_accounts,
@@ -42,6 +54,7 @@ from oziebot_api.services.trade_review_analytics import (
 )
 from oziebot_api.services.trading_mode_policy import can_set_trading_mode
 from oziebot_api.services.read_model_cache import ReadModelCache
+from oziebot_api.services.runtime_status import build_runtime_status_payload
 from oziebot_domain.trading_mode import TradingMode
 
 router = APIRouter(prefix="/me", tags=["me"])
@@ -49,6 +62,14 @@ router = APIRouter(prefix="/me", tags=["me"])
 DASHBOARD_CACHE_TTL_SECONDS = 120
 DASHBOARD_REJECTION_CACHE_TTL_SECONDS = 300
 ANALYTICS_CACHE_TTL_SECONDS = 120
+EXIT_RELIABILITY_STALL_MINUTES = 15
+EXIT_VISIBILITY_STAGES = {
+    "exit_monitoring_started",
+    "take_profit_triggered",
+    "stop_loss_triggered",
+    "trailing_stop_triggered",
+    "exit_execution_requested",
+}
 ANALYTICS_SUMMARY_CACHE_TTL_SECONDS = 300
 DASHBOARD_HISTORY_LOOKBACK_DAYS = 30
 DASHBOARD_POSITIONS_LIMIT = 50
@@ -59,8 +80,11 @@ DASHBOARD_REJECTION_EVENT_LIMIT = 100
 DASHBOARD_REJECTION_AUDIT_SCAN_LIMIT = 250
 DASHBOARD_GROWTH_POINTS = 8
 DASHBOARD_GROWTH_TRADE_LIMIT = 500
+DASHBOARD_ACTIVITY_SCAN_LIMIT = 500
 DASHBOARD_POSITION_DUST_NOTIONAL_USD = Decimal("1")
 DASHBOARD_MARK_LOOKBACK_MINUTES = 30
+DASHBOARD_MARKET_DATA_STALE_SECONDS = 120
+DASHBOARD_CRITICAL_FINDING_OPEN_STATUSES = ("new", "acknowledged")
 ANALYTICS_DEFAULT_LOOKBACK_DAYS = 30
 ANALYTICS_MAX_LOOKBACK_DAYS = 90
 
@@ -291,6 +315,812 @@ def _format_rejection_record(
         "strategy": strategy,
         "symbol": symbol,
         "createdAt": _as_utc(created_at).isoformat() if created_at else None,
+    }
+
+
+def _safe_iso(value: datetime | None) -> str | None:
+    normalized = _as_utc(value)
+    return normalized.isoformat() if normalized is not None else None
+
+
+def _normalize_dashboard_reason_code(
+    reason_code: str | None,
+    *,
+    reason_detail: str | None = None,
+) -> str:
+    return normalize_reason_code(reason_code, reason_detail=reason_detail)
+
+
+def _latest_by_key(rows: list[Any], key_name: str) -> dict[str, Any]:
+    latest: dict[str, Any] = {}
+    for row in rows:
+        key = str(getattr(row, key_name))
+        if key not in latest:
+            latest[key] = row
+    return latest
+
+
+def _latest_by_pair(rows: list[Any], first_key: str, second_key: str) -> dict[tuple[str, str], Any]:
+    latest: dict[tuple[str, str], Any] = {}
+    for row in rows:
+        key = (str(getattr(row, first_key)), str(getattr(row, second_key)))
+        if key not in latest:
+            latest[key] = row
+    return latest
+
+
+def _latest_market_data_health(runtime_payload: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+    market_data = (runtime_payload.get("activity") or {}).get("market_data") or {}
+    raw_last_at = market_data.get("last_at")
+    last_at: datetime | None = None
+    if raw_last_at:
+        try:
+            last_at = _as_utc(datetime.fromisoformat(str(raw_last_at).replace("Z", "+00:00")))
+        except ValueError:
+            last_at = None
+    age_seconds = (
+        round(max((now - last_at).total_seconds(), 0), 2)
+        if last_at is not None
+        else None
+    )
+    if age_seconds is None:
+        status = "unknown"
+    elif age_seconds <= DASHBOARD_MARKET_DATA_STALE_SECONDS:
+        status = "fresh"
+    elif age_seconds <= DASHBOARD_MARKET_DATA_STALE_SECONDS * 5:
+        status = "warning"
+    else:
+        status = "stale"
+    return {
+        "status": status,
+        "lastAt": _safe_iso(last_at),
+        "ageSeconds": age_seconds,
+        "tradeTicksRecent": int(market_data.get("trade_ticks") or 0),
+        "bboUpdatesRecent": int(market_data.get("bbo_updates") or 0),
+    }
+
+
+def _build_reconciliation_health(
+    *,
+    db: DbSession,
+    user: User,
+    trading_mode: str,
+    positions_rows: list[ExecutionPosition],
+    buckets: list[StrategyCapitalBucket],
+) -> dict[str, Any]:
+    trade_rows = (
+        db.query(ExecutionTradeRecord)
+        .filter(
+            ExecutionTradeRecord.user_id == user.id,
+            ExecutionTradeRecord.trading_mode == trading_mode,
+        )
+        .order_by(ExecutionTradeRecord.executed_at.asc())
+        .all()
+    )
+    trades_by_scope: defaultdict[tuple[str, str], list[ExecutionTradeRecord]] = defaultdict(list)
+    for row in trade_rows:
+        trades_by_scope[(str(row.strategy_id), str(row.symbol))].append(row)
+
+    positions_by_scope = {(str(row.strategy_id), str(row.symbol)): row for row in positions_rows}
+    mismatch_types: Counter[str] = Counter()
+    scopes = sorted(set(trades_by_scope) | set(positions_by_scope))
+    per_bucket_expected: defaultdict[str, dict[str, int]] = defaultdict(
+        lambda: {"locked_capital_cents": 0, "realized_pnl_cents": 0}
+    )
+
+    for scope in scopes:
+        scoped_trades = trades_by_scope.get(scope, [])
+        position = positions_by_scope.get(scope)
+        expected_quantity = Decimal("0")
+        expected_realized_pnl_cents = 0
+        latest_trade_quantity: Decimal | None = None
+        for trade in scoped_trades:
+            quantity = _to_decimal(trade.quantity)
+            if str(trade.side).lower() == "buy":
+                expected_quantity += quantity
+            else:
+                expected_quantity -= quantity
+                expected_realized_pnl_cents += int(trade.realized_pnl_cents or 0)
+            latest_trade_quantity = _to_decimal(trade.position_quantity_after)
+
+        actual_quantity = _to_decimal(position.quantity) if position is not None else Decimal("0")
+        actual_realized_pnl_cents = int(position.realized_pnl_cents or 0) if position is not None else 0
+        avg_entry_price = _to_decimal(position.avg_entry_price) if position is not None else Decimal("0")
+
+        if abs(expected_quantity - actual_quantity) > Decimal("0.00000001"):
+            mismatch_types["position_quantity_mismatch"] += 1
+        if latest_trade_quantity is not None and abs(latest_trade_quantity - actual_quantity) > Decimal(
+            "0.00000001"
+        ):
+            mismatch_types["latest_trade_quantity_mismatch"] += 1
+        if expected_realized_pnl_cents != actual_realized_pnl_cents:
+            mismatch_types["realized_pnl_mismatch"] += 1
+
+        expected_bucket = per_bucket_expected[str(scope[0])]
+        expected_bucket["realized_pnl_cents"] += actual_realized_pnl_cents
+        if actual_quantity > 0 and avg_entry_price > 0:
+            expected_bucket["locked_capital_cents"] += _cents(actual_quantity * avg_entry_price)
+
+    for bucket in buckets:
+        expected = per_bucket_expected[str(bucket.strategy_id)]
+        if int(bucket.locked_capital_cents or 0) != expected["locked_capital_cents"]:
+            mismatch_types["bucket_locked_capital_mismatch"] += 1
+        if int(bucket.realized_pnl_cents or 0) != expected["realized_pnl_cents"]:
+            mismatch_types["bucket_realized_pnl_mismatch"] += 1
+
+    recent_reconcile_cutoff = datetime.now(UTC) - timedelta(days=7)
+    recent_events = (
+        db.query(ExecutionReconciliationEvent)
+        .filter(
+            ExecutionReconciliationEvent.tenant_id == primary_tenant_id(db, user),
+            ExecutionReconciliationEvent.trading_mode == trading_mode,
+            ExecutionReconciliationEvent.created_at >= recent_reconcile_cutoff,
+        )
+        .order_by(ExecutionReconciliationEvent.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    external_errors = sum(1 for event in recent_events if event.status == "error")
+    mismatch_count = int(sum(mismatch_types.values()))
+    if mismatch_count > 0 or external_errors > 0:
+        status = "critical" if mismatch_count >= 3 or external_errors > 0 else "warning"
+    else:
+        status = "healthy"
+    return {
+        "status": status,
+        "mismatchCount": mismatch_count,
+        "scopeCount": len(scopes),
+        "bucketCount": len(buckets),
+        "externalErrorCount": external_errors,
+        "topMismatchTypes": [
+            {"type": mismatch_type, "count": int(count)}
+            for mismatch_type, count in mismatch_types.most_common(4)
+        ],
+    }
+
+
+def _build_strategy_health(
+    *,
+    user: User,
+    db: DbSession,
+    trading_mode: str,
+    enabled_strategies: list[dict[str, Any]],
+    buckets: list[StrategyCapitalBucket],
+    positions_rows: list[ExecutionPosition],
+    dashboard_cutoff: datetime,
+) -> list[dict[str, Any]]:
+    if not enabled_strategies:
+        return []
+
+    now = datetime.now(UTC)
+    strategy_ids = [str(item["id"]) for item in enabled_strategies]
+    bucket_by_strategy = {str(bucket.strategy_id): bucket for bucket in buckets}
+    position_counts: Counter[str] = Counter(
+        str(row.strategy_id) for row in positions_rows if _to_decimal(row.quantity) != 0
+    )
+    latest_trade_rows = _latest_by_key(
+        (
+            db.query(ExecutionTradeRecord)
+            .filter(
+                ExecutionTradeRecord.user_id == user.id,
+                ExecutionTradeRecord.trading_mode == trading_mode,
+                ExecutionTradeRecord.strategy_id.in_(strategy_ids),
+                ExecutionTradeRecord.executed_at >= dashboard_cutoff,
+            )
+            .order_by(ExecutionTradeRecord.executed_at.desc())
+            .limit(DASHBOARD_ACTIVITY_SCAN_LIMIT)
+            .all()
+        ),
+        "strategy_id",
+    )
+    latest_buy_trade_rows = _latest_by_key(
+        (
+            db.query(ExecutionTradeRecord)
+            .filter(
+                ExecutionTradeRecord.user_id == user.id,
+                ExecutionTradeRecord.trading_mode == trading_mode,
+                ExecutionTradeRecord.strategy_id.in_(strategy_ids),
+                ExecutionTradeRecord.side == "buy",
+                ExecutionTradeRecord.executed_at >= dashboard_cutoff,
+            )
+            .order_by(ExecutionTradeRecord.executed_at.desc())
+            .limit(DASHBOARD_ACTIVITY_SCAN_LIMIT)
+            .all()
+        ),
+        "strategy_id",
+    )
+    latest_signal_rows = _latest_by_key(
+        (
+            db.query(StrategySignalRecord)
+            .filter(
+                StrategySignalRecord.user_id == user.id,
+                StrategySignalRecord.trading_mode == trading_mode,
+                StrategySignalRecord.strategy_name.in_(strategy_ids),
+                StrategySignalRecord.timestamp >= dashboard_cutoff,
+            )
+            .order_by(StrategySignalRecord.timestamp.desc())
+            .limit(DASHBOARD_ACTIVITY_SCAN_LIMIT)
+            .all()
+        ),
+        "strategy_name",
+    )
+    latest_run_rows = _latest_by_key(
+        (
+            db.query(StrategyRun)
+            .filter(
+                StrategyRun.user_id == user.id,
+                StrategyRun.trading_mode == trading_mode,
+                StrategyRun.strategy_name.in_(strategy_ids),
+                StrategyRun.started_at >= dashboard_cutoff,
+            )
+            .order_by(StrategyRun.started_at.desc())
+            .limit(DASHBOARD_ACTIVITY_SCAN_LIMIT)
+            .all()
+        ),
+        "strategy_name",
+    )
+    latest_failed_lifecycle_rows = _latest_by_key(
+        (
+            db.query(StrategyLifecycleEvent)
+            .filter(
+                StrategyLifecycleEvent.user_id == user.id,
+                StrategyLifecycleEvent.trading_mode == trading_mode,
+                StrategyLifecycleEvent.strategy_name.in_(strategy_ids),
+                StrategyLifecycleEvent.status == "failed",
+                StrategyLifecycleEvent.occurred_at >= dashboard_cutoff,
+            )
+            .order_by(StrategyLifecycleEvent.occurred_at.desc())
+            .limit(DASHBOARD_ACTIVITY_SCAN_LIMIT)
+            .all()
+        ),
+        "strategy_name",
+    )
+    latest_lifecycle_rows = _latest_by_key(
+        (
+            db.query(StrategyLifecycleEvent)
+            .filter(
+                StrategyLifecycleEvent.user_id == user.id,
+                StrategyLifecycleEvent.trading_mode == trading_mode,
+                StrategyLifecycleEvent.strategy_name.in_(strategy_ids),
+                StrategyLifecycleEvent.occurred_at >= dashboard_cutoff,
+            )
+            .order_by(StrategyLifecycleEvent.occurred_at.desc())
+            .limit(DASHBOARD_ACTIVITY_SCAN_LIMIT)
+            .all()
+        ),
+        "strategy_name",
+    )
+    open_position_symbols = sorted({str(row.symbol) for row in positions_rows if row.symbol})
+    latest_exit_lifecycle_rows = _latest_by_pair(
+        (
+            db.query(StrategyLifecycleEvent)
+            .filter(
+                StrategyLifecycleEvent.user_id == user.id,
+                StrategyLifecycleEvent.trading_mode == trading_mode,
+                StrategyLifecycleEvent.stage.in_(EXIT_VISIBILITY_STAGES),
+                StrategyLifecycleEvent.strategy_name.in_(strategy_ids),
+                StrategyLifecycleEvent.symbol.in_(open_position_symbols),
+            )
+            .order_by(StrategyLifecycleEvent.occurred_at.desc())
+            .limit(DASHBOARD_ACTIVITY_SCAN_LIMIT)
+            .all()
+        )
+        if open_position_symbols
+        else [],
+        "strategy_name",
+        "symbol",
+    )
+    strategy_exit_rollups: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "positions": 0,
+            "stalled": 0,
+            "latest_event": None,
+        }
+    )
+    exit_stall_cutoff = now - timedelta(minutes=EXIT_RELIABILITY_STALL_MINUTES)
+    for row in positions_rows:
+        exit_event = latest_exit_lifecycle_rows.get((str(row.strategy_id), str(row.symbol)))
+        if exit_event is None:
+            continue
+        rollup = strategy_exit_rollups[str(row.strategy_id)]
+        rollup["positions"] += 1
+        occurred_at = _as_utc(exit_event.occurred_at)
+        if occurred_at is not None and occurred_at <= exit_stall_cutoff:
+            rollup["stalled"] += 1
+        latest_event = rollup.get("latest_event")
+        latest_event_at = _as_utc(getattr(latest_event, "occurred_at", None))
+        if latest_event is None or (
+            occurred_at is not None and (latest_event_at is None or occurred_at >= latest_event_at)
+        ):
+            rollup["latest_event"] = exit_event
+
+    summaries: list[dict[str, Any]] = []
+    for strategy in enabled_strategies:
+        strategy_id = str(strategy["id"])
+        strategy_config = strategy.get("config") or {}
+        strategy_params = (
+            strategy_config.get("strategy_params")
+            if isinstance(strategy_config, dict)
+            else {}
+        )
+        if not isinstance(strategy_params, dict):
+            strategy_params = {}
+        bucket = bucket_by_strategy.get(strategy_id)
+        last_trade = latest_trade_rows.get(strategy_id)
+        last_buy = latest_buy_trade_rows.get(strategy_id)
+        last_signal = latest_signal_rows.get(strategy_id)
+        last_run = latest_run_rows.get(strategy_id)
+        last_failed_event = latest_failed_lifecycle_rows.get(strategy_id)
+        latest_lifecycle = latest_lifecycle_rows.get(strategy_id)
+        open_positions = int(position_counts.get(strategy_id, 0))
+        exit_rollup = strategy_exit_rollups.get(strategy_id) or {}
+        latest_exit_event = exit_rollup.get("latest_event")
+        latest_exit_at = _as_utc(getattr(latest_exit_event, "occurred_at", None))
+        latest_exit_reason_code = (
+            _normalize_dashboard_reason_code(
+                getattr(latest_exit_event, "reason_code", None),
+                reason_detail=getattr(latest_exit_event, "reason_detail", None),
+            )
+            if latest_exit_event is not None
+            else None
+        )
+        latest_exit_reason_detail = (
+            getattr(latest_exit_event, "reason_detail", None) or getattr(latest_exit_event, "reason_code", None)
+            if latest_exit_event is not None
+            else None
+        )
+        exit_monitored_positions = int(exit_rollup.get("positions") or 0)
+        stalled_exit_count = int(exit_rollup.get("stalled") or 0)
+        dca_interval_hours = (
+            int(
+                strategy_params.get("buy_interval_hours")
+                or (strategy_config.get("buy_interval_hours") if isinstance(strategy_config, dict) else 0)
+                or 24
+            )
+            if strategy_id == "dca"
+            else None
+        )
+
+        blocking_reason_code: str | None = None
+        blocking_reason_detail: str | None = None
+        next_eligible_at: str | None = None
+        blocker_observed_at: datetime | None = None
+
+        run_metadata = (last_run.run_metadata or {}) if last_run is not None else {}
+        if last_run is not None and run_metadata.get("suppressed"):
+            blocking_reason_code = _normalize_dashboard_reason_code(
+                str(run_metadata.get("suppression_reason") or "suppressed"),
+                reason_detail=str(run_metadata.get("suppression_reason") or ""),
+            )
+            blocking_reason_detail = str(run_metadata.get("suppression_reason") or "Strategy suppressed")
+            blocker_observed_at = _as_utc(last_run.started_at)
+            next_eligible_at = (
+                str(run_metadata.get("next_eligible_buy_time"))
+                if run_metadata.get("next_eligible_buy_time")
+                else None
+            )
+
+        if last_failed_event is not None:
+            failed_at = _as_utc(last_failed_event.occurred_at)
+            if blocker_observed_at is None or (
+                failed_at is not None and failed_at >= blocker_observed_at
+            ):
+                blocking_reason_code = _normalize_dashboard_reason_code(
+                    last_failed_event.reason_code,
+                    reason_detail=last_failed_event.reason_detail,
+                )
+                blocking_reason_detail = last_failed_event.reason_detail or last_failed_event.reason_code
+                blocker_observed_at = failed_at
+                event_metadata = last_failed_event.event_metadata or {}
+                next_eligible_at = str(event_metadata.get("next_eligible_buy_time") or next_eligible_at)
+
+        if (
+            strategy_id == "dca"
+            and next_eligible_at is None
+            and dca_interval_hours
+            and last_buy is not None
+        ):
+            last_buy_at = _as_utc(last_buy.executed_at)
+            if last_buy_at is not None:
+                computed_next_eligible = last_buy_at + timedelta(hours=dca_interval_hours)
+                if computed_next_eligible > datetime.now(UTC):
+                    next_eligible_at = computed_next_eligible.isoformat()
+
+        if blocking_reason_code is None and last_signal is not None and str(last_signal.action).lower() == "hold":
+            signal_reason = str((last_signal.reasoning_metadata or {}).get("reason") or "Waiting for setup")
+            signal_reason_code = str(
+                (last_signal.reasoning_metadata or {}).get("reason_code") or "hold_signal"
+            )
+            blocking_reason_code = _normalize_dashboard_reason_code(
+                signal_reason_code,
+                reason_detail=signal_reason,
+            )
+            blocking_reason_detail = signal_reason
+
+        if not bool(strategy.get("enabled")):
+            current_status = "disabled"
+            blocking_reason_code = "strategy_disabled"
+            blocking_reason_detail = "Strategy is turned off."
+        elif open_positions > 0:
+            if exit_monitored_positions > 0 or (
+                latest_lifecycle is not None and str(latest_lifecycle.stage) in EXIT_VISIBILITY_STAGES
+            ):
+                current_status = "exit_monitoring"
+                if stalled_exit_count > 0:
+                    blocking_reason_code = "exit_stalled"
+                    blocking_reason_detail = (
+                        f"{stalled_exit_count} exit request"
+                        f"{'s look' if stalled_exit_count > 1 else ' looks'} stale and should be reviewed."
+                    )
+                elif blocking_reason_code is None and latest_exit_reason_code is not None:
+                    blocking_reason_code = latest_exit_reason_code
+                    blocking_reason_detail = latest_exit_reason_detail
+            else:
+                current_status = "managing_position"
+        elif blocking_reason_code in {
+            "insufficient_confidence",
+            "insufficient_volume",
+            "stale_market_data",
+            "spread_too_wide",
+            "cooldown_active",
+        }:
+            current_status = "waiting"
+        elif blocking_reason_code is not None:
+            current_status = "blocked"
+        elif last_run is not None or last_signal is not None:
+            current_status = "ready"
+        else:
+            current_status = "inactive"
+
+        summaries.append(
+            {
+                "id": strategy_id,
+                "name": strategy["name"],
+                "enabled": bool(strategy.get("enabled")),
+                "allocationPct": float(strategy.get("allocationPct") or 0),
+                "assignedCapital": round(int(bucket.assigned_capital_cents or 0) / 100, 2) if bucket else 0.0,
+                "availableCash": round(int(bucket.available_cash_cents or 0) / 100, 2) if bucket else 0.0,
+                "deployedCapital": (
+                    round(
+                        (
+                            int(bucket.reserved_cash_cents or 0)
+                            + int(bucket.locked_capital_cents or 0)
+                        )
+                        / 100,
+                        2,
+                    )
+                    if bucket
+                    else 0.0
+                ),
+                "utilizationPct": (
+                    round(
+                        (
+                            (
+                                int(bucket.reserved_cash_cents or 0)
+                                + int(bucket.locked_capital_cents or 0)
+                            )
+                            / max(int(bucket.assigned_capital_cents or 0), 1)
+                        )
+                        * 100,
+                        2,
+                    )
+                    if bucket and int(bucket.assigned_capital_cents or 0) > 0
+                    else 0.0
+                ),
+                "realizedPnl": round(int(bucket.realized_pnl_cents or 0) / 100, 2) if bucket else 0.0,
+                "unrealizedPnl": round(int(bucket.unrealized_pnl_cents or 0) / 100, 2) if bucket else 0.0,
+                "currentStatus": current_status,
+                "openPositions": open_positions,
+                "lastEvaluatedAt": _safe_iso(last_run.started_at if last_run is not None else None),
+                "lastSignalAt": _safe_iso(last_signal.timestamp if last_signal is not None else None),
+                "lastSignalAction": (str(last_signal.action).lower() if last_signal is not None else None),
+                "lastSignalReason": (
+                    str((last_signal.reasoning_metadata or {}).get("reason"))
+                    if last_signal is not None
+                    else None
+                ),
+                "lastTradeAt": _safe_iso(last_trade.executed_at if last_trade is not None else None),
+                "lastBuyAt": _safe_iso(last_buy.executed_at if last_buy is not None else None),
+                "dcaIntervalHours": dca_interval_hours,
+                "exitMonitoredPositions": exit_monitored_positions,
+                "stalledExitCount": stalled_exit_count,
+                "latestExitAt": _safe_iso(latest_exit_at),
+                "latestExitReasonCode": latest_exit_reason_code,
+                "latestExitReasonDetail": latest_exit_reason_detail,
+                "blockingReasonCode": blocking_reason_code,
+                "blockingReasonDetail": blocking_reason_detail,
+                "nextEligibleAt": next_eligible_at,
+                "latestLifecycleStage": (
+                    str(latest_lifecycle.stage) if latest_lifecycle is not None else None
+                ),
+                "latestLifecycleStatus": (
+                    str(latest_lifecycle.status) if latest_lifecycle is not None else None
+                ),
+            }
+        )
+
+    status_order = {
+        "blocked": 0,
+        "waiting": 1,
+        "exit_monitoring": 2,
+        "managing_position": 3,
+        "ready": 4,
+        "inactive": 5,
+        "disabled": 6,
+    }
+    return sorted(
+        summaries,
+        key=lambda item: (
+            status_order.get(str(item["currentStatus"]), 99),
+            -float(item["allocationPct"]),
+            str(item["name"]),
+        ),
+    )
+
+
+def _build_bot_health(
+    *,
+    user: User,
+    db: DbSession,
+    tenant_id: Any,
+    trading_mode: str,
+    enabled_strategies: list[dict[str, Any]],
+    positions: list[dict[str, Any]],
+    active_trades: list[dict[str, Any]],
+    recent_activity: list[dict[str, Any]],
+    strategy_health: list[dict[str, Any]],
+    reconciliation_health: dict[str, Any],
+) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    runtime_payload = build_runtime_status_payload(db)
+    market_data_health = _latest_market_data_health(runtime_payload, now=now)
+    critical_diagnostics_count = 0
+    if tenant_id is not None:
+        critical_diagnostics_count = int(
+            db.scalar(
+                select(func.count(AiDiagnosticFinding.id))
+                .select_from(AiDiagnosticFinding)
+                .join(AiDiagnosticReview, AiDiagnosticReview.id == AiDiagnosticFinding.review_id)
+                .join(DiagnosticSnapshot, DiagnosticSnapshot.id == AiDiagnosticReview.snapshot_id)
+                .where(AiDiagnosticReview.tenant_id == tenant_id)
+                .where(DiagnosticSnapshot.trading_mode == trading_mode)
+                .where(AiDiagnosticFinding.severity == "critical")
+                .where(AiDiagnosticFinding.status.in_(DASHBOARD_CRITICAL_FINDING_OPEN_STATUSES))
+            )
+            or 0
+        )
+
+    paper_live = _build_paper_live_health(
+        user=user,
+        db=db,
+        tenant_id=tenant_id,
+        trading_mode=trading_mode,
+        enabled_strategies=enabled_strategies,
+        strategy_health=strategy_health,
+        reconciliation_health=reconciliation_health,
+        critical_diagnostics_count=critical_diagnostics_count,
+        market_data_health=market_data_health,
+    )
+
+    if positions:
+        quiet_reason_code = "managing_open_positions"
+        quiet_reason = f"Bot is actively managing {len(positions)} open position(s)."
+    elif active_trades:
+        quiet_reason_code = "orders_in_flight"
+        quiet_reason = f"{len(active_trades)} order(s) are still working through execution."
+    elif recent_activity:
+        quiet_reason_code = "recent_trade_completed"
+        quiet_reason = "Recent trade activity exists; strategies may be waiting for the next valid setup."
+    else:
+        blocker = next(
+            (
+                item
+                for item in strategy_health
+                if item.get("enabled")
+                and item.get("blockingReasonCode")
+                and item.get("currentStatus") in {"blocked", "waiting"}
+            ),
+            None,
+        )
+        if blocker is not None:
+            quiet_reason_code = str(blocker.get("blockingReasonCode"))
+            quiet_reason = str(
+                blocker.get("blockingReasonDetail")
+                or blocker.get("blockingReasonCode")
+                or "Strategies are waiting for eligibility."
+            )
+        elif any(item.get("enabled") for item in strategy_health):
+            quiet_reason_code = "waiting_for_valid_setups"
+            quiet_reason = (
+                "Strategies are evaluating, but no setup has recently passed policy, risk, and execution gates."
+            )
+        else:
+            quiet_reason_code = "no_strategies_enabled"
+            quiet_reason = "No strategies are enabled in this trading mode."
+
+    overall_status = str(runtime_payload.get("overall_status") or "unknown")
+    if reconciliation_health.get("status") == "critical" or critical_diagnostics_count > 0:
+        overall_status = "critical"
+    elif overall_status not in {"critical"} and (
+        reconciliation_health.get("status") == "warning"
+        or market_data_health.get("status") in {"warning", "stale"}
+    ):
+        overall_status = "warning"
+    elif overall_status == "unknown" and quiet_reason_code not in {"no_strategies_enabled"}:
+        overall_status = "warning"
+
+    last_successful_trade_at = recent_activity[0]["timestamp"] if recent_activity else None
+    return {
+        "overallStatus": overall_status,
+        "runtimeStatus": str(runtime_payload.get("overall_status") or "unknown"),
+        "pipelineStatus": str(runtime_payload.get("pipeline_status") or "unknown"),
+        "mode": trading_mode,
+        "activeStrategies": sum(1 for item in enabled_strategies if item.get("enabled")),
+        "activePositions": len(positions),
+        "criticalDiagnosticsCount": critical_diagnostics_count,
+        "lastSuccessfulTradeAt": last_successful_trade_at,
+        "quietReasonCode": quiet_reason_code,
+        "quietReason": quiet_reason,
+        "marketData": market_data_health,
+        "reconciliation": reconciliation_health,
+        "paperLive": paper_live,
+    }
+
+
+def _build_paper_live_health(
+    *,
+    user: User,
+    db: DbSession,
+    tenant_id: Any,
+    trading_mode: str,
+    enabled_strategies: list[dict[str, Any]],
+    strategy_health: list[dict[str, Any]],
+    reconciliation_health: dict[str, Any],
+    critical_diagnostics_count: int,
+    market_data_health: dict[str, Any],
+) -> dict[str, Any]:
+    live_mode = TradingMode.LIVE
+    live_ready = False
+    live_reason: str | None = "Tenant context required for live readiness"
+    has_billing = False
+    coinbase_ready = False
+    connection_status = "not_connected"
+    connection_detail: str | None = "No validated Coinbase connection found."
+
+    if tenant_id is not None:
+        live_ready, live_reason = can_set_trading_mode(
+            db, tenant_id=tenant_id, new_mode=live_mode
+        )
+        has_billing = has_live_trading_billing(db, tenant_id)
+        coinbase_ready = coinbase_valid_for_live_trading(db, tenant_id)
+        connection = db.scalars(
+            select(ExchangeConnection)
+            .where(
+                ExchangeConnection.tenant_id == tenant_id,
+                ExchangeConnection.provider == "coinbase",
+            )
+            .limit(1)
+        ).first()
+        if connection is not None:
+            connection_status = str(connection.health_status or connection.validation_status)
+            connection_detail = (
+                connection.last_error
+                or (
+                    "Validated Coinbase connection is ready for balances and trading."
+                    if coinbase_ready
+                    else "Coinbase connection exists but is not fully validated for live trading."
+                )
+            )
+
+    validation_failures = int(
+        db.scalar(
+            select(func.count(ExecutionOrder.id)).where(
+                ExecutionOrder.user_id == user.id,
+                ExecutionOrder.trading_mode == trading_mode,
+                ExecutionOrder.failure_code == "execution_validation_failed",
+            )
+        )
+        or 0
+    )
+    lifecycle_healthy = not any(
+        bool(item.get("enabled"))
+        and (
+            int(item.get("stalledExitCount") or 0) > 0
+            or str(item.get("currentStatus")) == "blocked"
+        )
+        for item in strategy_health
+    )
+    exposure_configured = any(
+        float(item.get("assignedCapital") or 0) > 0 for item in strategy_health
+    )
+
+    checklist = [
+        {
+            "id": "reconciliation",
+            "label": "Reconciliation healthy",
+            "passed": reconciliation_health.get("status") == "healthy",
+            "detail": (
+                "Execution, position, and capital buckets reconcile cleanly."
+                if reconciliation_health.get("status") == "healthy"
+                else f"{int(reconciliation_health.get('mismatchCount') or 0)} mismatch(es) need review."
+            ),
+        },
+        {
+            "id": "diagnostics",
+            "label": "No critical diagnostics",
+            "passed": critical_diagnostics_count == 0,
+            "detail": (
+                "No open critical diagnostic findings."
+                if critical_diagnostics_count == 0
+                else f"{critical_diagnostics_count} critical diagnostic finding(s) remain open."
+            ),
+        },
+        {
+            "id": "execution_validation",
+            "label": "No execution validation failures",
+            "passed": validation_failures == 0,
+            "detail": (
+                "No zero-value or precision validation failures were recorded."
+                if validation_failures == 0
+                else f"{validation_failures} execution validation failure(s) were recorded."
+            ),
+        },
+        {
+            "id": "strategy_lifecycle",
+            "label": "Strategy lifecycle healthy",
+            "passed": lifecycle_healthy,
+            "detail": (
+                "No blocked strategies or stalled exits are currently visible."
+                if lifecycle_healthy
+                else "One or more strategies are blocked or have stalled exits."
+            ),
+        },
+        {
+            "id": "market_data",
+            "label": "Market data fresh",
+            "passed": market_data_health.get("status") == "fresh",
+            "detail": (
+                "Recent BBO and trade activity look fresh."
+                if market_data_health.get("status") == "fresh"
+                else "Market data freshness needs attention before trusting live readiness."
+            ),
+        },
+        {
+            "id": "coinbase",
+            "label": "Valid Coinbase credentials",
+            "passed": coinbase_ready,
+            "detail": connection_detail,
+        },
+        {
+            "id": "exposure",
+            "label": "Exposure configured",
+            "passed": exposure_configured,
+            "detail": (
+                "At least one strategy has assigned capital."
+                if exposure_configured
+                else "No assigned capital is configured yet."
+            ),
+        },
+        {
+            "id": "billing",
+            "label": "Live billing active",
+            "passed": has_billing,
+            "detail": (
+                "Trial or subscription covers live trading."
+                if has_billing
+                else "Live mode still needs an active trial or subscription."
+            ),
+        },
+    ]
+
+    return {
+        "currentMode": trading_mode,
+        "canSwitchToLive": live_ready,
+        "liveReadinessReason": live_reason,
+        "strictPaperModeAvailable": False,
+        "paperWarning": "Paper results may not fully represent live trading conditions.",
+        "connectionStatus": connection_status,
+        "checklist": checklist,
     }
 
 
@@ -534,7 +1364,7 @@ def _live_coinbase_balance_snapshot(
 
 
 def _dashboard_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
-    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 4}
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 5}
 
 
 def _dashboard_summary_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
@@ -542,7 +1372,7 @@ def _dashboard_summary_cache_params(*, user: User, trading_mode: str) -> dict[st
 
 
 def _dashboard_details_cache_params(*, user: User, trading_mode: str) -> dict[str, Any]:
-    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 4}
+    return {"user_id": str(user.id), "trading_mode": trading_mode, "version": 5}
 
 
 def _dashboard_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -580,6 +1410,8 @@ def _dashboard_rejection_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def _dashboard_details_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "enabledStrategies": payload.get("enabledStrategies") or [],
+        "strategyHealth": payload.get("strategyHealth") or [],
+        "botHealth": payload.get("botHealth") or {},
         "positions": payload.get("positions") or [],
         "activeTrades": payload.get("activeTrades") or [],
         "recentActivity": payload.get("recentActivity") or [],
@@ -1088,6 +1920,11 @@ def _build_dashboard_payload(
                 "name": row.display_name or _format_strategy_name(row.slug),
                 "enabled": is_enabled,
                 "allocationPct": 0,
+                "config": (
+                    configured_row.config
+                    if configured_row is not None and isinstance(configured_row.config, dict)
+                    else row.config_schema or {}
+                ),
             }
         )
 
@@ -1100,6 +1937,20 @@ def _build_dashboard_payload(
         .all()
     )
     bucket_by_strategy = {b.strategy_id: b for b in buckets}
+    known_strategy_ids = {str(item["id"]) for item in enabled_strategies}
+    for strategy_id in sorted(bucket_by_strategy):
+        if strategy_id in known_strategy_ids:
+            continue
+        enabled_strategies.append(
+            {
+                "id": strategy_id,
+                "name": _format_strategy_name(strategy_id),
+                "enabled": True,
+                "allocationPct": 0,
+                "config": {},
+            }
+        )
+        known_strategy_ids.add(strategy_id)
     total_assigned = sum(max(0, b.assigned_capital_cents) for b in buckets)
     for item in enabled_strategies:
         b = bucket_by_strategy.get(item["id"])
@@ -1156,6 +2007,30 @@ def _build_dashboard_payload(
             base = max(1.0, portfolio_value - pnl_value)
             pnl_percent = (pnl_value / base) * 100
     position_marks = _latest_symbol_marks(db, [row.symbol for row in positions_rows])
+    latest_exit_lifecycle_rows = _latest_by_pair(
+        (
+            db.query(StrategyLifecycleEvent)
+            .filter(
+                StrategyLifecycleEvent.user_id == user.id,
+                StrategyLifecycleEvent.trading_mode == mode,
+                StrategyLifecycleEvent.stage.in_(EXIT_VISIBILITY_STAGES),
+                StrategyLifecycleEvent.symbol.in_(
+                    [str(row.symbol) for row in positions_rows if row.symbol]
+                ),
+                StrategyLifecycleEvent.strategy_name.in_(
+                    [str(row.strategy_id) for row in positions_rows if row.strategy_id]
+                ),
+            )
+            .order_by(StrategyLifecycleEvent.occurred_at.desc())
+            .limit(DASHBOARD_ACTIVITY_SCAN_LIMIT)
+            .all()
+        )
+        if positions_rows
+        else [],
+        "strategy_name",
+        "symbol",
+    )
+    exit_stall_cutoff = now - timedelta(minutes=EXIT_RELIABILITY_STALL_MINUTES)
     positions: list[dict[str, Any]] = []
     for row in positions_rows:
         qty = _to_float(row.quantity)
@@ -1171,6 +2046,33 @@ def _build_dashboard_payload(
         last_trade_at = _as_utc(row.last_trade_at)
         closed_at = _as_utc(row.closed_at)
         age_seconds = max(0.0, (now - opened_at).total_seconds()) if opened_at is not None else None
+        exit_event = latest_exit_lifecycle_rows.get((str(row.strategy_id), str(row.symbol)))
+        exit_stage = str(exit_event.stage) if exit_event is not None else None
+        exit_event_at = _as_utc(exit_event.occurred_at if exit_event is not None else None)
+        exit_reason_code = (
+            _normalize_dashboard_reason_code(
+                exit_event.reason_code,
+                reason_detail=exit_event.reason_detail,
+            )
+            if exit_event is not None
+            else None
+        )
+        exit_reason_detail = (
+            exit_event.reason_detail or exit_event.reason_code if exit_event is not None else None
+        )
+        exit_stalled = bool(exit_event_at is not None and exit_event_at <= exit_stall_cutoff)
+        if exit_stage == "exit_execution_requested":
+            exit_status = "stalled" if exit_stalled else "requested"
+        elif exit_stage in {
+            "take_profit_triggered",
+            "stop_loss_triggered",
+            "trailing_stop_triggered",
+        }:
+            exit_status = "stalled" if exit_stalled else "triggered"
+        elif exit_stage == "exit_monitoring_started":
+            exit_status = "monitoring"
+        else:
+            exit_status = None
         positions.append(
             {
                 "id": str(row.id),
@@ -1187,6 +2089,12 @@ def _build_dashboard_payload(
                 "closedAt": closed_at.isoformat() if closed_at is not None else None,
                 "ageMinutes": (round(age_seconds / 60, 2) if age_seconds is not None else None),
                 "ageHours": (round(age_seconds / 3600, 4) if age_seconds is not None else None),
+                "exitStatus": exit_status,
+                "exitStage": exit_stage,
+                "exitReasonCode": exit_reason_code,
+                "exitReasonDetail": exit_reason_detail,
+                "exitUpdatedAt": exit_event_at.isoformat() if exit_event_at is not None else None,
+                "exitStalled": exit_stalled,
             }
         )
 
@@ -1552,6 +2460,33 @@ def _build_dashboard_payload(
         portfolio_value=portfolio_value,
         unrealized_pnl_value=unrealized_pnl_cents / 100,
     )
+    strategy_health = _build_strategy_health(
+        user=user,
+        db=db,
+        trading_mode=mode,
+        enabled_strategies=enabled_strategies,
+        buckets=buckets,
+        positions_rows=all_positions_rows,
+        dashboard_cutoff=dashboard_cutoff,
+    )
+    bot_health = _build_bot_health(
+        user=user,
+        db=db,
+        tenant_id=tenant_id,
+        trading_mode=mode,
+        enabled_strategies=enabled_strategies,
+        positions=positions,
+        active_trades=active_trades,
+        recent_activity=recent_activity,
+        strategy_health=strategy_health,
+        reconciliation_health=_build_reconciliation_health(
+            db=db,
+            user=user,
+            trading_mode=mode,
+            positions_rows=all_positions_rows,
+            buckets=buckets,
+        ),
+    )
 
     return {
         "availableBalance": round(available_balance_cents / 100, 2),
@@ -1563,6 +2498,8 @@ def _build_dashboard_payload(
         "gainLossLabel": "Total P&L",
         "growth": growth,
         "enabledStrategies": enabled_strategies,
+        "strategyHealth": strategy_health,
+        "botHealth": bot_health,
         "positions": positions,
         "activeTrades": active_trades,
         "recentActivity": recent_activity,

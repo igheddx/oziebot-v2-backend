@@ -17,6 +17,7 @@ from oziebot_common.fee_model import (
 )
 from oziebot_common.queues import QueueNames, notification_event_to_json
 from oziebot_common.postgres_runtime_kv import PostgresRuntimeKV
+from oziebot_common.reason_codes import normalize_reason_code
 from oziebot_common.worker_outbox import enqueue_worker_payload
 from oziebot_common.strategy_defaults import normalize_platform_strategy_config
 from oziebot_common.token_policy import resolve_effective_token_policy
@@ -121,6 +122,7 @@ class RiskEngineService:
             self._log_decision(signal, decision)
             return decision, None
         if size <= 0:
+            rejection_reason_code = normalize_reason_code("signal_size_positive")
             decision = RiskDecision(
                 outcome=RiskOutcome.REJECT,
                 approved=False,
@@ -138,7 +140,7 @@ class RiskEngineService:
                 trace_id=trace_id,
                 metadata={
                     "rejection_stage": "risk",
-                    "rejection_reason_code": "signal_size_positive",
+                    "rejection_reason_code": rejection_reason_code,
                     "rejection_metrics": {"suggested_size": str(signal.suggested_size)},
                     "sizing": self._json_dict(signal.reasoning_metadata.get("sizing")),
                     "fee_economics": facts.get("fee_economics", {}),
@@ -158,11 +160,11 @@ class RiskEngineService:
                 status=LifecycleEventStatus.FAILED,
                 occurred_at=now,
                 correlation_id=trace_id,
-                reason_code="signal_size_positive",
+                reason_code=rejection_reason_code,
                 reason_detail=decision.detail,
                 metadata=decision.metadata,
             )
-            self._record_metric(rejected=True, rejection_reason="signal_size_positive")
+            self._record_metric(rejected=True, rejection_reason=rejection_reason_code)
             self._log_decision(signal, decision)
             return decision, None
 
@@ -257,6 +259,10 @@ class RiskEngineService:
                 reduced = True
 
         if reject_result is not None:
+            rejection_reason_code = normalize_reason_code(
+                reject_result.rule_name,
+                reason_detail=reject_result.detail,
+            )
             decision = RiskDecision(
                 outcome=RiskOutcome.REJECT,
                 approved=False,
@@ -274,7 +280,7 @@ class RiskEngineService:
                 trace_id=trace_id,
                 metadata={
                     "rejection_stage": "risk",
-                    "rejection_reason_code": reject_result.rule_name,
+                    "rejection_reason_code": rejection_reason_code,
                     "rejection_metrics": {
                         "suggested_size": str(signal.suggested_size),
                         "mid_price": str(facts["mid_price"]),
@@ -301,13 +307,13 @@ class RiskEngineService:
                 status=LifecycleEventStatus.FAILED,
                 occurred_at=now,
                 correlation_id=trace_id,
-                reason_code=reject_result.rule_name,
+                reason_code=rejection_reason_code,
                 reason_detail=decision.detail,
                 metadata=decision.metadata | {"rules_evaluated": rules_evaluated},
             )
             self._record_metric(
                 rejected=True,
-                rejection_reason=reject_result.rule_name,
+                rejection_reason=rejection_reason_code,
             )
             self._log_decision(signal, decision)
             return decision, None

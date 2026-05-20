@@ -291,6 +291,7 @@ class TradingDiagnosticsSignalFunnel(BaseModel):
     trades_executed: int
     signal_actions: dict[str, int] = Field(default_factory=dict)
     rejection_reasons: TradingDiagnosticsRejectionReasons
+    top_rejection_reasons: list[dict[str, Any]] = Field(default_factory=list)
     data_sources: dict[str, str] = Field(default_factory=dict)
     strategy_breakdown: dict[str, dict[str, Any]] = Field(default_factory=dict)
     unavailable_metrics: list[str] = Field(default_factory=list)

@@ -14,11 +14,14 @@ from oziebot_api.models.market_data import MarketDataBboSnapshot
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.risk_event import RiskEvent
 from oziebot_api.models.strategy_allocation import StrategyCapitalBucket
+from oziebot_api.models.strategy_lifecycle import StrategyLifecycleEvent
+from oziebot_api.models.strategy_signal_pipeline import StrategyRun
 from oziebot_api.models.trade_intelligence import (
     StrategyDecisionAudit,
     StrategySignalSnapshot,
 )
 from oziebot_api.models.user import User
+from oziebot_api.models.user_strategy import UserStrategy
 from oziebot_api.services.credential_crypto import CredentialCrypto
 
 
@@ -576,6 +579,16 @@ def test_dashboard_summary_does_not_fetch_live_coinbase_balances(
 
     now = datetime.now(UTC)
     db_session.add(
+        UserStrategy(
+            user_id=user.id,
+            strategy_id="momentum",
+            is_enabled=True,
+            config={},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.add(
         StrategyCapitalBucket(
             user_id=user.id,
             strategy_id="momentum",
@@ -756,6 +769,252 @@ def test_dashboard_summary_ignores_rejection_diagnostics_history(
     assert payload["availableBalance"] == 950.0
     assert payload["portfolioValue"] == 1000.0
     assert payload["totalRejected"] == 0
+
+
+def test_dashboard_details_exposes_bot_health_and_strategy_wait_reasons(
+    client,
+    root_user_and_token,
+    db_session: Session,
+):
+    email, token = root_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+
+    now = datetime.now(UTC)
+    next_due = now + timedelta(hours=12)
+    db_session.add(
+        StrategyCapitalBucket(
+            user_id=user.id,
+            strategy_id="dca",
+            trading_mode="paper",
+            assigned_capital_cents=25_000,
+            available_cash_cents=25_000,
+            reserved_cash_cents=0,
+            locked_capital_cents=0,
+            realized_pnl_cents=0,
+            unrealized_pnl_cents=0,
+            available_buying_power_cents=25_000,
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.add(
+        StrategyRun(
+            run_id=uuid.uuid4(),
+            user_id=user.id,
+            strategy_name="dca",
+            symbol="BTC-USD",
+            trading_mode="paper",
+            status="completed",
+            trace_id="trace-dashboard-bot-health",
+            run_metadata={
+                "suppressed": True,
+                "suppression_reason": "skipped_due_to_interval",
+                "next_eligible_buy_time": next_due.isoformat(),
+            },
+            started_at=now,
+            completed_at=now,
+        )
+    )
+    db_session.add(
+        MarketDataBboSnapshot(
+            source="coinbase",
+            product_id="BTC-USD",
+            best_bid_price=65000,
+            best_bid_size=5,
+            best_ask_price=65010,
+            best_ask_size=5,
+            event_time=now,
+            ingest_time=now,
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/details?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["botHealth"]["marketData"]["status"] == "fresh"
+    assert payload["botHealth"]["quietReasonCode"] == "cooldown_active"
+    assert payload["botHealth"]["paperLive"]["currentMode"] == "paper"
+    assert payload["botHealth"]["paperLive"]["paperWarning"].startswith("Paper results may not")
+    assert any(
+        item["id"] == "market_data"
+        for item in payload["botHealth"]["paperLive"]["checklist"]
+    )
+    dca_health = next(row for row in payload["strategyHealth"] if row["id"] == "dca")
+    assert dca_health["currentStatus"] == "waiting"
+    assert dca_health["blockingReasonCode"] == "cooldown_active"
+    assert dca_health["dcaIntervalHours"] == 24
+    assert dca_health["lastBuyAt"] is None
+    assert dca_health["nextEligibleAt"] == next_due.isoformat()
+
+
+def test_dashboard_details_surfaces_reconciliation_mismatches(
+    client,
+    root_user_and_token,
+    db_session: Session,
+):
+    email, token = root_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+
+    now = datetime.now(UTC)
+    db_session.add(
+        UserStrategy(
+            user_id=user.id,
+            strategy_id="momentum",
+            is_enabled=True,
+            config={},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.add(
+        StrategyCapitalBucket(
+            user_id=user.id,
+            strategy_id="momentum",
+            trading_mode="paper",
+            assigned_capital_cents=50_000,
+            available_cash_cents=45_000,
+            reserved_cash_cents=0,
+            locked_capital_cents=5_000,
+            realized_pnl_cents=0,
+            unrealized_pnl_cents=0,
+            available_buying_power_cents=45_000,
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/details?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    reconciliation = response.json()["botHealth"]["reconciliation"]
+    assert reconciliation["status"] == "warning"
+    assert reconciliation["mismatchCount"] == 1
+    assert reconciliation["topMismatchTypes"] == [
+        {"type": "bucket_locked_capital_mismatch", "count": 1}
+    ]
+
+
+def test_dashboard_details_surfaces_exit_monitoring_and_stalled_positions(
+    client, regular_user_and_token, db_session: Session
+):
+    email, token = regular_user_and_token
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    db_session.add(
+        UserStrategy(
+            user_id=user.id,
+            strategy_id="momentum",
+            is_enabled=True,
+            config={},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.add(
+        StrategyCapitalBucket(
+            user_id=user.id,
+            strategy_id="momentum",
+            trading_mode="paper",
+            assigned_capital_cents=50_000,
+            available_cash_cents=10_000,
+            reserved_cash_cents=0,
+            locked_capital_cents=40_000,
+            realized_pnl_cents=2_000,
+            unrealized_pnl_cents=1_500,
+            available_buying_power_cents=10_000,
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.add(
+        ExecutionPosition(
+            id=uuid.uuid4(),
+            tenant_id=membership.tenant_id,
+            user_id=user.id,
+            strategy_id="momentum",
+            symbol="BTC-USD",
+            trading_mode="paper",
+            quantity="0.5",
+            avg_entry_price="50000",
+            realized_pnl_cents=0,
+            created_at=now - timedelta(hours=4),
+            updated_at=now - timedelta(minutes=10),
+            opened_at=now - timedelta(hours=4),
+            last_trade_at=now - timedelta(minutes=10),
+        )
+    )
+    db_session.add(
+        StrategyLifecycleEvent(
+            correlation_id="exit-stalled-trace",
+            user_id=user.id,
+            tenant_id=membership.tenant_id,
+            strategy_name="momentum",
+            symbol="BTC-USD",
+            trading_mode="paper",
+            side="sell",
+            stage="take_profit_triggered",
+            status="observed",
+            reason_code="take_profit_triggered",
+            reason_detail="Take-profit guard triggered and is waiting to close.",
+            event_metadata={},
+            occurred_at=now - timedelta(minutes=20),
+        )
+    )
+    db_session.add(
+        MarketDataBboSnapshot(
+            source="coinbase",
+            product_id="BTC-USD",
+            best_bid_price=52000,
+            best_bid_size=5,
+            best_ask_price=52010,
+            best_ask_size=5,
+            event_time=now,
+            ingest_time=now,
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/me/dashboard/details?trading_mode=paper&force_refresh=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    strategy_health = next(
+        row for row in payload["strategyHealth"] if row["id"] == "momentum"
+    )
+    assert strategy_health["currentStatus"] == "exit_monitoring"
+    assert strategy_health["exitMonitoredPositions"] == 1
+    assert strategy_health["stalledExitCount"] == 1
+    assert strategy_health["blockingReasonCode"] == "exit_stalled"
+    assert strategy_health["latestExitReasonCode"] == "take_profit_triggered"
+
+    position = next(row for row in payload["positions"] if row["symbol"] == "BTC-USD")
+    assert position["exitStatus"] == "stalled"
+    assert position["exitStage"] == "take_profit_triggered"
+    assert position["exitReasonCode"] == "take_profit_triggered"
+    assert position["exitStalled"] is True
 
 
 def test_dashboard_summary_recomputes_paper_unrealized_from_positions(

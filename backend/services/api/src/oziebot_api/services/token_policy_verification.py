@@ -426,7 +426,7 @@ class TokenPolicyVerificationService:
         intent_payload: dict[str, Any],
         risk_payload: dict[str, Any],
     ) -> str:
-        if row.failure_code == "token_strategy_policy":
+        if row.failure_code in {"token_strategy_policy", "policy_blocked"}:
             return "rejected"
         final_size = cls._normalize_decimal(
             cls._final_execution_size(row, intent_payload, risk_payload),

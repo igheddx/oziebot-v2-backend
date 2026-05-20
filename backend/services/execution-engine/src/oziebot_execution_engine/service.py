@@ -21,6 +21,7 @@ from oziebot_common.queues import (
     risk_decision_from_json,
     trade_intent_from_json,
 )
+from oziebot_common.reason_codes import normalize_reason_code
 from oziebot_common.worker_outbox import enqueue_worker_payload
 from oziebot_common.strategy_defaults import normalize_platform_strategy_config
 from oziebot_common.token_policy import resolve_effective_token_policy
@@ -179,6 +180,16 @@ class ExecutionService:
             request = self._annotate_validation_failure(request, validation_failure)
         now = _utcnow()
         order_id = str(uuid.uuid4())
+        policy_failure_code = (
+            normalize_reason_code("token_strategy_policy", reason_detail=policy_failure)
+            if policy_failure is not None
+            else None
+        )
+        validation_failure_code = (
+            self._validation_failure_reason_code(validation_failure)
+            if validation_failure is not None
+            else None
+        )
         self._persist_lifecycle_event(
             request=request,
             stage=StrategyLifecycleStage.EXECUTION_REQUESTED,
@@ -276,13 +287,9 @@ class ExecutionService:
                         "idempotency_key": request.idempotency_key,
                         "client_order_id": request.client_order_id,
                         "failure_code": (
-                            "token_strategy_policy"
-                            if policy_failure is not None
-                            else self._validation_failure_reason_code(
-                                validation_failure
-                            )
-                            if validation_failure is not None
-                            else None
+                            policy_failure_code
+                            if policy_failure_code is not None
+                            else validation_failure_code
                         ),
                         "failure_detail": (
                             policy_failure
@@ -323,7 +330,7 @@ class ExecutionService:
             self._persist_decision_audit_record(
                 request=request,
                 decision=DecisionAuditDecision.REDUCED,
-                reason_code="token_strategy_policy",
+                reason_code=policy_failure_code or "policy_blocked",
                 reason_detail="Execution quantity adjusted by token policy",
                 size_before=original_quantity,
                 size_after=request.quantity,
@@ -337,13 +344,13 @@ class ExecutionService:
                 status=LifecycleEventStatus.FAILED,
                 occurred_at=now,
                 order_id=order_id,
-                reason_code="token_strategy_policy",
+                reason_code=policy_failure_code or "policy_blocked",
                 reason_detail=policy_failure,
             )
             self._persist_decision_audit_record(
                 request=request,
                 decision=DecisionAuditDecision.REJECTED,
-                reason_code="token_strategy_policy",
+                reason_code=policy_failure_code or "policy_blocked",
                 reason_detail=policy_failure,
                 size_before=original_quantity,
                 size_after=Decimal("0"),
@@ -351,7 +358,7 @@ class ExecutionService:
             )
             self._record_metric(
                 rejected=True,
-                rejection_reason="token_strategy_policy",
+                rejection_reason=policy_failure_code or "policy_blocked",
             )
             self._persist_lifecycle_event(
                 request=request,
@@ -359,7 +366,7 @@ class ExecutionService:
                 status=LifecycleEventStatus.FAILED,
                 occurred_at=now,
                 order_id=order_id,
-                reason_code="token_strategy_policy",
+                reason_code=policy_failure_code or "policy_blocked",
                 reason_detail=policy_failure,
             )
             self._emit_event(
@@ -367,7 +374,7 @@ class ExecutionService:
                 request,
                 ExecutionOrderStatus.FAILED,
                 detail=policy_failure,
-                payload={"failure_code": "token_strategy_policy"},
+                payload={"failure_code": policy_failure_code or "policy_blocked"},
             )
             return ProcessResult(
                 order_id=order_id,
@@ -379,7 +386,7 @@ class ExecutionService:
             self._persist_decision_audit_record(
                 request=request,
                 decision=DecisionAuditDecision.REJECTED,
-                reason_code=self._validation_failure_reason_code(validation_failure),
+                reason_code=validation_failure_code or EXECUTION_VALIDATION_FAILURE_CODE,
                 reason_detail=validation_failure.detail,
                 size_before=original_quantity,
                 size_after=Decimal("0"),
@@ -387,9 +394,7 @@ class ExecutionService:
             )
             self._record_metric(
                 rejected=True,
-                rejection_reason=self._validation_failure_reason_code(
-                    validation_failure
-                ),
+                rejection_reason=validation_failure_code or EXECUTION_VALIDATION_FAILURE_CODE,
             )
             self._persist_lifecycle_event(
                 request=request,
@@ -397,7 +402,7 @@ class ExecutionService:
                 status=LifecycleEventStatus.FAILED,
                 occurred_at=now,
                 order_id=order_id,
-                reason_code=self._validation_failure_reason_code(validation_failure),
+                reason_code=validation_failure_code or EXECUTION_VALIDATION_FAILURE_CODE,
                 reason_detail=validation_failure.detail,
                 metadata={
                     "validation_code": validation_failure.code,
@@ -410,9 +415,8 @@ class ExecutionService:
                 ExecutionOrderStatus.FAILED,
                 detail=validation_failure.detail,
                 payload={
-                    "failure_code": self._validation_failure_reason_code(
-                        validation_failure
-                    ),
+                    "failure_code": validation_failure_code
+                    or EXECUTION_VALIDATION_FAILURE_CODE,
                     "validation_code": validation_failure.code,
                 },
             )
@@ -460,7 +464,10 @@ class ExecutionService:
                     status=ExecutionOrderStatus.FAILED,
                     venue=request.venue,
                     raw_payload={"policy_check": pre_submit_policy["snapshot"]},
-                    failure_code="token_strategy_policy",
+                    failure_code=normalize_reason_code(
+                        "token_strategy_policy",
+                        reason_detail=str(pre_submit_policy["failure"]),
+                    ),
                     failure_detail=failure_detail,
                 ),
             )
@@ -909,7 +916,10 @@ class ExecutionService:
     def _validation_failure_reason_code(
         failure: ExecutionValidationFailure | None,
     ) -> str:
-        return EXECUTION_VALIDATION_FAILURE_CODE
+        return normalize_reason_code(
+            EXECUTION_VALIDATION_FAILURE_CODE,
+            reason_detail=failure.detail if failure is not None else None,
+        )
 
     def _annotate_validation_failure(
         self,

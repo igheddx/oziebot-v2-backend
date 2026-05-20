@@ -433,12 +433,12 @@ def test_risk_rejections_store_exact_reason_metadata(tmp_path: Path):
         ).first()
 
     assert audit is not None
-    assert audit[0] == "signal_size_positive"
+    assert audit[0] == "execution_validation_failed"
     assert "positive" in str(audit[1])
     assert event is not None
     payload = json.loads(str(event[0]))
     assert payload["rejection_stage"] == "risk"
-    assert payload["rejection_reason_code"] == "signal_size_positive"
+    assert payload["rejection_reason_code"] == "execution_validation_failed"
     assert payload["rejection_metrics"]["suggested_size"] == "0"
 
 
@@ -467,7 +467,7 @@ def test_risk_persists_lifecycle_validation_events(tmp_path: Path):
         ).all()
 
     assert ("risk_validation", "observed", None) in rows
-    assert ("risk_validation", "failed", "signal_size_positive") in rows
+    assert ("risk_validation", "failed", "execution_validation_failed") in rows
 
 
 def test_risk_reduces_size_by_buying_power(tmp_path: Path):
