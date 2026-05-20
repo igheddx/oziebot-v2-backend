@@ -5,6 +5,10 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from oziebot_common.execution_constraints import (
+    MAX_COINBASE_DECIMAL_PLACES,
+    validate_coinbase_order,
+)
 from oziebot_common.fee_model import bps_to_decimal, is_trade_net_positive
 from oziebot_domain.risk import RejectionReason
 
@@ -546,15 +550,51 @@ class StaleDataRule(RiskRule):
     def evaluate(self, ctx: RuleContext) -> RuleResult | None:
         blocking_critical = blocking_critical_stale_flags(ctx.critical_stale_flags)
         if any(blocking_critical.values()):
+            stale_components = ", ".join(
+                f"{name}={age:.1f}s"
+                for name, age in sorted(ctx.stale_ages.items())
+                if age is not None and blocking_critical.get(name)
+            )
+            if not stale_components:
+                stale_components = "freshness timestamps unavailable"
             return RuleResult(
                 self.name,
                 "reject",
                 RejectionReason.POLICY,
                 (
-                    "Critically stale market data: "
-                    f"critical={blocking_critical}, raw_critical={ctx.critical_stale_flags}, "
-                    f"stale={ctx.stale_flags}, ages={ctx.stale_ages}"
+                    "Critically stale market data blocked execution "
+                    f"({stale_components})"
                 ),
+            )
+        return None
+
+
+class CoinbaseOrderValidationRule(RiskRule):
+    name = "coinbase_order_validation"
+
+    def evaluate(self, ctx: RuleContext) -> RuleResult | None:
+        validation = validate_coinbase_order(
+            quantity=ctx.suggested_size,
+            side="buy" if ctx.action == "buy" else "sell",
+            price_hint=ctx.mid_price,
+        )
+        if validation.failure_code is not None:
+            return RuleResult(
+                self.name,
+                "reject",
+                RejectionReason.POLICY,
+                validation.failure_detail or "Coinbase order validation failed",
+            )
+        if validation.quantity_adjusted:
+            return RuleResult(
+                self.name,
+                "reduce_size",
+                RejectionReason.POLICY,
+                (
+                    "Reduced by Coinbase quantity precision limit "
+                    f"to {MAX_COINBASE_DECIMAL_PLACES} decimal places"
+                ),
+                reduced_size=validation.normalized_quantity,
             )
         return None
 
@@ -709,6 +749,7 @@ def default_rules(settings) -> list[RiskRule]:
         GlobalDailyLossGuardRule(),
         CooldownAfterLossesRule(),
         StaleDataRule(),
+        CoinbaseOrderValidationRule(),
         FeeEconomicsRule(),
         ExecutionQualityRule(),
     ]

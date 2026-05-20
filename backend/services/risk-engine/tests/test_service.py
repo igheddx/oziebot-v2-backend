@@ -676,6 +676,52 @@ def test_paper_relaxes_fee_economics_even_with_legacy_relaxed_rule_config(
     assert live_intent is None
 
 
+def test_paper_still_rejects_buy_below_coinbase_minimum_before_execution(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "risk-paper-coinbase-min.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = _risk_svc(settings, _redis_with_fresh_market())
+
+    decision, intent = svc.evaluate(
+        _signal(user_id, mode=TradingMode.PAPER, size="0.00000001"),
+        trace_id="paper-coinbase-min",
+    )
+
+    assert decision.outcome == RiskOutcome.REJECT
+    assert "coinbase_order_validation:" in (decision.detail or "")
+    assert "rounded to zero cents after precision checks" in (decision.detail or "")
+    assert intent is None
+
+
+def test_risk_reduces_buy_quantity_to_coinbase_precision_before_execution(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "risk-coinbase-precision.sqlite"
+    _setup_db(db_path)
+    user_id = str(uuid4())
+    tenant_id = str(uuid4())
+    _seed_common(db_path, user_id, tenant_id)
+
+    settings = Settings(database_url=f"sqlite+pysqlite:///{db_path}")
+    svc = _risk_svc(settings, _redis_with_fresh_market())
+
+    decision, intent = svc.evaluate(
+        _signal(user_id, size="0.000600009"),
+        trace_id="coinbase-precision",
+    )
+
+    assert decision.outcome == RiskOutcome.REDUCE_SIZE
+    assert Decimal(decision.final_size) == Decimal("0.00060000")
+    assert intent is not None
+    assert Decimal(str(intent.quantity.amount)) == Decimal("0.00060000")
+
+
 def test_paper_can_trade_without_entitlement_when_allowed(tmp_path: Path):
     db_path = tmp_path / "risk-paper-entitlement.sqlite"
     _setup_db(db_path)
@@ -1157,7 +1203,8 @@ def test_critical_stale_data_still_rejects(tmp_path: Path):
 
     assert decision.outcome == RiskOutcome.REJECT
     assert intent is None
-    assert "Critically stale market data" in (decision.detail or "")
+    assert "Critically stale market data blocked execution" in (decision.detail or "")
+    assert "bbo=136.0s" in (decision.detail or "")
     assert svc.metrics_snapshot()["signals_rejected"] == 1
 
 

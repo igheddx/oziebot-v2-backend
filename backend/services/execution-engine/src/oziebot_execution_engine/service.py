@@ -14,6 +14,13 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from oziebot_common.execution_constraints import (
+    COINBASE_MIN_NOTIONAL_USD,
+    MAX_COINBASE_DECIMAL_PLACES,
+    decimal_places,
+    money_to_cents,
+    validate_coinbase_order,
+)
 from oziebot_common.queues import (
     QueueNames,
     execution_event_to_json,
@@ -52,8 +59,6 @@ from oziebot_execution_engine.state_machine import ensure_transition
 
 log = logging.getLogger("execution-engine.service")
 
-MAX_COINBASE_DECIMAL_PLACES = 8
-COINBASE_MIN_NOTIONAL_USD = Decimal("1.00")
 EXECUTION_VALIDATION_FAILURE_CODE = "execution_validation_failed"
 
 
@@ -171,6 +176,8 @@ class ExecutionService:
 
         original_quantity = request.quantity
         request, policy_failure = self._apply_token_strategy_policy(request)
+        policy_adjusted = request.quantity != original_quantity
+        request, _ = self._normalize_request_for_venue(request)
         reserve_cents = self._estimate_reserve_cents(request)
         validation_failure = self._validate_request(
             request=request,
@@ -326,7 +333,7 @@ class ExecutionService:
                 duplicated=True,
             )
 
-        if request.quantity != original_quantity:
+        if policy_adjusted:
             self._persist_decision_audit_record(
                 request=request,
                 decision=DecisionAuditDecision.REDUCED,
@@ -832,7 +839,41 @@ class ExecutionService:
         price = request.price_hint or Decimal("0")
         if price <= 0:
             return 0
-        return _money_to_cents(request.quantity * price)
+        return money_to_cents(request.quantity * price)
+
+    def _normalize_request_for_venue(
+        self, request: ExecutionRequest
+    ) -> tuple[ExecutionRequest, str | None]:
+        validation = validate_coinbase_order(
+            quantity=request.quantity,
+            side=request.side,
+            price_hint=request.price_hint,
+        )
+        if not validation.quantity_adjusted:
+            return request, None
+
+        intent_payload = dict(request.intent_payload or {})
+        metadata = dict(intent_payload.get("metadata") or {})
+        metadata["execution_quantity_normalization"] = {
+            "venue": Venue.COINBASE.value,
+            "from_quantity": str(request.quantity),
+            "normalized_quantity": str(validation.normalized_quantity),
+            "max_decimal_places": MAX_COINBASE_DECIMAL_PLACES,
+        }
+        intent_payload["quantity"] = {
+            **dict(intent_payload.get("quantity") or {}),
+            "amount": str(validation.normalized_quantity),
+        }
+        intent_payload["metadata"] = metadata
+        return (
+            request.model_copy(
+                update={
+                    "quantity": validation.normalized_quantity,
+                    "intent_payload": intent_payload,
+                }
+            ),
+            "Coinbase quantity precision normalization applied",
+        )
 
     def _validate_request(
         self,
@@ -840,55 +881,26 @@ class ExecutionService:
         request: ExecutionRequest,
         reserve_cents: int,
     ) -> ExecutionValidationFailure | None:
-        if not request.quantity.is_finite():
-            return ExecutionValidationFailure(
-                code="non_finite_quantity",
-                detail="Execution rejected: quantity must be finite",
-            )
-        if request.quantity <= 0:
-            return ExecutionValidationFailure(
-                code="invalid_quantity",
-                detail="Execution rejected: quantity must be greater than zero",
-            )
-        if self._decimal_places(request.quantity) > MAX_COINBASE_DECIMAL_PLACES:
+        validation = validate_coinbase_order(
+            quantity=request.quantity,
+            side=request.side,
+            price_hint=request.price_hint,
+        )
+        if validation.quantity_adjusted:
             return ExecutionValidationFailure(
                 code="quantity_precision_exceeded",
                 detail=(
-                    "Execution rejected: quantity precision exceeds Coinbase-supported "
-                    f"{MAX_COINBASE_DECIMAL_PLACES} decimal places"
+                    "Execution rejected: quantity must be normalized before Coinbase "
+                    "submission"
                 ),
+            )
+        if validation.failure_code is not None:
+            return ExecutionValidationFailure(
+                code=validation.failure_code,
+                detail=validation.failure_detail or "Execution rejected: invalid order",
             )
         if request.side != Side.BUY:
             return None
-
-        price = request.price_hint
-        if price is None:
-            return ExecutionValidationFailure(
-                code="missing_price_hint",
-                detail="Execution rejected: missing price hint for buy execution",
-            )
-        if not price.is_finite():
-            return ExecutionValidationFailure(
-                code="non_finite_price_hint",
-                detail="Execution rejected: price hint must be finite",
-            )
-        if price <= 0:
-            return ExecutionValidationFailure(
-                code="invalid_price_hint",
-                detail="Execution rejected: price hint must be greater than zero",
-            )
-
-        requested_notional = request.quantity * price
-        if not requested_notional.is_finite():
-            return ExecutionValidationFailure(
-                code="non_finite_notional",
-                detail="Execution rejected: requested notional must be finite",
-            )
-        if requested_notional <= 0:
-            return ExecutionValidationFailure(
-                code="invalid_notional",
-                detail="Execution rejected: requested notional must be greater than zero",
-            )
         if reserve_cents <= 0:
             return ExecutionValidationFailure(
                 code="notional_rounded_to_zero",
@@ -941,8 +953,7 @@ class ExecutionService:
 
     @staticmethod
     def _decimal_places(value: Decimal) -> int:
-        exponent = value.normalize().as_tuple().exponent
-        return 0 if exponent >= 0 else -exponent
+        return decimal_places(value)
 
     def _pre_submit_policy_check(self, request: ExecutionRequest) -> dict[str, Any]:
         policy_row = self._load_token_strategy_policy(

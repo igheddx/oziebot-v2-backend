@@ -1422,7 +1422,7 @@ def test_execution_rejects_buy_when_buying_power_is_insufficient(tmp_path: Path)
     assert int(bucket["available_cash_cents"]) == 50
 
 
-def test_execution_rejects_quantity_precision_beyond_coinbase_limit(tmp_path: Path):
+def test_execution_normalizes_quantity_precision_to_coinbase_limit(tmp_path: Path):
     db_path = tmp_path / "execution-precision.sqlite"
     _setup_db(db_path)
     redis = FakeRedis()
@@ -1453,10 +1453,14 @@ def test_execution_rejects_quantity_precision_beyond_coinbase_limit(tmp_path: Pa
         )
     )
 
-    assert result.state == ExecutionOrderStatus.FAILED
+    assert result.state == ExecutionOrderStatus.FILLED
     order = _last_order(db_path)
-    assert order["failure_code"] == "execution_validation_failed"
-    assert _count(db_path, "execution_fills") == 0
+    assert order["failure_code"] is None
+    assert Decimal(str(order["quantity"])) == Decimal("0.12345678")
+    intent_payload = json.loads(str(order["intent_payload"]))
+    normalization = intent_payload["metadata"]["execution_quantity_normalization"]
+    assert normalization["normalized_quantity"] == "0.12345678"
+    assert _count(db_path, "execution_fills") == 1
 
 
 def test_execution_reduces_discouraged_token_strategy_size(tmp_path: Path):
