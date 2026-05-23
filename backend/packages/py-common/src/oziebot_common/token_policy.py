@@ -11,6 +11,7 @@ TOKEN_POLICY_STRATEGIES = (
     "day_trading",
     "dca",
     "strategic_aggressive_allocation",
+    "volatility_harvest",
 )
 TOKEN_POLICY_RECOMMENDATIONS = ("preferred", "allowed", "discouraged", "blocked")
 DEFAULT_MISSING_POLICY_BEHAVIOR = "allowed"
@@ -360,6 +361,29 @@ def score_strategy_suitability(
         reason = (
             "Favors aggressive tokens with trend strength, relative volume, "
             "volatility, and optional Base ecosystem preference"
+        )
+    elif strategy_id == "volatility_harvest":
+        score = (
+            (profile.volatility_score * 0.28)
+            + (profile.liquidity_score * 0.20)
+            + (profile.spread_score * 0.14)
+            + (profile.slippage_score * 0.14)
+            + (profile.trend_score * 0.14)
+            + (relative_volume_score * 0.10)
+        )
+        ecosystem = str(token_extra.get("ecosystem") or "").strip().lower()
+        tags = {str(value).strip().lower() for value in token_extra.get("tags") or []}
+        if ecosystem == "base" or "base" in tags:
+            score += 6.0
+        if profile.avg_intraday_volatility_pct < 0.008:
+            score -= 18.0
+        if severe_downtrend:
+            score -= 16.0
+        elif bearish_regime:
+            score -= 8.0
+        reason = (
+            "Favors liquid, higher-volatility conviction assets where harvest bands "
+            "can overcome fees and spread"
         )
     else:
         raise ValueError(f"Unsupported strategy_id: {strategy_id}")

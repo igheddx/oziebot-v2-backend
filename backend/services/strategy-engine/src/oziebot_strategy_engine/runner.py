@@ -56,6 +56,11 @@ from oziebot_strategy_engine.strategies.strategic_aggressive_allocation import (
     build_portfolio_plan,
     selected_trade_symbols,
 )
+from oziebot_strategy_engine.strategies.volatility_harvest import (
+    STRATEGY_ID as VOLATILITY_HARVEST_ID,
+    build_volatility_harvest_plan,
+    selected_trade_symbols as selected_volatility_harvest_symbols,
+)
 
 log = logging.getLogger("strategy-engine.runner")
 
@@ -64,6 +69,7 @@ STRATEGY_INTERVAL_SECONDS: dict[str, int] = {
     "day_trading": 60,
     "dca": 300,
     "strategic_aggressive_allocation": 3600,
+    "volatility_harvest": 1800,
 }
 
 DCA_EXECUTION_LEASE_SECONDS = 120
@@ -241,6 +247,26 @@ class StrategyRunner:
                     strategy_symbol_contexts = dict(
                         (
                             build_portfolio_plan(
+                                config=config,
+                                market_map=market_map,
+                                positions=position_state_map,
+                                runtime_state=runtime_symbol_states,
+                                token_profiles=self._load_token_profiles(
+                                    list(market_map.keys())
+                                ),
+                                capital_context=self._load_strategy_capital_context(
+                                    user_id=user_id,
+                                    strategy_name=strategy_name,
+                                    trading_mode=mode.value,
+                                ),
+                            ).get("symbol_contexts")
+                            or {}
+                        )
+                    )
+                elif strategy_name == VOLATILITY_HARVEST_ID:
+                    strategy_symbol_contexts = dict(
+                        (
+                            build_volatility_harvest_plan(
                                 config=config,
                                 market_map=market_map,
                                 positions=position_state_map,
@@ -463,6 +489,9 @@ class StrategyRunner:
                             key: value
                             for key, value in {
                                 "strategic_allocation": strategy_symbol_contexts.get(
+                                    symbol, {}
+                                ),
+                                "volatility_harvest": strategy_symbol_contexts.get(
                                     symbol, {}
                                 ),
                                 "runtime_symbol_state": runtime_symbol_states.get(
@@ -747,7 +776,11 @@ class StrategyRunner:
                             size_after=event.suggested_size,
                             created_at=now,
                         )
-                        q = QueueNames.signal_generated(mode)
+                        q = (
+                            QueueNames.signal_generated_strategy(mode, strategy_name)
+                            if strategy_name in QueueNames.DEDICATED_SIGNAL_STRATEGIES
+                            else QueueNames.signal_generated(mode)
+                        )
                         if self._engine is not None:
                             enqueue_worker_payload(
                                 self._engine,
@@ -2494,6 +2527,9 @@ class StrategyRunner:
         if strategy_name == STRATEGIC_AGGRESSIVE_ALLOCATION_ID:
             requested = set(selected_trade_symbols(config))
             return [symbol for symbol in allowed_symbols if symbol in requested]
+        if strategy_name == VOLATILITY_HARVEST_ID:
+            requested = set(selected_volatility_harvest_symbols(config))
+            return [symbol for symbol in allowed_symbols if symbol in requested]
         return self._resolve_symbols(config=config, allowed_symbols=allowed_symbols)
 
     @staticmethod
@@ -2508,6 +2544,16 @@ class StrategyRunner:
             )
             interval_minutes = int(
                 mode_settings.get("evaluation_interval_minutes", 60) or 60
+            )
+            return max(interval_minutes, 15) * 60
+        if strategy_name == VOLATILITY_HARVEST_ID:
+            mode_settings = (
+                config.get("mode_settings")
+                if isinstance(config.get("mode_settings"), dict)
+                else {}
+            )
+            interval_minutes = int(
+                mode_settings.get("evaluation_interval_minutes", 30) or 30
             )
             return max(interval_minutes, 15) * 60
         return STRATEGY_INTERVAL_SECONDS.get(strategy_name, 60)
@@ -2571,12 +2617,21 @@ class StrategyRunner:
     def _merge_symbol_runtime_states(
         symbol_states: dict[str, dict[str, Any]],
         *,
+        strategy_name: str,
         position_state: PositionState,
         market: MarketSnapshot,
         now: datetime,
     ) -> dict[str, dict[str, Any]]:
         merged = dict(symbol_states)
         existing = dict(merged.get(position_state.symbol, {}))
+        if strategy_name == VOLATILITY_HARVEST_ID:
+            return StrategyRunner._merge_volatility_harvest_runtime_state(
+                merged,
+                existing=existing,
+                position_state=position_state,
+                market=market,
+                now=now,
+            )
         if position_state.quantity > 0:
             baseline_peak = max(
                 position_state.entry_price or Decimal("0"),
@@ -2640,6 +2695,240 @@ class StrategyRunner:
         else:
             merged.pop(position_state.symbol, None)
         return merged
+
+    @staticmethod
+    def _merge_volatility_harvest_runtime_state(
+        merged: dict[str, dict[str, Any]],
+        *,
+        existing: dict[str, Any],
+        position_state: PositionState,
+        market: MarketSnapshot,
+        now: datetime,
+    ) -> dict[str, dict[str, Any]]:
+        symbol = position_state.symbol
+        current_quantity = Decimal(str(position_state.quantity))
+        previous_quantity = Decimal(str(existing.get("last_seen_quantity") or "0"))
+        if current_quantity <= 0:
+            existing["core_quantity"] = "0"
+            existing["trading_quantity"] = "0"
+            existing["last_seen_quantity"] = "0"
+            existing["last_local_high"] = str(market.current_price)
+            existing.pop("pending_vh_action", None)
+            if any(
+                existing.get(key)
+                for key in (
+                    "harvested_cash_cents",
+                    "total_harvested_gains_cents",
+                    "baseline_quantity",
+                )
+            ):
+                merged[symbol] = existing
+            else:
+                merged.pop(symbol, None)
+            return merged
+
+        existing["last_local_high"] = str(
+            max(
+                Decimal(str(existing.get("last_local_high") or "0")),
+                position_state.peak_price or Decimal("0"),
+                market.current_price,
+            )
+        )
+        if not existing.get("opened_at"):
+            existing["opened_at"] = now.isoformat()
+
+        core_quantity = Decimal(str(existing.get("core_quantity") or "0"))
+        trading_quantity = Decimal(str(existing.get("trading_quantity") or "0"))
+        if core_quantity <= 0 and trading_quantity <= 0:
+            core_quantity = (current_quantity * Decimal("0.70")).quantize(
+                Decimal("0.00000001")
+            )
+            trading_quantity = current_quantity - core_quantity
+
+        pending_action = existing.get("pending_vh_action")
+        delta = current_quantity - previous_quantity
+        if isinstance(pending_action, dict) and delta != 0:
+            action_type = str(pending_action.get("type") or "")
+            ref_price = Decimal(
+                str(pending_action.get("ref_price") or market.current_price)
+            )
+            if delta > 0 and action_type in {"entry_buy", "rebuy_buy"}:
+                if action_type == "entry_buy":
+                    core_ratio = Decimal(
+                        str(pending_action.get("core_allocation_ratio") or "0.70")
+                    )
+                    core_add = (delta * core_ratio).quantize(Decimal("0.00000001"))
+                    trading_add = delta - core_add
+                    core_quantity += core_add
+                    trading_quantity += trading_add
+                    completed_entry_layers = {
+                        str(value)
+                        for value in existing.get("completed_entry_layers") or []
+                    }
+                    code = str(pending_action.get("code") or "")
+                    if code:
+                        completed_entry_layers.add(code)
+                    existing["completed_entry_layers"] = sorted(completed_entry_layers)
+                    if pending_action.get("entry_anchor_price"):
+                        existing["entry_anchor_price"] = pending_action.get(
+                            "entry_anchor_price"
+                        )
+                    existing["avg_core_entry_price"] = str(
+                        StrategyRunner._weighted_average(
+                            Decimal(
+                                str(existing.get("avg_core_entry_price") or ref_price)
+                            ),
+                            max(Decimal("0"), core_quantity - core_add),
+                            ref_price,
+                            core_add,
+                        )
+                    )
+                    existing["avg_trading_entry_price"] = str(
+                        StrategyRunner._weighted_average(
+                            Decimal(
+                                str(
+                                    existing.get("avg_trading_entry_price") or ref_price
+                                )
+                            ),
+                            max(Decimal("0"), trading_quantity - trading_add),
+                            ref_price,
+                            trading_add,
+                        )
+                    )
+                else:
+                    trading_quantity += delta
+                    harvested_cash_cents = int(
+                        existing.get("harvested_cash_cents") or 0
+                    )
+                    harvested_cash_cents = max(
+                        0,
+                        harvested_cash_cents
+                        - int(pending_action.get("deployed_cash_cents") or 0),
+                    )
+                    existing["harvested_cash_cents"] = harvested_cash_cents
+                    completed_rebuy_bands = {
+                        str(value)
+                        for value in existing.get("completed_rebuy_bands") or []
+                    }
+                    code = str(pending_action.get("code") or "")
+                    if code:
+                        completed_rebuy_bands.add(code)
+                    existing["completed_rebuy_bands"] = sorted(completed_rebuy_bands)
+                    existing["last_rebuy_at"] = now.isoformat()
+                    existing["daily_rebuy_count"] = (
+                        StrategyRunner._increment_daily_counter(
+                            existing.get("daily_rebuy_count"), now
+                        )
+                    )
+                    existing["avg_trading_entry_price"] = str(
+                        StrategyRunner._weighted_average(
+                            Decimal(
+                                str(
+                                    existing.get("avg_trading_entry_price") or ref_price
+                                )
+                            ),
+                            max(Decimal("0"), trading_quantity - delta),
+                            ref_price,
+                            delta,
+                        )
+                    )
+            elif delta < 0 and action_type in {"harvest_sell", "emergency_exit"}:
+                sell_qty = abs(delta)
+                trading_reduction = min(trading_quantity, sell_qty)
+                trading_quantity -= trading_reduction
+                core_quantity = max(Decimal("0"), current_quantity - trading_quantity)
+                notional_cents = int(
+                    (sell_qty * ref_price * Decimal("100")).quantize(Decimal("1"))
+                )
+                fee_cents = int(
+                    (Decimal(notional_cents) * Decimal("0.008")).quantize(Decimal("1"))
+                )
+                harvested_cash_cents = int(existing.get("harvested_cash_cents") or 0)
+                harvested_cash_cents += max(0, notional_cents - fee_cents)
+                existing["harvested_cash_cents"] = harvested_cash_cents
+                if action_type == "harvest_sell":
+                    completed_harvest_bands = {
+                        str(value)
+                        for value in existing.get("completed_harvest_bands") or []
+                    }
+                    code = str(pending_action.get("code") or "")
+                    if code:
+                        completed_harvest_bands.add(code)
+                    existing["completed_harvest_bands"] = sorted(
+                        completed_harvest_bands
+                    )
+                    existing["last_harvest_at"] = now.isoformat()
+                    existing["daily_sell_count"] = (
+                        StrategyRunner._increment_daily_counter(
+                            existing.get("daily_sell_count"), now
+                        )
+                    )
+                    basis_cents = int(
+                        (
+                            sell_qty
+                            * Decimal(
+                                str(
+                                    existing.get("avg_trading_entry_price") or ref_price
+                                )
+                            )
+                            * Decimal("100")
+                        ).quantize(Decimal("1"))
+                    )
+                    existing["total_harvested_gains_cents"] = int(
+                        existing.get("total_harvested_gains_cents") or 0
+                    ) + max(0, notional_cents - fee_cents - basis_cents)
+            existing.pop("pending_vh_action", None)
+
+        if core_quantity < 0:
+            core_quantity = Decimal("0")
+        if trading_quantity < 0:
+            trading_quantity = Decimal("0")
+        tracked_quantity = core_quantity + trading_quantity
+        if tracked_quantity != current_quantity:
+            trading_quantity = max(
+                Decimal("0"), trading_quantity + (current_quantity - tracked_quantity)
+            )
+        baseline_quantity = Decimal(str(existing.get("baseline_quantity") or "0"))
+        if baseline_quantity <= 0:
+            baseline_quantity = current_quantity
+        token_accumulation = current_quantity - baseline_quantity
+        token_accumulation_pct = (
+            (token_accumulation / baseline_quantity) * Decimal("100")
+            if baseline_quantity > 0
+            else Decimal("0")
+        )
+        existing["baseline_quantity"] = str(baseline_quantity)
+        existing["core_quantity"] = str(core_quantity)
+        existing["trading_quantity"] = str(trading_quantity)
+        existing["last_seen_quantity"] = str(current_quantity)
+        existing["token_accumulation_quantity"] = str(token_accumulation)
+        existing["token_accumulation_pct"] = str(token_accumulation_pct)
+        merged[symbol] = existing
+        return merged
+
+    @staticmethod
+    def _increment_daily_counter(counter: Any, now: datetime) -> dict[str, Any]:
+        current = dict(counter or {})
+        date_key = now.date().isoformat()
+        if str(current.get("date")) != date_key:
+            return {"date": date_key, "count": 1}
+        return {"date": date_key, "count": int(current.get("count") or 0) + 1}
+
+    @staticmethod
+    def _weighted_average(
+        old_price: Decimal,
+        old_qty: Decimal,
+        new_price: Decimal,
+        new_qty: Decimal,
+    ) -> Decimal:
+        if new_qty <= 0:
+            return old_price
+        if old_qty <= 0:
+            return new_price
+        total_qty = old_qty + new_qty
+        if total_qty <= 0:
+            return new_price
+        return ((old_price * old_qty) + (new_price * new_qty)) / total_qty
 
     def _apply_runtime_state_patch(
         self,
@@ -2984,6 +3273,7 @@ class StrategyRunner:
 
         symbol_states = self._merge_symbol_runtime_states(
             symbol_states,
+            strategy_name=strategy_name,
             position_state=position_state,
             market=market,
             now=now,

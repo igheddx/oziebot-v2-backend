@@ -16,6 +16,7 @@ from oziebot_api.api.v1 import (
     logs,
     me,
     strategic_aggressive_allocation,
+    volatility_harvest,
     tenants,
     tokens,
     strategies,
@@ -27,6 +28,7 @@ api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(me.router)
 api_router.include_router(strategic_aggressive_allocation.router)
+api_router.include_router(volatility_harvest.router)
 api_router.include_router(alerts.router)
 api_router.include_router(backtests.router)
 api_router.include_router(billing.router)

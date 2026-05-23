@@ -29,6 +29,7 @@ def _seed_market_data(db_session: Session, symbol: str) -> None:
         ("day_trading", "Day Trading", 3),
         ("dca", "DCA", 4),
         ("strategic_aggressive_allocation", "Strategic Aggressive Allocation", 5),
+        ("volatility_harvest", "Volatility Harvest Strategy", 6),
     ]
     for slug, display_name, sort_order in strategies:
         if slug in existing_slugs:
@@ -119,7 +120,7 @@ def test_admin_token_policy_recalculated_on_create(
     assert policy.status_code == 200, policy.text
     data = policy.json()
     assert data["market_profile"]["liquidity_score"] > 0
-    assert len(data["strategy_policies"]) == 5
+    assert len(data["strategy_policies"]) == 6
     dca_policy = next(item for item in data["strategy_policies"] if item["strategy_id"] == "dca")
     assert dca_policy["recommendation_status"] == "allowed"
     saa_policy = next(
@@ -162,6 +163,7 @@ def test_admin_can_initialize_recommended_token_strategy_defaults(
     }
     assert btc["momentum"] == "preferred"
     assert btc["dca"] == "preferred"
+    assert btc["volatility_harvest"] == "allowed"
 
     aero = {
         item["strategy_id"]: item["recommendation_status"]
@@ -172,6 +174,7 @@ def test_admin_can_initialize_recommended_token_strategy_defaults(
     assert aero["reversion"] == "blocked"
     assert aero["dca"] == "blocked"
     assert aero["strategic_aggressive_allocation"] == "preferred"
+    assert aero["volatility_harvest"] == "preferred"
 
     sui = {
         item["strategy_id"]: item["recommendation_status"]
@@ -180,6 +183,7 @@ def test_admin_can_initialize_recommended_token_strategy_defaults(
     assert sui["momentum"] == "allowed"
     assert sui["reversion"] == "blocked"
     assert sui["strategic_aggressive_allocation"] == "allowed"
+    assert sui["volatility_harvest"] == "allowed"
 
 
 def test_admin_can_override_effective_token_policy(

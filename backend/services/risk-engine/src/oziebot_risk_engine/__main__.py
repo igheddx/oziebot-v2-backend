@@ -61,9 +61,16 @@ def main() -> None:
             )
             return
 
+        approved_queue = (
+            QueueNames.intent_approved_strategy(
+                signal.trading_mode, signal.strategy_name
+            )
+            if signal.strategy_name in QueueNames.DEDICATED_INTENT_STRATEGIES
+            else QueueNames.intent_approved(signal.trading_mode)
+        )
         enqueue_worker_payload(
             engine,
-            QueueNames.intent_approved(signal.trading_mode),
+            approved_queue,
             {
                 "intent": trade_intent_to_json(intent),
                 "risk": decision.model_dump(mode="json"),

@@ -15,6 +15,9 @@ from oziebot_domain.trading_mode import TradingMode
 class QueueNames:
     """Logical Postgres outbox queues partitioned by TradingMode."""
 
+    DEDICATED_SIGNAL_STRATEGIES = ("volatility_harvest",)
+    DEDICATED_INTENT_STRATEGIES = ("volatility_harvest",)
+
     @staticmethod
     def intent_submitted(mode: TradingMode) -> str:
         return f"oziebot:queue:intent_submitted:{mode.value}"
@@ -52,12 +55,24 @@ class QueueNames:
         return f"oziebot:queue:signal_generated:{mode.value}"
 
     @staticmethod
+    def signal_generated_strategy(mode: TradingMode, strategy_id: str) -> str:
+        return f"oziebot:queue:signal_generated:{mode.value}:{strategy_id}"
+
+    @staticmethod
+    def intent_approved_strategy(mode: TradingMode, strategy_id: str) -> str:
+        return f"oziebot:queue:intent_approved:{mode.value}:{strategy_id}"
+
+    @staticmethod
     def all_intent_submitted_keys() -> list[str]:
         return [QueueNames.intent_submitted(m) for m in TradingMode]
 
     @staticmethod
     def all_intent_approved_keys() -> list[str]:
-        return [QueueNames.intent_approved(m) for m in TradingMode]
+        keys = [QueueNames.intent_approved(m) for m in TradingMode]
+        for mode in TradingMode:
+            for strategy_id in QueueNames.DEDICATED_INTENT_STRATEGIES:
+                keys.append(QueueNames.intent_approved_strategy(mode, strategy_id))
+        return keys
 
     @staticmethod
     def all_alerts_keys() -> list[str]:
@@ -81,7 +96,11 @@ class QueueNames:
 
     @staticmethod
     def all_signal_generated_keys() -> list[str]:
-        return [QueueNames.signal_generated(m) for m in TradingMode]
+        keys = [QueueNames.signal_generated(m) for m in TradingMode]
+        for mode in TradingMode:
+            for strategy_id in QueueNames.DEDICATED_SIGNAL_STRATEGIES:
+                keys.append(QueueNames.signal_generated_strategy(mode, strategy_id))
+        return keys
 
 
 BOUNDED_QUEUE_MAX_LENGTH = 200

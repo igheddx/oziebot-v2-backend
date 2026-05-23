@@ -39,6 +39,7 @@ RECOMMENDED_TOKEN_STRATEGY_MATRIX: dict[str, dict[str, str]] = {
         "reversion": "allowed",
         "dca": "preferred",
         "strategic_aggressive_allocation": "preferred",
+        "volatility_harvest": "allowed",
     },
     "ETH-USD": {
         "momentum": "preferred",
@@ -46,6 +47,7 @@ RECOMMENDED_TOKEN_STRATEGY_MATRIX: dict[str, dict[str, str]] = {
         "reversion": "allowed",
         "dca": "preferred",
         "strategic_aggressive_allocation": "preferred",
+        "volatility_harvest": "preferred",
     },
     "SOL-USD": {
         "momentum": "preferred",
@@ -53,6 +55,7 @@ RECOMMENDED_TOKEN_STRATEGY_MATRIX: dict[str, dict[str, str]] = {
         "reversion": "discouraged",
         "dca": "blocked",
         "strategic_aggressive_allocation": "preferred",
+        "volatility_harvest": "preferred",
     },
     "LINK-USD": {
         "momentum": "allowed",
@@ -60,6 +63,7 @@ RECOMMENDED_TOKEN_STRATEGY_MATRIX: dict[str, dict[str, str]] = {
         "reversion": "allowed",
         "dca": "blocked",
         "strategic_aggressive_allocation": "allowed",
+        "volatility_harvest": "preferred",
     },
     "AVAX-USD": {
         "momentum": "allowed",
@@ -67,6 +71,7 @@ RECOMMENDED_TOKEN_STRATEGY_MATRIX: dict[str, dict[str, str]] = {
         "reversion": "discouraged",
         "dca": "blocked",
         "strategic_aggressive_allocation": "allowed",
+        "volatility_harvest": "preferred",
     },
     "SUI-USD": {
         "momentum": "allowed",
@@ -74,6 +79,7 @@ RECOMMENDED_TOKEN_STRATEGY_MATRIX: dict[str, dict[str, str]] = {
         "reversion": "blocked",
         "dca": "blocked",
         "strategic_aggressive_allocation": "allowed",
+        "volatility_harvest": "allowed",
     },
     "AERO-USD": {
         "momentum": "allowed",
@@ -81,6 +87,7 @@ RECOMMENDED_TOKEN_STRATEGY_MATRIX: dict[str, dict[str, str]] = {
         "reversion": "blocked",
         "dca": "blocked",
         "strategic_aggressive_allocation": "preferred",
+        "volatility_harvest": "preferred",
     },
 }
 

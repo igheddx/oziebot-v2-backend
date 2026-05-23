@@ -53,6 +53,7 @@ class StrategyRegistry:
             "dca",
             "reversion",
             "strategic_aggressive_allocation",
+            "volatility_harvest",
         }.issubset(cls._strategies.keys()):
             return
 
@@ -63,6 +64,9 @@ class StrategyRegistry:
         from oziebot_strategy_engine.strategies.strategic_aggressive_allocation import (
             StrategicAggressiveAllocationStrategy,
         )
+        from oziebot_strategy_engine.strategies.volatility_harvest import (
+            VolatilityHarvestStrategy,
+        )
 
         for strategy_class in (
             MomentumStrategy,
@@ -70,6 +74,7 @@ class StrategyRegistry:
             DCAStrategy,
             ReversionStrategy,
             StrategicAggressiveAllocationStrategy,
+            VolatilityHarvestStrategy,
         ):
             strategy_id = strategy_class().strategy_id
             if strategy_id not in cls._strategies:

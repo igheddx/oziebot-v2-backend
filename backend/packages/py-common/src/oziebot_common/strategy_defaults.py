@@ -137,6 +137,31 @@ _BASELINE_PLATFORM_CONFIGS: dict[str, dict[str, dict[str, Any]]] = {
             "max_open_positions": 10,
         },
     },
+    "volatility_harvest": {
+        "strategy_params": {
+            "core_position_percentage": 70,
+            "trading_position_percentage": 30,
+            "evaluation_interval_minutes": 30,
+            "minimum_order_size_usd": 25,
+            "minimum_net_profit_after_fees_usd": 3,
+            "daily_max_sell_count": 4,
+            "daily_max_rebuy_count": 3,
+            "cooldown_minutes_between_actions": 90,
+            "max_allocation_per_token_pct": 22.5,
+            "emergency_stop_loss_pct": 18,
+            "atr_reference_pct": 0.035,
+            "atr_band_widening_multiplier": 1.35,
+            "rsi_rebuy_threshold": 35,
+        },
+        "signal_rules": {
+            **GLOBAL_SIGNAL_RULE_DEFAULTS,
+            "min_confidence": 0.6,
+        },
+        "risk_caps": {
+            "max_position_usd": 500,
+            "max_open_positions": 8,
+        },
+    },
 }
 
 _STRATEGY_PARAM_ALIASES: dict[str, dict[str, str]] = {

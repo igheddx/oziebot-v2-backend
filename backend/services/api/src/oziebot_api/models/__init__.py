@@ -50,6 +50,12 @@ from oziebot_api.models.strategic_aggressive_allocation import (
     StrategicAggressiveAllocationConfig,
     StrategicAggressiveAllocationProfitEvent,
 )
+from oziebot_api.models.volatility_harvest import (
+    VolatilityHarvestConfig,
+    VolatilityHarvestMetric,
+    VolatilityHarvestPosition,
+    VolatilityHarvestTransaction,
+)
 from oziebot_api.models.strategy_lifecycle import StrategyLifecycleEvent
 from oziebot_api.models.strategy_signal_pipeline import StrategyRun, StrategySignalRecord
 from oziebot_api.models.subscription_plan import SubscriptionPlan
@@ -114,6 +120,10 @@ __all__ = [
     "StrategyCapitalLedger",
     "StrategicAggressiveAllocationConfig",
     "StrategicAggressiveAllocationProfitEvent",
+    "VolatilityHarvestConfig",
+    "VolatilityHarvestMetric",
+    "VolatilityHarvestPosition",
+    "VolatilityHarvestTransaction",
     "StrategyLifecycleEvent",
     "StrategyDecisionAudit",
     "StrategyRun",
