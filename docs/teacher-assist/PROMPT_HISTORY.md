@@ -332,3 +332,26 @@ Result summary:
 - added a mock-first OCR seam and worker-managed extraction flow that reads artifacts only through the private TeacherAssist storage abstraction
 - surfaced extraction status, previews, failures, and teacher-review-ready items in TeacherAssist workspace/resource/student-work screens
 - kept AI usage, grading review creation, mastery updates, and parent communication out of the extraction flow
+
+## Phase 19 - Extraction Remediation + Teacher Review Drill-Down
+
+Date:
+Purpose:
+Add extraction remediation, teacher review drill-down, retry/lineage tracking, and operational workspace visibility on top of the Phase 18 mock OCR foundation while keeping grading automation and AI usage disabled.
+
+Prompt summary:
+Add extraction review statuses, confidence metadata, retry/remediation APIs, extraction detail/history endpoints, issue flagging with teacher notes, stale-job recovery, workspace attention updates, extraction drill-down UI, and validation coverage while preserving tenant isolation and mock OCR as the default provider.
+
+Non-goals:
+No AI grading, no mastery updates, no gradebook commits, no parent communication, no public file access, no real OCR activation by default, and no trading-system changes.
+
+Files/areas expected to change:
+- TeacherAssist extraction review service, migration 050, schemas, API routes, worker recovery loop, workspace aggregation, and tests
+- extraction drill-down frontend workspace, types/API helpers, and workspace/resource/assignment routing
+- TeacherAssist docs and validation coverage
+
+Result summary:
+- delivered teacher-controlled extraction review with retry lineage, issue flagging, corrected/approved text persistence, and extraction detail/history APIs
+- added the `/teacher-assist/extractions` operational workspace with remediation drill-down for both extracted-text review and job-only failure states
+- extended workspace attention surfaces for low-confidence, rejected, stale, and retry-required extraction items
+- kept AI usage, grading review creation, mastery updates, and gradebook commits out of extraction review actions

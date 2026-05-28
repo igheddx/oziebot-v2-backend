@@ -56,10 +56,12 @@
 - AWS bucket bootstrap and IAM guidance for TeacherAssist object storage
 - Async extraction jobs and extracted-text preview foundation on top of private TeacherAssist storage
 - Mock-first OCR provider seam and worker-managed artifact processing
+- Extraction remediation workflows with retry lineage and teacher review drill-down
+- Extraction review statuses, confidence metadata, issue flagging, and operational `/teacher-assist/extractions` workspace
 
 ## Current Direction
 
-TeacherAssist now supports a flexible instructional-planning foundation plus reusable-plan discovery, annual rollover foundations, dedicated worker-managed workflow execution, controlled real-provider instructional-plan execution, teacher-owned assignment/review workflows, a unified operational workspace, and private object-storage foundations while preserving weekly compatibility and mock-first safety defaults.
+TeacherAssist now supports a flexible instructional-planning foundation plus reusable-plan discovery, annual rollover foundations, dedicated worker-managed workflow execution, controlled real-provider instructional-plan execution, teacher-owned assignment/review workflows, a unified operational workspace, private object-storage foundations, and extraction remediation/review tooling while preserving weekly compatibility and mock-first safety defaults.
 
 TeacherAssist is evolving toward:
 - reusable instructional planning
@@ -77,17 +79,16 @@ TeacherAssist is evolving toward:
 5. Cross-school-year artifact reuse beyond plan copies
 6. Target grading-period remapping workflows
 7. Workspace action drill-down and remediation flows
-8. Extraction retry/remediation workflows and teacher review drill-down
-9. Real OCR provider evaluation and guarded rollout
-10. Direct-browser upload and larger-file transfer workflows
-11. Retention cleanup jobs for temporary artifacts and exports
-12. Teacher review workspace beyond plan-level review metadata
-13. Team/shared curriculum governance and approval flows
-14. Grading assistance workflows
-15. TEKS mastery matrix
-16. Lesson effectiveness insights
-17. Parent/newsletter communication assistant
-18. Export features such as PPTX/Google Slides-compatible outputs
+8. Real OCR provider evaluation and guarded rollout
+9. Direct-browser upload and larger-file transfer workflows
+10. Retention cleanup jobs for temporary artifacts and exports
+11. Teacher review workspace beyond plan-level review metadata
+12. Team/shared curriculum governance and approval flows
+13. Grading assistance workflows
+14. TEKS mastery matrix
+15. Lesson effectiveness insights
+16. Parent/newsletter communication assistant
+17. Export features such as PPTX/Google Slides-compatible outputs
 
 ## Future Planning Model Direction
 

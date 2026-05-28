@@ -2,7 +2,7 @@
 
 ## Current Implemented Baseline
 
-Phases 1 through 18 have been implemented according to the latest implementation summary.
+Phases 1 through 19 have been implemented according to the latest implementation summary.
 
 Operational TeacherAssist access setup is also in place through an idempotent admin seed script for the requested Dominic and Awele user access/bootstrap flow.
 
@@ -78,6 +78,10 @@ Storage-provider hardening, private S3-ready object storage abstraction, backend
 
 OCR intake and artifact-processing foundation, extraction-job persistence, extracted-text records, mock-first OCR provider seam, worker-managed storage-backed extraction, extraction status APIs, activity-event expansion, and workspace/frontend extraction visibility.
 
+## Phase 19
+
+Extraction remediation and teacher-review drill-down, extraction review statuses, confidence metadata, retry/lineage tracking, stale-job recovery, extraction detail/history APIs, issue flagging with teacher notes, workspace remediation attention rules, and the `/teacher-assist/extractions` operational review workspace.
+
 ## Next Phase
 
-The next recommended phase is extraction remediation and teacher-review drill-down so TeacherAssist can move from mock extraction foundations into richer review actions, retry tooling, and later real-provider OCR evaluation without introducing grading automation or mastery auto-commit.
+The next recommended phase is guarded real OCR provider integration so TeacherAssist can evaluate real extraction providers behind config guards while preserving teacher-approved text, retry lineage, and the no-grading-automation boundary.

@@ -601,14 +601,185 @@ This document summarizes the current Oziebot repo findings and the proposed impl
 ### Known limitations
 
 - real OCR providers are not implemented yet; mock OCR remains the only provider
-- extracted text is preview-oriented and not yet paired with richer teacher remediation/history tooling
 - external-link resources still cannot be extracted because they do not have a stored file body
-- extraction completion does not yet trigger a dedicated downstream review workflow beyond workspace surfacing
+- extraction completion does not auto-create grading reviews or mastery updates
 
 ### Next recommended phase
 
 - Phase 19 - extraction remediation and teacher-review drill-down
   - add richer retry tooling, extraction history/detail screens, teacher review actions on extracted artifacts, and guarded evaluation of real OCR providers without introducing grading automation
+
+## Phase 19 - Extraction Remediation + Teacher Review Drill-Down
+
+### What was implemented
+
+- Added extraction review and remediation foundations on top of Phase 18 mock OCR/extraction jobs.
+- Added `extraction_review_service.py` for:
+  - extraction detail aggregation
+  - retry eligibility checks
+  - cancel eligibility checks
+  - review-status transitions
+  - corrected/approved text persistence
+  - issue flagging with teacher notes/reason stored in record metadata
+  - attempt lineage/history loading
+  - stale extraction job detection support
+- Extended extracted-text persistence with teacher-review metadata:
+  - `review_status`
+  - `provider_confidence_score`
+  - `confidence_level`
+  - `teacher_corrected_text`
+  - `approved_text`
+  - `reviewed_at`
+  - `reviewed_by_user_id`
+  - `source_extraction_job_id`
+  - teacher review notes / issue reason via `metadata_json`
+- Extended extraction-job persistence with retry lineage:
+  - `parent_extraction_job_id`
+  - `retry_root_job_id`
+  - `attempt_number`
+- Added review statuses:
+  - `pending_review`
+  - `teacher_reviewing`
+  - `teacher_approved`
+  - `teacher_rejected`
+  - `reviewed`
+  - `issue_flagged`
+  - `needs_retry`
+  - `archived`
+- Added TeacherAssist activity events for:
+  - `extraction_retry_requested`
+  - `extraction_review_started`
+  - `extraction_review_approved`
+  - `extraction_review_rejected`
+  - `extraction_text_corrected`
+  - `extraction_issue_flagged`
+- Added worker stale-job recovery through `recover_stale_extraction_jobs()` in the dedicated TeacherAssist worker loop.
+- Extended workspace aggregation to surface:
+  - low-confidence extractions
+  - teacher-rejected extractions
+  - retry-required extractions
+  - stale extraction jobs
+  - awaiting-teacher-review counts
+  - recently approved extractions
+- Added the `/teacher-assist/extractions` operational workspace with drill-down detail for both extracted-text review and job-only remediation views.
+
+### Migration summary
+
+- Added `050_teacher_assist_extraction_review_workspace.py`
+- Extended tables:
+  - `teacher_assist_extracted_text_records`
+  - `teacher_assist_extraction_jobs`
+- New review/lineage fields and queue indexes for review/remediation lookups
+- Rollback concern:
+  - downgrading this migration removes review metadata and retry lineage needed for remediation history
+
+### Backend files added or updated
+
+- `backend/services/api/alembic/versions/050_teacher_assist_extraction_review_workspace.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_extracted_text_record.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_extraction_job.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/extraction_review_service.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/extraction_jobs.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/workspace_service.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/activity_events.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/mock_ocr_provider.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/constants.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+- `backend/services/teacher-assist-worker/src/oziebot_teacher_assist_worker/__main__.py`
+
+### Frontend files added or updated
+
+- `frontend/apps/web/app/teacher-assist/extractions/page.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-extraction-detail-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-workspace-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-resources-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-assignments-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-nav.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+
+### API routes added or changed
+
+- `GET /v1/teacher-assist/extractions`
+- `GET /v1/teacher-assist/extraction-jobs/{id}` — enriched job detail with timeline, artifact metadata, retry/cancel eligibility
+- `POST /v1/teacher-assist/extraction-jobs/{id}/retry`
+- `POST /v1/teacher-assist/resources/{id}/extraction-jobs/retry`
+- `POST /v1/teacher-assist/student-work/{id}/extraction-jobs/retry`
+- `GET /v1/teacher-assist/extracted-text/{id}`
+- `GET /v1/teacher-assist/extracted-text/{id}/history`
+- `PATCH /v1/teacher-assist/extracted-text/{id}/review-status`
+- `PUT /v1/teacher-assist/extracted-text/{id}/approved-text`
+
+### Activity-event types implemented
+
+- `extraction_retry_requested`
+- `extraction_review_started`
+- `extraction_review_approved`
+- `extraction_review_rejected`
+- `extraction_text_corrected`
+- `extraction_issue_flagged`
+
+### Workspace aggregation behavior
+
+- Workspace summaries now include low-confidence, rejected, retry-required, awaiting-review, stale-job, and recently-approved extraction counts.
+- Needs-attention aggregation now surfaces:
+  - `low_confidence_extraction` -> `warning`
+  - `teacher_rejected_extraction` -> `critical`
+  - `stale_extraction_job` -> `critical`
+  - `multiple_failed_retries` -> `critical`
+  - extraction retry queue visibility
+- Review-required items now include extracted-text records awaiting teacher approval before downstream use.
+
+### Retry/remediation behavior
+
+- Retry creates a new immutable extraction-job row; prior jobs and extracted-text records remain unchanged.
+- Retry lineage is preserved through `parent_extraction_job_id`, `retry_root_job_id`, and `attempt_number`.
+- Retry is blocked for queued/running jobs and only allowed for terminal or remediation-eligible states such as failed, cancelled, low-confidence completed jobs, or issue-flagged/rejected review states.
+- Stale running jobs are recovered through lease/heartbeat timeout handling in the worker loop.
+
+### Frontend behavior
+
+1. `/teacher-assist/extractions` now provides an operational extraction list with dashboard cards for failures, low confidence, awaiting review, retry required, stale jobs, and recently approved items.
+2. Extracted-text drill-down supports side-by-side original vs corrected text, confidence warnings, review actions, retry/cancel controls, and activity/history visibility.
+3. Job-only drill-down via `?jobId=` supports failed or in-progress extraction remediation before extracted text exists.
+4. Workspace, Resources, and Assignments now route review-required extraction items into the extraction drill-down experience.
+5. AI grading remains visibly disabled; extraction review does not trigger grading or AI usage.
+
+### Tests added
+
+- extraction job detail with retry/cancel eligibility and artifact metadata
+- retry blocked for queued/running jobs
+- teacher review approval/history flow
+- issue flagging with teacher notes/reason
+- mark reviewed without grading-review or AI-usage side effects
+- retry lineage creation for failed jobs
+- tenant-safe extraction remediation behavior
+
+### Manual validation checklist
+
+1. Upload a resource or student-work artifact and queue extraction.
+2. Open `/teacher-assist/extractions` and confirm the job appears with status/confidence metadata.
+3. Open extraction detail and confirm original text, preview, review status, and confidence appear.
+4. Start review, save corrected text, approve or mark reviewed, and confirm approved/corrected text persists separately from original extracted text.
+5. Flag an issue with a teacher reason and confirm it appears in detail/workspace attention surfaces.
+6. Retry a failed or remediation-eligible job and confirm a new extraction-job row is created with lineage fields populated.
+7. Confirm queued/running jobs cannot be retried.
+8. Confirm workspace attention panels surface low-confidence, rejected, stale, and retry-required extraction items.
+9. Confirm no grading review, AI usage event, or mastery workflow side effects are created by extraction review actions.
+
+### Known limitations
+
+- real OCR providers are still not implemented; mock OCR remains the default and only active provider
+- teacher review notes and issue reasons are currently stored in `metadata_json`, not dedicated columns
+- artifact-level retry buttons are centered in the Extractions workspace; Resources/Assignments primarily link into drill-down rather than exposing every remediation action inline
+- approved extracted text is persisted for future downstream phases but is not yet consumed by AI grading or analytics workflows
+
+### Next recommended phase
+
+- Phase 20 - guarded real OCR provider integration
+  - introduce a config-guarded real OCR provider behind the existing provider seam, compare provider attempts using retry lineage, and keep teacher-approved text as the only downstream input without enabling grading automation or mastery auto-commit
 
 ## Phase 16 - Unified Teacher Workspace + Workflow Cohesion Layer
 
