@@ -255,3 +255,16 @@ Implications:
 - packet generation derives student pages from `class.student_count` and anonymous `STUDENT #` values only
 - QR payloads carry compact ids plus a per-page token and must exclude names, emails, real student ids, and freeform sensitive content
 - the first printable implementation is HTML/browser-print oriented; OCR, scan upload, and grading review remain later phases
+
+## ADR-024: Student-work intake stores anonymous upload metadata before OCR or grading
+
+TeacherAssist student-work submissions should be introduced as a privacy-safe upload and linkage layer before any OCR, grading, or mastery automation is considered.
+
+Reason:
+Teachers need a durable way to associate completed work with assignments and printable packet identity without prematurely introducing document parsing, rubric scoring, or other higher-risk workflows.
+
+Implications:
+- submissions store anonymous `student_number` plus upload metadata and assignment/class/subject context
+- packet/page linkage is optional and can be added after upload when QR packet context exists
+- intake remains software-only and must not create AI usage, OCR output, grading artifacts, or mastery updates
+- review status is teacher-controlled and intentionally lightweight until later grading phases exist

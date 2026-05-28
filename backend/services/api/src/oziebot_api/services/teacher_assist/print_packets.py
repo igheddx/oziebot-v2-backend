@@ -85,6 +85,30 @@ def get_print_packet_or_404(
     return row
 
 
+def get_print_packet_page_or_404(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    page_id: uuid.UUID,
+) -> TeacherAssistAssignmentPrintPage:
+    row = db.scalars(
+        select(TeacherAssistAssignmentPrintPage)
+        .join(
+            TeacherAssistAssignmentPrintPacket,
+            TeacherAssistAssignmentPrintPacket.id == TeacherAssistAssignmentPrintPage.packet_id,
+        )
+        .where(
+            TeacherAssistAssignmentPrintPage.id == page_id,
+            TeacherAssistAssignmentPrintPacket.tenant_id == tenant_id,
+            TeacherAssistAssignmentPrintPacket.teacher_user_id == user_id,
+        )
+    ).one_or_none()
+    if row is None:
+        raise LookupError("Assignment print page not found")
+    return row
+
+
 def list_assignment_print_packets(
     db: Session,
     *,

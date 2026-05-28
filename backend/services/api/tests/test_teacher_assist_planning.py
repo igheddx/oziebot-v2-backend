@@ -2899,3 +2899,285 @@ def test_assignment_print_packet_does_not_create_ai_usage_event(client, db_sessi
     assert packet.status_code == 201, packet.text
     after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
     assert after_usage_count == before_usage_count
+
+
+def test_assignment_student_work_upload_persists_metadata(client, db_session: Session):
+    email = "teacher-student-work@example.com"
+    token = _register_user(client, email=email, tenant_name="Student Work Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Student Work")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Upload Intake Assignment",
+            "assignment_type": "writing",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+    assignment_id = assignment.json()["id"]
+
+    packet = client.post(
+        f"/v1/teacher-assist/assignments/{assignment_id}/print-packets",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"pages_per_student": 1, "template_type": "blank_writing_page"},
+    )
+    assert packet.status_code == 201, packet.text
+
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment_id}/student-work",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("student-work-02.pdf", b"%PDF-1.7 student work", "application/pdf")},
+        data={"student_number": "2", "assignment_print_packet_id": packet.json()["id"]},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    payload = uploaded.json()
+    assert payload["student_number"] == 2
+    assert payload["assignment_print_packet_id"] == packet.json()["id"]
+    assert payload["assignment_print_page_id"] is None
+    assert payload["original_filename"] == "student-work-02.pdf"
+    assert payload["mime_type"] == "application/pdf"
+    assert payload["file_size"] > 0
+    assert payload["storage_key"].startswith("teacher-assist/")
+    assert payload["upload_status"] == "uploaded"
+    assert payload["processing_status"] == "pending_review"
+
+    listed = client.get(
+        f"/v1/teacher-assist/assignments/{assignment_id}/student-work",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert listed.status_code == 200, listed.text
+    assert len(listed.json()) == 1
+    assert listed.json()[0]["id"] == payload["id"]
+
+    detail = client.get(
+        f"/v1/teacher-assist/student-work/{payload['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["storage_key"] == payload["storage_key"]
+
+
+def test_assignment_student_work_link_context_and_update_status(client, db_session: Session):
+    email = "teacher-student-work-link@example.com"
+    token = _register_user(client, email=email, tenant_name="Student Work Link Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Linking")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Linking Assignment",
+            "assignment_type": "short_answer",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+    assignment_id = assignment.json()["id"]
+
+    packet = client.post(
+        f"/v1/teacher-assist/assignments/{assignment_id}/print-packets",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"pages_per_student": 2, "template_type": "short_answer_page"},
+    )
+    assert packet.status_code == 201, packet.text
+    packet_id = packet.json()["id"]
+
+    pages = client.get(
+        f"/v1/teacher-assist/print-packets/{packet_id}/pages",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert pages.status_code == 200, pages.text
+    first_student_page = next(page for page in pages.json() if page["student_number"] == 1)
+
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment_id}/student-work",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("student-1-response.txt", b"anonymous work", "text/plain")},
+        data={"student_number": "1"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    submission_id = uploaded.json()["id"]
+
+    linked = client.patch(
+        f"/v1/teacher-assist/student-work/{submission_id}/packet-context",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "assignment_print_packet_id": packet_id,
+            "assignment_print_page_id": first_student_page["id"],
+        },
+    )
+    assert linked.status_code == 200, linked.text
+    assert linked.json()["assignment_print_packet_id"] == packet_id
+    assert linked.json()["assignment_print_page_id"] == first_student_page["id"]
+
+    ready = client.patch(
+        f"/v1/teacher-assist/student-work/{submission_id}/status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"processing_status": "ready_for_processing"},
+    )
+    assert ready.status_code == 200, ready.text
+    assert ready.json()["processing_status"] == "ready_for_processing"
+    assert ready.json()["upload_status"] == "uploaded"
+
+
+def test_assignment_student_work_rejects_invalid_student_number_and_page_context(client, db_session: Session):
+    email = "teacher-student-work-invalid@example.com"
+    token = _register_user(client, email=email, tenant_name="Student Work Invalid Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Validation")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Validation Assignment",
+            "assignment_type": "writing",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+    assignment_id = assignment.json()["id"]
+
+    invalid_student = client.post(
+        f"/v1/teacher-assist/assignments/{assignment_id}/student-work",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("response.pdf", b"%PDF-1.7 invalid", "application/pdf")},
+        data={"student_number": str(context["teacher_class"]["student_count"] + 1)},
+    )
+    assert invalid_student.status_code == 400, invalid_student.text
+    assert "student number" in invalid_student.json()["detail"].lower()
+
+    packet = client.post(
+        f"/v1/teacher-assist/assignments/{assignment_id}/print-packets",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"pages_per_student": 1, "template_type": "blank_writing_page"},
+    )
+    assert packet.status_code == 201, packet.text
+
+    pages = client.get(
+        f"/v1/teacher-assist/print-packets/{packet.json()['id']}/pages",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert pages.status_code == 200, pages.text
+    second_student_page = next(page for page in pages.json() if page["student_number"] == 2)
+
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment_id}/student-work",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("student-1.pdf", b"%PDF-1.7 valid", "application/pdf")},
+        data={"student_number": "1"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    mismatched_page = client.patch(
+        f"/v1/teacher-assist/student-work/{uploaded.json()['id']}/packet-context",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "assignment_print_packet_id": packet.json()["id"],
+            "assignment_print_page_id": second_student_page["id"],
+        },
+    )
+    assert mismatched_page.status_code == 400, mismatched_page.text
+    assert "student number" in mismatched_page.json()["detail"].lower()
+
+
+def test_assignment_student_work_tenant_isolation(client, db_session: Session):
+    first_email = "teacher-student-work-a@example.com"
+    second_email = "teacher-student-work-b@example.com"
+    first_token = _register_user(client, email=first_email, tenant_name="Student Work Tenant A")
+    second_token = _register_user(client, email=second_email, tenant_name="Student Work Tenant B")
+    _grant_teacher_assist_access(db_session, email=first_email)
+    _grant_teacher_assist_access(db_session, email=second_email)
+
+    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Isolation")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Isolation Assignment",
+            "assignment_type": "writing",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/student-work",
+        headers={"Authorization": f"Bearer {first_token}"},
+        files={"file": ("student-1.pdf", b"%PDF-1.7 isolate", "application/pdf")},
+        data={"student_number": "1"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    submission_id = uploaded.json()["id"]
+
+    foreign_detail = client.get(
+        f"/v1/teacher-assist/student-work/{submission_id}",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign_detail.status_code == 404
+
+    foreign_status = client.patch(
+        f"/v1/teacher-assist/student-work/{submission_id}/status",
+        headers={"Authorization": f"Bearer {second_token}"},
+        json={"processing_status": "ready_for_processing"},
+    )
+    assert foreign_status.status_code == 404
+
+    foreign_list = client.get(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/student-work",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign_list.status_code == 404
+
+
+def test_assignment_student_work_does_not_create_ai_usage_event(client, db_session: Session):
+    email = "teacher-student-work-no-ai@example.com"
+    token = _register_user(client, email=email, tenant_name="Student Work No AI Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="No AI Student Work")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "No AI Student Work Assignment",
+            "assignment_type": "project",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+
+    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/student-work",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("student-1.txt", b"no ai", "text/plain")},
+        data={"student_number": "1"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    assert after_usage_count == before_usage_count

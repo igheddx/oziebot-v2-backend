@@ -58,6 +58,10 @@ Assignment model foundation, assignment lifecycle/status APIs, tenant-safe assig
 
 QR-coded printable assignment packet foundation, tenant-safe packet/page persistence, software-only QR generation, assignment packet history, and the printable packet browser view.
 
+## Phase 14
+
+Uploaded student-work intake foundation, anonymous STUDENT # submission persistence, software-only upload metadata capture, optional packet/page linkage, and assignment-workspace submission review controls.
+
 ## Next Phase
 
-Scan/upload ingestion workflows on top of the packet/QR identity foundation.
+OCR-free review remains the current limit; later phases can add scan-content extraction or grading flows on top of the stored submission metadata.

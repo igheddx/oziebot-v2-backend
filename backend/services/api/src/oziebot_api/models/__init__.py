@@ -91,6 +91,7 @@ from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssis
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
 from oziebot_api.models.teacher_assist_standard import TeacherAssistStandard
 from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
+from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.models.teacher_assist_weekly_plan_version import TeacherAssistWeeklyPlanVersion
 from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
@@ -192,6 +193,7 @@ __all__ = [
     "TeacherAssistSchoolYear",
     "TeacherAssistStandard",
     "TeacherAssistSubject",
+    "TeacherAssistStudentWorkSubmission",
     "TeacherAssistWeeklyPlan",
     "TeacherAssistWeeklyPlanVersion",
     "TeacherAssistWorkflow",

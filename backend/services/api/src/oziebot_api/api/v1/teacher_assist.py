@@ -12,6 +12,7 @@ from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAss
 from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
 from oziebot_api.models.teacher_assist_assignment_resource import TeacherAssistAssignmentResource
 from oziebot_api.models.teacher_assist_assignment_standard import TeacherAssistAssignmentStandard
+from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
 from oziebot_api.models.teacher_assist_class import TeacherAssistClass
 from oziebot_api.models.teacher_assist_class_subject import TeacherAssistClassSubject
 from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
@@ -36,6 +37,9 @@ from oziebot_api.schemas.teacher_assist import (
     AssignmentPrintPageOut,
     AssignmentResourceCreate,
     AssignmentStandardCreate,
+    AssignmentStudentWorkOut,
+    AssignmentStudentWorkPacketContextUpdate,
+    AssignmentStudentWorkStatusUpdate,
     AssignmentStatusUpdate,
     ClassCreate,
     ClassOut,
@@ -91,6 +95,8 @@ from oziebot_api.services.teacher_assist.constants import (
     ASSIGNMENT_PRINT_OUTPUT_FORMATS,
     ASSIGNMENT_PRINT_PACKET_STATUSES,
     ASSIGNMENT_PRINT_TEMPLATE_TYPES,
+    ASSIGNMENT_STUDENT_WORK_PROCESSING_STATUSES,
+    ASSIGNMENT_STUDENT_WORK_UPLOAD_STATUSES,
     GRADING_PERIOD_TYPES,
     PLANNING_SCOPES,
     PLANNING_DRAFT_STATUSES,
@@ -116,6 +122,13 @@ from oziebot_api.services.teacher_assist.print_packets import (
     list_assignment_print_packets,
     list_print_packet_pages,
     render_qr_svg_data_uri,
+)
+from oziebot_api.services.teacher_assist.student_work import (
+    create_student_work_submission,
+    get_student_work_submission_or_404,
+    link_student_work_submission_context,
+    list_assignment_student_work_submissions,
+    update_student_work_submission_processing_status,
 )
 from oziebot_api.services.teacher_assist.planning import (
     attach_pacing_item_resource,
@@ -405,6 +418,30 @@ def _assignment_print_page_out(row: TeacherAssistAssignmentPrintPage) -> Assignm
         qr_token=row.qr_token,
         qr_svg_data_uri=render_qr_svg_data_uri(dict(row.qr_payload_json or {})),
         created_at=row.created_at,
+    )
+
+
+def _assignment_student_work_out(row: TeacherAssistStudentWorkSubmission) -> AssignmentStudentWorkOut:
+    return AssignmentStudentWorkOut(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        teacher_user_id=row.teacher_user_id,
+        assignment_id=row.assignment_id,
+        assignment_print_packet_id=row.assignment_print_packet_id,
+        assignment_print_page_id=row.assignment_print_page_id,
+        school_year_id=row.school_year_id,
+        grading_period_id=row.grading_period_id,
+        class_id=row.class_id,
+        subject_id=row.subject_id,
+        student_number=row.student_number,
+        original_filename=row.original_filename,
+        mime_type=row.mime_type,
+        file_size=row.file_size,
+        storage_key=row.storage_key,
+        upload_status=row.upload_status,
+        processing_status=row.processing_status,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
     )
 
 
@@ -776,6 +813,8 @@ def read_teacher_assist_options(user: CurrentUser, db: DbSession) -> TeacherAssi
         assignment_print_packet_statuses=list(ASSIGNMENT_PRINT_PACKET_STATUSES),
         assignment_print_template_types=list(ASSIGNMENT_PRINT_TEMPLATE_TYPES),
         assignment_print_output_formats=list(ASSIGNMENT_PRINT_OUTPUT_FORMATS),
+        assignment_student_work_upload_statuses=list(ASSIGNMENT_STUDENT_WORK_UPLOAD_STATUSES),
+        assignment_student_work_processing_statuses=list(ASSIGNMENT_STUDENT_WORK_PROCESSING_STATUSES),
         planning_draft_statuses=list(PLANNING_DRAFT_STATUSES),
         planning_scopes=list(PLANNING_SCOPES),
         supported_grade_levels=list(SUPPORTED_GRADE_LEVELS),
@@ -1671,6 +1710,125 @@ def read_teacher_assignment_print_packet_pages(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return [_assignment_print_page_out(row) for row in rows]
+
+
+@router.get("/assignments/{assignment_id}/student-work", response_model=list[AssignmentStudentWorkOut])
+def read_teacher_assignment_student_work(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> list[AssignmentStudentWorkOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        rows = list_assignment_student_work_submissions(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            assignment_id=assignment_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [_assignment_student_work_out(row) for row in rows]
+
+
+@router.post("/assignments/{assignment_id}/student-work", response_model=AssignmentStudentWorkOut, status_code=201)
+async def upload_teacher_assignment_student_work(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+    file: UploadFile = File(...),
+    student_number: int = Form(...),
+    assignment_print_packet_id: uuid.UUID | None = Form(default=None),
+    assignment_print_page_id: uuid.UUID | None = Form(default=None),
+) -> AssignmentStudentWorkOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        stored = await store_teacher_assist_upload(settings, tenant_id=tenant_id, upload=file)
+        row = create_student_work_submission(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            assignment_id=assignment_id,
+            student_number=student_number,
+            original_filename=stored.original_filename,
+            mime_type=stored.mime_type,
+            file_size=stored.file_size,
+            storage_key=stored.storage_key,
+            assignment_print_packet_id=assignment_print_packet_id,
+            assignment_print_page_id=assignment_print_page_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _assignment_student_work_out(row)
+
+
+@router.get("/student-work/{submission_id}", response_model=AssignmentStudentWorkOut)
+def read_teacher_assignment_student_work_submission(
+    submission_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> AssignmentStudentWorkOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = get_student_work_submission_or_404(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            submission_id=submission_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _assignment_student_work_out(row)
+
+
+@router.patch("/student-work/{submission_id}/status", response_model=AssignmentStudentWorkOut)
+def update_teacher_assignment_student_work_status(
+    submission_id: uuid.UUID,
+    body: AssignmentStudentWorkStatusUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> AssignmentStudentWorkOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = update_student_work_submission_processing_status(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            submission_id=submission_id,
+            processing_status=body.processing_status,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _assignment_student_work_out(row)
+
+
+@router.patch("/student-work/{submission_id}/packet-context", response_model=AssignmentStudentWorkOut)
+def update_teacher_assignment_student_work_packet_context(
+    submission_id: uuid.UUID,
+    body: AssignmentStudentWorkPacketContextUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> AssignmentStudentWorkOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = link_student_work_submission_context(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            submission_id=submission_id,
+            assignment_print_packet_id=body.assignment_print_packet_id,
+            assignment_print_page_id=body.assignment_print_page_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _assignment_student_work_out(row)
 
 
 @router.get("/planning-drafts", response_model=list[PlanningDraftOut])

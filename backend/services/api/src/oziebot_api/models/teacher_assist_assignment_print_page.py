@@ -36,6 +36,10 @@ class TeacherAssistAssignmentPrintPage(Base):
         "TeacherAssistAssignmentPrintPacket", back_populates="pages"
     )
     assignment: Mapped["TeacherAssistAssignment"] = relationship("TeacherAssistAssignment")
+    student_work_submissions: Mapped[list["TeacherAssistStudentWorkSubmission"]] = relationship(
+        "TeacherAssistStudentWorkSubmission",
+        back_populates="assignment_print_page",
+    )
 
 
 from typing import TYPE_CHECKING  # noqa: E402
@@ -44,4 +48,7 @@ if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
     from oziebot_api.models.teacher_assist_assignment_print_packet import (
         TeacherAssistAssignmentPrintPacket,
+    )
+    from oziebot_api.models.teacher_assist_student_work_submission import (
+        TeacherAssistStudentWorkSubmission,
     )

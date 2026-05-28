@@ -214,3 +214,26 @@ Result summary:
 - added software-only packet generation from anonymous STUDENT # values with zero AI/provider usage
 - added packet history, payload preview, and print-view UX inside TeacherAssist assignments
 - kept upload, OCR, grading, mastery, and trading behavior out of scope
+
+## Phase 14 - Uploaded Student Work Intake Foundation
+
+Date:
+Purpose:
+Add the first student-work intake layer so teachers can upload anonymous assignment submissions and associate them with printable packet context without enabling OCR, grading, or AI.
+
+Prompt summary:
+Add student-work submission persistence, upload/status/packet-link APIs, assignment-workspace upload and review controls, privacy-safe validation, backend tests, and the related docs updates while keeping OCR/grading/mastery/trading behavior out of scope.
+
+Non-goals:
+No OCR, AI/provider calls, grading results, mastery-matrix updates, SIS/Google Classroom integration, or trading-system changes.
+
+Files/areas expected to change:
+- student-work models, migration, services, schemas, and API routes
+- assignment packet/page relationships and backend validation tests
+- TeacherAssist assignments screen plus student-work API helpers and frontend types
+- TeacherAssist docs
+
+Result summary:
+- delivered tenant-safe student-work submission persistence using anonymous STUDENT # values and upload metadata only
+- added optional packet/page linking and manual review-status controls without OCR or grading
+- extended the assignments workspace with upload, list, and context-link flows while keeping grading and mastery actions disabled

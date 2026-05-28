@@ -37,6 +37,13 @@ AssignmentPrintTemplateTypeLiteral = Literal[
     "short_answer_page",
 ]
 AssignmentPrintOutputFormatLiteral = Literal["html"]
+AssignmentStudentWorkUploadStatusLiteral = Literal["uploaded", "archived"]
+AssignmentStudentWorkProcessingStatusLiteral = Literal[
+    "pending_review",
+    "ready_for_processing",
+    "processing_deferred",
+    "archived",
+]
 PlanningDraftStatusLiteral = Literal["draft", "ready"]
 PlanningScopeLiteral = Literal["weekly", "multi_week", "module", "unit", "grading_period"]
 PlanVisibilityScopeLiteral = Literal["private", "shared", "grade_team", "school", "district"]
@@ -62,6 +69,8 @@ class TeacherAssistOptionsOut(BaseModel):
     assignment_print_packet_statuses: list[str]
     assignment_print_template_types: list[str]
     assignment_print_output_formats: list[str]
+    assignment_student_work_upload_statuses: list[str]
+    assignment_student_work_processing_statuses: list[str]
     planning_draft_statuses: list[str]
     planning_scopes: list[str]
     supported_grade_levels: list[str]
@@ -370,6 +379,37 @@ class AssignmentPrintPageOut(BaseModel):
     qr_token: str
     qr_svg_data_uri: str
     created_at: datetime
+
+
+class AssignmentStudentWorkOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    teacher_user_id: uuid.UUID
+    assignment_id: uuid.UUID
+    assignment_print_packet_id: uuid.UUID | None = None
+    assignment_print_page_id: uuid.UUID | None = None
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    student_number: int
+    original_filename: str
+    mime_type: str
+    file_size: int
+    storage_key: str
+    upload_status: AssignmentStudentWorkUploadStatusLiteral
+    processing_status: AssignmentStudentWorkProcessingStatusLiteral
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssignmentStudentWorkStatusUpdate(BaseModel):
+    processing_status: AssignmentStudentWorkProcessingStatusLiteral
+
+
+class AssignmentStudentWorkPacketContextUpdate(BaseModel):
+    assignment_print_packet_id: uuid.UUID | None = None
+    assignment_print_page_id: uuid.UUID | None = None
 
 
 class PlanningDraftCreate(BaseModel):

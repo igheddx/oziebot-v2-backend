@@ -31,6 +31,13 @@ ASSIGNMENT_PRINT_TEMPLATE_TYPES = (
     "short_answer_page",
 )
 ASSIGNMENT_PRINT_OUTPUT_FORMATS = ("html",)
+ASSIGNMENT_STUDENT_WORK_UPLOAD_STATUSES = ("uploaded", "archived")
+ASSIGNMENT_STUDENT_WORK_PROCESSING_STATUSES = (
+    "pending_review",
+    "ready_for_processing",
+    "processing_deferred",
+    "archived",
+)
 PLANNING_DRAFT_STATUSES = ("draft", "ready")
 PLANNING_SCOPES = ("weekly", "multi_week", "module", "unit", "grading_period")
 PLAN_VISIBILITY_SCOPES = ("private", "shared", "grade_team", "school", "district")
@@ -133,6 +140,20 @@ def validate_assignment_print_output_format(value: str | None) -> str:
     normalized = (value or "html").strip() or "html"
     if normalized not in ASSIGNMENT_PRINT_OUTPUT_FORMATS:
         raise ValueError("Unsupported assignment print output format")
+    return normalized
+
+
+def validate_assignment_student_work_upload_status(value: str | None) -> str:
+    normalized = (value or "uploaded").strip() or "uploaded"
+    if normalized not in ASSIGNMENT_STUDENT_WORK_UPLOAD_STATUSES:
+        raise ValueError("Unsupported assignment student-work upload status")
+    return normalized
+
+
+def validate_assignment_student_work_processing_status(value: str | None) -> str:
+    normalized = (value or "pending_review").strip() or "pending_review"
+    if normalized not in ASSIGNMENT_STUDENT_WORK_PROCESSING_STATUSES:
+        raise ValueError("Unsupported assignment student-work processing status")
     return normalized
 
 

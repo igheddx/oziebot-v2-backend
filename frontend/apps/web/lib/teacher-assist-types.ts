@@ -17,6 +17,8 @@ export type TeacherAssistOptions = {
   assignment_print_packet_statuses: string[];
   assignment_print_template_types: string[];
   assignment_print_output_formats: string[];
+  assignment_student_work_upload_statuses: string[];
+  assignment_student_work_processing_statuses: string[];
   planning_draft_statuses: string[];
   planning_scopes: string[];
   supported_grade_levels: string[];
@@ -226,6 +228,28 @@ export type AssignmentPrintPage = {
   qr_token: string;
   qr_svg_data_uri: string;
   created_at: string;
+};
+
+export type AssignmentStudentWorkSubmission = {
+  id: string;
+  tenant_id: string;
+  teacher_user_id: string;
+  assignment_id: string;
+  assignment_print_packet_id: string | null;
+  assignment_print_page_id: string | null;
+  school_year_id: string;
+  grading_period_id: string | null;
+  class_id: string;
+  subject_id: string;
+  student_number: number;
+  original_filename: string;
+  mime_type: string;
+  file_size: number;
+  storage_key: string;
+  upload_status: "uploaded" | "archived";
+  processing_status: "pending_review" | "ready_for_processing" | "processing_deferred" | "archived";
+  created_at: string;
+  updated_at: string;
 };
 
 export type PlanningDraft = {

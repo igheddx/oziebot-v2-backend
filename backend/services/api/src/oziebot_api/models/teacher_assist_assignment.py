@@ -92,6 +92,12 @@ class TeacherAssistAssignment(Base):
         cascade="all, delete-orphan",
         order_by="TeacherAssistAssignmentPrintPacket.created_at.desc()",
     )
+    student_work_submissions: Mapped[list["TeacherAssistStudentWorkSubmission"]] = relationship(
+        "TeacherAssistStudentWorkSubmission",
+        back_populates="assignment",
+        cascade="all, delete-orphan",
+        order_by="TeacherAssistStudentWorkSubmission.created_at.desc()",
+    )
 
 
 from typing import TYPE_CHECKING  # noqa: E402
@@ -102,6 +108,9 @@ if TYPE_CHECKING:
     )
     from oziebot_api.models.teacher_assist_assignment_resource import TeacherAssistAssignmentResource
     from oziebot_api.models.teacher_assist_assignment_standard import TeacherAssistAssignmentStandard
+    from oziebot_api.models.teacher_assist_student_work_submission import (
+        TeacherAssistStudentWorkSubmission,
+    )
     from oziebot_api.models.teacher_assist_class import TeacherAssistClass
     from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
     from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear

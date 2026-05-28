@@ -11,6 +11,7 @@ import type {
   AssignmentPrintPacket,
   AssignmentPrintPacketInput,
   AssignmentPrintPage,
+  AssignmentStudentWorkSubmission,
   CurriculumRolloverCandidates,
   CurriculumRolloverCopyInput,
   CurriculumRolloverCopyResult,
@@ -249,6 +250,89 @@ export function fetchAssignmentPrintPacket(id: string) {
 
 export function fetchAssignmentPrintPacketPages(id: string) {
   return readJson<AssignmentPrintPage[]>(`/v1/teacher-assist/print-packets/${id}/pages`);
+}
+
+export function fetchAssignmentStudentWork(id: string) {
+  return readJson<AssignmentStudentWorkSubmission[]>(`/v1/teacher-assist/assignments/${id}/student-work`);
+}
+
+export function fetchAssignmentStudentWorkSubmission(id: string) {
+  return readJson<AssignmentStudentWorkSubmission>(`/v1/teacher-assist/student-work/${id}`);
+}
+
+export async function uploadAssignmentStudentWork(
+  assignmentId: string,
+  file: File,
+  body: {
+    student_number: number;
+    assignment_print_packet_id?: string | null;
+    assignment_print_page_id?: string | null;
+  },
+  onProgress?: (progress: number) => void,
+): Promise<AssignmentStudentWorkSubmission> {
+  let accessToken = getStoredAccessToken();
+  if (!accessToken) {
+    const refreshed = await refreshTokens();
+    accessToken = refreshed ? getStoredAccessToken() : null;
+  }
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("student_number", String(body.student_number));
+  if (body.assignment_print_packet_id) {
+    formData.append("assignment_print_packet_id", body.assignment_print_packet_id);
+  }
+  if (body.assignment_print_page_id) {
+    formData.append("assignment_print_page_id", body.assignment_print_page_id);
+  }
+
+  return await new Promise<AssignmentStudentWorkSubmission>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", buildApiUrl(`/v1/teacher-assist/assignments/${assignmentId}/student-work`));
+    xhr.withCredentials = true;
+    if (accessToken) {
+      xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
+    }
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || !onProgress) return;
+      onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+    xhr.onerror = () => reject(new Error("Could not reach API"));
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as AssignmentStudentWorkSubmission);
+        } catch {
+          reject(new Error("Upload succeeded but returned invalid JSON"));
+        }
+        return;
+      }
+      reject(new Error(parseUploadError(xhr.responseText, xhr.status)));
+    };
+    xhr.send(formData);
+  });
+}
+
+export function updateAssignmentStudentWorkStatus(
+  id: string,
+  processingStatus: AssignmentStudentWorkSubmission["processing_status"],
+) {
+  return writeJson<AssignmentStudentWorkSubmission>(`/v1/teacher-assist/student-work/${id}/status`, "PATCH", {
+    processing_status: processingStatus,
+  });
+}
+
+export function updateAssignmentStudentWorkPacketContext(
+  id: string,
+  body: {
+    assignment_print_packet_id?: string | null;
+    assignment_print_page_id?: string | null;
+  },
+) {
+  return writeJson<AssignmentStudentWorkSubmission>(
+    `/v1/teacher-assist/student-work/${id}/packet-context`,
+    "PATCH",
+    body as Record<string, unknown>,
+  );
 }
 
 export function createLinkResource(body: Record<string, unknown>) {

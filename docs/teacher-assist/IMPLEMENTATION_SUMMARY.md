@@ -303,6 +303,74 @@ This document summarizes the current Oziebot repo findings and the proposed impl
 - Real-provider regeneration still depends on the existing guarded backend configuration and remains disabled by default.
 - Deeper collaborative approval/governance workflows for shared-plan edits are still not implemented.
 
+## Phase 14 - Uploaded Student Work Intake Foundation
+
+### What was implemented
+
+- Added persisted student-work intake foundations through:
+  - `assignment_student_work_submissions`
+- Added tenant-safe backend student-work APIs:
+  - `GET /v1/teacher-assist/assignments/{id}/student-work`
+  - `POST /v1/teacher-assist/assignments/{id}/student-work`
+  - `GET /v1/teacher-assist/student-work/{id}`
+  - `PATCH /v1/teacher-assist/student-work/{id}/status`
+  - `PATCH /v1/teacher-assist/student-work/{id}/packet-context`
+- Added software-only submission intake that:
+  - requires a visible teacher-owned assignment inside the current TeacherAssist tenant
+  - stores anonymous `student_number` instead of student names
+  - copies assignment, class, subject, school-year, and grading-period context onto each submission row
+  - optionally links submissions to printable packet and packet-page context when student numbers match
+  - persists upload metadata only: original filename, mime type, file size, storage key, upload status, and processing status
+  - avoids all AI/provider usage, OCR, grading outputs, and mastery updates
+- Added submission lifecycle support for:
+  - upload status: `uploaded`, `archived`
+  - processing status: `pending_review`, `ready_for_processing`, `processing_deferred`, `archived`
+- Updated the assignments workspace to support:
+  - anonymous student-work uploads
+  - submission list by `STUDENT #`
+  - upload metadata display
+  - manual review-status updates
+  - optional packet/page linking after upload
+  - continued disabled placeholders for grading review and mastery updates
+
+### Migration added
+
+- `046_teacher_assist_student_work_intake.py`
+  - creates the student-work submission table plus supporting indexes
+
+### Backend files added or updated
+
+- `backend/services/api/alembic/versions/046_teacher_assist_student_work_intake.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_assignment.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_assignment_print_packet.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_assignment_print_page.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_student_work_submission.py`
+- `backend/services/api/src/oziebot_api/models/__init__.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/constants.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/print_packets.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/student_work.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+
+### Frontend files updated
+
+- `frontend/apps/web/components/teacher-assist/teacher-assist-assignments-screen.tsx`
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+
+### User-visible behavior after Phase 14
+
+1. Teachers can upload completed student work against an assignment using anonymous STUDENT # values.
+2. Submissions keep packet/page context optional, so uploads can happen before or after QR packet generation.
+3. The assignments workspace now shows upload metadata, review status, and packet/page linking without running OCR or grading.
+
+### Remaining gaps after Phase 14
+
+- OCR and any scan-content extraction are still deferred.
+- Grading-review execution and mastery updates are still deferred.
+- Submission intake currently stores upload metadata and linkage only; there is not yet a richer teacher annotation workflow.
+
 ## Phase 13 - QR-Coded Printable Assignment Packets
 
 ### What was implemented

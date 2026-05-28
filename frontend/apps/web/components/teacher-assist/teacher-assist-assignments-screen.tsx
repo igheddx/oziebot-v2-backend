@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createAssignment,
   createAssignmentPrintPacket,
+  fetchAssignmentStudentWork,
   fetchAssignmentPrintPacketPages,
   fetchAssignmentPrintPackets,
   fetchAssignments,
@@ -16,14 +17,18 @@ import {
   fetchStandards,
   fetchSubjects,
   fetchTeacherAssistOptions,
+  updateAssignmentStudentWorkPacketContext,
+  updateAssignmentStudentWorkStatus,
   updateAssignment,
   updateAssignmentStatus,
+  uploadAssignmentStudentWork,
 } from "@/lib/teacher-assist-api";
 import type {
   Assignment,
   AssignmentInput,
   AssignmentPrintPacket,
   AssignmentPrintPage,
+  AssignmentStudentWorkSubmission,
   GradingPeriod,
   SchoolYear,
   Standard,
@@ -61,8 +66,18 @@ type PacketForm = {
   output_format: AssignmentPrintPacket["output_format"];
 };
 
+type StudentWorkUploadForm = {
+  student_number: number;
+  assignment_print_packet_id: string;
+};
+
+type SubmissionContextForm = {
+  processing_status: AssignmentStudentWorkSubmission["processing_status"];
+  assignment_print_packet_id: string;
+  assignment_print_page_id: string;
+};
+
 const PLACEHOLDER_ACTIONS = [
-  "Upload Student Work",
   "Start Grading Review",
   "Update Mastery Matrix",
 ];
@@ -88,6 +103,13 @@ function emptyPacketForm(): PacketForm {
     pages_per_student: 1,
     template_type: "blank_writing_page",
     output_format: "html",
+  };
+}
+
+function emptyStudentWorkUploadForm(): StudentWorkUploadForm {
+  return {
+    student_number: 1,
+    assignment_print_packet_id: "",
   };
 }
 
@@ -118,6 +140,12 @@ function formatDateTime(value: string) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString();
+}
+
+function formatFileSize(value: number) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function labelize(value: string) {
@@ -203,11 +231,24 @@ export function TeacherAssistAssignmentsScreen() {
   const [selectedPacketId, setSelectedPacketId] = useState<string | null>(null);
   const [packets, setPackets] = useState<AssignmentPrintPacket[]>([]);
   const [selectedPacketPages, setSelectedPacketPages] = useState<AssignmentPrintPage[]>([]);
+  const [submissionPagesByPacketId, setSubmissionPagesByPacketId] = useState<
+    Record<string, AssignmentPrintPage[]>
+  >({});
+  const [submissions, setSubmissions] = useState<AssignmentStudentWorkSubmission[]>([]);
+  const [studentWorkForm, setStudentWorkForm] = useState<StudentWorkUploadForm>(emptyStudentWorkUploadForm);
+  const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(null);
+  const [selectedSubmissionFile, setSelectedSubmissionFile] = useState<File | null>(null);
+  const [submissionContextForm, setSubmissionContextForm] = useState<SubmissionContextForm | null>(null);
   const [loading, setLoading] = useState(true);
   const [packetsLoading, setPacketsLoading] = useState(false);
   const [packetPagesLoading, setPacketPagesLoading] = useState(false);
+  const [submissionsLoading, setSubmissionsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generatingPacket, setGeneratingPacket] = useState(false);
+  const [uploadingStudentWork, setUploadingStudentWork] = useState(false);
+  const [studentWorkUploadProgress, setStudentWorkUploadProgress] = useState(0);
+  const [savingSubmissionStatus, setSavingSubmissionStatus] = useState(false);
+  const [savingSubmissionContext, setSavingSubmissionContext] = useState(false);
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
   const [statusDrafts, setStatusDrafts] = useState<Record<string, Assignment["status"]>>({});
   const [error, setError] = useState<string | null>(null);
@@ -256,6 +297,9 @@ export function TeacherAssistAssignmentsScreen() {
         setPackets([]);
         setSelectedPacketId(null);
         setSelectedPacketPages([]);
+        setSubmissions([]);
+        setSelectedSubmissionId(null);
+        setSubmissionContextForm(null);
       }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Could not load assignments.");
@@ -273,6 +317,14 @@ export function TeacherAssistAssignmentsScreen() {
         if (current && nextPackets.some((packet) => packet.id === current)) return current;
         return nextPackets[0]?.id ?? null;
       });
+      setStudentWorkForm((current) => ({
+        ...current,
+        assignment_print_packet_id:
+          current.assignment_print_packet_id &&
+          nextPackets.some((packet) => packet.id === current.assignment_print_packet_id)
+            ? current.assignment_print_packet_id
+            : "",
+      }));
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Could not load printable packets.");
       setPackets([]);
@@ -281,6 +333,33 @@ export function TeacherAssistAssignmentsScreen() {
       setPacketsLoading(false);
     }
   }, []);
+
+  const loadStudentWork = useCallback(async (assignmentId: string) => {
+    setSubmissionsLoading(true);
+    try {
+      const nextSubmissions = await fetchAssignmentStudentWork(assignmentId);
+      setSubmissions(nextSubmissions);
+      setSelectedSubmissionId((current) => {
+        if (current && nextSubmissions.some((submission) => submission.id === current)) return current;
+        return nextSubmissions[0]?.id ?? null;
+      });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Could not load student work.");
+      setSubmissions([]);
+      setSelectedSubmissionId(null);
+    } finally {
+      setSubmissionsLoading(false);
+    }
+  }, []);
+
+  const ensurePacketPages = useCallback(
+    async (packetId: string) => {
+      if (submissionPagesByPacketId[packetId]) return;
+      const pages = await fetchAssignmentPrintPacketPages(packetId);
+      setSubmissionPagesByPacketId((current) => ({ ...current, [packetId]: pages }));
+    },
+    [submissionPagesByPacketId],
+  );
 
   useEffect(() => {
     void load(filters);
@@ -291,10 +370,17 @@ export function TeacherAssistAssignmentsScreen() {
       setPackets([]);
       setSelectedPacketId(null);
       setSelectedPacketPages([]);
+      setSubmissionPagesByPacketId({});
+      setSubmissions([]);
+      setSelectedSubmissionId(null);
+      setSubmissionContextForm(null);
+      setSelectedSubmissionFile(null);
+      setStudentWorkForm(emptyStudentWorkUploadForm());
       return;
     }
     void loadPackets(packetAssignmentId);
-  }, [loadPackets, packetAssignmentId]);
+    void loadStudentWork(packetAssignmentId);
+  }, [loadPackets, loadStudentWork, packetAssignmentId]);
 
   useEffect(() => {
     if (!selectedPacketId) {
@@ -344,6 +430,10 @@ export function TeacherAssistAssignmentsScreen() {
     () => packets.find((packet) => packet.id === selectedPacketId) ?? null,
     [packets, selectedPacketId],
   );
+  const selectedSubmission = useMemo(
+    () => submissions.find((submission) => submission.id === selectedSubmissionId) ?? null,
+    [selectedSubmissionId, submissions],
+  );
 
   const availableSubjects = useMemo(() => {
     const selectedClass = form.class_id ? classMap[form.class_id] : null;
@@ -366,6 +456,12 @@ export function TeacherAssistAssignmentsScreen() {
       }),
     [form.school_year_id, form.subject_id, standards],
   );
+  const selectedSubmissionPages = useMemo(() => {
+    if (!selectedSubmission || !submissionContextForm?.assignment_print_packet_id) return [];
+    return (submissionPagesByPacketId[submissionContextForm.assignment_print_packet_id] ?? []).filter(
+      (page) => page.student_number === selectedSubmission.student_number,
+    );
+  }, [selectedSubmission, submissionContextForm, submissionPagesByPacketId]);
 
   const assignmentCounts = useMemo(
     () => ({
@@ -395,6 +491,11 @@ export function TeacherAssistAssignmentsScreen() {
     setSelectedPacketId(null);
     setSelectedPacketPages([]);
     setPacketForm(emptyPacketForm());
+    setSubmissions([]);
+    setSelectedSubmissionId(null);
+    setSubmissionContextForm(null);
+    setSelectedSubmissionFile(null);
+    setStudentWorkForm(emptyStudentWorkUploadForm());
     setNotice(null);
     setError(null);
   }, []);
@@ -465,6 +566,97 @@ export function TeacherAssistAssignmentsScreen() {
     }
   }, [loadPackets, packetAssignmentId, packetForm]);
 
+  const handleUploadStudentWork = useCallback(async () => {
+    if (!packetAssignmentId || !selectedSubmissionFile) {
+      setError("Choose a file before uploading student work.");
+      return;
+    }
+    setUploadingStudentWork(true);
+    setStudentWorkUploadProgress(0);
+    setError(null);
+    setNotice(null);
+    try {
+      const created = await uploadAssignmentStudentWork(
+        packetAssignmentId,
+        selectedSubmissionFile,
+        {
+          student_number: studentWorkForm.student_number,
+          assignment_print_packet_id: studentWorkForm.assignment_print_packet_id || null,
+        },
+        setStudentWorkUploadProgress,
+      );
+      await loadStudentWork(packetAssignmentId);
+      setSelectedSubmissionId(created.id);
+      setSelectedSubmissionFile(null);
+      setStudentWorkForm((current) => ({
+        ...current,
+        assignment_print_packet_id: current.assignment_print_packet_id,
+      }));
+      setNotice("Student work uploaded.");
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Could not upload student work.");
+    } finally {
+      setUploadingStudentWork(false);
+      setStudentWorkUploadProgress(0);
+    }
+  }, [loadStudentWork, packetAssignmentId, selectedSubmissionFile, studentWorkForm]);
+
+  const handleUpdateSubmissionStatus = useCallback(async () => {
+    if (!selectedSubmission || !submissionContextForm) return;
+    setSavingSubmissionStatus(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await updateAssignmentStudentWorkStatus(selectedSubmission.id, submissionContextForm.processing_status);
+      if (packetAssignmentId) {
+        await loadStudentWork(packetAssignmentId);
+      }
+      setNotice("Student work status updated.");
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Could not update student work status.");
+    } finally {
+      setSavingSubmissionStatus(false);
+    }
+  }, [loadStudentWork, packetAssignmentId, selectedSubmission, submissionContextForm]);
+
+  const handleUpdateSubmissionContext = useCallback(async () => {
+    if (!selectedSubmission || !submissionContextForm) return;
+    setSavingSubmissionContext(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await updateAssignmentStudentWorkPacketContext(selectedSubmission.id, {
+        assignment_print_packet_id: submissionContextForm.assignment_print_packet_id || null,
+        assignment_print_page_id: submissionContextForm.assignment_print_page_id || null,
+      });
+      if (packetAssignmentId) {
+        await loadStudentWork(packetAssignmentId);
+      }
+      setNotice("Student work packet context updated.");
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Could not update packet context.");
+    } finally {
+      setSavingSubmissionContext(false);
+    }
+  }, [loadStudentWork, packetAssignmentId, selectedSubmission, submissionContextForm]);
+
+  useEffect(() => {
+    if (!selectedSubmission) {
+      setSubmissionContextForm(null);
+      return;
+    }
+    setSubmissionContextForm({
+      processing_status: selectedSubmission.processing_status,
+      assignment_print_packet_id: selectedSubmission.assignment_print_packet_id ?? "",
+      assignment_print_page_id: selectedSubmission.assignment_print_page_id ?? "",
+    });
+  }, [selectedSubmission]);
+
+  useEffect(() => {
+    if (!submissionContextForm?.assignment_print_packet_id) return;
+    void ensurePacketPages(submissionContextForm.assignment_print_packet_id);
+  }, [ensurePacketPages, submissionContextForm?.assignment_print_packet_id]);
+
   return (
     <div className="space-y-6">
       <section className="ta-panel p-6 sm:p-8">
@@ -473,19 +665,19 @@ export function TeacherAssistAssignmentsScreen() {
             TeacherAssist Assignments
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
-            Assignment and printable packet foundation
+            Assignment packets and student-work intake foundation
           </h1>
           <p className="mt-3 text-base leading-7 text-slate-600">
             Create, edit, organize, and move assignments through a teacher-review lifecycle with
-            class, subject, standards, and printable QR packet context. Upload, grading review, and
-            mastery updates remain intentionally deferred.
+            class, subject, standards, printable QR packet context, and anonymous student-work
+            uploads. OCR, grading review, and mastery updates remain intentionally deferred.
           </p>
         </div>
       </section>
 
       <section className="ta-alert ta-alert-info">
-        Assignment packets are software-only in this phase. No provider call, OCR, grading
-        automation, mastery update, or trading behavior is involved here.
+        Assignment packets and student-work intake are software-only in this phase. No provider
+        call, OCR, grading automation, mastery update, or trading behavior is involved here.
       </section>
 
       {error ? <section className="ta-alert ta-alert-error">{error}</section> : null}
@@ -687,7 +879,7 @@ export function TeacherAssistAssignmentsScreen() {
                         onClick={() => handlePacketAssignment(assignment.id)}
                         className="ta-button-secondary"
                       >
-                        Generate Printable QR Packet
+                        Open Packet + Student Work Tools
                       </button>
                       <select
                         className="ta-input"
@@ -1198,6 +1390,312 @@ export function TeacherAssistAssignmentsScreen() {
                   </div>
                 </>
               )}
+            </div>
+          )}
+        </article>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+        <article className="ta-panel p-6">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-900">Student Work</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Upload student work by anonymous STUDENT # and keep review status separate from any
+                future OCR or grading workflow.
+              </p>
+            </div>
+            {packetAssignment ? (
+              <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800">
+                {packetAssignment.title}
+              </span>
+            ) : null}
+          </div>
+
+          {!packetAssignment ? (
+            <div className="mt-5 rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">
+              Choose “Open Packet + Student Work Tools” from an assignment row to upload and review
+              anonymous student work.
+            </div>
+          ) : (
+            <div className="mt-5 space-y-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="flex flex-col gap-2">
+                  <span className="ta-label">Student number</span>
+                  <input
+                    className="ta-input"
+                    type="number"
+                    min={1}
+                    max={classMap[packetAssignment.class_id]?.student_count ?? undefined}
+                    value={studentWorkForm.student_number}
+                    onChange={(event) =>
+                      setStudentWorkForm((current) => ({
+                        ...current,
+                        student_number: Math.max(1, Number(event.target.value) || 1),
+                      }))
+                    }
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2">
+                  <span className="ta-label">Optional packet context</span>
+                  <select
+                    className="ta-input"
+                    value={studentWorkForm.assignment_print_packet_id}
+                    onChange={(event) =>
+                      setStudentWorkForm((current) => ({
+                        ...current,
+                        assignment_print_packet_id: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">No packet link yet</option>
+                    {packets.map((packet) => (
+                      <option key={packet.id} value={packet.id}>
+                        {labelize(packet.template_type)} · {packet.created_at.slice(0, 10)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label className="flex flex-col gap-2">
+                <span className="ta-label">Upload file</span>
+                <input
+                  className="ta-input"
+                  type="file"
+                  onChange={(event) => setSelectedSubmissionFile(event.target.files?.[0] ?? null)}
+                />
+              </label>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleUploadStudentWork();
+                  }}
+                  disabled={uploadingStudentWork}
+                  className="ta-button-primary disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {uploadingStudentWork ? "Uploading..." : "Upload Student Work"}
+                </button>
+                {uploadingStudentWork ? (
+                  <span className="text-sm text-slate-500">{studentWorkUploadProgress}% uploaded</span>
+                ) : null}
+              </div>
+
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">Submission list</h3>
+                {submissionsLoading ? (
+                  <div className="mt-3 rounded-2xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
+                    Loading student work...
+                  </div>
+                ) : submissions.length === 0 ? (
+                  <div className="mt-3 rounded-2xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
+                    No student-work submissions uploaded for this assignment yet.
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {submissions.map((submission) => (
+                      <button
+                        key={submission.id}
+                        type="button"
+                        onClick={() => setSelectedSubmissionId(submission.id)}
+                        className={`w-full rounded-2xl border p-4 text-left transition ${
+                          submission.id === selectedSubmissionId
+                            ? "border-sky-300 bg-sky-50"
+                            : "border-slate-200 bg-white hover:border-sky-200 hover:bg-sky-50/40"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold text-slate-900">
+                            STUDENT #{submission.student_number}
+                          </span>
+                          <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-800">
+                            {labelize(submission.processing_status)}
+                          </span>
+                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                            {labelize(submission.upload_status)}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-600">
+                          <span>{submission.original_filename}</span>
+                          <span>{formatFileSize(submission.file_size)}</span>
+                          <span>{submission.mime_type}</span>
+                        </div>
+                        <p className="mt-2 text-xs text-slate-500">
+                          {submission.assignment_print_page_id
+                            ? "Linked to a packet page"
+                            : submission.assignment_print_packet_id
+                              ? "Linked to a packet"
+                              : "No packet/page link yet"}{" "}
+                          · Updated {formatDateTime(submission.updated_at)}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </article>
+
+        <article className="ta-panel p-6">
+          <div className="flex flex-col gap-2">
+            <h2 className="text-xl font-semibold text-slate-900">Submission detail</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Keep uploads anonymous, set review state, and optionally attach packet/page context
+              when printable packet metadata is available.
+            </p>
+          </div>
+
+          {!selectedSubmission || !submissionContextForm ? (
+            <div className="mt-5 rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">
+              Select a student-work submission to inspect its metadata and update status or packet
+              context.
+            </div>
+          ) : (
+            <div className="mt-5 space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-semibold text-slate-500">Anonymous student</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-900">
+                    STUDENT #{selectedSubmission.student_number}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-semibold text-slate-500">Uploaded</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-900">
+                    {formatDateTime(selectedSubmission.created_at)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-semibold text-slate-900">Upload metadata</p>
+                <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                  <p>Filename: {selectedSubmission.original_filename}</p>
+                  <p>MIME type: {selectedSubmission.mime_type}</p>
+                  <p>File size: {formatFileSize(selectedSubmission.file_size)}</p>
+                  <p>Storage key: {selectedSubmission.storage_key}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+                <label className="flex flex-col gap-2">
+                  <span className="ta-label">Processing status</span>
+                  <select
+                    className="ta-input"
+                    value={submissionContextForm.processing_status}
+                    onChange={(event) =>
+                      setSubmissionContextForm((current) =>
+                        current
+                          ? {
+                              ...current,
+                              processing_status:
+                                event.target.value as AssignmentStudentWorkSubmission["processing_status"],
+                            }
+                          : current,
+                      )
+                    }
+                  >
+                    {(options?.assignment_student_work_processing_statuses ?? [
+                      "pending_review",
+                      "ready_for_processing",
+                      "processing_deferred",
+                      "archived",
+                    ]).map((status) => (
+                      <option key={status} value={status}>
+                        {labelize(status)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleUpdateSubmissionStatus();
+                  }}
+                  disabled={savingSubmissionStatus}
+                  className="ta-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {savingSubmissionStatus ? "Saving..." : "Update Student Work Status"}
+                </button>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 p-4">
+                <p className="text-sm font-semibold text-slate-900">Packet and page context</p>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <label className="flex flex-col gap-2">
+                    <span className="ta-label">Print packet</span>
+                    <select
+                      className="ta-input"
+                      value={submissionContextForm.assignment_print_packet_id}
+                      onChange={(event) => {
+                        const nextPacketId = event.target.value;
+                        setSubmissionContextForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                assignment_print_packet_id: nextPacketId,
+                                assignment_print_page_id: "",
+                              }
+                            : current,
+                        );
+                      }}
+                    >
+                      <option value="">No packet link</option>
+                      {packets.map((packet) => (
+                        <option key={packet.id} value={packet.id}>
+                          {labelize(packet.template_type)} · {packet.created_at.slice(0, 10)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="flex flex-col gap-2">
+                    <span className="ta-label">Print page</span>
+                    <select
+                      className="ta-input"
+                      value={submissionContextForm.assignment_print_page_id}
+                      onChange={(event) =>
+                        setSubmissionContextForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                assignment_print_page_id: event.target.value,
+                              }
+                            : current,
+                        )
+                      }
+                      disabled={!submissionContextForm.assignment_print_packet_id}
+                    >
+                      <option value="">No page link</option>
+                      {selectedSubmissionPages.map((page) => (
+                        <option key={page.id} value={page.id}>
+                          STUDENT #{page.student_number} · Page {page.page_number}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleUpdateSubmissionContext();
+                    }}
+                    disabled={savingSubmissionContext}
+                    className="ta-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {savingSubmissionContext ? "Saving..." : "Save Packet/Page Context"}
+                  </button>
+                  <p className="text-sm text-slate-500">
+                    OCR and grading remain disabled; this only stores anonymous upload metadata and
+                    packet/page linkage.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
         </article>

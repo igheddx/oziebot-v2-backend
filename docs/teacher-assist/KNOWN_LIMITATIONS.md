@@ -28,5 +28,5 @@
 - Shared-plan regeneration does not yet add collaborative approval or owner-protection workflows beyond existing visibility rules.
 - The assignment workspace is teacher-owned and single-user; collaborative assignment governance is not implemented yet.
 - Printable assignment packets are assignment-scoped and teacher-owned; broader packet sharing/governance workflows are not implemented yet.
-- Uploaded student-work intake, OCR, and grading review are not implemented yet.
+- Uploaded student-work intake is implemented as a metadata-and-linkage foundation only; OCR and grading review are not implemented yet.
 - Assignment resource-link editing exists only as a backend foundation and starter-copy seam; the frontend does not yet expose a richer assignment-resource editor.
