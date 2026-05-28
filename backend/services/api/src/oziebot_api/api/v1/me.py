@@ -38,7 +38,15 @@ from oziebot_api.models.ai_diagnostics import (
 from oziebot_api.models.tenant import Tenant
 from oziebot_api.models.user import User
 from oziebot_api.models.user_strategy import UserStrategy
-from oziebot_api.schemas.me import MeOut, TenantBrief, TradingModePatch
+from oziebot_api.schemas.me import (
+    DefaultProductPatch,
+    MeOut,
+    ProductBrief,
+    ProductsOut,
+    TenantBrief,
+    TradingModePatch,
+)
+from oziebot_api.services.product_access import get_user_products, set_user_default_product
 from oziebot_api.services.entitlements import tenant_strategy_entitlement_gate
 from oziebot_api.services.coinbase import coinbase_valid_for_live_trading
 from oziebot_api.services.entitlements import has_live_trading_billing
@@ -130,6 +138,7 @@ def _build_me(db: DbSession, user: User) -> MeOut:
         mode = TradingMode(user.current_trading_mode)
     except ValueError:
         mode = TradingMode.PAPER
+    products, default_product = get_user_products(db, user)
     return MeOut(
         id=user.id,
         email=user.email,
@@ -139,6 +148,32 @@ def _build_me(db: DbSession, user: User) -> MeOut:
         current_trading_mode=mode,
         email_verified_at=user.email_verified_at,
         tenants=tenants,
+        products=[
+            ProductBrief(
+                product_key=row.product_key,
+                display_name=row.display_name,
+                status=row.status,
+                is_default=row.is_default,
+            )
+            for row in products
+        ],
+        default_product=default_product,
+    )
+
+
+def _build_products_response(db: DbSession, user: User) -> ProductsOut:
+    products, default_product = get_user_products(db, user)
+    return ProductsOut(
+        products=[
+            ProductBrief(
+                product_key=row.product_key,
+                display_name=row.display_name,
+                status=row.status,
+                is_default=row.is_default,
+            )
+            for row in products
+        ],
+        default_product=default_product,
     )
 
 
@@ -173,6 +208,37 @@ def _analytics_filters(
 @router.get("", response_model=MeOut)
 def read_me(user: CurrentUser, db: DbSession) -> MeOut:
     return _build_me(db, user)
+
+
+@router.get("/products", response_model=ProductsOut)
+def read_my_products(user: CurrentUser, db: DbSession) -> ProductsOut:
+    return _build_products_response(db, user)
+
+
+@router.patch("/default-product", response_model=ProductsOut)
+def update_default_product(
+    body: DefaultProductPatch,
+    user: CurrentUser,
+    db: DbSession,
+) -> ProductsOut:
+    try:
+        products, default_product = set_user_default_product(db, user=user, product_key=body.product_key)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return ProductsOut(
+        products=[
+            ProductBrief(
+                product_key=row.product_key,
+                display_name=row.display_name,
+                status=row.status,
+                is_default=row.is_default,
+            )
+            for row in products
+        ],
+        default_product=default_product,
+    )
 
 
 def _format_strategy_name(strategy_id: str) -> str:

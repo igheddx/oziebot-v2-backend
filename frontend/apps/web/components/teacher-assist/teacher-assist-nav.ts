@@ -1,0 +1,16 @@
+export const TEACHER_ASSIST_NAV_LINKS = [
+  { href: "/teacher-assist", label: "Dashboard" },
+  { href: "/teacher-assist/plans", label: "Plans" },
+  { href: "/teacher-assist/assignments", label: "Assignments" },
+  { href: "/teacher-assist/resources", label: "Resources" },
+  { href: "/teacher-assist/pacing-guides", label: "Pacing Guides" },
+  { href: "/teacher-assist/weekly-planning", label: "Weekly Planning" },
+  { href: "/teacher-assist/curriculum-rollover", label: "Curriculum Rollover" },
+  { href: "/teacher-assist/daily-teaching", label: "Daily Teaching" },
+  { href: "/teacher-assist/assessments", label: "Assessments" },
+  { href: "/teacher-assist/students", label: "Students" },
+  { href: "/teacher-assist/insights", label: "Insights" },
+  { href: "/teacher-assist/newsletters", label: "Newsletters" },
+  { href: "/teacher-assist/communication", label: "Communication" },
+  { href: "/teacher-assist/settings", label: "Settings" },
+] as const;

@@ -63,6 +63,11 @@ class Tenant(Base):
         back_populates="tenant",
         cascade="all, delete-orphan",
     )
+    product_access_rows: Mapped[list["TenantProductAccess"]] = relationship(
+        "TenantProductAccess",
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+    )
 
 
 from typing import TYPE_CHECKING  # noqa: E402
@@ -71,6 +76,7 @@ if TYPE_CHECKING:
     from oziebot_api.models.billing_checkout_session import BillingCheckoutSession
     from oziebot_api.models.exchange_connection import ExchangeConnection
     from oziebot_api.models.membership import TenantMembership
+    from oziebot_api.models.tenant_product_access import TenantProductAccess
     from oziebot_api.models.stripe_customer import StripeCustomer
     from oziebot_api.models.stripe_subscription import StripeSubscription
     from oziebot_api.models.tenant_entitlement import TenantEntitlement

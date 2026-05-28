@@ -42,6 +42,18 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    product_preference: Mapped["UserProductPreference | None"] = relationship(
+        "UserProductPreference",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    teacher_assist_profile: Mapped["TeacherAssistProfile | None"] = relationship(
+        "TeacherAssistProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 from typing import TYPE_CHECKING  # noqa: E402
@@ -49,3 +61,5 @@ from typing import TYPE_CHECKING  # noqa: E402
 if TYPE_CHECKING:
     from oziebot_api.models.auth_session import AuthSession
     from oziebot_api.models.membership import TenantMembership
+    from oziebot_api.models.teacher_assist_profile import TeacherAssistProfile
+    from oziebot_api.models.user_product_preference import UserProductPreference

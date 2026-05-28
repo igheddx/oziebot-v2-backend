@@ -32,6 +32,7 @@ from oziebot_api.models.notification import (
     NotificationDeliveryAttempt,
     NotificationPreference,
 )
+from oziebot_api.models.platform_product import PlatformProduct
 from oziebot_api.models.platform_setting import PlatformSetting
 from oziebot_api.models.platform_strategy import PlatformStrategy
 from oziebot_api.models.platform_token import PlatformTokenAllowlist
@@ -59,9 +60,45 @@ from oziebot_api.models.volatility_harvest import (
 from oziebot_api.models.strategy_lifecycle import StrategyLifecycleEvent
 from oziebot_api.models.strategy_signal_pipeline import StrategyRun, StrategySignalRecord
 from oziebot_api.models.subscription_plan import SubscriptionPlan
+from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
+from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAssistAssignmentPrintPacket
+from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
+from oziebot_api.models.teacher_assist_assignment_resource import TeacherAssistAssignmentResource
+from oziebot_api.models.teacher_assist_assignment_standard import TeacherAssistAssignmentStandard
+from oziebot_api.models.teacher_assist_class import TeacherAssistClass
+from oziebot_api.models.teacher_assist_class_subject import TeacherAssistClassSubject
+from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsageEvent
+from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
+from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
+from oziebot_api.models.teacher_assist_pacing_item import TeacherAssistPacingItem
+from oziebot_api.models.teacher_assist_pacing_item_resource import TeacherAssistPacingItemResource
+from oziebot_api.models.teacher_assist_pacing_item_standard import TeacherAssistPacingItemStandard
+from oziebot_api.models.teacher_assist_planning_input_draft import TeacherAssistPlanningInputDraft
+from oziebot_api.models.teacher_assist_planning_input_draft_pacing_item import (
+    TeacherAssistPlanningInputDraftPacingItem,
+)
+from oziebot_api.models.teacher_assist_planning_input_draft_resource import (
+    TeacherAssistPlanningInputDraftResource,
+)
+from oziebot_api.models.teacher_assist_planning_input_draft_standard import (
+    TeacherAssistPlanningInputDraftStandard,
+)
+from oziebot_api.models.teacher_assist_planning_input_draft_subject import (
+    TeacherAssistPlanningInputDraftSubject,
+)
+from oziebot_api.models.teacher_assist_profile import TeacherAssistProfile
+from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
+from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
+from oziebot_api.models.teacher_assist_standard import TeacherAssistStandard
+from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
+from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
+from oziebot_api.models.teacher_assist_weekly_plan_version import TeacherAssistWeeklyPlanVersion
+from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
+from oziebot_api.models.teacher_assist_workflow_step import TeacherAssistWorkflowStep
 from oziebot_api.models.tenant import Tenant
 from oziebot_api.models.tenant_entitlement import TenantEntitlement
 from oziebot_api.models.tenant_integration import TenantIntegration
+from oziebot_api.models.tenant_product_access import TenantProductAccess
 from oziebot_api.models.token_market_profile import TokenMarketProfile
 from oziebot_api.models.token_strategy_policy import TokenStrategyPolicy
 from oziebot_api.models.trade_intelligence import (
@@ -71,6 +108,7 @@ from oziebot_api.models.trade_intelligence import (
     TradeOutcomeFeature,
 )
 from oziebot_api.models.user import User
+from oziebot_api.models.user_product_preference import UserProductPreference
 from oziebot_api.models.user_token_permission import UserTokenPermission
 from oziebot_api.models.user_strategy import (
     StrategyPerformance,
@@ -103,6 +141,7 @@ __all__ = [
     "NotificationChannelConfig",
     "NotificationDeliveryAttempt",
     "NotificationPreference",
+    "PlatformProduct",
     "PlatformSetting",
     "PlatformStrategy",
     "PlatformTokenAllowlist",
@@ -130,14 +169,43 @@ __all__ = [
     "StrategySignalSnapshot",
     "StrategySignalRecord",
     "SubscriptionPlan",
+    "TeacherAssistAssignment",
+    "TeacherAssistAssignmentPrintPacket",
+    "TeacherAssistAssignmentPrintPage",
+    "TeacherAssistAssignmentResource",
+    "TeacherAssistAssignmentStandard",
+    "TeacherAssistClass",
+    "TeacherAssistClassSubject",
+    "TeacherAssistAIUsageEvent",
+    "TeacherAssistGradingPeriod",
+    "TeacherAssistPacingGuide",
+    "TeacherAssistPacingItem",
+    "TeacherAssistPacingItemResource",
+    "TeacherAssistPacingItemStandard",
+    "TeacherAssistPlanningInputDraft",
+    "TeacherAssistPlanningInputDraftPacingItem",
+    "TeacherAssistPlanningInputDraftResource",
+    "TeacherAssistPlanningInputDraftStandard",
+    "TeacherAssistPlanningInputDraftSubject",
+    "TeacherAssistProfile",
+    "TeacherAssistResourceLibraryItem",
+    "TeacherAssistSchoolYear",
+    "TeacherAssistStandard",
+    "TeacherAssistSubject",
+    "TeacherAssistWeeklyPlan",
+    "TeacherAssistWeeklyPlanVersion",
+    "TeacherAssistWorkflow",
+    "TeacherAssistWorkflowStep",
     "Tenant",
     "TenantEntitlement",
     "TenantIntegration",
     "TenantMembership",
+    "TenantProductAccess",
     "TokenMarketProfile",
     "TokenStrategyPolicy",
     "TradeOutcomeFeature",
     "User",
+    "UserProductPreference",
     "UserStrategy",
     "UserStrategyState",
     "UserTokenPermission",

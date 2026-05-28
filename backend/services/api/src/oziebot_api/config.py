@@ -61,6 +61,80 @@ class Settings(BaseSettings):
     ai_diagnostic_provider_base_url: str | None = None
     ai_diagnostic_model_name: str = "gpt-4.1-mini"
     ai_diagnostic_prompt_version: str = "ai-diagnostics-v1"
+    teacher_assist_storage_root: str = "/tmp/oziebot-teacher-assist"
+    teacher_assist_storage_backend: str = "local"
+    teacher_assist_upload_max_bytes: int = Field(
+        default=25 * 1024 * 1024,
+        description="Maximum size in bytes for TeacherAssist resource uploads.",
+    )
+    teacher_assist_ai_provider: str = Field(
+        default="mock",
+        description="Backend-only TeacherAssist AI provider selection.",
+    )
+    teacher_assist_real_provider_enabled: bool = Field(
+        default=False,
+        description="Primary safety switch for any future real TeacherAssist AI provider.",
+    )
+    teacher_assist_ai_enable_real_provider: bool = Field(
+        default=False,
+        description="Deprecated alias for teacher_assist_real_provider_enabled.",
+    )
+    teacher_assist_real_provider_model: str | None = Field(
+        default=None,
+        description="Configured model name for a future real TeacherAssist provider.",
+    )
+    teacher_assist_openai_api_key: str | None = Field(
+        default=None,
+        description="API key for guarded TeacherAssist OpenAI provider execution.",
+    )
+    teacher_assist_openai_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        description="Base URL for the guarded TeacherAssist OpenAI-compatible provider.",
+    )
+    teacher_assist_ai_fixture_mode: str = Field(
+        default="off",
+        description="TeacherAssist AI fixture mode: off, record, or replay.",
+    )
+    teacher_assist_ai_fixtures_root: str = Field(
+        default="fixtures/teacher_assist",
+        description="Directory used for optional TeacherAssist AI fixture replay/record support.",
+    )
+    teacher_assist_ai_max_input_tokens: int = Field(
+        default=16000,
+        description="Soft max input tokens allowed for TeacherAssist provider requests.",
+    )
+    teacher_assist_ai_max_output_tokens: int = Field(
+        default=4000,
+        description="Soft max output tokens allowed for TeacherAssist provider responses.",
+    )
+    teacher_assist_ai_daily_cost_limit_cents: int = Field(
+        default=0,
+        description="Daily TeacherAssist AI cost limit in cents. Zero keeps real-provider usage disabled by policy.",
+    )
+    teacher_assist_worker_enabled: bool = Field(
+        default=True,
+        description="Enable the dedicated TeacherAssist worker loop.",
+    )
+    teacher_assist_worker_poll_interval_seconds: float = Field(
+        default=1.0,
+        description="Idle poll interval for the TeacherAssist worker.",
+    )
+    teacher_assist_worker_lease_seconds: int = Field(
+        default=30,
+        description="Lease length for a claimed TeacherAssist workflow.",
+    )
+    teacher_assist_worker_max_retries: int = Field(
+        default=3,
+        description="Maximum retries for a failed TeacherAssist workflow.",
+    )
+    teacher_assist_workflow_timeout_seconds: int = Field(
+        default=300,
+        description="Max runtime for a TeacherAssist workflow attempt before timing out.",
+    )
+    teacher_assist_allowed_models: str = Field(
+        default="mock",
+        description="Comma-separated allowlist of TeacherAssist AI models.",
+    )
 
 
 def get_settings() -> Settings:

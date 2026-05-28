@@ -1,0 +1,32 @@
+# TeacherAssist Known Limitations
+
+- Current planning route may still be named `/teacher-assist/weekly-planning`, even though the product direction is broader instructional planning.
+- Real provider calls are disabled by default.
+- Mock generation is currently the only safe default provider.
+- OCR has not been introduced.
+- Uploaded resource parsing has not been introduced.
+- QR assignment-page identity is implemented only for generated printable packets; scan/upload ingestion is not implemented yet.
+- Printable assignment templates are currently limited to browser-print HTML output.
+- Grading assistant workflows have not been implemented yet.
+- TEKS mastery matrix has not been implemented yet.
+- Newsletter/communication assistant has not been implemented yet.
+- Resource unlink/remove flows may still be deferred.
+- Static-export frontend constraints may influence route design.
+- TeacherAssist currently resolves the first accessible TeacherAssist tenant membership.
+- Shared instructional plan discovery is implemented as a foundation, but collaborative team workflows are still limited.
+- Sharing/template mutation is currently owner-only; tenant-admin moderation flows are not implemented yet.
+- Teacher personalization branching/versioning has not been implemented yet.
+- Annual curriculum rollover is implemented as a plan-copy foundation, but broader multi-artifact rollover is not implemented yet.
+- Cross-school-year instructional asset reuse is currently limited to instructional-plan copying.
+- Instructional asset library workflows beyond plans have not been implemented yet.
+- Target grading-period remapping UI has not been implemented yet.
+- Section regeneration currently saves directly to a new version; preview-before-save is not implemented yet.
+- Dedicated TeacherAssist worker execution is implemented as a foundation, but deployment/runtime orchestration still depends on environment wiring.
+- Workflow metadata is surfaced in the planning workspace, but there is not yet a separate rich workflow-detail operations screen.
+- Real-provider execution is available only for instructional-plan generation and only when explicit backend config, API key, allowlisted model, and cost controls are in place.
+- Provider support is currently limited to the guarded OpenAI-compatible path plus deterministic mock mode.
+- Shared-plan regeneration does not yet add collaborative approval or owner-protection workflows beyond existing visibility rules.
+- The assignment workspace is teacher-owned and single-user; collaborative assignment governance is not implemented yet.
+- Printable assignment packets are assignment-scoped and teacher-owned; broader packet sharing/governance workflows are not implemented yet.
+- Uploaded student-work intake, OCR, and grading review are not implemented yet.
+- Assignment resource-link editing exists only as a backend foundation and starter-copy seam; the frontend does not yet expose a richer assignment-resource editor.

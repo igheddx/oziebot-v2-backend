@@ -1,0 +1,2901 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+import pytest
+import uuid
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from oziebot_api.config import Settings
+from oziebot_api.models.membership import TenantMembership
+from oziebot_api.models.platform_product import PlatformProduct
+from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsageEvent
+from oziebot_api.models.tenant_product_access import TenantProductAccess
+from oziebot_api.models.user import User
+from oziebot_api.services.teacher_assist.ai_provider import TeacherAssistAIProviderResult
+from oziebot_api.services.teacher_assist.provider_config import get_teacher_assist_ai_provider
+from oziebot_api.services.teacher_assist.prompt_contracts import INSTRUCTIONAL_PLAN_PROMPT_VERSION
+from oziebot_api.services.teacher_assist.workflow_service import (
+    claim_next_teacher_assist_workflow,
+    process_claimed_teacher_assist_workflow_with_engine,
+    process_next_teacher_assist_workflow_with_engine,
+)
+from oziebot_api.services.product_access import TEACHER_ASSIST_PRODUCT_KEY
+
+
+def _register_user(client, *, email: str, tenant_name: str) -> str:
+    response = client.post(
+        "/v1/auth/register",
+        json={
+            "email": email,
+            "full_name": email.split("@")[0].title(),
+            "password": "password-123",
+            "tenant_name": tenant_name,
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["access_token"]
+
+
+def _grant_teacher_assist_access(db_session: Session, *, email: str, status: str = "active") -> None:
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+    product = db_session.scalar(
+        select(PlatformProduct).where(PlatformProduct.product_key == TEACHER_ASSIST_PRODUCT_KEY)
+    )
+    assert product is not None
+    existing = db_session.scalar(
+        select(TenantProductAccess).where(
+            TenantProductAccess.tenant_id == membership.tenant_id,
+            TenantProductAccess.product_id == product.id,
+        )
+    )
+    if existing is None:
+        db_session.add(
+            TenantProductAccess(
+                tenant_id=membership.tenant_id,
+                product_id=product.id,
+                status=status,
+                created_at=membership.created_at,
+                updated_at=membership.created_at,
+            )
+        )
+    else:
+        existing.status = status
+    db_session.commit()
+
+
+def _run_teacher_assist_worker(
+    db_session: Session,
+    *,
+    settings: Settings | None = None,
+    workflow_id: str | None = None,
+) -> str | None:
+    settings = settings or Settings(teacher_assist_worker_max_retries=0)
+    claimed_id = process_next_teacher_assist_workflow_with_engine(
+        db_session.get_bind(),
+        settings=settings,
+        workflow_id=uuid.UUID(workflow_id) if workflow_id else None,
+        worker_name="teacher-assist-test-worker",
+    )
+    db_session.expire_all()
+    return str(claimed_id) if claimed_id is not None else None
+
+
+def _share_teacher_assist_tenant(
+    db_session: Session,
+    *,
+    owner_email: str,
+    member_email: str,
+    role: str = "user",
+) -> None:
+    owner = db_session.scalar(select(User).where(User.email == owner_email))
+    member = db_session.scalar(select(User).where(User.email == member_email))
+    assert owner is not None
+    assert member is not None
+    owner_membership = db_session.scalar(select(TenantMembership).where(TenantMembership.user_id == owner.id))
+    assert owner_membership is not None
+    existing = db_session.scalar(
+        select(TenantMembership).where(
+            TenantMembership.user_id == member.id,
+            TenantMembership.tenant_id == owner_membership.tenant_id,
+        )
+    )
+    if existing is None:
+        db_session.add(
+            TenantMembership(
+                user_id=member.id,
+                tenant_id=owner_membership.tenant_id,
+                role=role,
+                created_at=owner_membership.created_at,
+            )
+        )
+    db_session.commit()
+
+
+def _real_provider_result(*, planning_scope: str = "weekly") -> TeacherAssistAIProviderResult:
+    return TeacherAssistAIProviderResult(
+        content_json={
+            "planning_scope": planning_scope,
+            "plan_title": "TeacherAssist Real Provider Plan",
+            "module_title": None,
+            "duration": {
+                "start_date": "2026-08-10",
+                "end_date": "2026-08-14",
+                "estimated_weeks": 1,
+                "instructional_days_count": 5,
+                "summary": "1 week / 5 instructional days",
+            },
+            "overview": "Teacher-ready instructional overview with concrete classroom steps.",
+            "instructional_arc": [
+                "Launch prior knowledge and objective framing.",
+                "Model, guided practice, and checks for understanding.",
+                "Independent application and reflection.",
+            ],
+            "weekly_segments": [
+                {
+                    "segment_index": 1,
+                    "segment_label": "Week 1",
+                    "focus": "Close reading and evidence-based response writing.",
+                    "objectives": ["Analyze text evidence", "Draft a short written response"],
+                    "subjects": [],
+                    "daily_breakdown": [
+                        {
+                            "day": 1,
+                            "day_label": "Monday",
+                            "focus": "Annotate the anchor text",
+                            "teacher_actions": ["Model annotation moves"],
+                            "student_activities": ["Annotate a short passage"],
+                            "checks_for_understanding": ["Collect annotations"],
+                            "materials_needed": ["Anchor text", "Notebook"],
+                        }
+                    ],
+                    "assessment_checkpoints": ["Short written response review"],
+                }
+            ],
+            "standards_progression": [
+                {
+                    "code": "ELA.5.6A",
+                    "description": "Use evidence from text.",
+                    "phase": "Apply during guided reading and writing.",
+                }
+            ],
+            "vocabulary": ["annotate", "evidence", "response"],
+            "materials_needed": ["Anchor text", "Notebook"],
+            "differentiation": {
+                "support": ["Sentence stems"],
+                "extension": ["Evidence-based paragraph"],
+                "intervention": ["Teacher conference"],
+            },
+            "assessment_checkpoints": ["Entry check", "Exit ticket"],
+            "resources_used": [{"id": "resource-1", "title": "Anchor text", "resource_type": "doc"}],
+            "teacher_notes_used": "Focus on text evidence and concise writing.",
+            "review_notes": "",
+        },
+        provider="openai",
+        model="gpt-4.1-mini",
+        input_tokens=1200,
+        output_tokens=700,
+        estimated_cost_cents=1,
+        metadata_json={
+            "is_mock": False,
+            "provider_mode": "real",
+            "prompt_version": INSTRUCTIONAL_PLAN_PROMPT_VERSION,
+            "request_id": "resp_test_123",
+        },
+    )
+
+
+def _create_ready_planning_draft_context(
+    client,
+    *,
+    token: str,
+    subject_name: str = "Math",
+    planning_scope: str = "weekly",
+    weeks: int = 1,
+    module_title: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    estimated_weeks: int | None = None,
+    instructional_days_count: int | None = None,
+) -> dict[str, dict]:
+    school_year = client.post(
+        "/v1/teacher-assist/school-years",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "2026-2027",
+            "start_date": "2026-08-10",
+            "end_date": "2027-05-28",
+            "is_active": True,
+        },
+    ).json()
+    grading_period = client.post(
+        "/v1/teacher-assist/grading-periods",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "title": "9 Weeks 1",
+            "grading_period_type": "nine_weeks",
+            "start_date": "2026-08-10",
+            "end_date": "2026-10-10",
+            "sort_order": 1,
+        },
+    ).json()
+    subject = client.post(
+        "/v1/teacher-assist/subjects",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"code": subject_name[:4].upper(), "name": subject_name},
+    ).json()
+    teacher_class = client.post(
+        "/v1/teacher-assist/classes",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "name": f"{subject_name} Block A",
+            "grade_level": "5",
+            "student_count": 24,
+        },
+    ).json()
+    attach_subject = client.post(
+        "/v1/teacher-assist/class-subjects",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"class_id": teacher_class["id"], "subject_id": subject["id"]},
+    )
+    assert attach_subject.status_code == 201, attach_subject.text
+    standard = client.post(
+        "/v1/teacher-assist/standards",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "subject_id": subject["id"],
+            "standard_type": "TEKS",
+            "code": "5.1A",
+            "description": f"Use {subject_name} planning context.",
+            "grade_level": "5",
+            "school_year_id": school_year["id"],
+        },
+    ).json()
+    resource = client.post(
+        "/v1/teacher-assist/resources/link",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": f"{subject_name} Resource",
+            "description": "Mock workflow resource",
+            "external_url": f"https://example.com/{subject_name.lower()}-resource",
+        },
+    ).json()
+    guide = client.post(
+        "/v1/teacher-assist/pacing-guides",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "title": f"{subject_name} Guide",
+            "description": "Workflow-ready guide",
+            "grade_level": "5",
+            "subject_id": subject["id"],
+            "is_shared": False,
+        },
+    ).json()
+    pacing_items = [
+        client.post(
+            f"/v1/teacher-assist/pacing-guides/{guide['id']}/items",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "grading_period_id": grading_period["id"],
+                "subject_id": subject["id"],
+                "week_number": week_index,
+                "day_number": 1,
+                "title": f"{subject_name} Focus Week {week_index}",
+                "instructional_focus": f"Model {subject_name.lower()} thinking week {week_index}",
+                "objectives": f"Practice {subject_name.lower()} objective week {week_index}",
+                "notes": "Use the mock workflow sequence.",
+                "sort_order": week_index,
+            },
+        ).json()
+        for week_index in range(1, weeks + 1)
+    ]
+    draft = client.post(
+        "/v1/teacher-assist/planning-drafts",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "planning_scope": planning_scope,
+            "school_year_id": school_year["id"],
+            "grading_period_id": grading_period["id"],
+            "class_id": teacher_class["id"],
+            "subject_ids": [subject["id"]],
+            "pacing_item_ids": [item["id"] for item in pacing_items],
+            "standard_ids": [standard["id"]],
+            "title": f"{subject_name} Week 1",
+            "module_title": module_title,
+            "start_date": start_date,
+            "end_date": end_date,
+            "estimated_weeks": estimated_weeks,
+            "instructional_days_count": instructional_days_count,
+            "notes": f"Prepare the weekly {subject_name.lower()} mock plan.",
+            "status": "draft",
+        },
+    ).json()
+    attach_resource = client.post(
+        f"/v1/teacher-assist/planning-drafts/{draft['id']}/resources",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"resource_library_item_id": resource["id"]},
+    )
+    assert attach_resource.status_code == 200, attach_resource.text
+    ready = client.patch(
+        f"/v1/teacher-assist/planning-drafts/{draft['id']}/status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "ready"},
+    )
+    assert ready.status_code == 200, ready.text
+    return {
+        "school_year": school_year,
+        "grading_period": grading_period,
+        "subject": subject,
+        "teacher_class": teacher_class,
+        "standard": standard,
+        "resource": resource,
+        "guide": guide,
+        "pacing_item": pacing_items[0],
+        "pacing_items": pacing_items,
+        "draft": ready.json(),
+    }
+
+
+def _generate_weekly_plan(
+    client,
+    db_session: Session,
+    *,
+    token: str,
+    subject_name: str = "Math",
+    planning_scope: str = "weekly",
+    weeks: int = 1,
+) -> tuple[dict, dict]:
+    context = _create_ready_planning_draft_context(
+        client,
+        token=token,
+        subject_name=subject_name,
+        planning_scope=planning_scope,
+        weeks=weeks,
+        estimated_weeks=weeks,
+        instructional_days_count=max(5, weeks * 5),
+    )
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert start.status_code == 202, start.text
+    _run_teacher_assist_worker(db_session)
+    weekly_plan = client.get(
+        "/v1/teacher-assist/weekly-plans",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()[0]
+    return context, weekly_plan
+
+
+def test_pacing_guide_and_item_round_trip(client, db_session: Session):
+    email = "teacher-planning@example.com"
+    token = _register_user(client, email=email, tenant_name="Planning Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    school_year = client.post(
+        "/v1/teacher-assist/school-years",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "2026-2027",
+            "start_date": "2026-08-10",
+            "end_date": "2027-05-28",
+            "is_active": True,
+        },
+    ).json()
+    grading_period = client.post(
+        "/v1/teacher-assist/grading-periods",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "title": "9 Weeks 1",
+            "grading_period_type": "nine_weeks",
+            "start_date": "2026-08-10",
+            "end_date": "2026-10-10",
+            "sort_order": 1,
+        },
+    ).json()
+    subject = client.post(
+        "/v1/teacher-assist/subjects",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"code": "MATH", "name": "Math"},
+    ).json()
+    standard = client.post(
+        "/v1/teacher-assist/standards",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "subject_id": subject["id"],
+            "standard_type": "TEKS",
+            "code": "5.3H",
+            "description": "Represent and solve addition and subtraction problems.",
+            "grade_level": "5",
+            "school_year_id": school_year["id"],
+        },
+    ).json()
+    resource = client.post(
+        "/v1/teacher-assist/resources/link",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "District Curriculum Link",
+            "description": "Shared pacing notes",
+            "external_url": "https://example.com/curriculum/math",
+        },
+    ).json()
+
+    pacing_guide = client.post(
+        "/v1/teacher-assist/pacing-guides",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "title": "5th Grade Math Pacing",
+            "description": "Quarter one pacing foundation",
+            "grade_level": "5",
+            "subject_id": subject["id"],
+            "is_shared": False,
+        },
+    )
+    assert pacing_guide.status_code == 201, pacing_guide.text
+    guide_payload = pacing_guide.json()
+
+    pacing_item = client.post(
+        f"/v1/teacher-assist/pacing-guides/{guide_payload['id']}/items",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "grading_period_id": grading_period["id"],
+            "subject_id": subject["id"],
+            "week_number": 1,
+            "day_number": 2,
+            "instructional_date": "2026-08-11",
+            "title": "Place value review",
+            "instructional_focus": "Refresh number sense",
+            "objectives": "Review whole-number place value",
+            "notes": "Use base ten blocks",
+            "sort_order": 1,
+        },
+    )
+    assert pacing_item.status_code == 201, pacing_item.text
+    pacing_item_payload = pacing_item.json()
+
+    attach_standard = client.post(
+        f"/v1/teacher-assist/pacing-items/{pacing_item_payload['id']}/standards",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"standard_id": standard["id"]},
+    )
+    assert attach_standard.status_code == 200, attach_standard.text
+    assert attach_standard.json()["standard_ids"] == [standard["id"]]
+
+    attach_resource = client.post(
+        f"/v1/teacher-assist/pacing-items/{pacing_item_payload['id']}/resources",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"resource_library_item_id": resource["id"]},
+    )
+    assert attach_resource.status_code == 200, attach_resource.text
+    assert attach_resource.json()["resource_ids"] == [resource["id"]]
+
+    updated_item = client.put(
+        f"/v1/teacher-assist/pacing-items/{pacing_item_payload['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "grading_period_id": grading_period["id"],
+            "subject_id": subject["id"],
+            "week_number": 1,
+            "day_number": 3,
+            "instructional_date": "2026-08-12",
+            "title": "Place value practice",
+            "instructional_focus": "Independent practice",
+            "objectives": "Strengthen place value fluency",
+            "notes": "Station rotation",
+            "sort_order": 2,
+        },
+    )
+    assert updated_item.status_code == 200, updated_item.text
+    assert updated_item.json()["day_number"] == 3
+    assert updated_item.json()["standard_ids"] == [standard["id"]]
+    assert updated_item.json()["resource_ids"] == [resource["id"]]
+
+    guides = client.get(
+        "/v1/teacher-assist/pacing-guides",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert guides.status_code == 200, guides.text
+    assert guides.json()[0]["item_count"] == 1
+
+    items = client.get(
+        f"/v1/teacher-assist/pacing-guides/{guide_payload['id']}/items",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert items.status_code == 200, items.text
+    assert items.json()[0]["standard_ids"] == [standard["id"]]
+    assert items.json()[0]["resource_ids"] == [resource["id"]]
+
+
+def test_resource_upload_and_planning_draft_round_trip(client, db_session: Session):
+    email = "teacher-resources@example.com"
+    token = _register_user(client, email=email, tenant_name="Resources Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    school_year = client.post(
+        "/v1/teacher-assist/school-years",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "2026-2027",
+            "start_date": "2026-08-10",
+            "end_date": "2027-05-28",
+            "is_active": True,
+        },
+    ).json()
+    grading_period = client.post(
+        "/v1/teacher-assist/grading-periods",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "title": "9 Weeks 1",
+            "grading_period_type": "nine_weeks",
+            "start_date": "2026-08-10",
+            "end_date": "2026-10-10",
+            "sort_order": 1,
+        },
+    ).json()
+    subject = client.post(
+        "/v1/teacher-assist/subjects",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"name": "Science"},
+    ).json()
+    teacher_class = client.post(
+        "/v1/teacher-assist/classes",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "name": "5th Grade Homeroom",
+            "grade_level": "5",
+            "student_count": 23,
+        },
+    ).json()
+    attach_subject = client.post(
+        "/v1/teacher-assist/class-subjects",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"class_id": teacher_class["id"], "subject_id": subject["id"]},
+    )
+    assert attach_subject.status_code == 201, attach_subject.text
+
+    upload = client.post(
+        "/v1/teacher-assist/resources/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("curriculum-map.pdf", b"%PDF-1.7 planning context", "application/pdf")},
+        data={"title": "Curriculum Map", "description": "Quarter one map"},
+    )
+    assert upload.status_code == 201, upload.text
+    resource_payload = upload.json()
+    assert resource_payload["resource_type"] == "pdf"
+    assert resource_payload["original_filename"] == "curriculum-map.pdf"
+    assert resource_payload["storage_key"]
+    assert resource_payload["linked_pacing_items_count"] == 0
+
+    draft = client.post(
+        "/v1/teacher-assist/planning-drafts",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "grading_period_id": grading_period["id"],
+            "class_id": teacher_class["id"],
+            "subject_id": subject["id"],
+            "title": "Week 1 Science Context",
+            "notes": "Prepare context only. Do not generate yet.",
+            "status": "draft",
+        },
+    )
+    assert draft.status_code == 201, draft.text
+    draft_payload = draft.json()
+    assert draft_payload["status"] == "draft"
+
+    attach_resource = client.post(
+        f"/v1/teacher-assist/planning-drafts/{draft_payload['id']}/resources",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"resource_library_item_id": resource_payload["id"]},
+    )
+    assert attach_resource.status_code == 200, attach_resource.text
+    assert attach_resource.json()["resource_ids"] == [resource_payload["id"]]
+
+    updated = client.put(
+        f"/v1/teacher-assist/planning-drafts/{draft_payload['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "grading_period_id": grading_period["id"],
+            "class_id": teacher_class["id"],
+            "subject_id": subject["id"],
+            "title": "Week 1 Science Context",
+            "notes": "Context is ready for a later generation phase.",
+            "status": "ready",
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["status"] == "ready"
+    assert updated.json()["resource_ids"] == [resource_payload["id"]]
+
+    resources = client.get(
+        "/v1/teacher-assist/resources",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resources.status_code == 200, resources.text
+    assert resources.json()[0]["linked_planning_drafts_count"] == 1
+
+    drafts = client.get(
+        "/v1/teacher-assist/planning-drafts",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert drafts.status_code == 200, drafts.text
+    assert drafts.json()[0]["resource_ids"] == [resource_payload["id"]]
+    assert drafts.json()[0]["subject_ids"] == [subject["id"]]
+
+
+def test_planning_draft_context_preview_and_ready_status(client, db_session: Session):
+    email = "teacher-preview@example.com"
+    token = _register_user(client, email=email, tenant_name="Preview Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    school_year = client.post(
+        "/v1/teacher-assist/school-years",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "2026-2027",
+            "start_date": "2026-08-10",
+            "end_date": "2027-05-28",
+            "is_active": True,
+        },
+    ).json()
+    grading_period = client.post(
+        "/v1/teacher-assist/grading-periods",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "title": "9 Weeks 1",
+            "grading_period_type": "nine_weeks",
+            "start_date": "2026-08-10",
+            "end_date": "2026-10-10",
+            "sort_order": 1,
+        },
+    ).json()
+    subject = client.post(
+        "/v1/teacher-assist/subjects",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"code": "ELA", "name": "ELA"},
+    ).json()
+    teacher_class = client.post(
+        "/v1/teacher-assist/classes",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "name": "ELA Block A",
+            "grade_level": "5",
+            "student_count": 24,
+        },
+    ).json()
+    client.post(
+        "/v1/teacher-assist/class-subjects",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"class_id": teacher_class["id"], "subject_id": subject["id"]},
+    )
+    standard = client.post(
+        "/v1/teacher-assist/standards",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "subject_id": subject["id"],
+            "standard_type": "TEKS",
+            "code": "5.6A",
+            "description": "Summarize texts with supporting details.",
+            "grade_level": "5",
+            "school_year_id": school_year["id"],
+        },
+    ).json()
+    resource = client.post(
+        "/v1/teacher-assist/resources/link",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "Novel Study Guide",
+            "description": "Planning context resource",
+            "external_url": "https://example.com/ela-guide",
+        },
+    ).json()
+    guide = client.post(
+        "/v1/teacher-assist/pacing-guides",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "title": "ELA Guide",
+            "description": "Unit 1",
+            "grade_level": "5",
+            "subject_id": subject["id"],
+            "is_shared": False,
+        },
+    ).json()
+    pacing_item = client.post(
+        f"/v1/teacher-assist/pacing-guides/{guide['id']}/items",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "grading_period_id": grading_period["id"],
+            "subject_id": subject["id"],
+            "week_number": 1,
+            "day_number": 1,
+            "title": "Launch close reading",
+            "instructional_focus": "Model annotations",
+            "objectives": "Students identify key details.",
+            "notes": "Shared read aloud",
+            "sort_order": 1,
+        },
+    ).json()
+
+    draft = client.post(
+        "/v1/teacher-assist/planning-drafts",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "grading_period_id": grading_period["id"],
+            "class_id": teacher_class["id"],
+            "subject_ids": [subject["id"]],
+            "pacing_item_ids": [pacing_item["id"]],
+            "standard_ids": [standard["id"]],
+            "title": "Week 1 ELA Context",
+            "notes": "Prioritize vocabulary scaffolds.",
+            "status": "draft",
+        },
+    )
+    assert draft.status_code == 201, draft.text
+    draft_payload = draft.json()
+    assert draft_payload["subject_ids"] == [subject["id"]]
+    assert draft_payload["pacing_item_ids"] == [pacing_item["id"]]
+    assert draft_payload["standard_ids"] == [standard["id"]]
+
+    attach_resource = client.post(
+        f"/v1/teacher-assist/planning-drafts/{draft_payload['id']}/resources",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"resource_library_item_id": resource["id"]},
+    )
+    assert attach_resource.status_code == 200, attach_resource.text
+
+    preview = client.get(
+        f"/v1/teacher-assist/planning-drafts/{draft_payload['id']}/context-preview",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert preview.status_code == 200, preview.text
+    preview_payload = preview.json()
+    assert preview_payload["readiness"]["is_ready"] is True
+    assert preview_payload["subjects"][0]["id"] == subject["id"]
+    assert preview_payload["pacing_items"][0]["id"] == pacing_item["id"]
+    assert preview_payload["standards"][0]["id"] == standard["id"]
+    assert preview_payload["resources"][0]["id"] == resource["id"]
+    assert preview_payload["teacher_notes"] == "Prioritize vocabulary scaffolds."
+
+    ready = client.patch(
+        f"/v1/teacher-assist/planning-drafts/{draft_payload['id']}/status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "ready"},
+    )
+    assert ready.status_code == 200, ready.text
+    assert ready.json()["status"] == "ready"
+
+    generation_preview = client.post(
+        f"/v1/teacher-assist/planning-drafts/{draft_payload['id']}/generation-preview",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert generation_preview.status_code == 200, generation_preview.text
+    assert generation_preview.json()["ready"] is True
+
+
+def test_planning_draft_ready_requires_subject_and_context(client, db_session: Session):
+    email = "teacher-ready-rules@example.com"
+    token = _register_user(client, email=email, tenant_name="Ready Rules Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    school_year = client.post(
+        "/v1/teacher-assist/school-years",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "2026-2027",
+            "start_date": "2026-08-10",
+            "end_date": "2027-05-28",
+            "is_active": True,
+        },
+    ).json()
+    grading_period = client.post(
+        "/v1/teacher-assist/grading-periods",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "title": "9 Weeks 1",
+            "grading_period_type": "nine_weeks",
+            "start_date": "2026-08-10",
+            "end_date": "2026-10-10",
+            "sort_order": 1,
+        },
+    ).json()
+    teacher_class = client.post(
+        "/v1/teacher-assist/classes",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "name": "Ready Rules Class",
+            "grade_level": "5",
+            "student_count": 18,
+        },
+    ).json()
+
+    draft = client.post(
+        "/v1/teacher-assist/planning-drafts",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "grading_period_id": grading_period["id"],
+            "class_id": teacher_class["id"],
+            "title": "Incomplete Draft",
+            "status": "draft",
+        },
+    ).json()
+
+    preview = client.get(
+        f"/v1/teacher-assist/planning-drafts/{draft['id']}/context-preview",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["readiness"]["is_ready"] is False
+    assert "Add at least one subject." in preview.json()["readiness"]["missing_items"]
+    assert (
+        "Add at least one pacing item, teacher note, or attached resource."
+        in preview.json()["readiness"]["missing_items"]
+    )
+
+    ready = client.patch(
+        f"/v1/teacher-assist/planning-drafts/{draft['id']}/status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "ready"},
+    )
+    assert ready.status_code == 400
+    assert "Planning draft is not ready" in ready.json()["detail"]
+
+
+def test_planning_draft_preview_is_tenant_isolated_and_invalid_status_is_rejected(
+    client, db_session: Session
+):
+    first_email = "phase4-a@example.com"
+    second_email = "phase4-b@example.com"
+    first_token = _register_user(client, email=first_email, tenant_name="Phase4 Tenant A")
+    second_token = _register_user(client, email=second_email, tenant_name="Phase4 Tenant B")
+    _grant_teacher_assist_access(db_session, email=first_email)
+    _grant_teacher_assist_access(db_session, email=second_email)
+
+    school_year = client.post(
+        "/v1/teacher-assist/school-years",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={
+            "title": "2026-2027",
+            "start_date": "2026-08-10",
+            "end_date": "2027-05-28",
+            "is_active": True,
+        },
+    ).json()
+    draft = client.post(
+        "/v1/teacher-assist/planning-drafts",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={"school_year_id": school_year["id"], "title": "Tenant A Draft", "status": "draft"},
+    ).json()
+
+    foreign_preview = client.get(
+        f"/v1/teacher-assist/planning-drafts/{draft['id']}/context-preview",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign_preview.status_code == 404
+
+    invalid_status = client.patch(
+        f"/v1/teacher-assist/planning-drafts/{draft['id']}/status",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={"status": "archived"},
+    )
+    assert invalid_status.status_code == 422
+
+
+def test_cannot_start_weekly_plan_workflow_unless_draft_is_ready(client, db_session: Session):
+    email = "teacher-workflow-not-ready@example.com"
+    token = _register_user(client, email=email, tenant_name="Workflow Not Ready Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token)
+    draft_id = context["draft"]["id"]
+    revert = client.patch(
+        f"/v1/teacher-assist/planning-drafts/{draft_id}/status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "draft"},
+    )
+    assert revert.status_code == 200, revert.text
+
+    response = client.post(
+        f"/v1/teacher-assist/planning-drafts/{draft_id}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 400
+    assert "marked ready" in response.json()["detail"]
+
+
+def test_teacher_assist_provider_defaults_to_mock_and_real_provider_is_disabled():
+    settings = Settings()
+    provider = get_teacher_assist_ai_provider(settings)
+    assert provider.provider_name == "mock"
+    assert settings.teacher_assist_real_provider_enabled is False
+    assert settings.teacher_assist_ai_enable_real_provider is False
+
+    with pytest.raises(RuntimeError, match="disabled"):
+        get_teacher_assist_ai_provider(
+            Settings(
+                teacher_assist_ai_provider="openai",
+                teacher_assist_real_provider_enabled=False,
+                teacher_assist_ai_enable_real_provider=False,
+            )
+        )
+
+
+def test_real_provider_requires_api_key_and_allowed_model():
+    with pytest.raises(RuntimeError, match="API key"):
+        get_teacher_assist_ai_provider(
+            Settings(
+                teacher_assist_ai_provider="openai",
+                teacher_assist_real_provider_enabled=True,
+                teacher_assist_real_provider_model="gpt-4.1-mini",
+                teacher_assist_allowed_models="gpt-4.1-mini",
+                teacher_assist_openai_api_key=None,
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="not allowed"):
+        get_teacher_assist_ai_provider(
+            Settings(
+                teacher_assist_ai_provider="openai",
+                teacher_assist_real_provider_enabled=True,
+                teacher_assist_real_provider_model="gpt-4.1-mini",
+                teacher_assist_allowed_models="gpt-4.1",
+                teacher_assist_openai_api_key="test-key",
+            )
+        )
+
+
+def test_worker_claims_queued_teacher_assist_workflow_and_sets_lease_fields(client, db_session: Session):
+    email = "teacher-worker-lease@example.com"
+    token = _register_user(client, email=email, tenant_name="Worker Lease Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Lease")
+
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert start.status_code == 202, start.text
+    workflow_id = start.json()["id"]
+
+    claimed = claim_next_teacher_assist_workflow(
+        db_session,
+        settings=Settings(),
+        worker_name="teacher-assist-test-worker",
+        workflow_id=uuid.UUID(workflow_id),
+    )
+    assert claimed is not None
+    db_session.commit()
+
+    detail = client.get(
+        f"/v1/teacher-assist/workflows/{workflow_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail.status_code == 200, detail.text
+    payload = detail.json()
+    assert payload["status"] == "running"
+    assert payload["leased_by_worker"] == "teacher-assist-test-worker"
+    assert payload["heartbeat_at"] is not None
+    assert payload["lease_expires_at"] is not None
+    assert payload["prompt_version"] == INSTRUCTIONAL_PLAN_PROMPT_VERSION
+
+
+def test_weekly_plan_workflow_creates_persisted_output(client, db_session: Session):
+    email = "teacher-workflow-success@example.com"
+    token = _register_user(client, email=email, tenant_name="Workflow Success Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Science")
+    draft_id = context["draft"]["id"]
+
+    response = client.post(
+        f"/v1/teacher-assist/planning-drafts/{draft_id}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 202, response.text
+    workflow_payload = response.json()
+    assert workflow_payload["workflow_type"] == "weekly_plan_generation"
+    assert workflow_payload["status"] == "queued"
+    _run_teacher_assist_worker(db_session)
+
+    workflows = client.get(
+        "/v1/teacher-assist/workflows",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert workflows.status_code == 200, workflows.text
+    assert workflows.json()[0]["status"] == "completed"
+    assert workflows.json()[0]["output_ref_type"] == "weekly_plan"
+    assert workflows.json()[0]["output_ref_id"]
+    workflow_id = workflows.json()[0]["id"]
+    weekly_plan_id = workflows.json()[0]["output_ref_id"]
+
+    workflow_detail = client.get(
+        f"/v1/teacher-assist/workflows/{workflow_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert workflow_detail.status_code == 200, workflow_detail.text
+    workflow_detail_payload = workflow_detail.json()
+    assert workflow_detail_payload["status"] == "completed"
+    assert workflow_detail_payload["progress_percent"] == 100
+    assert workflow_detail_payload["heartbeat_at"] is not None
+    assert workflow_detail_payload["provider_name"] == "mock"
+    assert workflow_detail_payload["provider_model"] == "mock"
+    assert workflow_detail_payload["prompt_version"] == INSTRUCTIONAL_PLAN_PROMPT_VERSION
+    assert workflow_detail_payload["estimated_cost_cents_total"] == 0
+    assert [step["status"] for step in workflow_detail_payload["steps"]] == [
+        "completed",
+        "completed",
+        "completed",
+        "completed",
+    ]
+    assert workflow_detail_payload["usage_events"][0]["provider"] == "mock"
+    assert workflow_detail_payload["usage_events"][0]["estimated_cost_cents"] == 0
+
+    weekly_plans = client.get(
+        "/v1/teacher-assist/weekly-plans",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert weekly_plans.status_code == 200, weekly_plans.text
+    assert weekly_plans.json()[0]["id"] == weekly_plan_id
+    assert weekly_plans.json()[0]["status"] == "in_progress"
+    assert "[MOCK OUTPUT]" in weekly_plans.json()[0]["content_json"]["overview"]
+    assert weekly_plans.json()[0]["workflow_id"] == workflow_id
+    assert weekly_plans.json()[0]["current_version_number"] == 1
+    assert weekly_plans.json()[0]["latest_usage_event"]["provider"] == "mock"
+    assert weekly_plans.json()[0]["latest_usage_event"]["estimated_cost_cents"] == 0
+
+    weekly_plan = client.get(
+        f"/v1/teacher-assist/weekly-plans/{weekly_plan_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert weekly_plan.status_code == 200, weekly_plan.text
+    weekly_plan_payload = weekly_plan.json()
+    assert weekly_plan_payload["source_context_json"]["draft"]["id"] == draft_id
+    assert weekly_plan_payload["content_json"]["subjects"][0]["subject_name"] == "Science"
+    assert weekly_plan_payload["content_json"]["metadata"]["is_mock"] is True
+    assert weekly_plan_payload["content_json"]["metadata"]["generator"] == "mock"
+    assert weekly_plan_payload["content_json"]["metadata"]["version"] == 1
+    assert weekly_plan_payload["content_json"]["review_required"] is True
+    assert "mock-output" in weekly_plan_payload["content_json"]["quality_flags"]
+    assert weekly_plan_payload["content_json"]["teacher_review_checklist"]
+    assert weekly_plan_payload["content_json"]["weekly_objectives"]
+    assert weekly_plan_payload["content_json"]["subjects"][0]["vocabulary"]
+    assert weekly_plan_payload["content_json"]["subjects"][0]["daily_breakdown"][0]["day_label"] == "Monday"
+    assert weekly_plan_payload["content_json"]["subjects"][0]["daily_breakdown"][0]["materials_needed"]
+    assert weekly_plan_payload["content_json"]["subjects"][0]["differentiation"]["support"]
+    versions = client.get(
+        f"/v1/teacher-assist/weekly-plans/{weekly_plan_id}/versions",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert versions.status_code == 200, versions.text
+    assert versions.json()[0]["version_number"] == 1
+
+
+def test_real_provider_runs_only_when_enabled_and_configured_and_adds_review_metadata(
+    client, db_session: Session, monkeypatch
+):
+    email = "teacher-real-provider-success@example.com"
+    token = _register_user(client, email=email, tenant_name="Real Provider Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="ELA")
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.openai_ai_provider.OpenAITeacherAssistAIProvider.generate_instructional_plan",
+        lambda self, _context: _real_provider_result(),
+    )
+
+    response = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 202, response.text
+    _run_teacher_assist_worker(
+        db_session,
+        settings=Settings(
+            teacher_assist_ai_provider="openai",
+            teacher_assist_real_provider_enabled=True,
+            teacher_assist_real_provider_model="gpt-4.1-mini",
+            teacher_assist_allowed_models="gpt-4.1-mini",
+            teacher_assist_openai_api_key="test-key",
+            teacher_assist_worker_max_retries=0,
+        ),
+        workflow_id=response.json()["id"],
+    )
+
+    workflow = client.get(
+        "/v1/teacher-assist/workflows",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()[0]
+    assert workflow["status"] == "completed"
+    assert workflow["provider_name"] == "openai"
+    assert workflow["provider_model"] == "gpt-4.1-mini"
+    assert workflow["prompt_version"] == INSTRUCTIONAL_PLAN_PROMPT_VERSION
+    assert workflow["estimated_cost_cents_total"] == 1
+
+    weekly_plan = client.get(
+        "/v1/teacher-assist/weekly-plans",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()[0]
+    assert weekly_plan["latest_usage_event"]["provider"] == "openai"
+    assert weekly_plan["content_json"]["metadata"]["is_mock"] is False
+    assert weekly_plan["content_json"]["metadata"]["provider_mode"] == "real"
+    assert weekly_plan["content_json"]["metadata"]["provider_model"] == "gpt-4.1-mini"
+    assert weekly_plan["content_json"]["review_required"] is True
+    assert weekly_plan["content_json"]["quality_flags"] == []
+    assert "Verify standards alignment." in weekly_plan["content_json"]["teacher_review_checklist"]
+    assert "Aligned to" in weekly_plan["content_json"]["standards_alignment_summary"]
+
+
+def test_weekly_plan_workflow_failure_records_error(client, db_session: Session, monkeypatch):
+    email = "teacher-workflow-failure@example.com"
+    token = _register_user(client, email=email, tenant_name="Workflow Failure Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Reading")
+
+    class _ExplodingProvider:
+        provider_name = "mock"
+
+        def generate_instructional_plan(self, _: dict):
+            raise RuntimeError("mock generation exploded")
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.workflow_service.get_teacher_assist_ai_provider",
+        lambda _settings, **_kwargs: _ExplodingProvider(),
+    )
+
+    response = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 202, response.text
+    _run_teacher_assist_worker(db_session)
+
+    workflows = client.get(
+        "/v1/teacher-assist/workflows",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert workflows.status_code == 200, workflows.text
+    assert workflows.json()[0]["status"] == "failed"
+    assert workflows.json()[0]["error_message"] == "mock generation exploded"
+    workflow_id = workflows.json()[0]["id"]
+
+    workflow_detail = client.get(
+        f"/v1/teacher-assist/workflows/{workflow_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert workflow_detail.status_code == 200, workflow_detail.text
+    statuses = [step["status"] for step in workflow_detail.json()["steps"]]
+    assert statuses[0] == "completed"
+    assert statuses[1] == "failed"
+    assert statuses[2:] == ["skipped", "skipped"]
+
+
+def test_planning_draft_defaults_to_weekly_scope(client, db_session: Session):
+    email = "teacher-default-scope@example.com"
+    token = _register_user(client, email=email, tenant_name="Default Scope Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token)
+    assert context["draft"]["planning_scope"] == "weekly"
+    assert context["draft"]["plan_title"] == "Math Week 1"
+
+
+def test_module_planning_draft_can_be_saved(client, db_session: Session):
+    email = "teacher-module-draft@example.com"
+    token = _register_user(client, email=email, tenant_name="Module Draft Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(
+        client,
+        token=token,
+        subject_name="Science",
+        planning_scope="module",
+        weeks=2,
+        module_title="Ecosystems Module",
+        start_date="2026-08-10",
+        end_date="2026-08-21",
+        estimated_weeks=2,
+        instructional_days_count=10,
+    )
+    assert context["draft"]["planning_scope"] == "module"
+    assert context["draft"]["module_title"] == "Ecosystems Module"
+    assert context["draft"]["estimated_weeks"] == 2
+    assert context["draft"]["instructional_days_count"] == 10
+
+
+def test_multi_week_context_preview_includes_duration_and_scope(client, db_session: Session):
+    email = "teacher-multiweek-preview@example.com"
+    token = _register_user(client, email=email, tenant_name="Multiweek Preview Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(
+        client,
+        token=token,
+        subject_name="History",
+        planning_scope="multi_week",
+        weeks=2,
+        start_date="2026-08-10",
+        end_date="2026-08-21",
+        estimated_weeks=2,
+        instructional_days_count=10,
+    )
+    preview = client.get(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/context-preview",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert preview.status_code == 200, preview.text
+    payload = preview.json()
+    assert payload["draft"]["planning_scope"] == "multi_week"
+    assert payload["duration_summary"]["estimated_weeks"] == 2
+    assert payload["duration_summary"]["instructional_days_count"] == 10
+    assert len(payload["pacing_groups"]) == 2
+    assert payload["pacing_groups"][0]["label"] == "Week 1"
+
+
+def test_module_scope_workflow_creates_weekly_segments(client, db_session: Session):
+    email = "teacher-module-workflow@example.com"
+    token = _register_user(client, email=email, tenant_name="Module Workflow Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(
+        client,
+        token=token,
+        subject_name="Reading",
+        planning_scope="module",
+        weeks=2,
+        module_title="Comprehension Module",
+        start_date="2026-08-10",
+        end_date="2026-08-21",
+        estimated_weeks=2,
+        instructional_days_count=10,
+    )
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert start.status_code == 202, start.text
+    _run_teacher_assist_worker(db_session)
+
+    weekly_plan = client.get(
+        "/v1/teacher-assist/weekly-plans",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()[0]
+    assert weekly_plan["planning_scope"] == "module"
+    assert weekly_plan["content_json"]["planning_scope"] == "module"
+    assert weekly_plan["content_json"]["duration"]["estimated_weeks"] == 2
+    assert len(weekly_plan["content_json"]["weekly_segments"]) == 2
+
+
+def test_worker_handles_cancellation_before_artifact_persistence(client, db_session: Session):
+    email = "teacher-worker-cancelled@example.com"
+    token = _register_user(client, email=email, tenant_name="Worker Cancelled Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Cancel")
+
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert start.status_code == 202, start.text
+    workflow_id = start.json()["id"]
+
+    claimed = claim_next_teacher_assist_workflow(
+        db_session,
+        settings=Settings(),
+        worker_name="teacher-assist-test-worker",
+        workflow_id=uuid.UUID(workflow_id),
+    )
+    assert claimed is not None
+    db_session.commit()
+
+    cancel = client.patch(
+        f"/v1/teacher-assist/workflows/{workflow_id}/cancel",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "cancelled"},
+    )
+    assert cancel.status_code == 200, cancel.text
+
+    process_claimed_teacher_assist_workflow_with_engine(
+        db_session.get_bind(),
+        uuid.UUID(workflow_id),
+        settings=Settings(),
+        worker_name="teacher-assist-test-worker",
+    )
+    db_session.expire_all()
+
+    workflow_detail = client.get(
+        f"/v1/teacher-assist/workflows/{workflow_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert workflow_detail.status_code == 200, workflow_detail.text
+    assert workflow_detail.json()["status"] == "cancelled"
+    assert workflow_detail.json()["output_ref_id"] is None
+    assert (
+        client.get(
+            "/v1/teacher-assist/weekly-plans",
+            headers={"Authorization": f"Bearer {token}"},
+        ).json()
+        == []
+    )
+
+
+def test_copy_weekly_plan_does_not_call_ai(client, db_session: Session, monkeypatch):
+    email = "teacher-plan-copy@example.com"
+    token = _register_user(client, email=email, tenant_name="Plan Copy Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Art")
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert start.status_code == 202, start.text
+    _run_teacher_assist_worker(db_session)
+    source_plan = client.get(
+        "/v1/teacher-assist/weekly-plans",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()[0]
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.workflow_service.get_teacher_assist_ai_provider",
+        lambda _settings, **_kwargs: pytest.fail("copy endpoint should not call provider"),
+    )
+
+    copied = client.post(
+        f"/v1/teacher-assist/weekly-plans/{source_plan['id']}/copy",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert copied.status_code == 201, copied.text
+    copied_payload = copied.json()
+    assert copied_payload["derived_from_plan_id"] == source_plan["id"]
+    assert copied_payload["source_plan_id"] == source_plan["id"]
+    assert copied_payload["workflow_id"] is None
+    assert copied_payload["current_version_number"] == 1
+    assert copied_payload["latest_usage_event"] is None
+    assert copied_payload["content_json"]["metadata"]["copy_mode"] == "personal_copy"
+
+
+def test_worker_retries_failed_workflow_until_retry_exhaustion(client, db_session: Session, monkeypatch):
+    email = "teacher-worker-retry@example.com"
+    token = _register_user(client, email=email, tenant_name="Worker Retry Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Retry")
+    attempts = {"count": 0}
+
+    class _ExplodingProvider:
+        provider_name = "mock"
+
+        def generate_instructional_plan(self, _: dict):
+            attempts["count"] += 1
+            raise RuntimeError("retryable worker failure")
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.workflow_service.get_teacher_assist_ai_provider",
+        lambda _settings, **_kwargs: _ExplodingProvider(),
+    )
+
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert start.status_code == 202, start.text
+    workflow_id = start.json()["id"]
+    retry_settings = Settings(teacher_assist_worker_max_retries=1)
+
+    _run_teacher_assist_worker(db_session, settings=retry_settings, workflow_id=workflow_id)
+    first_attempt = client.get(
+        f"/v1/teacher-assist/workflows/{workflow_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert first_attempt.status_code == 200, first_attempt.text
+    first_payload = first_attempt.json()
+    assert first_payload["status"] == "queued"
+    assert first_payload["retry_count"] == 1
+    assert first_payload["last_error_code"] == "execution_failed"
+
+    _run_teacher_assist_worker(db_session, settings=retry_settings, workflow_id=workflow_id)
+    final_attempt = client.get(
+        f"/v1/teacher-assist/workflows/{workflow_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert final_attempt.status_code == 200, final_attempt.text
+    final_payload = final_attempt.json()
+    assert final_payload["status"] == "failed"
+    assert final_payload["retry_count"] == 2
+    assert final_payload["error_message"] == "retryable worker failure"
+    assert attempts["count"] == 2
+
+
+def test_worker_blocks_real_provider_by_default_and_enforces_cost_limit(
+    client, db_session: Session, monkeypatch
+):
+    email = "teacher-worker-guardrails@example.com"
+    token = _register_user(client, email=email, tenant_name="Worker Guardrails Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Guardrails")
+
+    openai_start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert openai_start.status_code == 202, openai_start.text
+    openai_workflow_id = openai_start.json()["id"]
+    _run_teacher_assist_worker(
+        db_session,
+        settings=Settings(
+            teacher_assist_ai_provider="openai",
+            teacher_assist_real_provider_enabled=False,
+            teacher_assist_worker_max_retries=0,
+        ),
+        workflow_id=openai_workflow_id,
+    )
+    openai_workflow = client.get(
+        f"/v1/teacher-assist/workflows/{openai_workflow_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert openai_workflow.status_code == 200, openai_workflow.text
+    assert openai_workflow.json()["status"] == "failed"
+    assert "disabled" in openai_workflow.json()["error_message"]
+
+    cost_start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert cost_start.status_code == 202, cost_start.text
+    cost_workflow_id = cost_start.json()["id"]
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id).limit(1)
+    )
+    assert membership is not None
+    db_session.add(
+        TeacherAssistAIUsageEvent(
+            tenant_id=membership.tenant_id,
+            user_id=user.id,
+            workflow_id=None,
+            provider="mock",
+            model="mock",
+            feature="weekly_plan_generation",
+            input_tokens=0,
+            output_tokens=0,
+            estimated_cost_cents=5,
+            metadata_json={"prompt_version": INSTRUCTIONAL_PLAN_PROMPT_VERSION},
+            created_at=datetime.now(UTC),
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.workflow_service.get_teacher_assist_ai_provider",
+        lambda _settings, **_kwargs: pytest.fail("cost limit should block provider execution"),
+    )
+    _run_teacher_assist_worker(
+        db_session,
+        settings=Settings(
+            teacher_assist_ai_daily_cost_limit_cents=5,
+            teacher_assist_worker_max_retries=0,
+        ),
+        workflow_id=cost_workflow_id,
+    )
+    cost_workflow = client.get(
+        f"/v1/teacher-assist/workflows/{cost_workflow_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert cost_workflow.status_code == 200, cost_workflow.text
+    assert cost_workflow.json()["status"] == "failed"
+    assert "daily cost limit" in cost_workflow.json()["error_message"]
+
+
+def test_malformed_provider_output_fails_gracefully(client, db_session: Session, monkeypatch):
+    email = "teacher-malformed-provider@example.com"
+    token = _register_user(client, email=email, tenant_name="Malformed Provider Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Music")
+
+    class _MalformedProvider:
+        provider_name = "mock"
+
+        def generate_instructional_plan(self, _: dict):
+            from oziebot_api.services.teacher_assist.ai_provider import TeacherAssistAIProviderResult
+
+            return TeacherAssistAIProviderResult(
+                content_json={"overview": "missing required structure"},
+                provider="mock",
+                model="mock",
+                input_tokens=0,
+                output_tokens=0,
+                estimated_cost_cents=0,
+                metadata_json={"is_mock": True},
+            )
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.workflow_service.get_teacher_assist_ai_provider",
+        lambda _settings, **_kwargs: _MalformedProvider(),
+    )
+
+    response = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 202, response.text
+    _run_teacher_assist_worker(db_session)
+
+    workflow = client.get(
+        "/v1/teacher-assist/workflows",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()[0]
+    assert workflow["status"] == "failed"
+    assert "missing required fields" in workflow["error_message"]
+
+
+def test_invalid_real_provider_output_fails_without_creating_artifact(
+    client, db_session: Session, monkeypatch
+):
+    email = "teacher-real-provider-invalid@example.com"
+    token = _register_user(client, email=email, tenant_name="Real Provider Invalid Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Science")
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.openai_ai_provider.OpenAITeacherAssistAIProvider.generate_instructional_plan",
+        lambda self, _context: TeacherAssistAIProviderResult(
+            content_json={
+                "planning_scope": "module",
+                "plan_title": "Bad Provider Output",
+                "module_title": None,
+                "duration": {},
+                "overview": "bad",
+                "instructional_arc": [],
+                "weekly_segments": [],
+                "standards_progression": [],
+                "vocabulary": [],
+                "materials_needed": [],
+                "differentiation": {},
+                "assessment_checkpoints": [],
+                "resources_used": [],
+                "teacher_notes_used": "",
+                "review_notes": "",
+            },
+            provider="openai",
+            model="gpt-4.1-mini",
+            input_tokens=100,
+            output_tokens=100,
+            estimated_cost_cents=1,
+            metadata_json={
+                "is_mock": False,
+                "provider_mode": "real",
+                "prompt_version": INSTRUCTIONAL_PLAN_PROMPT_VERSION,
+            },
+        ),
+    )
+
+    response = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 202, response.text
+    workflow_id = response.json()["id"]
+    _run_teacher_assist_worker(
+        db_session,
+        settings=Settings(
+            teacher_assist_ai_provider="openai",
+            teacher_assist_real_provider_enabled=True,
+            teacher_assist_real_provider_model="gpt-4.1-mini",
+            teacher_assist_allowed_models="gpt-4.1-mini",
+            teacher_assist_openai_api_key="test-key",
+            teacher_assist_worker_max_retries=0,
+        ),
+        workflow_id=workflow_id,
+    )
+
+    workflow = client.get(
+        f"/v1/teacher-assist/workflows/{workflow_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert workflow.status_code == 200, workflow.text
+    assert workflow.json()["status"] == "failed"
+    assert workflow.json()["last_error_code"] == "execution_failed"
+    assert "instructional_arc" in workflow.json()["error_message"]
+    assert client.get(
+        "/v1/teacher-assist/weekly-plans",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json() == []
+
+
+def test_library_listing_only_returns_tenant_visible_plans_and_private_plans_stay_owner_only(
+    client, db_session: Session
+):
+    owner_email = "teacher-library-owner@example.com"
+    teammate_email = "teacher-library-teammate@example.com"
+    outsider_email = "teacher-library-outsider@example.com"
+    owner_token = _register_user(client, email=owner_email, tenant_name="Library Tenant")
+    teammate_token = _register_user(client, email=teammate_email, tenant_name="Teammate Tenant")
+    outsider_token = _register_user(client, email=outsider_email, tenant_name="Outsider Tenant")
+    _grant_teacher_assist_access(db_session, email=owner_email)
+    _grant_teacher_assist_access(db_session, email=outsider_email)
+    _share_teacher_assist_tenant(db_session, owner_email=owner_email, member_email=teammate_email)
+
+    owner_context = _create_ready_planning_draft_context(client, token=owner_token, subject_name="Library")
+    workflow = client.post(
+        f"/v1/teacher-assist/planning-drafts/{owner_context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert workflow.status_code == 202, workflow.text
+    _run_teacher_assist_worker(db_session)
+    owner_plan = client.get(
+        "/v1/teacher-assist/weekly-plans",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()[0]
+
+    teammate_private = client.get(
+        "/v1/teacher-assist/instructional-plans/library",
+        headers={"Authorization": f"Bearer {teammate_token}"},
+    )
+    assert teammate_private.status_code == 200, teammate_private.text
+    assert teammate_private.json() == []
+
+    sharing = client.patch(
+        f"/v1/teacher-assist/weekly-plans/{owner_plan['id']}/sharing",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"visibility_scope": "shared", "reuse_status": "reusable"},
+    )
+    assert sharing.status_code == 200, sharing.text
+
+    owner_library = client.get(
+        "/v1/teacher-assist/instructional-plans/library",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert owner_library.status_code == 200, owner_library.text
+    assert owner_library.json()[0]["id"] == owner_plan["id"]
+
+    teammate_library = client.get(
+        "/v1/teacher-assist/instructional-plans/library",
+        headers={"Authorization": f"Bearer {teammate_token}"},
+    )
+    assert teammate_library.status_code == 200, teammate_library.text
+    assert teammate_library.json()[0]["id"] == owner_plan["id"]
+
+    outsider_library = client.get(
+        "/v1/teacher-assist/instructional-plans/library",
+        headers={"Authorization": f"Bearer {outsider_token}"},
+    )
+    assert outsider_library.status_code == 200, outsider_library.text
+    assert outsider_library.json() == []
+
+
+def test_owner_can_update_sharing_fields_and_non_owner_cannot(client, db_session: Session):
+    owner_email = "teacher-sharing-owner@example.com"
+    teammate_email = "teacher-sharing-teammate@example.com"
+    owner_token = _register_user(client, email=owner_email, tenant_name="Sharing Tenant")
+    teammate_token = _register_user(client, email=teammate_email, tenant_name="Sharing Member Tenant")
+    _grant_teacher_assist_access(db_session, email=owner_email)
+    _share_teacher_assist_tenant(db_session, owner_email=owner_email, member_email=teammate_email)
+
+    context = _create_ready_planning_draft_context(client, token=owner_token, subject_name="Sharing")
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert start.status_code == 202, start.text
+    _run_teacher_assist_worker(db_session)
+    plan = client.get("/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {owner_token}"}).json()[0]
+
+    owner_update = client.patch(
+        f"/v1/teacher-assist/weekly-plans/{plan['id']}/sharing",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"is_template": True, "visibility_scope": "shared", "reuse_status": "reusable"},
+    )
+    assert owner_update.status_code == 200, owner_update.text
+    assert owner_update.json()["is_template"] is True
+    assert owner_update.json()["visibility_scope"] == "shared"
+    assert owner_update.json()["reuse_status"] == "reusable"
+
+    non_owner_update = client.patch(
+        f"/v1/teacher-assist/weekly-plans/{plan['id']}/sharing",
+        headers={"Authorization": f"Bearer {teammate_token}"},
+        json={"visibility_scope": "district"},
+    )
+    assert non_owner_update.status_code == 403
+
+
+def test_copy_endpoint_preserves_lineage_and_can_patch_target_year(client, db_session: Session):
+    email = "teacher-copy-lineage@example.com"
+    token = _register_user(client, email=email, tenant_name="Copy Lineage Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Lineage")
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert start.status_code == 202, start.text
+    _run_teacher_assist_worker(db_session)
+    source_plan = client.get("/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {token}"}).json()[0]
+
+    next_school_year = client.post(
+        "/v1/teacher-assist/school-years",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "2027-2028",
+            "start_date": "2027-08-10",
+            "end_date": "2028-05-28",
+            "is_active": False,
+        },
+    ).json()
+
+    copied = client.post(
+        f"/v1/teacher-assist/weekly-plans/{source_plan['id']}/copy",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "target_school_year_id": next_school_year["id"],
+            "title_override": "Lineage Personalized Copy",
+            "copy_mode": "rollover_copy",
+        },
+    )
+    assert copied.status_code == 201, copied.text
+    payload = copied.json()
+    assert payload["title"] == "Lineage Personalized Copy"
+    assert payload["source_plan_id"] == source_plan["id"]
+    assert payload["derived_from_plan_id"] == source_plan["id"]
+    assert payload["school_year_origin_id"] == next_school_year["id"]
+    assert payload["source_context_json"]["draft"]["school_year_id"] == next_school_year["id"]
+    assert payload["latest_usage_event"] is None
+
+
+def test_rollover_candidates_find_prior_year_reusable_plans(client, db_session: Session):
+    email = "teacher-rollover-candidates@example.com"
+    token = _register_user(client, email=email, tenant_name="Rollover Candidates Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Candidates")
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert start.status_code == 202, start.text
+    _run_teacher_assist_worker(db_session)
+    source_plan = client.get("/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {token}"}).json()[0]
+    sharing = client.patch(
+        f"/v1/teacher-assist/weekly-plans/{source_plan['id']}/sharing",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"is_template": True, "visibility_scope": "shared", "reuse_status": "reusable"},
+    )
+    assert sharing.status_code == 200, sharing.text
+
+    target_school_year = client.post(
+        "/v1/teacher-assist/school-years",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "2027-2028",
+            "start_date": "2027-08-10",
+            "end_date": "2028-05-28",
+            "is_active": False,
+        },
+    ).json()
+
+    candidates = client.get(
+        "/v1/teacher-assist/curriculum-rollover/candidates",
+        headers={"Authorization": f"Bearer {token}"},
+        params={
+            "source_school_year_id": context["school_year"]["id"],
+            "target_school_year_id": target_school_year["id"],
+            "reuse_status": "reusable",
+        },
+    )
+    assert candidates.status_code == 200, candidates.text
+    payload = candidates.json()
+    assert payload["items"][0]["id"] == source_plan["id"]
+    assert payload["items"][0]["already_copied_to_target"] is False
+    assert payload["summary_counts_by_planning_scope"]["weekly"] == 1
+    assert "Candidates" in payload["subjects_represented"]
+
+
+def test_rollover_copy_creates_target_year_copies_and_duplicate_rollover_is_warned(
+    client, db_session: Session
+):
+    email = "teacher-rollover-copy@example.com"
+    token = _register_user(client, email=email, tenant_name="Rollover Copy Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Rollover")
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert start.status_code == 202, start.text
+    _run_teacher_assist_worker(db_session)
+    source_plan = client.get("/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {token}"}).json()[0]
+    sharing = client.patch(
+        f"/v1/teacher-assist/weekly-plans/{source_plan['id']}/sharing",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"visibility_scope": "shared", "reuse_status": "reusable"},
+    )
+    assert sharing.status_code == 200, sharing.text
+
+    target_school_year = client.post(
+        "/v1/teacher-assist/school-years",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "2027-2028",
+            "start_date": "2027-08-10",
+            "end_date": "2028-05-28",
+            "is_active": False,
+        },
+    ).json()
+
+    copied = client.post(
+        "/v1/teacher-assist/curriculum-rollover/copy",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "source_school_year_id": context["school_year"]["id"],
+            "target_school_year_id": target_school_year["id"],
+            "plan_ids": [source_plan["id"]],
+            "copy_mode": "rollover_copy",
+            "preserve_titles": True,
+            "title_suffix": "2027-2028",
+        },
+    )
+    assert copied.status_code == 200, copied.text
+    payload = copied.json()
+    assert len(payload["copied_plans"]) == 1
+    assert payload["copied_plans"][0]["school_year_origin_id"] == target_school_year["id"]
+    assert payload["copied_plans"][0]["source_plan_id"] == source_plan["id"]
+    assert payload["warnings"] == []
+
+    duplicate = client.post(
+        "/v1/teacher-assist/curriculum-rollover/copy",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "source_school_year_id": context["school_year"]["id"],
+            "target_school_year_id": target_school_year["id"],
+            "plan_ids": [source_plan["id"]],
+            "copy_mode": "rollover_copy",
+            "preserve_titles": True,
+        },
+    )
+    assert duplicate.status_code == 200, duplicate.text
+    assert "already has a rollover copy" in duplicate.json()["warnings"][0]
+
+
+def test_cross_tenant_rollover_access_is_blocked(client, db_session: Session):
+    owner_email = "teacher-rollover-owner@example.com"
+    outsider_email = "teacher-rollover-outsider@example.com"
+    owner_token = _register_user(client, email=owner_email, tenant_name="Owner Rollover Tenant")
+    outsider_token = _register_user(client, email=outsider_email, tenant_name="Outsider Rollover Tenant")
+    _grant_teacher_assist_access(db_session, email=owner_email)
+    _grant_teacher_assist_access(db_session, email=outsider_email)
+
+    context = _create_ready_planning_draft_context(client, token=owner_token, subject_name="Blocked")
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert start.status_code == 202, start.text
+    _run_teacher_assist_worker(db_session)
+    source_plan = client.get("/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {owner_token}"}).json()[0]
+    sharing = client.patch(
+        f"/v1/teacher-assist/weekly-plans/{source_plan['id']}/sharing",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"visibility_scope": "shared", "reuse_status": "reusable"},
+    )
+    assert sharing.status_code == 200, sharing.text
+
+    outsider_year = client.post(
+        "/v1/teacher-assist/school-years",
+        headers={"Authorization": f"Bearer {outsider_token}"},
+        json={
+            "title": "2027-2028",
+            "start_date": "2027-08-10",
+            "end_date": "2028-05-28",
+            "is_active": False,
+        },
+    ).json()
+
+    candidates = client.get(
+        "/v1/teacher-assist/curriculum-rollover/candidates",
+        headers={"Authorization": f"Bearer {outsider_token}"},
+        params={
+            "source_school_year_id": context["school_year"]["id"],
+            "target_school_year_id": outsider_year["id"],
+        },
+    )
+    assert candidates.status_code == 200, candidates.text
+    assert candidates.json()["items"] == []
+
+    copied = client.post(
+        "/v1/teacher-assist/curriculum-rollover/copy",
+        headers={"Authorization": f"Bearer {outsider_token}"},
+        json={
+            "source_school_year_id": context["school_year"]["id"],
+            "target_school_year_id": outsider_year["id"],
+            "plan_ids": [source_plan["id"]],
+            "copy_mode": "rollover_copy",
+            "preserve_titles": True,
+        },
+    )
+    assert copied.status_code == 200, copied.text
+    assert copied.json()["copied_plans"] == []
+    assert "not available for rollover" in copied.json()["warnings"][0]
+
+
+def test_workflow_and_weekly_plan_retrieval_are_tenant_isolated(client, db_session: Session):
+    first_email = "workflow-phase5-a@example.com"
+    second_email = "workflow-phase5-b@example.com"
+    first_token = _register_user(client, email=first_email, tenant_name="Workflow Tenant A")
+    second_token = _register_user(client, email=second_email, tenant_name="Workflow Tenant B")
+    _grant_teacher_assist_access(db_session, email=first_email)
+    _grant_teacher_assist_access(db_session, email=second_email)
+
+    first_context = _create_ready_planning_draft_context(client, token=first_token, subject_name="History")
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{first_context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {first_token}"},
+    )
+    assert start.status_code == 202, start.text
+    _run_teacher_assist_worker(db_session)
+
+    first_workflow = client.get(
+        "/v1/teacher-assist/workflows",
+        headers={"Authorization": f"Bearer {first_token}"},
+    ).json()[0]
+    first_weekly_plan = client.get(
+        "/v1/teacher-assist/weekly-plans",
+        headers={"Authorization": f"Bearer {first_token}"},
+    ).json()[0]
+
+    foreign_workflow = client.get(
+        f"/v1/teacher-assist/workflows/{first_workflow['id']}",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign_workflow.status_code == 404
+
+    foreign_weekly_plan = client.get(
+        f"/v1/teacher-assist/weekly-plans/{first_weekly_plan['id']}",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign_weekly_plan.status_code == 404
+    foreign_versions = client.get(
+        f"/v1/teacher-assist/weekly-plans/{first_weekly_plan['id']}/versions",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign_versions.status_code == 404
+    foreign_update = client.put(
+        f"/v1/teacher-assist/weekly-plans/{first_weekly_plan['id']}",
+        headers={"Authorization": f"Bearer {second_token}"},
+        json={"title": "Blocked foreign edit", "change_reason": "Should fail"},
+    )
+    assert foreign_update.status_code == 404
+
+    assert client.get(
+        "/v1/teacher-assist/workflows",
+        headers={"Authorization": f"Bearer {second_token}"},
+    ).json() == []
+    assert client.get(
+        "/v1/teacher-assist/weekly-plans",
+        headers={"Authorization": f"Bearer {second_token}"},
+    ).json() == []
+
+
+def test_cancel_workflow_rejects_completed_workflow(client, db_session: Session):
+    email = "teacher-workflow-cancel@example.com"
+    token = _register_user(client, email=email, tenant_name="Workflow Cancel Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Art")
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert start.status_code == 202, start.text
+    _run_teacher_assist_worker(db_session)
+
+    workflow_id = client.get(
+        "/v1/teacher-assist/workflows",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()[0]["id"]
+    cancel = client.patch(
+        f"/v1/teacher-assist/workflows/{workflow_id}/cancel",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "cancelled"},
+    )
+    assert cancel.status_code == 400
+    assert "can no longer be cancelled" in cancel.json()["detail"]
+
+
+def test_weekly_plan_edit_creates_new_version_and_completed_status(client, db_session: Session):
+    email = "teacher-weekly-plan-edit@example.com"
+    token = _register_user(client, email=email, tenant_name="Weekly Plan Edit Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="ELA")
+    start = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert start.status_code == 202, start.text
+    _run_teacher_assist_worker(db_session)
+
+    weekly_plan = client.get(
+        "/v1/teacher-assist/weekly-plans",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()[0]
+    updated_content = weekly_plan["content_json"]
+    updated_content["overview"] = "[MOCK OUTPUT] Teacher-reviewed weekly overview."
+    updated_content["review_notes"] = "Tighten the day two transition and mark the plan ready."
+
+    update = client.put(
+        f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "Teacher-reviewed ELA Weekly Plan",
+            "status": "completed",
+            "content_json": updated_content,
+            "change_reason": "Teacher review pass",
+        },
+    )
+    assert update.status_code == 200, update.text
+    updated_payload = update.json()
+    assert updated_payload["title"] == "Teacher-reviewed ELA Weekly Plan"
+    assert updated_payload["status"] == "completed"
+    assert updated_payload["content_json"]["review_notes"] == updated_content["review_notes"]
+    assert updated_payload["content_json"]["metadata"]["version"] == 2
+    assert updated_payload["current_version_number"] == 2
+
+    versions = client.get(
+        f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/versions",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert versions.status_code == 200, versions.text
+    version_payload = versions.json()
+    assert [version["version_number"] for version in version_payload] == [2, 1]
+    assert version_payload[0]["change_reason"] == "Teacher review pass"
+
+    version_detail = client.get(
+        f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/versions/{version_payload[0]['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert version_detail.status_code == 200, version_detail.text
+    assert version_detail.json()["content_json"]["review_notes"] == updated_content["review_notes"]
+
+
+def test_regenerate_overview_only_creates_new_version_and_preserves_original(client, db_session: Session):
+    email = "teacher-regen-overview@example.com"
+    token = _register_user(client, email=email, tenant_name="Regenerate Overview Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    _, weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Overview")
+    original_overview = weekly_plan["content_json"]["overview"]
+    original_vocabulary = list(weekly_plan["content_json"]["vocabulary"])
+
+    regenerated = client.post(
+        f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/regenerate-section",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "section_key": "overview",
+            "teacher_instruction": "Make it more teacher-facing and practical.",
+            "provider_mode": "mock",
+            "preserve_existing_context": True,
+        },
+    )
+    assert regenerated.status_code == 200, regenerated.text
+    payload = regenerated.json()
+    assert payload["status"] == "in_progress"
+    assert payload["current_version_number"] == 2
+    assert payload["content_json"]["overview"] != original_overview
+    assert payload["content_json"]["vocabulary"] == original_vocabulary
+    assert payload["content_json"]["review_required"] is True
+    assert payload["latest_usage_event"]["feature"] == "weekly_plan_section_regeneration"
+    assert payload["latest_usage_event"]["estimated_cost_cents"] == 0
+    assert payload["latest_usage_event"]["metadata_json"]["section_key"] == "overview"
+
+    versions = client.get(
+        f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/versions",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert versions.status_code == 200, versions.text
+    version_payload = versions.json()
+    assert [version["version_number"] for version in version_payload[:2]] == [2, 1]
+    assert version_payload[0]["change_reason"] == "Regenerated overview at overview"
+    assert version_payload[1]["content_json"]["overview"] == original_overview
+
+
+def test_regenerate_specific_weekly_segment_only_updates_target_segment(client, db_session: Session):
+    email = "teacher-regen-segment@example.com"
+    token = _register_user(client, email=email, tenant_name="Regenerate Segment Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    _, weekly_plan = _generate_weekly_plan(
+        client,
+        db_session,
+        token=token,
+        subject_name="Segments",
+        planning_scope="module",
+        weeks=2,
+    )
+    original_segments = weekly_plan["content_json"]["weekly_segments"]
+
+    regenerated = client.post(
+        f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/regenerate-section",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "section_key": "weekly_segments",
+            "section_path": "weekly_segments.0",
+            "teacher_instruction": "Tighten the focus for the first segment.",
+            "provider_mode": "mock",
+        },
+    )
+    assert regenerated.status_code == 200, regenerated.text
+    payload = regenerated.json()
+    assert payload["current_version_number"] == 2
+    assert payload["content_json"]["weekly_segments"][0]["focus"] != original_segments[0]["focus"]
+    assert payload["content_json"]["weekly_segments"][1] == original_segments[1]
+    assert payload["latest_usage_event"]["metadata_json"]["section_path"] == "weekly_segments.0"
+
+
+def test_regenerate_invalid_section_key_is_rejected(client, db_session: Session):
+    email = "teacher-regen-invalid@example.com"
+    token = _register_user(client, email=email, tenant_name="Regenerate Invalid Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    _, weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Invalid")
+
+    regenerated = client.post(
+        f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/regenerate-section",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"section_key": "not_a_section"},
+    )
+    assert regenerated.status_code == 422, regenerated.text
+
+
+def test_regenerate_malformed_provider_output_fails_safely(client, db_session: Session, monkeypatch):
+    email = "teacher-regen-malformed@example.com"
+    token = _register_user(client, email=email, tenant_name="Regenerate Malformed Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    _, weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Malformed")
+    original_overview = weekly_plan["content_json"]["overview"]
+
+    class _MalformedProvider:
+        provider_name = "mock"
+
+        def regenerate_instructional_plan_section(self, **_kwargs):
+            return TeacherAssistAIProviderResult(
+                content_json={"bad": "payload"},
+                provider="mock",
+                model="mock",
+                input_tokens=0,
+                output_tokens=0,
+                estimated_cost_cents=0,
+                metadata_json={"is_mock": True, "provider_mode": "mock", "prompt_version": "instructional-plan-section-v1"},
+            )
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.workflow_service.get_teacher_assist_ai_provider",
+        lambda _settings, **_kwargs: _MalformedProvider(),
+    )
+
+    regenerated = client.post(
+        f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/regenerate-section",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"section_key": "overview", "provider_mode": "mock"},
+    )
+    assert regenerated.status_code == 400, regenerated.text
+    assert "section_content" in regenerated.json()["detail"]
+
+    unchanged = client.get(
+        f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert unchanged.status_code == 200, unchanged.text
+    assert unchanged.json()["content_json"]["overview"] == original_overview
+    assert unchanged.json()["current_version_number"] == 1
+
+
+def test_regenerate_copied_plan_records_zero_cost_usage_event_without_workflow_id(
+    client, db_session: Session
+):
+    email = "teacher-regen-copy@example.com"
+    token = _register_user(client, email=email, tenant_name="Regenerate Copy Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    _, source_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Copy Regen")
+    copied = client.post(
+        f"/v1/teacher-assist/weekly-plans/{source_plan['id']}/copy",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert copied.status_code == 201, copied.text
+    copied_payload = copied.json()
+    assert copied_payload["workflow_id"] is None
+
+    regenerated = client.post(
+        f"/v1/teacher-assist/weekly-plans/{copied_payload['id']}/regenerate-section",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"section_key": "review_notes", "provider_mode": "mock"},
+    )
+    assert regenerated.status_code == 200, regenerated.text
+    regenerated_payload = regenerated.json()
+    assert regenerated_payload["workflow_id"] is None
+    assert regenerated_payload["latest_usage_event"]["feature"] == "weekly_plan_section_regeneration"
+    assert regenerated_payload["latest_usage_event"]["estimated_cost_cents"] == 0
+    assert regenerated_payload["latest_usage_event"]["metadata_json"]["weekly_plan_id"] == copied_payload["id"]
+
+
+def test_regenerate_real_provider_is_blocked_by_default(client, db_session: Session):
+    email = "teacher-regen-real-blocked@example.com"
+    token = _register_user(client, email=email, tenant_name="Regenerate Real Blocked Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    _, weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Blocked Real")
+
+    regenerated = client.post(
+        f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/regenerate-section",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"section_key": "overview", "provider_mode": "real"},
+    )
+    assert regenerated.status_code == 400, regenerated.text
+    assert "disabled" in regenerated.json()["detail"]
+
+
+def test_phase3_tenant_isolation_for_resources_guides_and_drafts(client, db_session: Session):
+    first_email = "phase3-a@example.com"
+    second_email = "phase3-b@example.com"
+    first_token = _register_user(client, email=first_email, tenant_name="Phase3 Tenant A")
+    second_token = _register_user(client, email=second_email, tenant_name="Phase3 Tenant B")
+    _grant_teacher_assist_access(db_session, email=first_email)
+    _grant_teacher_assist_access(db_session, email=second_email)
+
+    school_year = client.post(
+        "/v1/teacher-assist/school-years",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={
+            "title": "2026-2027",
+            "start_date": "2026-08-10",
+            "end_date": "2027-05-28",
+            "is_active": True,
+        },
+    ).json()
+    resource = client.post(
+        "/v1/teacher-assist/resources/link",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={
+            "title": "Private Curriculum",
+            "description": "Tenant A only",
+            "external_url": "https://example.com/private-curriculum",
+        },
+    ).json()
+    guide = client.post(
+        "/v1/teacher-assist/pacing-guides",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "title": "Tenant A Guide",
+            "description": "Private guide",
+            "is_shared": False,
+        },
+    ).json()
+    draft = client.post(
+        "/v1/teacher-assist/planning-drafts",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={"school_year_id": school_year["id"], "title": "Tenant A Draft", "status": "draft"},
+    ).json()
+
+    second_resources = client.get(
+        "/v1/teacher-assist/resources",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert second_resources.status_code == 200, second_resources.text
+    assert second_resources.json() == []
+
+    second_guides = client.get(
+        "/v1/teacher-assist/pacing-guides",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert second_guides.status_code == 200, second_guides.text
+    assert second_guides.json() == []
+
+    second_drafts = client.get(
+        "/v1/teacher-assist/planning-drafts",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert second_drafts.status_code == 200, second_drafts.text
+    assert second_drafts.json() == []
+
+    foreign_resource = client.get(
+        f"/v1/teacher-assist/resources/{resource['id']}",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign_resource.status_code == 404
+
+    foreign_update = client.put(
+        f"/v1/teacher-assist/pacing-guides/{guide['id']}",
+        headers={"Authorization": f"Bearer {second_token}"},
+        json={
+            "school_year_id": school_year["id"],
+            "title": "Nope",
+            "description": "Should not work",
+            "is_shared": False,
+        },
+    )
+    assert foreign_update.status_code == 404
+
+    foreign_attach = client.post(
+        f"/v1/teacher-assist/planning-drafts/{draft['id']}/resources",
+        headers={"Authorization": f"Bearer {second_token}"},
+        json={"resource_library_item_id": resource["id"]},
+    )
+    assert foreign_attach.status_code == 404
+
+
+def test_assignment_create_and_read_round_trip(client, db_session: Session):
+    email = "teacher-assignments@example.com"
+    token = _register_user(client, email=email, tenant_name="Assignments Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Writing")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Evidence-Based Writing Response",
+            "description": "Students draft a short constructed response.",
+            "assignment_type": "writing",
+            "due_date": "2026-08-14",
+            "status": "draft",
+            "instructions": "Use anonymous STUDENT numbers only.",
+            "standard_ids": [context["standard"]["id"]],
+            "resource_ids": [context["resource"]["id"]],
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+    payload = assignment.json()
+    assert payload["assignment_type"] == "writing"
+    assert payload["status"] == "draft"
+    assert payload["standard_ids"] == [context["standard"]["id"]]
+    assert payload["resource_ids"] == [context["resource"]["id"]]
+
+    fetched = client.get(
+        f"/v1/teacher-assist/assignments/{payload['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["title"] == "Evidence-Based Writing Response"
+
+
+def test_assignment_list_filters(client, db_session: Session):
+    email = "teacher-assignment-filters@example.com"
+    token = _register_user(client, email=email, tenant_name="Assignment Filters Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Reading")
+    first = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Reading Exit Ticket",
+            "assignment_type": "exit_ticket",
+            "status": "ready",
+        },
+    )
+    assert first.status_code == 201, first.text
+    second = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Vocabulary Homework",
+            "assignment_type": "homework",
+            "status": "draft",
+        },
+    )
+    assert second.status_code == 201, second.text
+
+    filtered = client.get(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"status": "ready", "assignment_type": "exit_ticket", "q": "exit"},
+    )
+    assert filtered.status_code == 200, filtered.text
+    items = filtered.json()
+    assert len(items) == 1
+    assert items[0]["title"] == "Reading Exit Ticket"
+
+
+def test_assignment_update_replaces_fields_and_links(client, db_session: Session):
+    email = "teacher-assignment-update@example.com"
+    token = _register_user(client, email=email, tenant_name="Assignment Update Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Science")
+    extra_standard = client.post(
+        "/v1/teacher-assist/standards",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "subject_id": context["subject"]["id"],
+            "standard_type": "TEKS",
+            "code": "5.2B",
+            "description": "Plan and implement classroom investigations.",
+            "grade_level": "5",
+            "school_year_id": context["school_year"]["id"],
+        },
+    )
+    assert extra_standard.status_code == 201, extra_standard.text
+
+    created = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Science Draft",
+            "assignment_type": "other",
+            "status": "draft",
+            "standard_ids": [context["standard"]["id"]],
+        },
+    )
+    assert created.status_code == 201, created.text
+    assignment_id = created.json()["id"]
+
+    updated = client.put(
+        f"/v1/teacher-assist/assignments/{assignment_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Science Investigation Write-Up",
+            "description": "Students explain the investigation results.",
+            "assignment_type": "project",
+            "due_date": "2026-08-15",
+            "status": "ready",
+            "instructions": "Revise with teacher feedback before finalizing.",
+            "standard_ids": [extra_standard.json()["id"]],
+            "resource_ids": [context["resource"]["id"]],
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    payload = updated.json()
+    assert payload["title"] == "Science Investigation Write-Up"
+    assert payload["assignment_type"] == "project"
+    assert payload["status"] == "ready"
+    assert payload["standard_ids"] == [extra_standard.json()["id"]]
+    assert payload["resource_ids"] == [context["resource"]["id"]]
+
+
+def test_assignment_status_transition_requires_lifecycle_order(client, db_session: Session):
+    email = "teacher-assignment-status@example.com"
+    token = _register_user(client, email=email, tenant_name="Assignment Status Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Math")
+    created = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Math Spiral Review",
+            "assignment_type": "homework",
+            "status": "draft",
+        },
+    )
+    assert created.status_code == 201, created.text
+    assignment_id = created.json()["id"]
+
+    invalid = client.patch(
+        f"/v1/teacher-assist/assignments/{assignment_id}/status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "assigned"},
+    )
+    assert invalid.status_code == 400, invalid.text
+    assert "cannot transition" in invalid.json()["detail"]
+
+    ready = client.patch(
+        f"/v1/teacher-assist/assignments/{assignment_id}/status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "ready"},
+    )
+    assert ready.status_code == 200, ready.text
+    assert ready.json()["status"] == "ready"
+
+
+def test_assignment_attach_standard_is_idempotent(client, db_session: Session):
+    email = "teacher-assignment-standards@example.com"
+    token = _register_user(client, email=email, tenant_name="Assignment Standards Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="ELA")
+    second_standard = client.post(
+        "/v1/teacher-assist/standards",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "subject_id": context["subject"]["id"],
+            "standard_type": "TEKS",
+            "code": "5.7C",
+            "description": "Compose short responses using text evidence.",
+            "grade_level": "5",
+            "school_year_id": context["school_year"]["id"],
+        },
+    )
+    assert second_standard.status_code == 201, second_standard.text
+
+    created = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "ELA Response Draft",
+            "assignment_type": "short_answer",
+            "status": "draft",
+            "standard_ids": [context["standard"]["id"]],
+        },
+    )
+    assert created.status_code == 201, created.text
+    assignment_id = created.json()["id"]
+
+    attach = client.post(
+        f"/v1/teacher-assist/assignments/{assignment_id}/standards",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"standard_id": second_standard.json()["id"]},
+    )
+    assert attach.status_code == 200, attach.text
+    assert attach.json()["standard_ids"] == [context["standard"]["id"], second_standard.json()["id"]]
+
+    reattach = client.post(
+        f"/v1/teacher-assist/assignments/{assignment_id}/standards",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"standard_id": second_standard.json()["id"]},
+    )
+    assert reattach.status_code == 200, reattach.text
+    assert reattach.json()["standard_ids"] == [context["standard"]["id"], second_standard.json()["id"]]
+
+
+def test_assignment_tenant_isolation(client, db_session: Session):
+    first_email = "teacher-assignment-a@example.com"
+    second_email = "teacher-assignment-b@example.com"
+    first_token = _register_user(client, email=first_email, tenant_name="Assignment Tenant A")
+    second_token = _register_user(client, email=second_email, tenant_name="Assignment Tenant B")
+    _grant_teacher_assist_access(db_session, email=first_email)
+    _grant_teacher_assist_access(db_session, email=second_email)
+
+    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="History")
+    created = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "History Reflection",
+            "assignment_type": "reading_response",
+            "status": "draft",
+        },
+    )
+    assert created.status_code == 201, created.text
+    assignment_id = created.json()["id"]
+
+    foreign_get = client.get(
+        f"/v1/teacher-assist/assignments/{assignment_id}",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign_get.status_code == 404
+
+    foreign_update = client.patch(
+        f"/v1/teacher-assist/assignments/{assignment_id}/status",
+        headers={"Authorization": f"Bearer {second_token}"},
+        json={"status": "ready"},
+    )
+    assert foreign_update.status_code == 404
+
+
+def test_assignment_rejects_invalid_class_subject_school_year_relationships(client, db_session: Session):
+    email = "teacher-assignment-invalid@example.com"
+    token = _register_user(client, email=email, tenant_name="Assignment Invalid Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Social Studies")
+    extra_school_year = client.post(
+        "/v1/teacher-assist/school-years",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "2027-2028",
+            "start_date": "2027-08-09",
+            "end_date": "2028-05-26",
+            "is_active": False,
+        },
+    )
+    assert extra_school_year.status_code == 201, extra_school_year.text
+    unrelated_subject = client.post(
+        "/v1/teacher-assist/subjects",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"code": "ART", "name": "Art"},
+    )
+    assert unrelated_subject.status_code == 201, unrelated_subject.text
+
+    mismatched_school_year = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": extra_school_year.json()["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Bad School Year",
+            "assignment_type": "other",
+            "status": "draft",
+        },
+    )
+    assert mismatched_school_year.status_code == 400, mismatched_school_year.text
+    assert "school year" in mismatched_school_year.json()["detail"].lower()
+
+    mismatched_subject = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": unrelated_subject.json()["id"],
+            "title": "Bad Subject",
+            "assignment_type": "other",
+            "status": "draft",
+        },
+    )
+    assert mismatched_subject.status_code == 400, mismatched_subject.text
+    assert "selected subject" in mismatched_subject.json()["detail"].lower()
+
+
+def test_weekly_plan_assignment_starter_copies_context_without_ai_usage(client, db_session: Session):
+    email = "teacher-assignment-starter@example.com"
+    token = _register_user(client, email=email, tenant_name="Assignment Starter Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context, weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Starter")
+    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+
+    starter = client.post(
+        f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"assignment_type": "homework"},
+    )
+    assert starter.status_code == 201, starter.text
+    payload = starter.json()
+    assert payload["status"] == "draft"
+    assert payload["source_plan_id"] == weekly_plan["id"]
+    assert payload["school_year_id"] == context["school_year"]["id"]
+    assert payload["class_id"] == context["teacher_class"]["id"]
+    assert payload["subject_id"] == context["subject"]["id"]
+    assert payload["standard_ids"] == [context["standard"]["id"]]
+    assert payload["resource_ids"] == [context["resource"]["id"]]
+
+    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    assert after_usage_count == before_usage_count
+
+
+def test_assignment_print_packet_create_and_page_count(client, db_session: Session):
+    email = "teacher-print-packet@example.com"
+    token = _register_user(client, email=email, tenant_name="Print Packet Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Packet")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Packet Assignment",
+            "assignment_type": "writing",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+    assignment_id = assignment.json()["id"]
+
+    created = client.post(
+        f"/v1/teacher-assist/assignments/{assignment_id}/print-packets",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"pages_per_student": 2, "template_type": "lined_writing_page", "output_format": "html"},
+    )
+    assert created.status_code == 201, created.text
+    packet = created.json()
+    assert packet["student_count"] == context["teacher_class"]["student_count"]
+    assert packet["total_page_count"] == context["teacher_class"]["student_count"] * 2
+    assert packet["template_type"] == "lined_writing_page"
+
+    pages = client.get(
+        f"/v1/teacher-assist/print-packets/{packet['id']}/pages",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert pages.status_code == 200, pages.text
+    assert len(pages.json()) == context["teacher_class"]["student_count"] * 2
+
+
+def test_assignment_print_packet_qr_payload_is_non_pii(client, db_session: Session):
+    email = "teacher-print-packet-pii@example.com"
+    token = _register_user(client, email=email, tenant_name="Print Packet PII Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="QR Safety")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "QR Safety Assignment",
+            "assignment_type": "short_answer",
+            "status": "draft",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+
+    packet = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/print-packets",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"pages_per_student": 1, "template_type": "blank_writing_page"},
+    )
+    assert packet.status_code == 201, packet.text
+
+    pages = client.get(
+        f"/v1/teacher-assist/print-packets/{packet.json()['id']}/pages",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert pages.status_code == 200, pages.text
+    first_page = pages.json()[0]
+    payload = first_page["qr_payload_json"]
+    assert set(payload.keys()) == {
+        "qr_version",
+        "packet_id",
+        "assignment_id",
+        "teacher_user_id",
+        "tenant_id",
+        "school_year_id",
+        "grading_period_id",
+        "class_id",
+        "subject_id",
+        "student_number",
+        "page_number",
+        "qr_token",
+    }
+    payload_text = str(payload).lower()
+    assert "student_name" not in payload_text
+    assert "real_student_id" not in payload_text
+    assert "@" not in payload_text
+    assert first_page["student_number"] == 1
+    assert first_page["page_number"] == 1
+    assert first_page["qr_svg_data_uri"].startswith("data:image/svg+xml;base64,")
+
+
+def test_assignment_print_packet_tenant_isolation(client, db_session: Session):
+    first_email = "teacher-print-a@example.com"
+    second_email = "teacher-print-b@example.com"
+    first_token = _register_user(client, email=first_email, tenant_name="Print Tenant A")
+    second_token = _register_user(client, email=second_email, tenant_name="Print Tenant B")
+    _grant_teacher_assist_access(db_session, email=first_email)
+    _grant_teacher_assist_access(db_session, email=second_email)
+
+    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Isolation")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Tenant Packet",
+            "assignment_type": "writing",
+            "status": "draft",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+
+    packet = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/print-packets",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={"pages_per_student": 1, "template_type": "short_answer_page"},
+    )
+    assert packet.status_code == 201, packet.text
+    packet_id = packet.json()["id"]
+
+    foreign = client.get(
+        f"/v1/teacher-assist/print-packets/{packet_id}",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign.status_code == 404
+
+    foreign_pages = client.get(
+        f"/v1/teacher-assist/print-packets/{packet_id}/pages",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign_pages.status_code == 404
+
+
+def test_assignment_print_packet_invalid_assignment_is_rejected(client, db_session: Session):
+    email = "teacher-print-invalid@example.com"
+    token = _register_user(client, email=email, tenant_name="Print Invalid Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    created = client.post(
+        f"/v1/teacher-assist/assignments/{uuid.uuid4()}/print-packets",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"pages_per_student": 1, "template_type": "blank_writing_page"},
+    )
+    assert created.status_code == 404
+
+
+def test_assignment_print_packet_does_not_create_ai_usage_event(client, db_session: Session):
+    email = "teacher-print-no-ai@example.com"
+    token = _register_user(client, email=email, tenant_name="Print No AI Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="No AI Packet")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "No AI Packet Assignment",
+            "assignment_type": "project",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+
+    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    packet = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/print-packets",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"pages_per_student": 3, "template_type": "blank_writing_page"},
+    )
+    assert packet.status_code == 201, packet.text
+    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    assert after_usage_count == before_usage_count

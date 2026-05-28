@@ -4,6 +4,7 @@ from functools import lru_cache
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from oziebot_api.config import Settings
 from oziebot_api.services.performance_observability import register_query_observers
@@ -13,7 +14,11 @@ from oziebot_api.services.performance_observability import register_query_observ
 def _cached_engine(database_url: str, slow_query_ms: int):
     url = make_url(database_url)
     engine_kwargs = {"pool_pre_ping": True}
-    if not url.drivername.startswith("sqlite"):
+    if url.drivername.startswith("sqlite"):
+        if url.database in {None, "", ":memory:"}:
+            engine_kwargs["poolclass"] = StaticPool
+            engine_kwargs["connect_args"] = {"check_same_thread": False}
+    else:
         engine_kwargs["pool_size"] = 5
         engine_kwargs["max_overflow"] = 10
     engine = create_engine(database_url, **engine_kwargs)

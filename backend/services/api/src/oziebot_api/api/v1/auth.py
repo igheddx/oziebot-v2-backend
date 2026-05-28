@@ -22,6 +22,7 @@ from oziebot_api.schemas.auth import (
     TokenResponse,
 )
 from oziebot_api.services.passwords import hash_password, verify_password
+from oziebot_api.services.product_access import TRADING_PRODUCT_KEY, grant_tenant_product_access
 from oziebot_api.services.root_admin_defaults import ensure_root_admin_strategy_access
 from oziebot_api.services.strategy_catalog import ensure_platform_strategy_catalog
 from oziebot_api.services.tenant_scope import primary_tenant_id
@@ -109,6 +110,7 @@ def register(
     db.flush()
     ensure_platform_strategy_catalog(db)
     start_trial_for_new_tenant(db, tenant.id)
+    grant_tenant_product_access(db, tenant_id=tenant.id, product_key=TRADING_PRODUCT_KEY)
     # Initialize user with permissions for all currently enabled platform tokens
     TokenPermissionService.initialize_user_tokens(db, user.id, enabled=True)
     return _issue_token_pair(db, settings, user)
