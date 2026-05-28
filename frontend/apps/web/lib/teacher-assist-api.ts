@@ -7,6 +7,9 @@ import {
 } from "@/lib/auth-service";
 import type {
   Assignment,
+  AssignmentGradingReview,
+  AssignmentGradingReviewCreateInput,
+  AssignmentGradingReviewUpdateInput,
   AssignmentInput,
   AssignmentPrintPacket,
   AssignmentPrintPacketInput,
@@ -27,7 +30,16 @@ import type {
   Subject,
   TeacherAssistWorkflow,
   TeacherAssistWorkflowDetail,
+  TeacherAssistExtractedTextDetailAggregate,
+  TeacherAssistExtractedTextHistory,
+  TeacherAssistExtractedTextRecord,
+  TeacherAssistExtractionJob,
+  TeacherAssistExtractionJobDetail,
+  TeacherAssistExtractionRun,
+  TeacherAssistExtractionSummary,
+  TeacherAssistFileDownload,
   TeacherAssistOptions,
+  TeacherAssistWorkspace,
   TeacherClass,
   TeacherProfile,
   WeeklyPlan,
@@ -74,6 +86,10 @@ function parseUploadError(text: string, status: number): string {
 
 export function fetchTeacherAssistOptions() {
   return readJson<TeacherAssistOptions>("/v1/teacher-assist/options");
+}
+
+export function fetchTeacherAssistWorkspace() {
+  return readJson<TeacherAssistWorkspace>("/v1/teacher-assist/workspace");
 }
 
 export function fetchTeacherProfile() {
@@ -180,6 +196,18 @@ export function fetchResources() {
   return readJson<ResourceLibraryItem[]>("/v1/teacher-assist/resources");
 }
 
+export function fetchResourceDownloadUrl(id: string) {
+  return readJson<TeacherAssistFileDownload>(`/v1/teacher-assist/resources/${id}/download-url`);
+}
+
+export function createResourceExtractionJob(id: string) {
+  return writeJson<TeacherAssistExtractionJob>(`/v1/teacher-assist/resources/${id}/extraction-jobs`, "POST", {});
+}
+
+export function fetchResourceExtractions(id: string) {
+  return readJson<TeacherAssistExtractionRun[]>(`/v1/teacher-assist/resources/${id}/extractions`);
+}
+
 export function fetchAssignments(
   filters: {
     school_year_id?: string;
@@ -260,6 +288,70 @@ export function fetchAssignmentStudentWorkSubmission(id: string) {
   return readJson<AssignmentStudentWorkSubmission>(`/v1/teacher-assist/student-work/${id}`);
 }
 
+export function fetchAssignmentStudentWorkDownloadUrl(id: string) {
+  return readJson<TeacherAssistFileDownload>(`/v1/teacher-assist/student-work/${id}/download-url`);
+}
+
+export function createStudentWorkExtractionJob(id: string) {
+  return writeJson<TeacherAssistExtractionJob>(`/v1/teacher-assist/student-work/${id}/extraction-jobs`, "POST", {});
+}
+
+export function fetchStudentWorkExtractions(id: string) {
+  return readJson<TeacherAssistExtractionRun[]>(`/v1/teacher-assist/student-work/${id}/extractions`);
+}
+
+export function fetchExtractionJob(id: string) {
+  return readJson<TeacherAssistExtractionJobDetail>(`/v1/teacher-assist/extraction-jobs/${id}`);
+}
+
+export function cancelExtractionJob(id: string) {
+  return writeJson<TeacherAssistExtractionJob>(`/v1/teacher-assist/extraction-jobs/${id}/cancel`, "PATCH", {
+    status: "cancelled",
+  });
+}
+
+export function fetchExtractionSummaries(limit = 100) {
+  return readJson<TeacherAssistExtractionSummary[]>(`/v1/teacher-assist/extractions?limit=${limit}`);
+}
+
+export function retryExtractionJob(id: string) {
+  return writeJson<TeacherAssistExtractionJob>(`/v1/teacher-assist/extraction-jobs/${id}/retry`, "POST", {});
+}
+
+export function fetchExtractedTextDetail(id: string) {
+  return readJson<TeacherAssistExtractedTextDetailAggregate>(`/v1/teacher-assist/extracted-text/${id}`);
+}
+
+export function fetchExtractedTextHistory(id: string) {
+  return readJson<TeacherAssistExtractedTextHistory>(`/v1/teacher-assist/extracted-text/${id}/history`);
+}
+
+export function updateExtractedTextReviewStatus(
+  id: string,
+  body: {
+    review_status: TeacherAssistExtractedTextRecord["review_status"];
+    teacher_review_notes?: string | null;
+    teacher_issue_reason?: string | null;
+  },
+) {
+  return writeJson<TeacherAssistExtractedTextRecord>(
+    `/v1/teacher-assist/extracted-text/${id}/review-status`,
+    "PATCH",
+    body,
+  );
+}
+
+export function updateExtractedTextApprovedContent(
+  id: string,
+  body: { approved_text?: string | null; teacher_corrected_text?: string | null },
+) {
+  return writeJson<TeacherAssistExtractedTextRecord>(
+    `/v1/teacher-assist/extracted-text/${id}/approved-text`,
+    "PUT",
+    body,
+  );
+}
+
 export async function uploadAssignmentStudentWork(
   assignmentId: string,
   file: File,
@@ -333,6 +425,42 @@ export function updateAssignmentStudentWorkPacketContext(
     "PATCH",
     body as Record<string, unknown>,
   );
+}
+
+export function fetchAssignmentGradingReviews(id: string) {
+  return readJson<AssignmentGradingReview[]>(`/v1/teacher-assist/assignments/${id}/grading-reviews`);
+}
+
+export function createAssignmentGradingReview(
+  studentWorkSubmissionId: string,
+  body: AssignmentGradingReviewCreateInput,
+) {
+  return writeJson<AssignmentGradingReview>(
+    `/v1/teacher-assist/student-work/${studentWorkSubmissionId}/grading-review`,
+    "POST",
+    body as Record<string, unknown>,
+  );
+}
+
+export function fetchAssignmentGradingReview(id: string) {
+  return readJson<AssignmentGradingReview>(`/v1/teacher-assist/grading-reviews/${id}`);
+}
+
+export function updateAssignmentGradingReview(id: string, body: AssignmentGradingReviewUpdateInput) {
+  return writeJson<AssignmentGradingReview>(
+    `/v1/teacher-assist/grading-reviews/${id}`,
+    "PUT",
+    body as Record<string, unknown>,
+  );
+}
+
+export function updateAssignmentGradingReviewStatus(
+  id: string,
+  status: AssignmentGradingReview["status"],
+) {
+  return writeJson<AssignmentGradingReview>(`/v1/teacher-assist/grading-reviews/${id}/status`, "PATCH", {
+    status,
+  });
 }
 
 export function createLinkResource(body: Record<string, unknown>) {

@@ -19,6 +19,10 @@ export type TeacherAssistOptions = {
   assignment_print_output_formats: string[];
   assignment_student_work_upload_statuses: string[];
   assignment_student_work_processing_statuses: string[];
+  assignment_grading_review_statuses: string[];
+  assignment_grading_review_sources: string[];
+  extraction_review_statuses?: string[];
+  extraction_confidence_levels?: string[];
   planning_draft_statuses: string[];
   planning_scopes: string[];
   supported_grade_levels: string[];
@@ -132,8 +136,15 @@ export type ResourceLibraryItem = {
   uploaded_at: string;
   linked_pacing_items_count: number;
   linked_planning_drafts_count: number;
+  latest_extraction_job: TeacherAssistExtractionJob | null;
+  latest_extracted_text: TeacherAssistExtractedTextRecord | null;
   created_at: string;
   updated_at: string;
+};
+
+export type TeacherAssistFileDownload = {
+  url: string;
+  expires_at: string;
 };
 
 export type Assignment = {
@@ -248,8 +259,222 @@ export type AssignmentStudentWorkSubmission = {
   storage_key: string;
   upload_status: "uploaded" | "archived";
   processing_status: "pending_review" | "ready_for_processing" | "processing_deferred" | "archived";
+  latest_extraction_job: TeacherAssistExtractionJob | null;
+  latest_extracted_text: TeacherAssistExtractedTextRecord | null;
   created_at: string;
   updated_at: string;
+};
+
+export type TeacherAssistExtractionJob = {
+  id: string;
+  artifact_type: "resource" | "student_work";
+  resource_library_item_id: string | null;
+  student_work_submission_id: string | null;
+  assignment_id: string | null;
+  school_year_id: string | null;
+  grading_period_id: string | null;
+  class_id: string | null;
+  subject_id: string | null;
+  student_number: number | null;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled" | "skipped";
+  progress_percent: number;
+  provider_name: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  error_metadata_json: Record<string, unknown> | null;
+  retry_count: number;
+  max_retries: number;
+  parent_extraction_job_id: string | null;
+  retry_root_job_id: string | null;
+  attempt_number: number;
+  leased_by_worker: string | null;
+  lease_expires_at: string | null;
+  heartbeat_at: string | null;
+  execution_log_json: Array<Record<string, unknown>> | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  updated_at: string;
+};
+
+export type ExtractionReviewStatus =
+  | "pending_review"
+  | "teacher_reviewing"
+  | "teacher_approved"
+  | "teacher_rejected"
+  | "reviewed"
+  | "issue_flagged"
+  | "needs_retry"
+  | "archived";
+
+export type ExtractionConfidenceLevel = "low" | "medium" | "high" | "unknown";
+
+export type TeacherAssistExtractedTextRecord = {
+  id: string;
+  extraction_job_id: string;
+  artifact_type: "resource" | "student_work";
+  resource_library_item_id: string | null;
+  student_work_submission_id: string | null;
+  assignment_id: string | null;
+  class_id: string | null;
+  subject_id: string | null;
+  student_number: number | null;
+  preview_text: string;
+  text_char_count: number;
+  pii_flagged: boolean;
+  redaction_applied: boolean;
+  review_status: ExtractionReviewStatus;
+  provider_confidence_score: number | null;
+  confidence_level: ExtractionConfidenceLevel;
+  teacher_corrected_text: string | null;
+  approved_text: string | null;
+  reviewed_at: string | null;
+  reviewed_by_user_id: string | null;
+  source_extraction_job_id: string | null;
+  teacher_review_notes: string | null;
+  teacher_issue_reason: string | null;
+  metadata_json: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TeacherAssistExtractedTextDetail = TeacherAssistExtractedTextRecord & {
+  extracted_text: string;
+};
+
+export type TeacherAssistExtractionSummary = {
+  job: TeacherAssistExtractionJob;
+  extracted_text: TeacherAssistExtractedTextRecord | null;
+  retry_eligible: boolean;
+  processing_duration_seconds: number | null;
+};
+
+export type TeacherAssistExtractedTextDetailAggregate = {
+  record: TeacherAssistExtractedTextDetail;
+  job: TeacherAssistExtractionJob;
+  lineage_jobs: TeacherAssistExtractionJob[];
+  retry_eligible: boolean;
+  cancel_eligible: boolean;
+  processing_duration_seconds: number | null;
+  activity_events: TeacherAssistActivityEvent[];
+};
+
+export type TeacherAssistExtractionJobDetail = {
+  job: TeacherAssistExtractionJob;
+  extracted_text: TeacherAssistExtractedTextRecord | null;
+  lineage_jobs: TeacherAssistExtractionJob[];
+  retry_eligible: boolean;
+  cancel_eligible: boolean;
+  processing_duration_seconds: number | null;
+  execution_timeline: Array<Record<string, unknown>>;
+  source_artifact: {
+    artifact_type: "resource" | "student_work";
+    original_filename: string;
+    mime_type: string;
+    file_size: number;
+    resource_library_item_id: string | null;
+    student_work_submission_id: string | null;
+    assignment_id: string | null;
+    student_number: number | null;
+  };
+  activity_events: TeacherAssistActivityEvent[];
+};
+
+export type TeacherAssistExtractedTextHistory = {
+  current_record: TeacherAssistExtractedTextDetail;
+  current_job: TeacherAssistExtractionJob;
+  attempt_jobs: TeacherAssistExtractionJob[];
+  attempt_records: TeacherAssistExtractedTextRecord[];
+  activity_events: TeacherAssistActivityEvent[];
+};
+
+export type TeacherAssistExtractionRun = {
+  job: TeacherAssistExtractionJob;
+  extracted_text: TeacherAssistExtractedTextRecord | null;
+};
+
+export type AssignmentGradingReviewItem = {
+  id: string;
+  grading_review_id: string;
+  criterion_title: string;
+  score_suggestion: number | null;
+  max_score: number | null;
+  feedback_summary: string | null;
+  strengths: string[];
+  improvement_areas: string[];
+  teacher_notes: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AssignmentGradingReview = {
+  id: string;
+  tenant_id: string;
+  teacher_user_id: string;
+  assignment_id: string;
+  student_work_submission_id: string;
+  student_number: number;
+  school_year_id: string;
+  grading_period_id: string | null;
+  class_id: string;
+  subject_id: string;
+  status:
+    | "draft"
+    | "ai_suggested"
+    | "teacher_reviewing"
+    | "teacher_confirmed"
+    | "returned_for_revision"
+    | "archived";
+  review_source: "manual" | "ai_placeholder";
+  provider_name: string | null;
+  provider_model: string | null;
+  prompt_version: string | null;
+  ai_usage_event_id: string | null;
+  score_suggestion: number | null;
+  max_score: number | null;
+  feedback_summary: string | null;
+  strengths: string[];
+  improvement_areas: string[];
+  teacher_notes: string | null;
+  teacher_confirmed_score: number | null;
+  teacher_confirmed_feedback: string | null;
+  items: AssignmentGradingReviewItem[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type AssignmentGradingReviewCreateInput = {
+  student_number: number;
+  score_suggestion?: number | null;
+  max_score?: number | null;
+  feedback_summary?: string | null;
+  strengths?: string[];
+  improvement_areas?: string[];
+  teacher_notes?: string | null;
+  items?: Array<{
+    criterion_title: string;
+    score_suggestion?: number | null;
+    max_score?: number | null;
+    feedback_summary?: string | null;
+    strengths?: string[];
+    improvement_areas?: string[];
+    teacher_notes?: string | null;
+    sort_order?: number;
+  }>;
+};
+
+export type AssignmentGradingReviewUpdateInput = {
+  status: AssignmentGradingReview["status"];
+  score_suggestion?: number | null;
+  max_score?: number | null;
+  feedback_summary?: string | null;
+  strengths?: string[];
+  improvement_areas?: string[];
+  teacher_notes?: string | null;
+  teacher_confirmed_score?: number | null;
+  teacher_confirmed_feedback?: string | null;
+  items?: AssignmentGradingReviewCreateInput["items"];
 };
 
 export type PlanningDraft = {
@@ -376,6 +601,185 @@ export type TeacherAssistAIUsageEvent = {
 export type TeacherAssistWorkflowDetail = TeacherAssistWorkflow & {
   steps: TeacherAssistWorkflowStep[];
   usage_events: TeacherAssistAIUsageEvent[];
+};
+
+export type TeacherAssistActivityEvent = {
+  id: string;
+  event_category: string;
+  event_type: string;
+  entity_type: string;
+  entity_id: string;
+  timestamp: string;
+  summary_text: string;
+  workflow_id: string | null;
+  school_year_id: string | null;
+  grading_period_id: string | null;
+  class_id: string | null;
+  subject_id: string | null;
+  details_json: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type TeacherAssistWorkspacePlanSummary = {
+  id: string;
+  title: string;
+  planning_scope: "weekly" | "multi_week" | "module" | "unit" | "grading_period";
+  status: "in_progress" | "completed";
+  workflow_id: string | null;
+  class_id: string | null;
+  school_year_id: string | null;
+  review_required: boolean;
+  quality_flags: string[];
+  missing_context_warnings: string[];
+  updated_at: string;
+};
+
+export type TeacherAssistWorkspaceAssignmentSummary = {
+  id: string;
+  class_id: string;
+  subject_id: string;
+  title: string;
+  status: Assignment["status"];
+  assignment_type: Assignment["assignment_type"];
+  due_date: string | null;
+  updated_at: string;
+};
+
+export type TeacherAssistWorkspacePacketSummary = {
+  id: string;
+  assignment_id: string;
+  class_id: string;
+  packet_status: AssignmentPrintPacket["packet_status"];
+  pages_per_student: number;
+  student_count: number;
+  template_type: AssignmentPrintPacket["template_type"];
+  created_at: string;
+  updated_at: string;
+};
+
+export type TeacherAssistWorkspaceSubmissionSummary = {
+  id: string;
+  assignment_id: string;
+  class_id: string;
+  student_number: number;
+  original_filename: string;
+  upload_status: AssignmentStudentWorkSubmission["upload_status"];
+  processing_status: AssignmentStudentWorkSubmission["processing_status"];
+  latest_extraction_status: TeacherAssistExtractionJob["status"] | null;
+  extraction_ready_for_teacher_review: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TeacherAssistWorkspaceGradingReviewSummary = {
+  id: string;
+  assignment_id: string;
+  student_work_submission_id: string;
+  class_id: string;
+  student_number: number;
+  status: AssignmentGradingReview["status"];
+  teacher_confirmed_score: number | null;
+  updated_at: string;
+};
+
+export type TeacherAssistWorkspaceWorkflowSummary = {
+  id: string;
+  workflow_type: TeacherAssistWorkflow["workflow_type"];
+  status: TeacherAssistWorkflow["status"];
+  class_id: string | null;
+  school_year_id: string | null;
+  grading_period_id: string | null;
+  progress_percent: number;
+  retry_count: number;
+  max_retries: number;
+  provider_name: string | null;
+  provider_model: string | null;
+  last_error_code: string | null;
+  heartbeat_at: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  error_message: string | null;
+};
+
+export type TeacherAssistWorkspaceNeedsAttention = {
+  type: string;
+  severity: "info" | "warning" | "critical";
+  title: string;
+  message: string;
+  entity_type: string;
+  entity_id: string;
+  class_id: string | null;
+  created_at: string;
+};
+
+export type TeacherAssistWorkspaceReviewRequiredItem = {
+  entity_type: string;
+  entity_id: string;
+  class_id: string | null;
+  title: string;
+  status: string;
+  review_reason: string;
+  updated_at: string;
+};
+
+export type TeacherAssistWorkspaceTodaySummary = {
+  active_grading_period_title: string | null;
+  active_workflows_count: number;
+  plans_needing_review_count: number;
+  grading_reviews_pending_confirmation_count: number;
+  recent_uploads_count: number;
+  workflow_failures_count: number;
+  extraction_failures_count: number;
+  student_work_ready_for_extraction_count: number;
+  extracted_artifacts_ready_for_teacher_review_count: number;
+  low_confidence_extractions_count: number;
+  rejected_extractions_count: number;
+  retry_required_extractions_count: number;
+  awaiting_teacher_review_count: number;
+  stale_extraction_jobs_count: number;
+  recently_approved_extractions_count: number;
+};
+
+export type TeacherAssistWorkspaceStats = {
+  active_plans_count: number;
+  plans_in_review_count: number;
+  pending_grading_reviews_count: number;
+  recent_upload_count: number;
+  workflow_failure_count: number;
+  assignments_in_review_count: number;
+  extraction_failure_count: number;
+  student_work_ready_for_extraction_count: number;
+  extracted_artifacts_ready_for_teacher_review_count: number;
+  low_confidence_extractions_count: number;
+  rejected_extractions_count: number;
+  retry_required_extractions_count: number;
+  awaiting_teacher_review_count: number;
+  stale_extraction_jobs_count: number;
+  recently_approved_extractions_count: number;
+};
+
+export type TeacherAssistClassWorkspace = {
+  class: TeacherClass;
+  active_plans: TeacherAssistWorkspacePlanSummary[];
+  assignments: TeacherAssistWorkspaceAssignmentSummary[];
+  pending_grading_reviews: TeacherAssistWorkspaceGradingReviewSummary[];
+  recent_submissions: TeacherAssistWorkspaceSubmissionSummary[];
+  workflow_summaries: TeacherAssistWorkspaceWorkflowSummary[];
+  packet_summaries: TeacherAssistWorkspacePacketSummary[];
+  needs_attention_count: number;
+};
+
+export type TeacherAssistWorkspace = {
+  current_school_year: SchoolYear | null;
+  active_grading_period: GradingPeriod | null;
+  today_summary: TeacherAssistWorkspaceTodaySummary;
+  class_workspaces: TeacherAssistClassWorkspace[];
+  needs_attention: TeacherAssistWorkspaceNeedsAttention[];
+  recent_activity: TeacherAssistActivityEvent[];
+  active_workflows: TeacherAssistWorkspaceWorkflowSummary[];
+  review_required_items: TeacherAssistWorkspaceReviewRequiredItem[];
+  workspace_stats: TeacherAssistWorkspaceStats;
 };
 
 export type WeeklyPlanContentStandard = {

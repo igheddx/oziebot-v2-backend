@@ -1,10 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { buildApiUrl } from "@/lib/auth-service";
 import {
+  createResourceExtractionJob,
   createLinkResource,
   fetchResources,
+  fetchResourceDownloadUrl,
   uploadResourceFile,
 } from "@/lib/teacher-assist-api";
 import type { ResourceLibraryItem } from "@/lib/teacher-assist-types";
@@ -29,6 +33,29 @@ function formatDate(value: string) {
   return parsed.toLocaleDateString();
 }
 
+function labelize(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function extractionStatusClasses(status: string | null | undefined) {
+  switch (status) {
+    case "completed":
+      return "bg-emerald-100 text-emerald-700";
+    case "failed":
+      return "bg-rose-100 text-rose-700";
+    case "running":
+      return "bg-sky-100 text-sky-700";
+    case "queued":
+      return "bg-amber-100 text-amber-700";
+    case "cancelled":
+      return "bg-slate-200 text-slate-700";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
 export function TeacherAssistResourcesScreen() {
   const [resources, setResources] = useState<ResourceLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,6 +69,8 @@ export function TeacherAssistResourcesScreen() {
   });
   const [dragActive, setDragActive] = useState(false);
   const [savingLink, setSavingLink] = useState(false);
+  const [downloadingResourceId, setDownloadingResourceId] = useState<string | null>(null);
+  const [startingExtractionId, setStartingExtractionId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(async () => {
@@ -59,6 +88,40 @@ export function TeacherAssistResourcesScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const handleDownloadResource = useCallback(async (resource: ResourceLibraryItem) => {
+    if (!resource.storage_key) return;
+    setError(null);
+    setNotice(null);
+    setDownloadingResourceId(resource.id);
+    try {
+      const download = await fetchResourceDownloadUrl(resource.id);
+      const nextUrl = download.url.startsWith("/") ? buildApiUrl(download.url) : download.url;
+      window.open(nextUrl, "_blank", "noopener,noreferrer");
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Could not prepare the file download.");
+    } finally {
+      setDownloadingResourceId(null);
+    }
+  }, []);
+
+  const handleStartExtraction = useCallback(
+    async (resource: ResourceLibraryItem) => {
+      setError(null);
+      setNotice(null);
+      setStartingExtractionId(resource.id);
+      try {
+        await createResourceExtractionJob(resource.id);
+        await load();
+        setNotice("Resource extraction queued.");
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : "Could not queue extraction.");
+      } finally {
+        setStartingExtractionId(null);
+      }
+    },
+    [load],
+  );
 
   const totalLinkedCount = useMemo(
     () =>
@@ -125,9 +188,8 @@ export function TeacherAssistResourcesScreen() {
             Resource library foundation
           </h1>
           <p className="mt-3 text-base leading-7 text-slate-600">
-            Save curriculum files and links as reusable metadata-first assets. TeacherAssist stores
-            file references and metadata only in this phase—no OCR, extraction, embeddings, or AI
-            generation yet.
+            Save curriculum files and links as reusable metadata-first assets. Uploaded files can
+            now move into the TeacherAssist extraction queue while links remain metadata-only.
           </p>
         </div>
       </section>
@@ -160,7 +222,8 @@ export function TeacherAssistResourcesScreen() {
             <h2 className="text-xl font-semibold text-slate-900">Upload curriculum files</h2>
             <p className="text-sm text-slate-600">
               Drag files here or browse to upload PDFs, presentations, docs, spreadsheets, images,
-              and other supporting materials. Metadata and local storage references are saved now.
+              and other supporting materials. Metadata stays backend-owned and extraction remains
+              mock-first in this phase.
             </p>
           </div>
 
@@ -335,8 +398,8 @@ export function TeacherAssistResourcesScreen() {
           <p className="mt-5 text-sm text-slate-600">Loading resources...</p>
         ) : resources.length === 0 ? (
           <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-900">
-            Upload curriculum resources or save curriculum URLs first. No extraction or AI processing
-            runs yet in this phase.
+            Upload curriculum resources or save curriculum URLs first. Uploaded files can then be
+            queued for extraction; direct links remain unprocessed.
           </div>
         ) : (
           <div className="mt-5 grid gap-3 lg:grid-cols-2">
@@ -371,6 +434,69 @@ export function TeacherAssistResourcesScreen() {
                     <dd>{resource.linked_planning_drafts_count}</dd>
                   </div>
                 </dl>
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-slate-900">Extraction status</p>
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${extractionStatusClasses(
+                        resource.latest_extraction_job?.status,
+                      )}`}
+                    >
+                      {labelize(resource.latest_extraction_job?.status ?? "not_started")}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-600">
+                    {resource.storage_key
+                      ? "TeacherAssist uses a backend-only mock OCR path for this phase."
+                      : "Saved links do not have uploaded files, so extraction is unavailable."}
+                  </p>
+                  {resource.latest_extraction_job?.error_message ? (
+                    <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                      {resource.latest_extraction_job.error_message}
+                    </p>
+                  ) : null}
+                  {resource.latest_extracted_text ? (
+                    <div className="mt-3 rounded-xl bg-white px-3 py-3 text-sm text-slate-700">
+                      <p className="font-semibold text-slate-900">Extracted text preview</p>
+                      <p className="mt-2 leading-6">{resource.latest_extracted_text.preview_text}</p>
+                      <p className="mt-2 text-xs text-slate-500">
+                        Review {labelize(resource.latest_extracted_text.review_status)} · Confidence{" "}
+                        {labelize(resource.latest_extracted_text.confidence_level)}
+                      </p>
+                    </div>
+                  ) : null}
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    {resource.latest_extracted_text ? (
+                      <Link
+                        href={`/teacher-assist/extractions?id=${resource.latest_extracted_text.id}`}
+                        className="ta-button-secondary"
+                      >
+                        Open extraction review
+                      </Link>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void handleStartExtraction(resource)}
+                      disabled={
+                        !resource.storage_key ||
+                        startingExtractionId === resource.id ||
+                        resource.latest_extraction_job?.status === "queued" ||
+                        resource.latest_extraction_job?.status === "running"
+                      }
+                      className="ta-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {startingExtractionId === resource.id
+                        ? "Queueing..."
+                        : resource.latest_extraction_job?.status === "queued" ||
+                            resource.latest_extraction_job?.status === "running"
+                          ? "Extraction in progress"
+                          : "Start extraction"}
+                    </button>
+                    <button type="button" disabled className="ta-button-secondary opacity-60">
+                      OCR enhancements coming later
+                    </button>
+                  </div>
+                </div>
                 {resource.external_url ? (
                   <a
                     href={resource.external_url}
@@ -380,6 +506,15 @@ export function TeacherAssistResourcesScreen() {
                   >
                     Open saved link
                   </a>
+                ) : resource.storage_key ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadResource(resource)}
+                    disabled={downloadingResourceId === resource.id}
+                    className="mt-4 inline-flex text-sm font-semibold text-sky-700 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {downloadingResourceId === resource.id ? "Preparing download..." : "Download file"}
+                  </button>
                 ) : null}
               </article>
             ))}

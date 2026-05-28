@@ -4,19 +4,27 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { buildApiUrl } from "@/lib/auth-service";
 import {
+  cancelExtractionJob,
   createAssignment,
+  createAssignmentGradingReview,
   createAssignmentPrintPacket,
+  createStudentWorkExtractionJob,
+  fetchAssignmentGradingReviews,
   fetchAssignmentStudentWork,
   fetchAssignmentPrintPacketPages,
   fetchAssignmentPrintPackets,
   fetchAssignments,
+  fetchAssignmentStudentWorkDownloadUrl,
   fetchClasses,
   fetchGradingPeriods,
   fetchSchoolYears,
   fetchStandards,
   fetchSubjects,
   fetchTeacherAssistOptions,
+  updateAssignmentGradingReview,
+  updateAssignmentGradingReviewStatus,
   updateAssignmentStudentWorkPacketContext,
   updateAssignmentStudentWorkStatus,
   updateAssignment,
@@ -25,6 +33,7 @@ import {
 } from "@/lib/teacher-assist-api";
 import type {
   Assignment,
+  AssignmentGradingReview,
   AssignmentInput,
   AssignmentPrintPacket,
   AssignmentPrintPage,
@@ -77,9 +86,22 @@ type SubmissionContextForm = {
   assignment_print_page_id: string;
 };
 
+type GradingReviewForm = {
+  status: AssignmentGradingReview["status"];
+  score_suggestion: string;
+  max_score: string;
+  feedback_summary: string;
+  strengths: string;
+  improvement_areas: string;
+  teacher_notes: string;
+  teacher_confirmed_score: string;
+  teacher_confirmed_feedback: string;
+};
+
 const PLACEHOLDER_ACTIONS = [
-  "Start Grading Review",
+  "AI Grading",
   "Update Mastery Matrix",
+  "Send Parent Communication",
 ];
 
 function emptyForm(): AssignmentForm {
@@ -110,6 +132,20 @@ function emptyStudentWorkUploadForm(): StudentWorkUploadForm {
   return {
     student_number: 1,
     assignment_print_packet_id: "",
+  };
+}
+
+function emptyGradingReviewForm(): GradingReviewForm {
+  return {
+    status: "draft",
+    score_suggestion: "",
+    max_score: "",
+    feedback_summary: "",
+    strengths: "",
+    improvement_areas: "",
+    teacher_notes: "",
+    teacher_confirmed_score: "",
+    teacher_confirmed_feedback: "",
   };
 }
 
@@ -148,11 +184,65 @@ function formatFileSize(value: number) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatNumber(value: number | null) {
+  if (value == null) return "";
+  return Number.isInteger(value) ? String(value) : String(value);
+}
+
 function labelize(value: string) {
   return value
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function extractionStatusClasses(status: string | null | undefined) {
+  switch (status) {
+    case "completed":
+      return "bg-emerald-100 text-emerald-700";
+    case "failed":
+      return "bg-rose-100 text-rose-700";
+    case "running":
+      return "bg-sky-100 text-sky-700";
+    case "queued":
+      return "bg-amber-100 text-amber-700";
+    case "cancelled":
+      return "bg-slate-200 text-slate-700";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
+function listToEditorText(values: string[]) {
+  return values.join("\n");
+}
+
+function editorTextToList(value: string) {
+  return value
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function reviewFormFromReview(review: AssignmentGradingReview): GradingReviewForm {
+  return {
+    status: review.status,
+    score_suggestion: formatNumber(review.score_suggestion),
+    max_score: formatNumber(review.max_score),
+    feedback_summary: review.feedback_summary ?? "",
+    strengths: listToEditorText(review.strengths),
+    improvement_areas: listToEditorText(review.improvement_areas),
+    teacher_notes: review.teacher_notes ?? "",
+    teacher_confirmed_score: formatNumber(review.teacher_confirmed_score),
+    teacher_confirmed_feedback: review.teacher_confirmed_feedback ?? "",
+  };
+}
+
+function maybeNumber(value: string) {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function toAssignmentInput(form: AssignmentForm): AssignmentInput {
@@ -235,20 +325,30 @@ export function TeacherAssistAssignmentsScreen() {
     Record<string, AssignmentPrintPage[]>
   >({});
   const [submissions, setSubmissions] = useState<AssignmentStudentWorkSubmission[]>([]);
+  const [gradingReviews, setGradingReviews] = useState<AssignmentGradingReview[]>([]);
   const [studentWorkForm, setStudentWorkForm] = useState<StudentWorkUploadForm>(emptyStudentWorkUploadForm);
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(null);
+  const [selectedGradingReviewId, setSelectedGradingReviewId] = useState<string | null>(null);
   const [selectedSubmissionFile, setSelectedSubmissionFile] = useState<File | null>(null);
   const [submissionContextForm, setSubmissionContextForm] = useState<SubmissionContextForm | null>(null);
+  const [gradingReviewForm, setGradingReviewForm] = useState<GradingReviewForm>(emptyGradingReviewForm);
   const [loading, setLoading] = useState(true);
   const [packetsLoading, setPacketsLoading] = useState(false);
   const [packetPagesLoading, setPacketPagesLoading] = useState(false);
   const [submissionsLoading, setSubmissionsLoading] = useState(false);
+  const [gradingReviewsLoading, setGradingReviewsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generatingPacket, setGeneratingPacket] = useState(false);
   const [uploadingStudentWork, setUploadingStudentWork] = useState(false);
   const [studentWorkUploadProgress, setStudentWorkUploadProgress] = useState(0);
+  const [downloadingSubmissionId, setDownloadingSubmissionId] = useState<string | null>(null);
+  const [startingExtractionId, setStartingExtractionId] = useState<string | null>(null);
+  const [cancellingExtractionId, setCancellingExtractionId] = useState<string | null>(null);
   const [savingSubmissionStatus, setSavingSubmissionStatus] = useState(false);
   const [savingSubmissionContext, setSavingSubmissionContext] = useState(false);
+  const [creatingGradingReview, setCreatingGradingReview] = useState<string | null>(null);
+  const [savingGradingReview, setSavingGradingReview] = useState(false);
+  const [savingGradingReviewStatus, setSavingGradingReviewStatus] = useState(false);
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
   const [statusDrafts, setStatusDrafts] = useState<Record<string, Assignment["status"]>>({});
   const [error, setError] = useState<string | null>(null);
@@ -300,6 +400,9 @@ export function TeacherAssistAssignmentsScreen() {
         setSubmissions([]);
         setSelectedSubmissionId(null);
         setSubmissionContextForm(null);
+        setGradingReviews([]);
+        setSelectedGradingReviewId(null);
+        setGradingReviewForm(emptyGradingReviewForm());
       }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Could not load assignments.");
@@ -352,6 +455,24 @@ export function TeacherAssistAssignmentsScreen() {
     }
   }, []);
 
+  const loadGradingReviews = useCallback(async (assignmentId: string) => {
+    setGradingReviewsLoading(true);
+    try {
+      const nextReviews = await fetchAssignmentGradingReviews(assignmentId);
+      setGradingReviews(nextReviews);
+      setSelectedGradingReviewId((current) => {
+        if (current && nextReviews.some((review) => review.id === current)) return current;
+        return nextReviews[0]?.id ?? null;
+      });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Could not load grading reviews.");
+      setGradingReviews([]);
+      setSelectedGradingReviewId(null);
+    } finally {
+      setGradingReviewsLoading(false);
+    }
+  }, []);
+
   const ensurePacketPages = useCallback(
     async (packetId: string) => {
       if (submissionPagesByPacketId[packetId]) return;
@@ -376,11 +497,15 @@ export function TeacherAssistAssignmentsScreen() {
       setSubmissionContextForm(null);
       setSelectedSubmissionFile(null);
       setStudentWorkForm(emptyStudentWorkUploadForm());
+      setGradingReviews([]);
+      setSelectedGradingReviewId(null);
+      setGradingReviewForm(emptyGradingReviewForm());
       return;
     }
     void loadPackets(packetAssignmentId);
     void loadStudentWork(packetAssignmentId);
-  }, [loadPackets, loadStudentWork, packetAssignmentId]);
+    void loadGradingReviews(packetAssignmentId);
+  }, [loadGradingReviews, loadPackets, loadStudentWork, packetAssignmentId]);
 
   useEffect(() => {
     if (!selectedPacketId) {
@@ -433,6 +558,14 @@ export function TeacherAssistAssignmentsScreen() {
   const selectedSubmission = useMemo(
     () => submissions.find((submission) => submission.id === selectedSubmissionId) ?? null,
     [selectedSubmissionId, submissions],
+  );
+  const selectedGradingReview = useMemo(
+    () => gradingReviews.find((review) => review.id === selectedGradingReviewId) ?? null,
+    [gradingReviews, selectedGradingReviewId],
+  );
+  const reviewBySubmissionId = useMemo(
+    () => Object.fromEntries(gradingReviews.map((review) => [review.student_work_submission_id, review])),
+    [gradingReviews],
   );
 
   const availableSubjects = useMemo(() => {
@@ -496,6 +629,9 @@ export function TeacherAssistAssignmentsScreen() {
     setSubmissionContextForm(null);
     setSelectedSubmissionFile(null);
     setStudentWorkForm(emptyStudentWorkUploadForm());
+    setGradingReviews([]);
+    setSelectedGradingReviewId(null);
+    setGradingReviewForm(emptyGradingReviewForm());
     setNotice(null);
     setError(null);
   }, []);
@@ -601,6 +737,85 @@ export function TeacherAssistAssignmentsScreen() {
     }
   }, [loadStudentWork, packetAssignmentId, selectedSubmissionFile, studentWorkForm]);
 
+  const handleStartGradingReview = useCallback(
+    async (submission: AssignmentStudentWorkSubmission) => {
+      const existing = reviewBySubmissionId[submission.id];
+      if (existing) {
+        setSelectedGradingReviewId(existing.id);
+        setNotice("Opened existing grading review.");
+        setError(null);
+        return;
+      }
+      setCreatingGradingReview(submission.id);
+      setError(null);
+      setNotice(null);
+      try {
+        const created = await createAssignmentGradingReview(submission.id, {
+          student_number: submission.student_number,
+        });
+        if (packetAssignmentId) {
+          await loadGradingReviews(packetAssignmentId);
+        }
+        setSelectedGradingReviewId(created.id);
+        setNotice("Grading review created.");
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : "Could not start grading review.");
+      } finally {
+        setCreatingGradingReview(null);
+      }
+    },
+    [loadGradingReviews, packetAssignmentId, reviewBySubmissionId],
+  );
+
+  const handleDownloadSubmission = useCallback(async () => {
+    if (!selectedSubmission) return;
+    setDownloadingSubmissionId(selectedSubmission.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const download = await fetchAssignmentStudentWorkDownloadUrl(selectedSubmission.id);
+      const nextUrl = download.url.startsWith("/") ? buildApiUrl(download.url) : download.url;
+      window.open(nextUrl, "_blank", "noopener,noreferrer");
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Could not prepare the student-work download.");
+    } finally {
+      setDownloadingSubmissionId(null);
+    }
+  }, [selectedSubmission]);
+
+  const handleStartExtraction = useCallback(async () => {
+    if (!selectedSubmission || !packetAssignmentId) return;
+    setError(null);
+    setNotice(null);
+    setStartingExtractionId(selectedSubmission.id);
+    try {
+      await createStudentWorkExtractionJob(selectedSubmission.id);
+      await loadStudentWork(packetAssignmentId);
+      setNotice(`Extraction queued for STUDENT #${selectedSubmission.student_number}.`);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Could not queue extraction.");
+    } finally {
+      setStartingExtractionId(null);
+    }
+  }, [loadStudentWork, packetAssignmentId, selectedSubmission]);
+
+  const handleCancelExtraction = useCallback(async () => {
+    const extractionJobId = selectedSubmission?.latest_extraction_job?.id;
+    if (!selectedSubmission || !extractionJobId || !packetAssignmentId) return;
+    setError(null);
+    setNotice(null);
+    setCancellingExtractionId(extractionJobId);
+    try {
+      await cancelExtractionJob(extractionJobId);
+      await loadStudentWork(packetAssignmentId);
+      setNotice(`Extraction cancelled for STUDENT #${selectedSubmission.student_number}.`);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Could not cancel extraction.");
+    } finally {
+      setCancellingExtractionId(null);
+    }
+  }, [loadStudentWork, packetAssignmentId, selectedSubmission]);
+
   const handleUpdateSubmissionStatus = useCallback(async () => {
     if (!selectedSubmission || !submissionContextForm) return;
     setSavingSubmissionStatus(true);
@@ -640,6 +855,53 @@ export function TeacherAssistAssignmentsScreen() {
     }
   }, [loadStudentWork, packetAssignmentId, selectedSubmission, submissionContextForm]);
 
+  const handleSaveGradingReview = useCallback(async () => {
+    if (!selectedGradingReview) return;
+    setSavingGradingReview(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await updateAssignmentGradingReview(selectedGradingReview.id, {
+        status: gradingReviewForm.status,
+        score_suggestion: maybeNumber(gradingReviewForm.score_suggestion),
+        max_score: maybeNumber(gradingReviewForm.max_score),
+        feedback_summary: gradingReviewForm.feedback_summary.trim() || null,
+        strengths: editorTextToList(gradingReviewForm.strengths),
+        improvement_areas: editorTextToList(gradingReviewForm.improvement_areas),
+        teacher_notes: gradingReviewForm.teacher_notes.trim() || null,
+        teacher_confirmed_score: maybeNumber(gradingReviewForm.teacher_confirmed_score),
+        teacher_confirmed_feedback: gradingReviewForm.teacher_confirmed_feedback.trim() || null,
+        items: [],
+      });
+      if (packetAssignmentId) {
+        await loadGradingReviews(packetAssignmentId);
+      }
+      setNotice("Grading review saved.");
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Could not save grading review.");
+    } finally {
+      setSavingGradingReview(false);
+    }
+  }, [gradingReviewForm, loadGradingReviews, packetAssignmentId, selectedGradingReview]);
+
+  const handleUpdateGradingReviewStatus = useCallback(async () => {
+    if (!selectedGradingReview) return;
+    setSavingGradingReviewStatus(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await updateAssignmentGradingReviewStatus(selectedGradingReview.id, gradingReviewForm.status);
+      if (packetAssignmentId) {
+        await loadGradingReviews(packetAssignmentId);
+      }
+      setNotice("Grading review status updated.");
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Could not update grading review status.");
+    } finally {
+      setSavingGradingReviewStatus(false);
+    }
+  }, [gradingReviewForm.status, loadGradingReviews, packetAssignmentId, selectedGradingReview]);
+
   useEffect(() => {
     if (!selectedSubmission) {
       setSubmissionContextForm(null);
@@ -657,6 +919,14 @@ export function TeacherAssistAssignmentsScreen() {
     void ensurePacketPages(submissionContextForm.assignment_print_packet_id);
   }, [ensurePacketPages, submissionContextForm?.assignment_print_packet_id]);
 
+  useEffect(() => {
+    if (!selectedGradingReview) {
+      setGradingReviewForm(emptyGradingReviewForm());
+      return;
+    }
+    setGradingReviewForm(reviewFormFromReview(selectedGradingReview));
+  }, [selectedGradingReview]);
+
   return (
     <div className="space-y-6">
       <section className="ta-panel p-6 sm:p-8">
@@ -665,19 +935,21 @@ export function TeacherAssistAssignmentsScreen() {
             TeacherAssist Assignments
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
-            Assignment packets and student-work intake foundation
+            Assignment packets, student work, and grading review foundation
           </h1>
           <p className="mt-3 text-base leading-7 text-slate-600">
             Create, edit, organize, and move assignments through a teacher-review lifecycle with
             class, subject, standards, printable QR packet context, and anonymous student-work
-            uploads. OCR, grading review, and mastery updates remain intentionally deferred.
+            uploads. Grading review stays teacher-confirmation-first, while OCR, AI grading, mastery,
+            and gradebook commit remain intentionally deferred.
           </p>
         </div>
       </section>
 
       <section className="ta-alert ta-alert-info">
-        Assignment packets and student-work intake are software-only in this phase. No provider
-        call, OCR, grading automation, mastery update, or trading behavior is involved here.
+        Assignment packets, student-work intake, and grading review are software-only in this phase.
+        No provider call, OCR, grading automation, mastery update, gradebook commit, or trading
+        behavior is involved here.
       </section>
 
       {error ? <section className="ta-alert ta-alert-error">{error}</section> : null}
@@ -1402,7 +1674,7 @@ export function TeacherAssistAssignmentsScreen() {
               <h2 className="text-xl font-semibold text-slate-900">Student Work</h2>
               <p className="mt-1 text-sm text-slate-600">
                 Upload student work by anonymous STUDENT # and keep review status separate from any
-                future OCR or grading workflow.
+                extraction, grading review, or later AI workflow.
               </p>
             </div>
             {packetAssignment ? (
@@ -1496,43 +1768,79 @@ export function TeacherAssistAssignmentsScreen() {
                   </div>
                 ) : (
                   <div className="mt-3 space-y-3">
-                    {submissions.map((submission) => (
-                      <button
-                        key={submission.id}
-                        type="button"
-                        onClick={() => setSelectedSubmissionId(submission.id)}
-                        className={`w-full rounded-2xl border p-4 text-left transition ${
-                          submission.id === selectedSubmissionId
-                            ? "border-sky-300 bg-sky-50"
-                            : "border-slate-200 bg-white hover:border-sky-200 hover:bg-sky-50/40"
-                        }`}
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-semibold text-slate-900">
-                            STUDENT #{submission.student_number}
-                          </span>
-                          <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-800">
-                            {labelize(submission.processing_status)}
-                          </span>
-                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                            {labelize(submission.upload_status)}
-                          </span>
+                    {submissions.map((submission) => {
+                      const linkedReview = reviewBySubmissionId[submission.id];
+                      return (
+                        <div
+                          key={submission.id}
+                          className={`rounded-2xl border p-4 transition ${
+                            submission.id === selectedSubmissionId
+                              ? "border-sky-300 bg-sky-50"
+                              : "border-slate-200 bg-white"
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setSelectedSubmissionId(submission.id)}
+                            className="w-full text-left"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-semibold text-slate-900">
+                                STUDENT #{submission.student_number}
+                              </span>
+                              <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-800">
+                                {labelize(submission.processing_status)}
+                              </span>
+                              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                                {labelize(submission.upload_status)}
+                              </span>
+                              <span
+                                className={`rounded-full px-2.5 py-1 text-xs font-semibold ${extractionStatusClasses(
+                                  submission.latest_extraction_job?.status,
+                                )}`}
+                              >
+                                Extraction: {labelize(submission.latest_extraction_job?.status ?? "not_started")}
+                              </span>
+                              {linkedReview ? (
+                                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                                  Review: {labelize(linkedReview.status)}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-600">
+                              <span>{submission.original_filename}</span>
+                              <span>{formatFileSize(submission.file_size)}</span>
+                              <span>{submission.mime_type}</span>
+                            </div>
+                            <p className="mt-2 text-xs text-slate-500">
+                              {submission.assignment_print_page_id
+                                ? "Linked to a packet page"
+                                : submission.assignment_print_packet_id
+                                  ? "Linked to a packet"
+                                  : "No packet/page link yet"}{" "}
+                              · Updated {formatDateTime(submission.updated_at)}
+                            </p>
+                          </button>
+                          <div className="mt-3 flex flex-wrap gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedSubmissionId(submission.id);
+                                void handleStartGradingReview(submission);
+                              }}
+                              disabled={creatingGradingReview === submission.id}
+                              className="ta-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {creatingGradingReview === submission.id
+                                ? "Starting..."
+                                : linkedReview
+                                  ? "Open Grading Review"
+                                  : "Start Grading Review"}
+                            </button>
+                          </div>
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-600">
-                          <span>{submission.original_filename}</span>
-                          <span>{formatFileSize(submission.file_size)}</span>
-                          <span>{submission.mime_type}</span>
-                        </div>
-                        <p className="mt-2 text-xs text-slate-500">
-                          {submission.assignment_print_page_id
-                            ? "Linked to a packet page"
-                            : submission.assignment_print_packet_id
-                              ? "Linked to a packet"
-                              : "No packet/page link yet"}{" "}
-                          · Updated {formatDateTime(submission.updated_at)}
-                        </p>
-                      </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1542,17 +1850,17 @@ export function TeacherAssistAssignmentsScreen() {
 
         <article className="ta-panel p-6">
           <div className="flex flex-col gap-2">
-            <h2 className="text-xl font-semibold text-slate-900">Submission detail</h2>
+            <h2 className="text-xl font-semibold text-slate-900">Submission + grading review detail</h2>
             <p className="mt-1 text-sm text-slate-600">
-              Keep uploads anonymous, set review state, and optionally attach packet/page context
-              when printable packet metadata is available.
+              Manage anonymous upload metadata first, then review work with teacher-confirmed score
+              and feedback before any later automation exists.
             </p>
           </div>
 
           {!selectedSubmission || !submissionContextForm ? (
             <div className="mt-5 rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">
-              Select a student-work submission to inspect its metadata and update status or packet
-              context.
+              Select a student-work submission to inspect its metadata, update packet context, or
+              open a grading review.
             </div>
           ) : (
             <div className="mt-5 space-y-5">
@@ -1577,7 +1885,101 @@ export function TeacherAssistAssignmentsScreen() {
                   <p>Filename: {selectedSubmission.original_filename}</p>
                   <p>MIME type: {selectedSubmission.mime_type}</p>
                   <p>File size: {formatFileSize(selectedSubmission.file_size)}</p>
-                  <p>Storage key: {selectedSubmission.storage_key}</p>
+                  <p>Stored privately through the TeacherAssist backend.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleDownloadSubmission()}
+                  disabled={downloadingSubmissionId === selectedSubmission.id}
+                  className="mt-4 ta-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {downloadingSubmissionId === selectedSubmission.id
+                    ? "Preparing download..."
+                    : "Download Uploaded File"}
+                </button>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-slate-900">Extraction</p>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${extractionStatusClasses(
+                      selectedSubmission.latest_extraction_job?.status,
+                    )}`}
+                  >
+                    {labelize(selectedSubmission.latest_extraction_job?.status ?? "not_started")}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-slate-600">
+                  Extraction reads the uploaded file through private TeacherAssist storage and keeps
+                  later AI grading disabled in this phase.
+                </p>
+                {selectedSubmission.latest_extraction_job?.error_message ? (
+                  <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {selectedSubmission.latest_extraction_job.error_message}
+                  </p>
+                ) : null}
+                {selectedSubmission.latest_extracted_text ? (
+                  <div className="mt-3 rounded-xl bg-white px-3 py-3 text-sm text-slate-700">
+                    <p className="font-semibold text-slate-900">Extracted text preview</p>
+                    <p className="mt-2 leading-6">{selectedSubmission.latest_extracted_text.preview_text}</p>
+                    <p className="mt-2 text-xs text-slate-500">
+                      Review {labelize(selectedSubmission.latest_extracted_text.review_status)} · Confidence{" "}
+                      {labelize(selectedSubmission.latest_extracted_text.confidence_level)}
+                    </p>
+                    {selectedSubmission.latest_extracted_text.redaction_applied ? (
+                      <p className="mt-2 text-xs text-amber-700">
+                        Preview was redacted because TeacherAssist flagged potential PII-like content.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="mt-4 flex flex-wrap gap-3">
+                  {selectedSubmission.latest_extracted_text ? (
+                    <Link
+                      href={`/teacher-assist/extractions?id=${selectedSubmission.latest_extracted_text.id}`}
+                      className="ta-button-secondary"
+                    >
+                      Open extraction review
+                    </Link>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleStartExtraction();
+                    }}
+                    disabled={
+                      startingExtractionId === selectedSubmission.id ||
+                      selectedSubmission.latest_extraction_job?.status === "queued" ||
+                      selectedSubmission.latest_extraction_job?.status === "running"
+                    }
+                    className="ta-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {startingExtractionId === selectedSubmission.id
+                      ? "Queueing..."
+                      : selectedSubmission.latest_extraction_job?.status === "queued" ||
+                          selectedSubmission.latest_extraction_job?.status === "running"
+                        ? "Extraction in progress"
+                        : "Start extraction"}
+                  </button>
+                  {selectedSubmission.latest_extraction_job?.status === "queued" ||
+                  selectedSubmission.latest_extraction_job?.status === "running" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleCancelExtraction();
+                      }}
+                      disabled={cancellingExtractionId === selectedSubmission.latest_extraction_job?.id}
+                      className="ta-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {cancellingExtractionId === selectedSubmission.latest_extraction_job?.id
+                        ? "Cancelling..."
+                        : "Cancel extraction"}
+                    </button>
+                  ) : null}
+                  <button type="button" disabled className="ta-button-secondary opacity-60">
+                    AI grading coming later
+                  </button>
                 </div>
               </div>
 
@@ -1691,10 +2093,272 @@ export function TeacherAssistAssignmentsScreen() {
                     {savingSubmissionContext ? "Saving..." : "Save Packet/Page Context"}
                   </button>
                   <p className="text-sm text-slate-500">
-                    OCR and grading remain disabled; this only stores anonymous upload metadata and
-                    packet/page linkage.
+                    OCR remains disabled; this only stores anonymous upload metadata and packet/page
+                    linkage.
                   </p>
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Grading reviews</p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Manual, teacher-confirmed review only. No AI grading, mastery commit, or parent
+                      messaging yet.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleStartGradingReview(selectedSubmission);
+                    }}
+                    disabled={creatingGradingReview === selectedSubmission.id}
+                    className="ta-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {creatingGradingReview === selectedSubmission.id
+                      ? "Starting..."
+                      : reviewBySubmissionId[selectedSubmission.id]
+                        ? "Open Review"
+                        : "Start Grading Review"}
+                  </button>
+                </div>
+
+                {gradingReviewsLoading ? (
+                  <div className="mt-4 rounded-2xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
+                    Loading grading reviews...
+                  </div>
+                ) : gradingReviews.length === 0 ? (
+                  <div className="mt-4 rounded-2xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
+                    No grading reviews created for this assignment yet.
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    {gradingReviews.map((review) => (
+                      <button
+                        key={review.id}
+                        type="button"
+                        onClick={() => setSelectedGradingReviewId(review.id)}
+                        className={`w-full rounded-2xl border p-4 text-left transition ${
+                          review.id === selectedGradingReviewId
+                            ? "border-sky-300 bg-sky-50"
+                            : "border-slate-200 bg-white hover:border-sky-200 hover:bg-sky-50/40"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold text-slate-900">
+                            STUDENT #{review.student_number}
+                          </span>
+                          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                            {labelize(review.status)}
+                          </span>
+                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                            {labelize(review.review_source)}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm text-slate-600">
+                          Submission:{" "}
+                          {submissions.find((submission) => submission.id === review.student_work_submission_id)
+                            ?.original_filename ?? "Unknown"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Provider: {review.provider_name ?? "None"} · Model: {review.provider_model ?? "None"} ·
+                          Cost: $0.00
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {!selectedGradingReview ? (
+                  <div className="mt-4 rounded-2xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
+                    Select or create a grading review to edit score, feedback, strengths, and teacher
+                    confirmation fields.
+                  </div>
+                ) : (
+                  <div className="mt-5 space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="flex flex-col gap-2">
+                        <span className="ta-label">Review status</span>
+                        <select
+                          className="ta-input"
+                          value={gradingReviewForm.status}
+                          onChange={(event) =>
+                            setGradingReviewForm((current) => ({
+                              ...current,
+                              status: event.target.value as AssignmentGradingReview["status"],
+                            }))
+                          }
+                        >
+                          {(options?.assignment_grading_review_statuses ?? [
+                            "draft",
+                            "ai_suggested",
+                            "teacher_reviewing",
+                            "teacher_confirmed",
+                            "returned_for_revision",
+                            "archived",
+                          ]).map((status) => (
+                            <option key={status} value={status}>
+                              {labelize(status)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                        <p>Provider: {selectedGradingReview.provider_name ?? "None"}</p>
+                        <p>Model: {selectedGradingReview.provider_model ?? "None"}</p>
+                        <p>Prompt version: {selectedGradingReview.prompt_version ?? "None"}</p>
+                        <p>Usage event: {selectedGradingReview.ai_usage_event_id ?? "None"}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="flex flex-col gap-2">
+                        <span className="ta-label">Score suggestion</span>
+                        <input
+                          className="ta-input"
+                          value={gradingReviewForm.score_suggestion}
+                          onChange={(event) =>
+                            setGradingReviewForm((current) => ({
+                              ...current,
+                              score_suggestion: event.target.value,
+                            }))
+                          }
+                          placeholder="Optional manual score suggestion"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2">
+                        <span className="ta-label">Max score</span>
+                        <input
+                          className="ta-input"
+                          value={gradingReviewForm.max_score}
+                          onChange={(event) =>
+                            setGradingReviewForm((current) => ({
+                              ...current,
+                              max_score: event.target.value,
+                            }))
+                          }
+                          placeholder="Optional max points"
+                        />
+                      </label>
+                    </div>
+
+                    <label className="flex flex-col gap-2">
+                      <span className="ta-label">Feedback summary</span>
+                      <textarea
+                        className="ta-input min-h-24"
+                        value={gradingReviewForm.feedback_summary}
+                        onChange={(event) =>
+                          setGradingReviewForm((current) => ({
+                            ...current,
+                            feedback_summary: event.target.value,
+                          }))
+                        }
+                        placeholder="Teacher-facing summary without student names or emails"
+                      />
+                    </label>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="flex flex-col gap-2">
+                        <span className="ta-label">Strengths</span>
+                        <textarea
+                          className="ta-input min-h-28"
+                          value={gradingReviewForm.strengths}
+                          onChange={(event) =>
+                            setGradingReviewForm((current) => ({
+                              ...current,
+                              strengths: event.target.value,
+                            }))
+                          }
+                          placeholder="One strength per line"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2">
+                        <span className="ta-label">Improvement areas</span>
+                        <textarea
+                          className="ta-input min-h-28"
+                          value={gradingReviewForm.improvement_areas}
+                          onChange={(event) =>
+                            setGradingReviewForm((current) => ({
+                              ...current,
+                              improvement_areas: event.target.value,
+                            }))
+                          }
+                          placeholder="One improvement area per line"
+                        />
+                      </label>
+                    </div>
+
+                    <label className="flex flex-col gap-2">
+                      <span className="ta-label">Teacher notes</span>
+                      <textarea
+                        className="ta-input min-h-24"
+                        value={gradingReviewForm.teacher_notes}
+                        onChange={(event) =>
+                          setGradingReviewForm((current) => ({
+                            ...current,
+                            teacher_notes: event.target.value,
+                          }))
+                        }
+                        placeholder="Private teacher review notes"
+                      />
+                    </label>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="flex flex-col gap-2">
+                        <span className="ta-label">Teacher confirmed score</span>
+                        <input
+                          className="ta-input"
+                          value={gradingReviewForm.teacher_confirmed_score}
+                          onChange={(event) =>
+                            setGradingReviewForm((current) => ({
+                              ...current,
+                              teacher_confirmed_score: event.target.value,
+                            }))
+                          }
+                          placeholder="Required before teacher_confirmed if no confirmed feedback"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2">
+                        <span className="ta-label">Teacher confirmed feedback</span>
+                        <textarea
+                          className="ta-input min-h-24"
+                          value={gradingReviewForm.teacher_confirmed_feedback}
+                          onChange={(event) =>
+                            setGradingReviewForm((current) => ({
+                              ...current,
+                              teacher_confirmed_feedback: event.target.value,
+                            }))
+                          }
+                          placeholder="Required before teacher_confirmed if no confirmed score"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleSaveGradingReview();
+                        }}
+                        disabled={savingGradingReview}
+                        className="ta-button-primary disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {savingGradingReview ? "Saving..." : "Save Review"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleUpdateGradingReviewStatus();
+                        }}
+                        disabled={savingGradingReviewStatus}
+                        className="ta-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {savingGradingReviewStatus ? "Updating..." : "Update Review Status"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -1,5 +1,6 @@
 export const TEACHER_ASSIST_NAV_LINKS = [
-  { href: "/teacher-assist", label: "Dashboard" },
+  { href: "/teacher-assist/workspace", label: "Workspace" },
+  { href: "/teacher-assist/extractions", label: "Extractions" },
   { href: "/teacher-assist/plans", label: "Plans" },
   { href: "/teacher-assist/assignments", label: "Assignments" },
   { href: "/teacher-assist/resources", label: "Resources" },

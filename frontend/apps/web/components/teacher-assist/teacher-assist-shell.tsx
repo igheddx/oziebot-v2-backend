@@ -49,8 +49,10 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
           <nav className="mt-5 flex flex-wrap gap-2">
             {TEACHER_ASSIST_NAV_LINKS.map((item) => {
               const active =
-                item.href === "/teacher-assist"
-                  ? pathname === item.href
+                item.href === "/teacher-assist/workspace"
+                  ? pathname === "/teacher-assist" ||
+                    pathname === item.href ||
+                    pathname.startsWith(`${item.href}/`)
                   : pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
                 <Link
