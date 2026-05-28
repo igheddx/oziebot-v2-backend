@@ -49,11 +49,27 @@ class TeacherAssistResourceLibraryItem(Base):
         back_populates="resource_library_item",
         cascade="all, delete-orphan",
     )
+    extraction_jobs: Mapped[list["TeacherAssistExtractionJob"]] = relationship(
+        "TeacherAssistExtractionJob",
+        back_populates="resource_library_item",
+        cascade="all, delete-orphan",
+        order_by="TeacherAssistExtractionJob.created_at.desc()",
+    )
+    extracted_text_records: Mapped[list["TeacherAssistExtractedTextRecord"]] = relationship(
+        "TeacherAssistExtractedTextRecord",
+        back_populates="resource_library_item",
+        cascade="all, delete-orphan",
+        order_by="TeacherAssistExtractedTextRecord.created_at.desc()",
+    )
 
 
 from typing import TYPE_CHECKING  # noqa: E402
 
 if TYPE_CHECKING:
+    from oziebot_api.models.teacher_assist_extracted_text_record import (
+        TeacherAssistExtractedTextRecord,
+    )
+    from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtractionJob
     from oziebot_api.models.teacher_assist_pacing_item_resource import TeacherAssistPacingItemResource
     from oziebot_api.models.teacher_assist_planning_input_draft_resource import (
         TeacherAssistPlanningInputDraftResource,

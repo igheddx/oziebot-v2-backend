@@ -19,6 +19,7 @@ from oziebot_api.models.teacher_assist_weekly_plan_version import TeacherAssistW
 from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
 from oziebot_api.models.teacher_assist_workflow_step import TeacherAssistWorkflowStep
 from oziebot_api.models.teacher_assist_class import TeacherAssistClass
+from oziebot_api.services.teacher_assist.activity_events import record_activity_event
 from oziebot_api.services.teacher_assist.instructional_plan_validator import (
     validate_instructional_plan_output,
     validate_instructional_plan_section_output,
@@ -90,6 +91,51 @@ def _parse_snapshot_uuid(value: Any) -> uuid.UUID | None:
     if not value:
         return None
     return uuid.UUID(str(value))
+
+
+def _snapshot_school_year_id(snapshot: dict[str, Any]) -> uuid.UUID | None:
+    draft = dict(snapshot.get("draft") or {})
+    school_year = dict(snapshot.get("school_year") or {})
+    return _parse_snapshot_uuid(school_year.get("id") or draft.get("school_year_id"))
+
+
+def _snapshot_grading_period_id(snapshot: dict[str, Any]) -> uuid.UUID | None:
+    draft = dict(snapshot.get("draft") or {})
+    grading_period = dict(snapshot.get("grading_period") or {})
+    return _parse_snapshot_uuid(grading_period.get("id") or draft.get("grading_period_id"))
+
+
+def _snapshot_class_id(snapshot: dict[str, Any]) -> uuid.UUID | None:
+    draft = dict(snapshot.get("draft") or {})
+    class_context = dict(snapshot.get("class") or {})
+    return _parse_snapshot_uuid(class_context.get("id") or draft.get("class_id"))
+
+
+def _snapshot_subject_id(snapshot: dict[str, Any]) -> uuid.UUID | None:
+    draft = dict(snapshot.get("draft") or {})
+    if draft.get("subject_id"):
+        return _parse_snapshot_uuid(draft.get("subject_id"))
+    subjects = list(snapshot.get("subjects") or [])
+    for subject in subjects:
+        if isinstance(subject, dict) and subject.get("id"):
+            return _parse_snapshot_uuid(subject.get("id"))
+    return None
+
+
+def _plan_school_year_id(plan: TeacherAssistWeeklyPlan) -> uuid.UUID | None:
+    return _snapshot_school_year_id(dict(plan.source_context_json or {})) or plan.school_year_origin_id
+
+
+def _plan_grading_period_id(plan: TeacherAssistWeeklyPlan) -> uuid.UUID | None:
+    return _snapshot_grading_period_id(dict(plan.source_context_json or {}))
+
+
+def _plan_class_id(plan: TeacherAssistWeeklyPlan) -> uuid.UUID | None:
+    return _snapshot_class_id(dict(plan.source_context_json or {}))
+
+
+def _plan_subject_id(plan: TeacherAssistWeeklyPlan) -> uuid.UUID | None:
+    return _snapshot_subject_id(dict(plan.source_context_json or {}))
 
 
 def list_teacher_assist_workflows(
@@ -375,6 +421,7 @@ def update_weekly_plan(
     )
     now = datetime.now(UTC)
     next_version = _next_weekly_plan_version_number(db, weekly_plan_id=weekly_plan.id)
+    previous_status = weekly_plan.status
     weekly_plan.title = title or weekly_plan.title
     if status is not None:
         weekly_plan.status = validate_weekly_plan_status(status)
@@ -393,6 +440,34 @@ def update_weekly_plan(
         version_number=next_version,
         change_reason=change_reason,
         created_at=now,
+    )
+    record_activity_event(
+        db,
+        tenant_id=weekly_plan.tenant_id,
+        user_id=user_id,
+        event_type="plan_completed"
+        if weekly_plan.status == "completed" and previous_status != "completed"
+        else "plan_updated",
+        event_category="planning",
+        entity_type="weekly_plan",
+        entity_id=weekly_plan.id,
+        workflow_id=weekly_plan.workflow_id,
+        school_year_id=_plan_school_year_id(weekly_plan),
+        grading_period_id=_plan_grading_period_id(weekly_plan),
+        class_id=_plan_class_id(weekly_plan),
+        subject_id=_plan_subject_id(weekly_plan),
+        summary_text=(
+            f"Marked plan '{weekly_plan.title}' complete."
+            if weekly_plan.status == "completed" and previous_status != "completed"
+            else f"Updated plan '{weekly_plan.title}'."
+        ),
+        details_json={
+            "previous_status": previous_status,
+            "status": weekly_plan.status,
+            "version_number": next_version,
+            "change_reason": change_reason,
+        },
+        event_timestamp=now,
     )
     db.flush()
     return weekly_plan
@@ -616,6 +691,32 @@ def regenerate_weekly_plan_section(
             },
             created_at=now,
         )
+    )
+    record_activity_event(
+        db,
+        tenant_id=weekly_plan.tenant_id,
+        user_id=user_id,
+        event_type="section_regenerated",
+        event_category="planning",
+        entity_type="weekly_plan",
+        entity_id=weekly_plan.id,
+        workflow_id=weekly_plan.workflow_id,
+        school_year_id=_plan_school_year_id(weekly_plan),
+        grading_period_id=_plan_grading_period_id(weekly_plan),
+        class_id=_plan_class_id(weekly_plan),
+        subject_id=_plan_subject_id(weekly_plan),
+        summary_text=f"Regenerated {section_key} for '{weekly_plan.title}'.",
+        details_json={
+            "section_key": section_key,
+            "section_path": resolved_path,
+            "provider_name": provider_result.provider,
+            "provider_model": provider_result.model,
+            "prompt_version": str(
+                (provider_result.metadata_json or {}).get("prompt_version")
+                or INSTRUCTIONAL_PLAN_PROMPT_VERSION
+            ),
+        },
+        event_timestamp=now,
     )
     db.flush()
     return weekly_plan
@@ -1334,6 +1435,22 @@ def claim_next_teacher_assist_workflow(
             "max_retries": workflow.max_retries,
         },
     )
+    record_activity_event(
+        db,
+        tenant_id=workflow.tenant_id,
+        user_id=workflow.user_id,
+        event_type="workflow_started",
+        event_category="workflow",
+        entity_type="workflow",
+        entity_id=workflow.id,
+        workflow_id=workflow.id,
+        school_year_id=_snapshot_school_year_id(workflow.input_snapshot_json),
+        grading_period_id=_snapshot_grading_period_id(workflow.input_snapshot_json),
+        class_id=_snapshot_class_id(workflow.input_snapshot_json),
+        subject_id=_snapshot_subject_id(workflow.input_snapshot_json),
+        summary_text="Started TeacherAssist instructional-plan workflow.",
+        details_json={"retry_count": workflow.retry_count, "workflow_type": workflow.workflow_type},
+    )
     db.flush()
     return workflow
 
@@ -1452,6 +1569,22 @@ def cancel_teacher_assist_workflow(
     for step in workflow.steps:
         if step.status == "queued":
             _set_workflow_step_status(step, status="skipped")
+    record_activity_event(
+        db,
+        tenant_id=workflow.tenant_id,
+        user_id=workflow.user_id,
+        event_type="workflow_cancelled",
+        event_category="workflow",
+        entity_type="workflow",
+        entity_id=workflow.id,
+        workflow_id=workflow.id,
+        school_year_id=_snapshot_school_year_id(workflow.input_snapshot_json),
+        grading_period_id=_snapshot_grading_period_id(workflow.input_snapshot_json),
+        class_id=_snapshot_class_id(workflow.input_snapshot_json),
+        subject_id=_snapshot_subject_id(workflow.input_snapshot_json),
+        summary_text="Cancelled TeacherAssist instructional-plan workflow.",
+        details_json={"workflow_type": workflow.workflow_type},
+    )
     db.flush()
     return workflow
 
@@ -1695,6 +1828,28 @@ def _persist_teacher_assist_workflow_success(
             created_at=now,
         )
     )
+    record_activity_event(
+        session,
+        tenant_id=weekly_plan.tenant_id,
+        user_id=workflow.user_id,
+        event_type="plan_created",
+        event_category="planning",
+        entity_type="weekly_plan",
+        entity_id=weekly_plan.id,
+        workflow_id=workflow.id,
+        school_year_id=_plan_school_year_id(weekly_plan),
+        grading_period_id=_plan_grading_period_id(weekly_plan),
+        class_id=_plan_class_id(weekly_plan),
+        subject_id=_plan_subject_id(weekly_plan),
+        summary_text=f"Generated instructional plan '{weekly_plan.title}'.",
+        details_json={
+            "planning_scope": weekly_plan.planning_scope,
+            "provider_name": provider_result.provider,
+            "provider_model": provider_result.model,
+            "prompt_version": workflow.prompt_version,
+        },
+        event_timestamp=now,
+    )
     _set_workflow_step_status(
         persist_step,
         status="completed",
@@ -1738,6 +1893,22 @@ def _persist_teacher_assist_workflow_success(
         message="TeacherAssist workflow completed successfully",
         metadata={"output_ref_id": str(weekly_plan.id)},
     )
+    record_activity_event(
+        session,
+        tenant_id=workflow.tenant_id,
+        user_id=workflow.user_id,
+        event_type="workflow_completed",
+        event_category="workflow",
+        entity_type="workflow",
+        entity_id=workflow.id,
+        workflow_id=workflow.id,
+        school_year_id=_snapshot_school_year_id(workflow.input_snapshot_json),
+        grading_period_id=_snapshot_grading_period_id(workflow.input_snapshot_json),
+        class_id=_snapshot_class_id(workflow.input_snapshot_json),
+        subject_id=_snapshot_subject_id(workflow.input_snapshot_json),
+        summary_text="Completed TeacherAssist instructional-plan workflow.",
+        details_json={"output_ref_id": str(weekly_plan.id), "workflow_type": workflow.workflow_type},
+    )
     session.commit()
 
 
@@ -1752,6 +1923,31 @@ def _persist_teacher_assist_workflow_failure(
     try:
         workflow = _refresh_workflow_for_execution(failure_session, workflow_id)
         _mark_workflow_for_retry_or_failure(workflow, exc=exc, error_code=error_code)
+        record_activity_event(
+            failure_session,
+            tenant_id=workflow.tenant_id,
+            user_id=workflow.user_id,
+            event_type="workflow_failed",
+            event_category="workflow",
+            entity_type="workflow",
+            entity_id=workflow.id,
+            workflow_id=workflow.id,
+            school_year_id=_snapshot_school_year_id(workflow.input_snapshot_json),
+            grading_period_id=_snapshot_grading_period_id(workflow.input_snapshot_json),
+            class_id=_snapshot_class_id(workflow.input_snapshot_json),
+            subject_id=_snapshot_subject_id(workflow.input_snapshot_json),
+            summary_text=(
+                "TeacherAssist instructional-plan workflow failed and is queued to retry."
+                if workflow.status == "queued"
+                else "TeacherAssist instructional-plan workflow failed."
+            ),
+            details_json={
+                "error_code": error_code,
+                "retry_count": workflow.retry_count,
+                "max_retries": workflow.max_retries,
+                "status": workflow.status,
+            },
+        )
         failure_session.commit()
     finally:
         failure_session.close()

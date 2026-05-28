@@ -62,10 +62,45 @@ class Settings(BaseSettings):
     ai_diagnostic_model_name: str = "gpt-4.1-mini"
     ai_diagnostic_prompt_version: str = "ai-diagnostics-v1"
     teacher_assist_storage_root: str = "/tmp/oziebot-teacher-assist"
-    teacher_assist_storage_backend: str = "local"
+    teacher_assist_storage_backend: str = Field(
+        default="local",
+        description="TeacherAssist storage backend: local or s3.",
+    )
+    teacher_assist_s3_bucket: str | None = Field(
+        default=None,
+        description="Private S3 bucket for TeacherAssist stored objects.",
+    )
+    teacher_assist_s3_region: str | None = Field(
+        default=None,
+        description="AWS region for the TeacherAssist S3 bucket.",
+    )
+    teacher_assist_s3_prefix: str = Field(
+        default="teacher-assist",
+        description="Key prefix used for TeacherAssist stored objects.",
+    )
+    teacher_assist_s3_endpoint: str | None = Field(
+        default=None,
+        description="Optional S3-compatible endpoint override for TeacherAssist storage.",
+    )
+    teacher_assist_s3_presign_expiration_seconds: int = Field(
+        default=900,
+        description="Expiration for TeacherAssist presigned download URLs in seconds.",
+    )
     teacher_assist_upload_max_bytes: int = Field(
         default=25 * 1024 * 1024,
         description="Maximum size in bytes for TeacherAssist resource uploads.",
+    )
+    teacher_assist_ocr_provider: str = Field(
+        default="mock",
+        description="Backend-only TeacherAssist OCR provider selection.",
+    )
+    teacher_assist_ocr_mock_text_limit: int = Field(
+        default=4000,
+        description="Soft text-length cap for TeacherAssist mock OCR placeholder output.",
+    )
+    teacher_assist_extraction_timeout_seconds: int = Field(
+        default=180,
+        description="Max runtime for a TeacherAssist extraction attempt before timing out.",
     )
     teacher_assist_ai_provider: str = Field(
         default="mock",

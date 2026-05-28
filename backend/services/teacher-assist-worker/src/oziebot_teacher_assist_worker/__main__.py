@@ -4,8 +4,13 @@ import logging
 import time
 
 from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from oziebot_api.config import get_settings
+from oziebot_api.services.teacher_assist.extraction_jobs import (
+    process_next_teacher_assist_extraction_job_with_engine,
+    recover_stale_extraction_jobs,
+)
 from oziebot_api.services.teacher_assist.workflow_service import (
     process_next_teacher_assist_workflow_with_engine,
 )
@@ -33,11 +38,23 @@ def main() -> None:
     log.info("teacher-assist-worker started poll_interval=%s", poll_seconds)
 
     while not stop_event.is_set():
-        claimed_id = process_next_teacher_assist_workflow_with_engine(
+        recovery_session = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)()
+        try:
+            recover_stale_extraction_jobs(recovery_session, settings=settings)
+            recovery_session.commit()
+        finally:
+            recovery_session.close()
+        claimed_id = process_next_teacher_assist_extraction_job_with_engine(
             engine,
             settings=settings,
             worker_name="teacher-assist-worker",
         )
+        if claimed_id is None:
+            claimed_id = process_next_teacher_assist_workflow_with_engine(
+                engine,
+                settings=settings,
+                worker_name="teacher-assist-worker",
+            )
         health.touch()
         if claimed_id is None:
             time.sleep(poll_seconds)

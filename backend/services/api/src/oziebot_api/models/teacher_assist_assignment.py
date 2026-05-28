@@ -98,6 +98,12 @@ class TeacherAssistAssignment(Base):
         cascade="all, delete-orphan",
         order_by="TeacherAssistStudentWorkSubmission.created_at.desc()",
     )
+    grading_reviews: Mapped[list["TeacherAssistAssignmentGradingReview"]] = relationship(
+        "TeacherAssistAssignmentGradingReview",
+        back_populates="assignment",
+        cascade="all, delete-orphan",
+        order_by="TeacherAssistAssignmentGradingReview.updated_at.desc()",
+    )
 
 
 from typing import TYPE_CHECKING  # noqa: E402
@@ -105,6 +111,9 @@ from typing import TYPE_CHECKING  # noqa: E402
 if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_assignment_print_packet import (
         TeacherAssistAssignmentPrintPacket,
+    )
+    from oziebot_api.models.teacher_assist_assignment_grading_review import (
+        TeacherAssistAssignmentGradingReview,
     )
     from oziebot_api.models.teacher_assist_assignment_resource import TeacherAssistAssignmentResource
     from oziebot_api.models.teacher_assist_assignment_standard import TeacherAssistAssignmentStandard

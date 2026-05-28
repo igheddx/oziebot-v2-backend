@@ -38,6 +38,35 @@ ASSIGNMENT_STUDENT_WORK_PROCESSING_STATUSES = (
     "processing_deferred",
     "archived",
 )
+ASSIGNMENT_GRADING_REVIEW_STATUSES = (
+    "draft",
+    "ai_suggested",
+    "teacher_reviewing",
+    "teacher_confirmed",
+    "returned_for_revision",
+    "archived",
+)
+ASSIGNMENT_GRADING_REVIEW_SOURCES = ("manual", "ai_placeholder")
+TEACHER_ASSIST_EXTRACTION_ARTIFACT_TYPES = ("resource", "student_work")
+TEACHER_ASSIST_EXTRACTION_JOB_STATUSES = (
+    "queued",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+    "skipped",
+)
+EXTRACTION_REVIEW_STATUSES = (
+    "pending_review",
+    "teacher_reviewing",
+    "teacher_approved",
+    "teacher_rejected",
+    "reviewed",
+    "issue_flagged",
+    "needs_retry",
+    "archived",
+)
+EXTRACTION_CONFIDENCE_LEVELS = ("low", "medium", "high", "unknown")
 PLANNING_DRAFT_STATUSES = ("draft", "ready")
 PLANNING_SCOPES = ("weekly", "multi_week", "module", "unit", "grading_period")
 PLAN_VISIBILITY_SCOPES = ("private", "shared", "grade_team", "school", "district")
@@ -53,6 +82,7 @@ TEACHER_ASSIST_WORKFLOW_STATUSES = ("queued", "running", "completed", "failed", 
 TEACHER_ASSIST_WORKFLOW_STEP_STATUSES = ("queued", "running", "completed", "failed", "skipped")
 WEEKLY_PLAN_STATUSES = ("in_progress", "completed")
 TEACHER_ASSIST_AI_PROVIDERS = ("mock", "openai")
+TEACHER_ASSIST_OCR_PROVIDERS = ("mock",)
 TEACHER_ASSIST_AI_FIXTURE_MODES = ("off", "record", "replay")
 SUPPORTED_GRADE_LEVELS = ("Pre-K", "K", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12")
 
@@ -157,6 +187,48 @@ def validate_assignment_student_work_processing_status(value: str | None) -> str
     return normalized
 
 
+def validate_assignment_grading_review_status(value: str | None) -> str:
+    normalized = (value or "draft").strip() or "draft"
+    if normalized not in ASSIGNMENT_GRADING_REVIEW_STATUSES:
+        raise ValueError("Unsupported assignment grading review status")
+    return normalized
+
+
+def validate_assignment_grading_review_source(value: str | None) -> str:
+    normalized = (value or "manual").strip() or "manual"
+    if normalized not in ASSIGNMENT_GRADING_REVIEW_SOURCES:
+        raise ValueError("Unsupported assignment grading review source")
+    return normalized
+
+
+def validate_teacher_assist_extraction_artifact_type(value: str) -> str:
+    normalized = value.strip()
+    if normalized not in TEACHER_ASSIST_EXTRACTION_ARTIFACT_TYPES:
+        raise ValueError("Unsupported TeacherAssist extraction artifact type")
+    return normalized
+
+
+def validate_teacher_assist_extraction_job_status(value: str) -> str:
+    normalized = value.strip()
+    if normalized not in TEACHER_ASSIST_EXTRACTION_JOB_STATUSES:
+        raise ValueError("Unsupported TeacherAssist extraction job status")
+    return normalized
+
+
+def validate_extraction_review_status(value: str) -> str:
+    normalized = value.strip()
+    if normalized not in EXTRACTION_REVIEW_STATUSES:
+        raise ValueError("Unsupported TeacherAssist extraction review status")
+    return normalized
+
+
+def validate_extraction_confidence_level(value: str) -> str:
+    normalized = value.strip()
+    if normalized not in EXTRACTION_CONFIDENCE_LEVELS:
+        raise ValueError("Unsupported TeacherAssist extraction confidence level")
+    return normalized
+
+
 def validate_planning_draft_status(value: str | None) -> str:
     normalized = (value or "draft").strip() or "draft"
     if normalized not in PLANNING_DRAFT_STATUSES:
@@ -217,6 +289,13 @@ def validate_teacher_assist_ai_provider(value: str) -> str:
     normalized = value.strip()
     if normalized not in TEACHER_ASSIST_AI_PROVIDERS:
         raise ValueError("Unsupported TeacherAssist AI provider")
+    return normalized
+
+
+def validate_teacher_assist_ocr_provider(value: str) -> str:
+    normalized = value.strip()
+    if normalized not in TEACHER_ASSIST_OCR_PROVIDERS:
+        raise ValueError("Unsupported TeacherAssist OCR provider")
     return normalized
 
 

@@ -237,3 +237,98 @@ Result summary:
 - delivered tenant-safe student-work submission persistence using anonymous STUDENT # values and upload metadata only
 - added optional packet/page linking and manual review-status controls without OCR or grading
 - extended the assignments workspace with upload, list, and context-link flows while keeping grading and mastery actions disabled
+
+## Phase 15 - Grading Review Foundation + Teacher Confirmation
+
+Date:
+Purpose:
+Add the first teacher-confirmation-first grading review layer for uploaded student work without committing grades, updating mastery, exposing student names, or invoking OCR/AI.
+
+Prompt summary:
+Add grading review models and migration, tenant-safe grading review APIs, manual review lifecycle/status handling, PII-safe feedback validation, teacher-confirmation rules, assignment-workspace grading review UI, and disabled placeholders for future AI/mastery/parent actions.
+
+Non-goals:
+No OCR, AI/provider grading, gradebook commit, mastery update, parent communication generation, student-name storage, SIS/Google Classroom integration, or trading-system changes.
+
+Files/areas expected to change:
+- grading review models, schemas, services, and API routes
+- grading review migration and backend validation tests
+- TeacherAssist assignments screen, API helpers, and frontend types
+- TeacherAssist docs
+
+Result summary:
+- delivered persisted grading-review records and item rows linked to anonymous student-work submissions
+- kept review creation software-only with `manual` review source and zero provider/usage metadata
+- added teacher-confirmed validation plus PII rejection across review feedback fields
+- added assignment-workspace grading review creation, list, edit, and status controls with disabled future automation placeholders
+
+## Phase 16 - Unified Teacher Workspace + Workflow Cohesion Layer
+
+Date:
+Purpose:
+Consolidate TeacherAssist planning, assignments, workflows, packets, uploads, grading reviews, alerts, and recent activity into a single backend-composed operational workspace.
+
+Prompt summary:
+Add an append-only activity-event foundation, backend workspace read-model/orchestration service, `/v1/teacher-assist/workspace` API, class-centric grouping, needs-attention aggregation, recent activity feed, workspace stats, and a new frontend workspace route/screen while keeping OCR, grading automation, parent communication, mastery auto-commit, and trading behavior out of scope.
+
+Non-goals:
+No OCR, embeddings/vector DBs, autonomous grading, parent messaging, newsletter generation, mastery auto-commit, Google/SIS integration, Slides/PPTX export, or trading-system changes.
+
+Files/areas expected to change:
+- activity-event migration, model, helper, and TeacherAssist service hooks
+- workspace read-model service, schemas, and API route
+- TeacherAssist dashboard/nav/shell, workspace screen, and frontend API/types
+- backend validation tests and TeacherAssist docs
+
+Result summary:
+- delivered append-only tenant-safe activity events for core TeacherAssist lifecycle changes
+- added a backend-composed unified workspace endpoint with class grouping, attention detection, review queue, activity feed, and stats
+- made the TeacherAssist landing experience workspace-first in the frontend
+- kept the phase operational and software-centric without adding OCR, grading automation, mastery updates, or provider-side review flows
+
+## Phase 17 - TeacherAssist Storage Hardening + S3 Migration Foundation
+
+Date:
+Purpose:
+Move TeacherAssist file handling from local-only persistence toward a private S3-ready storage foundation without changing trading infrastructure or introducing OCR/grading behavior.
+
+Prompt summary:
+Add a provider-based TeacherAssist storage abstraction, local and S3 backends, private download-url support, S3-safe key generation, runtime/dependency wiring, AWS bucket bootstrap artifacts, IAM guidance, backend tests, and light frontend download actions while keeping storage private and backend-controlled.
+
+Non-goals:
+No OCR, AI grading, embeddings/vector DB, public file access, CDN exposure, Google Drive integration, PDF generation rewrite, mastery automation, or trading-system changes.
+
+Files/areas expected to change:
+- TeacherAssist storage service, config, routes, schemas, and tests
+- resource/student-work frontend API/types/screens
+- backend runtime dependencies and docker-compose env wiring
+- AWS bootstrap/policy artifacts and TeacherAssist docs
+
+Result summary:
+- delivered `local` and `s3` TeacherAssist storage providers behind a shared abstraction
+- added backend-generated temporary download URLs for stored resource and student-work files
+- preserved local development storage while preparing private S3-backed production storage
+- added AWS CLI bucket bootstrap and least-privilege IAM artifacts without introducing Terraform/CDK or public object access
+
+## Phase 18 - OCR Intake + Artifact Processing Foundation
+
+Date:
+Purpose:
+Add TeacherAssist extraction-job and extracted-text foundations on top of the new private storage layer while preserving teacher-review-first behavior and keeping grading automation disabled.
+
+Prompt summary:
+Add extraction job persistence, extracted-text records, mock-first OCR provider seams, worker-managed storage-backed extraction, tenant-safe extraction APIs, activity events, workspace attention updates, frontend extraction status/preview controls, and backend validation while keeping OCR providers mocked and grading/mastery side effects out of scope.
+
+Non-goals:
+No AI grading, no mastery updates, no gradebook commits, no parent communication, no public file access, no embeddings/vector DB, no real OCR calls by default, and no trading-system changes.
+
+Files/areas expected to change:
+- TeacherAssist extraction models, migration, services, worker loop, schemas, and API routes
+- resource/student-work frontend API helpers, types, workspace, and extraction UI
+- TeacherAssist docs and validation coverage
+
+Result summary:
+- delivered tenant-safe extraction jobs and extracted-text persistence for uploaded resources and student-work submissions
+- added a mock-first OCR seam and worker-managed extraction flow that reads artifacts only through the private TeacherAssist storage abstraction
+- surfaced extraction status, previews, failures, and teacher-review-ready items in TeacherAssist workspace/resource/student-work screens
+- kept AI usage, grading review creation, mastery updates, and parent communication out of the extraction flow

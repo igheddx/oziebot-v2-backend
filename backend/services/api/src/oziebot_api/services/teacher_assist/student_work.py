@@ -11,6 +11,7 @@ from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
 from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAssistAssignmentPrintPacket
 from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
 from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
+from oziebot_api.services.teacher_assist.activity_events import record_activity_event
 from oziebot_api.services.teacher_assist.assignments import get_assignment_or_404
 from oziebot_api.services.teacher_assist.constants import (
     validate_assignment_student_work_processing_status,
@@ -232,6 +233,27 @@ def create_student_work_submission(
     )
     db.add(row)
     db.flush()
+    record_activity_event(
+        db,
+        tenant_id=row.tenant_id,
+        user_id=row.teacher_user_id,
+        event_type="student_work_uploaded",
+        event_category="submission",
+        entity_type="student_work_submission",
+        entity_id=row.id,
+        school_year_id=row.school_year_id,
+        grading_period_id=row.grading_period_id,
+        class_id=row.class_id,
+        subject_id=row.subject_id,
+        summary_text=f"Uploaded student work for STUDENT #{row.student_number}.",
+        details_json={
+            "assignment_id": str(row.assignment_id),
+            "processing_status": row.processing_status,
+            "upload_status": row.upload_status,
+            "has_packet_context": row.assignment_print_packet_id is not None,
+            "has_page_context": row.assignment_print_page_id is not None,
+        },
+    )
     return row
 
 
@@ -249,6 +271,7 @@ def update_student_work_submission_processing_status(
         user_id=user_id,
         submission_id=submission_id,
     )
+    previous_status = row.processing_status
     row.processing_status = _validate_processing_status_transition(
         current_status=row.processing_status,
         next_status=processing_status,
@@ -259,6 +282,25 @@ def update_student_work_submission_processing_status(
             next_status="archived",
         )
     row.updated_at = datetime.now(UTC)
+    record_activity_event(
+        db,
+        tenant_id=row.tenant_id,
+        user_id=row.teacher_user_id,
+        event_type="student_work_status_changed",
+        event_category="submission",
+        entity_type="student_work_submission",
+        entity_id=row.id,
+        school_year_id=row.school_year_id,
+        grading_period_id=row.grading_period_id,
+        class_id=row.class_id,
+        subject_id=row.subject_id,
+        summary_text=f"Changed student work status for STUDENT #{row.student_number} from {previous_status} to {row.processing_status}.",
+        details_json={
+            "previous_processing_status": previous_status,
+            "processing_status": row.processing_status,
+            "upload_status": row.upload_status,
+        },
+    )
     db.flush()
     return row
 

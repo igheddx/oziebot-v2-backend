@@ -44,6 +44,35 @@ AssignmentStudentWorkProcessingStatusLiteral = Literal[
     "processing_deferred",
     "archived",
 ]
+AssignmentGradingReviewStatusLiteral = Literal[
+    "draft",
+    "ai_suggested",
+    "teacher_reviewing",
+    "teacher_confirmed",
+    "returned_for_revision",
+    "archived",
+]
+AssignmentGradingReviewSourceLiteral = Literal["manual", "ai_placeholder"]
+TeacherAssistExtractionArtifactTypeLiteral = Literal["resource", "student_work"]
+TeacherAssistExtractionJobStatusLiteral = Literal[
+    "queued",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+    "skipped",
+]
+ExtractionReviewStatusLiteral = Literal[
+    "pending_review",
+    "teacher_reviewing",
+    "teacher_approved",
+    "teacher_rejected",
+    "reviewed",
+    "issue_flagged",
+    "needs_retry",
+    "archived",
+]
+ExtractionConfidenceLevelLiteral = Literal["low", "medium", "high", "unknown"]
 PlanningDraftStatusLiteral = Literal["draft", "ready"]
 PlanningScopeLiteral = Literal["weekly", "multi_week", "module", "unit", "grading_period"]
 PlanVisibilityScopeLiteral = Literal["private", "shared", "grade_team", "school", "district"]
@@ -71,6 +100,12 @@ class TeacherAssistOptionsOut(BaseModel):
     assignment_print_output_formats: list[str]
     assignment_student_work_upload_statuses: list[str]
     assignment_student_work_processing_statuses: list[str]
+    assignment_grading_review_statuses: list[str]
+    assignment_grading_review_sources: list[str]
+    extraction_artifact_types: list[str]
+    extraction_job_statuses: list[str]
+    extraction_review_statuses: list[str]
+    extraction_confidence_levels: list[str]
     planning_draft_statuses: list[str]
     planning_scopes: list[str]
     supported_grade_levels: list[str]
@@ -271,6 +306,139 @@ class ResourceLinkCreate(BaseModel):
     external_url: str = Field(min_length=1, max_length=2048)
 
 
+class TeacherAssistExtractionJobOut(BaseModel):
+    id: uuid.UUID
+    artifact_type: TeacherAssistExtractionArtifactTypeLiteral
+    resource_library_item_id: uuid.UUID | None = None
+    student_work_submission_id: uuid.UUID | None = None
+    assignment_id: uuid.UUID | None = None
+    school_year_id: uuid.UUID | None = None
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID | None = None
+    subject_id: uuid.UUID | None = None
+    student_number: int | None = None
+    status: TeacherAssistExtractionJobStatusLiteral
+    progress_percent: int = 0
+    provider_name: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    error_metadata_json: dict[str, Any] | None = None
+    retry_count: int = 0
+    max_retries: int = 0
+    parent_extraction_job_id: uuid.UUID | None = None
+    retry_root_job_id: uuid.UUID | None = None
+    attempt_number: int = 1
+    leased_by_worker: str | None = None
+    lease_expires_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    execution_log_json: list[dict[str, Any]] | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    updated_at: datetime
+
+
+class TeacherAssistExtractedTextRecordOut(BaseModel):
+    id: uuid.UUID
+    extraction_job_id: uuid.UUID
+    artifact_type: TeacherAssistExtractionArtifactTypeLiteral
+    resource_library_item_id: uuid.UUID | None = None
+    student_work_submission_id: uuid.UUID | None = None
+    assignment_id: uuid.UUID | None = None
+    class_id: uuid.UUID | None = None
+    subject_id: uuid.UUID | None = None
+    student_number: int | None = None
+    preview_text: str
+    text_char_count: int
+    pii_flagged: bool = False
+    redaction_applied: bool = False
+    review_status: ExtractionReviewStatusLiteral = "pending_review"
+    provider_confidence_score: float | None = None
+    confidence_level: ExtractionConfidenceLevelLiteral = "unknown"
+    teacher_corrected_text: str | None = None
+    approved_text: str | None = None
+    reviewed_at: datetime | None = None
+    reviewed_by_user_id: uuid.UUID | None = None
+    source_extraction_job_id: uuid.UUID | None = None
+    teacher_review_notes: str | None = None
+    teacher_issue_reason: str | None = None
+    metadata_json: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TeacherAssistExtractedTextDetailOut(TeacherAssistExtractedTextRecordOut):
+    extracted_text: str
+
+
+class TeacherAssistExtractedTextReviewStatusUpdate(BaseModel):
+    review_status: ExtractionReviewStatusLiteral
+    teacher_review_notes: str | None = Field(default=None, max_length=4000)
+    teacher_issue_reason: str | None = Field(default=None, max_length=4000)
+
+
+class TeacherAssistExtractedTextApprovedTextUpdate(BaseModel):
+    approved_text: str | None = None
+    teacher_corrected_text: str | None = None
+
+
+class TeacherAssistExtractionSummaryOut(BaseModel):
+    job: TeacherAssistExtractionJobOut
+    extracted_text: TeacherAssistExtractedTextRecordOut | None = None
+    retry_eligible: bool = False
+    processing_duration_seconds: int | None = None
+
+
+class TeacherAssistExtractedTextHistoryOut(BaseModel):
+    current_record: TeacherAssistExtractedTextDetailOut
+    current_job: TeacherAssistExtractionJobOut
+    attempt_jobs: list[TeacherAssistExtractionJobOut] = Field(default_factory=list)
+    attempt_records: list[TeacherAssistExtractedTextRecordOut] = Field(default_factory=list)
+    activity_events: list["TeacherAssistActivityEventOut"] = Field(default_factory=list)
+
+
+class TeacherAssistExtractedTextDetailAggregateOut(BaseModel):
+    record: TeacherAssistExtractedTextDetailOut
+    job: TeacherAssistExtractionJobOut
+    lineage_jobs: list[TeacherAssistExtractionJobOut] = Field(default_factory=list)
+    retry_eligible: bool = False
+    cancel_eligible: bool = False
+    processing_duration_seconds: int | None = None
+    activity_events: list["TeacherAssistActivityEventOut"] = Field(default_factory=list)
+
+
+class TeacherAssistExtractionRunOut(BaseModel):
+    job: TeacherAssistExtractionJobOut
+    extracted_text: TeacherAssistExtractedTextRecordOut | None = None
+
+
+class TeacherAssistExtractionSourceArtifactOut(BaseModel):
+    artifact_type: TeacherAssistExtractionArtifactTypeLiteral
+    original_filename: str
+    mime_type: str
+    file_size: int
+    resource_library_item_id: uuid.UUID | None = None
+    student_work_submission_id: uuid.UUID | None = None
+    assignment_id: uuid.UUID | None = None
+    student_number: int | None = None
+
+
+class TeacherAssistExtractionJobDetailOut(BaseModel):
+    job: TeacherAssistExtractionJobOut
+    extracted_text: TeacherAssistExtractedTextRecordOut | None = None
+    lineage_jobs: list[TeacherAssistExtractionJobOut] = Field(default_factory=list)
+    retry_eligible: bool = False
+    cancel_eligible: bool = False
+    processing_duration_seconds: int | None = None
+    execution_timeline: list[dict[str, Any]] = Field(default_factory=list)
+    source_artifact: TeacherAssistExtractionSourceArtifactOut
+    activity_events: list["TeacherAssistActivityEventOut"] = Field(default_factory=list)
+
+
+class TeacherAssistExtractionJobCancelUpdate(BaseModel):
+    status: Literal["cancelled"]
+
+
 class ResourceOut(BaseModel):
     id: uuid.UUID
     tenant_id: uuid.UUID
@@ -286,8 +454,15 @@ class ResourceOut(BaseModel):
     uploaded_at: datetime
     linked_pacing_items_count: int = 0
     linked_planning_drafts_count: int = 0
+    latest_extraction_job: TeacherAssistExtractionJobOut | None = None
+    latest_extracted_text: TeacherAssistExtractedTextRecordOut | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class TeacherAssistFileDownloadOut(BaseModel):
+    url: str
+    expires_at: datetime
 
 
 class AssignmentCreate(BaseModel):
@@ -399,6 +574,8 @@ class AssignmentStudentWorkOut(BaseModel):
     storage_key: str
     upload_status: AssignmentStudentWorkUploadStatusLiteral
     processing_status: AssignmentStudentWorkProcessingStatusLiteral
+    latest_extraction_job: TeacherAssistExtractionJobOut | None = None
+    latest_extracted_text: TeacherAssistExtractedTextRecordOut | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -410,6 +587,90 @@ class AssignmentStudentWorkStatusUpdate(BaseModel):
 class AssignmentStudentWorkPacketContextUpdate(BaseModel):
     assignment_print_packet_id: uuid.UUID | None = None
     assignment_print_page_id: uuid.UUID | None = None
+
+
+class AssignmentGradingReviewItemInput(BaseModel):
+    criterion_title: str = Field(min_length=1, max_length=160)
+    score_suggestion: float | None = None
+    max_score: float | None = Field(default=None, ge=0)
+    feedback_summary: str | None = Field(default=None, max_length=4000)
+    strengths: list[str] = Field(default_factory=list)
+    improvement_areas: list[str] = Field(default_factory=list)
+    teacher_notes: str | None = Field(default=None, max_length=4000)
+    sort_order: int = Field(default=0, ge=0)
+
+
+class AssignmentGradingReviewCreate(BaseModel):
+    student_number: int = Field(ge=1)
+    score_suggestion: float | None = None
+    max_score: float | None = Field(default=None, ge=0)
+    feedback_summary: str | None = Field(default=None, max_length=4000)
+    strengths: list[str] = Field(default_factory=list)
+    improvement_areas: list[str] = Field(default_factory=list)
+    teacher_notes: str | None = Field(default=None, max_length=4000)
+    items: list[AssignmentGradingReviewItemInput] = Field(default_factory=list)
+
+
+class AssignmentGradingReviewUpdate(BaseModel):
+    status: AssignmentGradingReviewStatusLiteral = "draft"
+    score_suggestion: float | None = None
+    max_score: float | None = Field(default=None, ge=0)
+    feedback_summary: str | None = Field(default=None, max_length=4000)
+    strengths: list[str] = Field(default_factory=list)
+    improvement_areas: list[str] = Field(default_factory=list)
+    teacher_notes: str | None = Field(default=None, max_length=4000)
+    teacher_confirmed_score: float | None = None
+    teacher_confirmed_feedback: str | None = Field(default=None, max_length=4000)
+    items: list[AssignmentGradingReviewItemInput] = Field(default_factory=list)
+
+
+class AssignmentGradingReviewStatusUpdate(BaseModel):
+    status: AssignmentGradingReviewStatusLiteral
+
+
+class AssignmentGradingReviewItemOut(BaseModel):
+    id: uuid.UUID
+    grading_review_id: uuid.UUID
+    criterion_title: str
+    score_suggestion: float | None = None
+    max_score: float | None = None
+    feedback_summary: str | None = None
+    strengths: list[str] = Field(default_factory=list)
+    improvement_areas: list[str] = Field(default_factory=list)
+    teacher_notes: str | None = None
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssignmentGradingReviewOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    teacher_user_id: uuid.UUID
+    assignment_id: uuid.UUID
+    student_work_submission_id: uuid.UUID
+    student_number: int
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    status: AssignmentGradingReviewStatusLiteral
+    review_source: AssignmentGradingReviewSourceLiteral
+    provider_name: str | None = None
+    provider_model: str | None = None
+    prompt_version: str | None = None
+    ai_usage_event_id: uuid.UUID | None = None
+    score_suggestion: float | None = None
+    max_score: float | None = None
+    feedback_summary: str | None = None
+    strengths: list[str] = Field(default_factory=list)
+    improvement_areas: list[str] = Field(default_factory=list)
+    teacher_notes: str | None = None
+    teacher_confirmed_score: float | None = None
+    teacher_confirmed_feedback: str | None = None
+    items: list[AssignmentGradingReviewItemOut] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
 
 
 class PlanningDraftCreate(BaseModel):
@@ -612,6 +873,187 @@ class WeeklyPlanOut(BaseModel):
     latest_usage_event: TeacherAssistAIUsageEventOut | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class TeacherAssistActivityEventOut(BaseModel):
+    id: uuid.UUID
+    event_category: str
+    event_type: str
+    entity_type: str
+    entity_id: uuid.UUID
+    timestamp: datetime
+    summary_text: str
+    workflow_id: uuid.UUID | None = None
+    school_year_id: uuid.UUID | None = None
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID | None = None
+    subject_id: uuid.UUID | None = None
+    details_json: dict[str, Any] | None = None
+    created_at: datetime
+
+
+class TeacherAssistWorkspacePlanSummaryOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    planning_scope: PlanningScopeLiteral = "weekly"
+    status: WeeklyPlanStatusLiteral
+    workflow_id: uuid.UUID | None = None
+    class_id: uuid.UUID | None = None
+    school_year_id: uuid.UUID | None = None
+    review_required: bool = False
+    quality_flags: list[str] = Field(default_factory=list)
+    missing_context_warnings: list[str] = Field(default_factory=list)
+    updated_at: datetime
+
+
+class TeacherAssistWorkspaceAssignmentSummaryOut(BaseModel):
+    id: uuid.UUID
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    title: str
+    status: AssignmentStatusLiteral
+    assignment_type: AssignmentTypeLiteral
+    due_date: date | None = None
+    updated_at: datetime
+
+
+class TeacherAssistWorkspacePacketSummaryOut(BaseModel):
+    id: uuid.UUID
+    assignment_id: uuid.UUID
+    class_id: uuid.UUID
+    packet_status: AssignmentPrintPacketStatusLiteral
+    pages_per_student: int
+    student_count: int
+    template_type: AssignmentPrintTemplateTypeLiteral
+    created_at: datetime
+    updated_at: datetime
+
+
+class TeacherAssistWorkspaceSubmissionSummaryOut(BaseModel):
+    id: uuid.UUID
+    assignment_id: uuid.UUID
+    class_id: uuid.UUID
+    student_number: int
+    original_filename: str
+    upload_status: AssignmentStudentWorkUploadStatusLiteral
+    processing_status: AssignmentStudentWorkProcessingStatusLiteral
+    latest_extraction_status: TeacherAssistExtractionJobStatusLiteral | None = None
+    extraction_ready_for_teacher_review: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class TeacherAssistWorkspaceGradingReviewSummaryOut(BaseModel):
+    id: uuid.UUID
+    assignment_id: uuid.UUID
+    student_work_submission_id: uuid.UUID
+    class_id: uuid.UUID
+    student_number: int
+    status: AssignmentGradingReviewStatusLiteral
+    teacher_confirmed_score: float | None = None
+    updated_at: datetime
+
+
+class TeacherAssistWorkspaceWorkflowSummaryOut(BaseModel):
+    id: uuid.UUID
+    workflow_type: TeacherAssistWorkflowTypeLiteral
+    status: TeacherAssistWorkflowStatusLiteral
+    class_id: uuid.UUID | None = None
+    school_year_id: uuid.UUID | None = None
+    grading_period_id: uuid.UUID | None = None
+    progress_percent: int
+    retry_count: int = 0
+    max_retries: int = 0
+    provider_name: str | None = None
+    provider_model: str | None = None
+    last_error_code: str | None = None
+    heartbeat_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+    error_message: str | None = None
+
+
+class TeacherAssistWorkspaceNeedsAttentionOut(BaseModel):
+    type: str
+    severity: Literal["info", "warning", "critical"]
+    title: str
+    message: str
+    entity_type: str
+    entity_id: uuid.UUID
+    class_id: uuid.UUID | None = None
+    created_at: datetime
+
+
+class TeacherAssistWorkspaceReviewRequiredItemOut(BaseModel):
+    entity_type: str
+    entity_id: uuid.UUID
+    class_id: uuid.UUID | None = None
+    title: str
+    status: str
+    review_reason: str
+    updated_at: datetime
+
+
+class TeacherAssistWorkspaceTodaySummaryOut(BaseModel):
+    active_grading_period_title: str | None = None
+    active_workflows_count: int = 0
+    plans_needing_review_count: int = 0
+    grading_reviews_pending_confirmation_count: int = 0
+    recent_uploads_count: int = 0
+    workflow_failures_count: int = 0
+    extraction_failures_count: int = 0
+    student_work_ready_for_extraction_count: int = 0
+    extracted_artifacts_ready_for_teacher_review_count: int = 0
+    low_confidence_extractions_count: int = 0
+    rejected_extractions_count: int = 0
+    retry_required_extractions_count: int = 0
+    awaiting_teacher_review_count: int = 0
+    stale_extraction_jobs_count: int = 0
+    recently_approved_extractions_count: int = 0
+
+
+class TeacherAssistWorkspaceStatsOut(BaseModel):
+    active_plans_count: int = 0
+    plans_in_review_count: int = 0
+    pending_grading_reviews_count: int = 0
+    recent_upload_count: int = 0
+    workflow_failure_count: int = 0
+    assignments_in_review_count: int = 0
+    extraction_failure_count: int = 0
+    student_work_ready_for_extraction_count: int = 0
+    extracted_artifacts_ready_for_teacher_review_count: int = 0
+    low_confidence_extractions_count: int = 0
+    rejected_extractions_count: int = 0
+    retry_required_extractions_count: int = 0
+    awaiting_teacher_review_count: int = 0
+    stale_extraction_jobs_count: int = 0
+    recently_approved_extractions_count: int = 0
+
+
+class TeacherAssistClassWorkspaceOut(BaseModel):
+    class_context: ClassOut = Field(alias="class")
+    active_plans: list[TeacherAssistWorkspacePlanSummaryOut] = Field(default_factory=list)
+    assignments: list[TeacherAssistWorkspaceAssignmentSummaryOut] = Field(default_factory=list)
+    pending_grading_reviews: list[TeacherAssistWorkspaceGradingReviewSummaryOut] = Field(default_factory=list)
+    recent_submissions: list[TeacherAssistWorkspaceSubmissionSummaryOut] = Field(default_factory=list)
+    workflow_summaries: list[TeacherAssistWorkspaceWorkflowSummaryOut] = Field(default_factory=list)
+    packet_summaries: list[TeacherAssistWorkspacePacketSummaryOut] = Field(default_factory=list)
+    needs_attention_count: int = 0
+
+    model_config = {"populate_by_name": True}
+
+
+class TeacherAssistWorkspaceOut(BaseModel):
+    current_school_year: SchoolYearOut | None = None
+    active_grading_period: GradingPeriodOut | None = None
+    today_summary: TeacherAssistWorkspaceTodaySummaryOut
+    class_workspaces: list[TeacherAssistClassWorkspaceOut] = Field(default_factory=list)
+    needs_attention: list[TeacherAssistWorkspaceNeedsAttentionOut] = Field(default_factory=list)
+    recent_activity: list[TeacherAssistActivityEventOut] = Field(default_factory=list)
+    active_workflows: list[TeacherAssistWorkspaceWorkflowSummaryOut] = Field(default_factory=list)
+    review_required_items: list[TeacherAssistWorkspaceReviewRequiredItemOut] = Field(default_factory=list)
+    workspace_stats: TeacherAssistWorkspaceStatsOut
 
 
 class TeacherAssistWorkflowCancelUpdate(BaseModel):

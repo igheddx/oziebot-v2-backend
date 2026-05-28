@@ -3,8 +3,8 @@
 - Current planning route may still be named `/teacher-assist/weekly-planning`, even though the product direction is broader instructional planning.
 - Real provider calls are disabled by default.
 - Mock generation is currently the only safe default provider.
-- OCR has not been introduced.
-- Uploaded resource parsing has not been introduced.
+- OCR extraction is now mock-first only; real OCR provider execution has not been introduced.
+- Uploaded resource parsing is represented by extraction jobs and preview records, not real document understanding.
 - QR assignment-page identity is implemented only for generated printable packets; scan/upload ingestion is not implemented yet.
 - Printable assignment templates are currently limited to browser-print HTML output.
 - Grading assistant workflows have not been implemented yet.
@@ -28,5 +28,17 @@
 - Shared-plan regeneration does not yet add collaborative approval or owner-protection workflows beyond existing visibility rules.
 - The assignment workspace is teacher-owned and single-user; collaborative assignment governance is not implemented yet.
 - Printable assignment packets are assignment-scoped and teacher-owned; broader packet sharing/governance workflows are not implemented yet.
-- Uploaded student-work intake is implemented as a metadata-and-linkage foundation only; OCR and grading review are not implemented yet.
+- Uploaded student-work intake now supports async extraction jobs and preview persistence, but real OCR quality, handwriting extraction, and teacher-side remediation flows are still limited.
+- Grading review is implemented as a manual teacher-confirmation-first foundation only; AI grading, mastery updates, gradebook commit, and parent communication are not implemented yet.
 - Assignment resource-link editing exists only as a backend foundation and starter-copy seam; the frontend does not yet expose a richer assignment-resource editor.
+- The unified workspace currently refreshes through simple polling; live push notifications and websocket-based updates are not implemented.
+- The unified workspace is optimized for operational summaries and attention surfacing; deeper workflow-remediation and teacher-action detail screens are still deferred.
+- TeacherAssist activity events are stored as append-only relational records for timeline/query use; broader event-stream infrastructure is not implemented.
+- TeacherAssist frontend validation remains lint/build only because the repo does not yet include a wired frontend test harness for this product area.
+- TeacherAssist object storage now supports local and private S3 backends, but direct-browser uploads are not implemented yet.
+- Stored TeacherAssist downloads use temporary backend-generated URLs only; public bucket/CDN delivery is intentionally not supported.
+- Printable packet HTML views are still the active print/export surface; persisted packet/export artifacts in object storage remain a later phase.
+- Lifecycle cleanup is currently infrastructure-guided for S3 `temp/` and `exports/` prefixes only; app-managed retention jobs are not implemented yet.
+- Extraction previews are intentionally lightweight and sensitive; full teacher-side extraction history tooling and richer remediation UI are still deferred.
+- External-link resources do not have uploaded file bodies, so extraction applies only to stored resource files and uploaded student-work artifacts.
+- Extraction completion does not create grading reviews, mastery updates, gradebook commits, or parent communication artifacts.

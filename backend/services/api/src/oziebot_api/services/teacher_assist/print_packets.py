@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
 from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAssistAssignmentPrintPacket
 from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
+from oziebot_api.services.teacher_assist.activity_events import record_activity_event
 from oziebot_api.services.teacher_assist.assignments import get_assignment_or_404
 from oziebot_api.services.teacher_assist.constants import (
     validate_assignment_print_output_format,
@@ -212,6 +213,27 @@ def create_assignment_print_packet(
                 )
             )
     db.add_all(pages)
+    record_activity_event(
+        db,
+        tenant_id=packet.tenant_id,
+        user_id=packet.teacher_user_id,
+        event_type="packet_generated",
+        event_category="packet",
+        entity_type="assignment_print_packet",
+        entity_id=packet.id,
+        school_year_id=packet.school_year_id,
+        grading_period_id=packet.grading_period_id,
+        class_id=packet.class_id,
+        subject_id=packet.subject_id,
+        summary_text=f"Generated printable packet for assignment '{assignment.title}'.",
+        details_json={
+            "pages_per_student": packet.pages_per_student,
+            "student_count": packet.student_count,
+            "template_type": packet.template_type,
+            "output_format": packet.output_format,
+            "total_page_count": packet.student_count * packet.pages_per_student,
+        },
+    )
     db.flush()
     db.refresh(packet)
     return packet

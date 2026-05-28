@@ -1,17 +1,28 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 
 from oziebot_api.config import Settings
 from oziebot_api.deps import DbSession, settings_dep
 from oziebot_api.deps.auth import CurrentUser
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
+from oziebot_api.models.teacher_assist_activity_event import TeacherAssistActivityEvent
+from oziebot_api.models.teacher_assist_assignment_grading_review import (
+    TeacherAssistAssignmentGradingReview,
+)
+from oziebot_api.models.teacher_assist_assignment_grading_review_item import (
+    TeacherAssistAssignmentGradingReviewItem,
+)
 from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAssistAssignmentPrintPacket
 from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
 from oziebot_api.models.teacher_assist_assignment_resource import TeacherAssistAssignmentResource
 from oziebot_api.models.teacher_assist_assignment_standard import TeacherAssistAssignmentStandard
+from oziebot_api.models.teacher_assist_extracted_text_record import TeacherAssistExtractedTextRecord
+from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtractionJob
 from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
 from oziebot_api.models.teacher_assist_class import TeacherAssistClass
 from oziebot_api.models.teacher_assist_class_subject import TeacherAssistClassSubject
@@ -31,6 +42,12 @@ from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
 from oziebot_api.models.teacher_assist_workflow_step import TeacherAssistWorkflowStep
 from oziebot_api.schemas.teacher_assist import (
     AssignmentCreate,
+    TeacherAssistActivityEventOut,
+    AssignmentGradingReviewCreate,
+    AssignmentGradingReviewItemOut,
+    AssignmentGradingReviewOut,
+    AssignmentGradingReviewStatusUpdate,
+    AssignmentGradingReviewUpdate,
     AssignmentOut,
     AssignmentPrintPacketCreate,
     AssignmentPrintPacketOut,
@@ -73,11 +90,36 @@ from oziebot_api.schemas.teacher_assist import (
     StandardOut,
     SubjectCreate,
     SubjectOut,
+    TeacherAssistFileDownloadOut,
+    TeacherAssistExtractedTextApprovedTextUpdate,
+    TeacherAssistExtractedTextDetailAggregateOut,
+    TeacherAssistExtractedTextDetailOut,
+    TeacherAssistExtractedTextHistoryOut,
+    TeacherAssistExtractedTextRecordOut,
+    TeacherAssistExtractedTextReviewStatusUpdate,
+    TeacherAssistExtractionJobCancelUpdate,
+    TeacherAssistExtractionJobDetailOut,
+    TeacherAssistExtractionJobOut,
+    TeacherAssistExtractionRunOut,
+    TeacherAssistExtractionSourceArtifactOut,
+    TeacherAssistExtractionSummaryOut,
     TeacherAssistOptionsOut,
     TeacherAssistWorkflowCancelUpdate,
     TeacherAssistAIUsageEventOut,
+    TeacherAssistClassWorkspaceOut,
     TeacherAssistWorkflowDetailOut,
+    TeacherAssistWorkspaceAssignmentSummaryOut,
+    TeacherAssistWorkspaceGradingReviewSummaryOut,
+    TeacherAssistWorkspaceNeedsAttentionOut,
     TeacherAssistWorkflowOut,
+    TeacherAssistWorkspaceOut,
+    TeacherAssistWorkspacePacketSummaryOut,
+    TeacherAssistWorkspacePlanSummaryOut,
+    TeacherAssistWorkspaceReviewRequiredItemOut,
+    TeacherAssistWorkspaceStatsOut,
+    TeacherAssistWorkspaceSubmissionSummaryOut,
+    TeacherAssistWorkspaceTodaySummaryOut,
+    TeacherAssistWorkspaceWorkflowSummaryOut,
     TeacherAssistWorkflowStepOut,
     TeacherProfileOut,
     TeacherProfileUpsert,
@@ -95,6 +137,12 @@ from oziebot_api.services.teacher_assist.constants import (
     ASSIGNMENT_PRINT_OUTPUT_FORMATS,
     ASSIGNMENT_PRINT_PACKET_STATUSES,
     ASSIGNMENT_PRINT_TEMPLATE_TYPES,
+    ASSIGNMENT_GRADING_REVIEW_SOURCES,
+    ASSIGNMENT_GRADING_REVIEW_STATUSES,
+    TEACHER_ASSIST_EXTRACTION_ARTIFACT_TYPES,
+    TEACHER_ASSIST_EXTRACTION_JOB_STATUSES,
+    EXTRACTION_CONFIDENCE_LEVELS,
+    EXTRACTION_REVIEW_STATUSES,
     ASSIGNMENT_STUDENT_WORK_PROCESSING_STATUSES,
     ASSIGNMENT_STUDENT_WORK_UPLOAD_STATUSES,
     GRADING_PERIOD_TYPES,
@@ -116,12 +164,39 @@ from oziebot_api.services.teacher_assist.assignments import (
     update_assignment,
     update_assignment_status,
 )
+from oziebot_api.services.teacher_assist.grading_reviews import (
+    create_grading_review_from_student_work,
+    get_grading_review_or_404,
+    list_assignment_grading_reviews,
+    update_grading_review,
+    update_grading_review_status,
+)
 from oziebot_api.services.teacher_assist.print_packets import (
     create_assignment_print_packet,
     get_print_packet_or_404,
     list_assignment_print_packets,
     list_print_packet_pages,
     render_qr_svg_data_uri,
+)
+from oziebot_api.services.teacher_assist.extraction_review_service import (
+    get_extracted_text_detail,
+    get_extracted_text_history,
+    get_extraction_job_detail,
+    list_extraction_summaries,
+    retry_extraction_job,
+    retry_latest_eligible_extraction_for_resource,
+    retry_latest_eligible_extraction_for_submission,
+    save_extracted_text_approved_content,
+    update_extracted_text_review_status,
+)
+from oziebot_api.services.teacher_assist.extraction_jobs import (
+    cancel_extraction_job,
+    create_resource_extraction_job,
+    create_student_work_extraction_job,
+    latest_extraction_state_for_resources,
+    latest_extraction_state_for_submissions,
+    list_resource_extraction_runs,
+    list_student_work_extraction_runs,
 )
 from oziebot_api.services.teacher_assist.student_work import (
     create_student_work_submission,
@@ -179,6 +254,7 @@ from oziebot_api.services.teacher_assist.workflow_service import (
     update_weekly_plan,
     _plan_source_metadata,
 )
+from oziebot_api.services.teacher_assist.workspace_service import get_teacher_assist_workspace
 from oziebot_api.services.teacher_assist.setup import (
     attach_class_subject,
     create_class,
@@ -199,7 +275,14 @@ from oziebot_api.services.teacher_assist.setup import (
     update_school_year,
     upsert_teacher_profile,
 )
-from oziebot_api.services.teacher_assist.storage import store_teacher_assist_upload
+from oziebot_api.services.teacher_assist.storage import (
+    build_content_disposition,
+    get_teacher_assist_download_url,
+    open_teacher_assist_stream,
+    resolve_teacher_assist_local_download,
+    store_teacher_assist_upload,
+    teacher_assist_file_exists,
+)
 
 router = APIRouter(prefix="/teacher-assist", tags=["teacher_assist"])
 
@@ -334,6 +417,8 @@ def _resource_out(
     *,
     linked_pacing_items_count: int,
     linked_planning_drafts_count: int,
+    latest_extraction_job: TeacherAssistExtractionJob | None = None,
+    latest_extracted_text: TeacherAssistExtractedTextRecord | None = None,
 ) -> ResourceOut:
     return ResourceOut(
         id=row.id,
@@ -350,6 +435,14 @@ def _resource_out(
         uploaded_at=row.uploaded_at,
         linked_pacing_items_count=linked_pacing_items_count,
         linked_planning_drafts_count=linked_planning_drafts_count,
+        latest_extraction_job=(
+            _extraction_job_out(latest_extraction_job) if latest_extraction_job is not None else None
+        ),
+        latest_extracted_text=(
+            _extracted_text_record_out(latest_extracted_text)
+            if latest_extracted_text is not None
+            else None
+        ),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -421,7 +514,12 @@ def _assignment_print_page_out(row: TeacherAssistAssignmentPrintPage) -> Assignm
     )
 
 
-def _assignment_student_work_out(row: TeacherAssistStudentWorkSubmission) -> AssignmentStudentWorkOut:
+def _assignment_student_work_out(
+    row: TeacherAssistStudentWorkSubmission,
+    *,
+    latest_extraction_job: TeacherAssistExtractionJob | None = None,
+    latest_extracted_text: TeacherAssistExtractedTextRecord | None = None,
+) -> AssignmentStudentWorkOut:
     return AssignmentStudentWorkOut(
         id=row.id,
         tenant_id=row.tenant_id,
@@ -440,8 +538,241 @@ def _assignment_student_work_out(row: TeacherAssistStudentWorkSubmission) -> Ass
         storage_key=row.storage_key,
         upload_status=row.upload_status,
         processing_status=row.processing_status,
+        latest_extraction_job=(
+            _extraction_job_out(latest_extraction_job) if latest_extraction_job is not None else None
+        ),
+        latest_extracted_text=(
+            _extracted_text_record_out(latest_extracted_text)
+            if latest_extracted_text is not None
+            else None
+        ),
         created_at=row.created_at,
         updated_at=row.updated_at,
+    )
+
+
+def _extraction_job_out(row: TeacherAssistExtractionJob) -> TeacherAssistExtractionJobOut:
+    return TeacherAssistExtractionJobOut(
+        id=row.id,
+        artifact_type=row.artifact_type,
+        resource_library_item_id=row.resource_library_item_id,
+        student_work_submission_id=row.student_work_submission_id,
+        assignment_id=row.assignment_id,
+        school_year_id=row.school_year_id,
+        grading_period_id=row.grading_period_id,
+        class_id=row.class_id,
+        subject_id=row.subject_id,
+        student_number=row.student_number,
+        status=row.status,
+        progress_percent=row.progress_percent,
+        provider_name=row.provider_name,
+        error_code=row.error_code,
+        error_message=row.error_message,
+        error_metadata_json=dict(row.error_metadata_json or {}) or None,
+        retry_count=row.retry_count,
+        max_retries=row.max_retries,
+        parent_extraction_job_id=row.parent_extraction_job_id,
+        retry_root_job_id=row.retry_root_job_id,
+        attempt_number=row.attempt_number,
+        leased_by_worker=row.leased_by_worker,
+        lease_expires_at=row.lease_expires_at,
+        heartbeat_at=row.heartbeat_at,
+        execution_log_json=list(row.execution_log_json or []) or None,
+        created_at=row.created_at,
+        started_at=row.started_at,
+        completed_at=row.completed_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _extracted_text_record_out(
+    row: TeacherAssistExtractedTextRecord,
+) -> TeacherAssistExtractedTextRecordOut:
+    metadata = dict(row.metadata_json or {})
+    return TeacherAssistExtractedTextRecordOut(
+        id=row.id,
+        extraction_job_id=row.extraction_job_id,
+        artifact_type=row.artifact_type,
+        resource_library_item_id=row.resource_library_item_id,
+        student_work_submission_id=row.student_work_submission_id,
+        assignment_id=row.assignment_id,
+        class_id=row.class_id,
+        subject_id=row.subject_id,
+        student_number=row.student_number,
+        preview_text=row.preview_text,
+        text_char_count=row.text_char_count,
+        pii_flagged=row.pii_flagged,
+        redaction_applied=row.redaction_applied,
+        review_status=row.review_status,
+        provider_confidence_score=row.provider_confidence_score,
+        confidence_level=row.confidence_level,
+        teacher_corrected_text=row.teacher_corrected_text,
+        approved_text=row.approved_text,
+        reviewed_at=row.reviewed_at,
+        reviewed_by_user_id=row.reviewed_by_user_id,
+        source_extraction_job_id=row.source_extraction_job_id,
+        teacher_review_notes=str(metadata.get("teacher_review_notes") or "") or None,
+        teacher_issue_reason=str(metadata.get("teacher_issue_reason") or "") or None,
+        metadata_json=metadata or None,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _extracted_text_detail_out(
+    row: TeacherAssistExtractedTextRecord,
+) -> TeacherAssistExtractedTextDetailOut:
+    base = _extracted_text_record_out(row)
+    return TeacherAssistExtractedTextDetailOut(
+        **base.model_dump(),
+        extracted_text=row.extracted_text,
+    )
+
+
+def _extraction_run_out(
+    job: TeacherAssistExtractionJob,
+    record: TeacherAssistExtractedTextRecord | None,
+) -> TeacherAssistExtractionRunOut:
+    return TeacherAssistExtractionRunOut(
+        job=_extraction_job_out(job),
+        extracted_text=_extracted_text_record_out(record) if record is not None else None,
+    )
+
+
+def _file_download_out(*, settings: Settings, url: str) -> TeacherAssistFileDownloadOut:
+    return TeacherAssistFileDownloadOut(
+        url=url,
+        expires_at=datetime.now(UTC)
+        + timedelta(seconds=max(1, settings.teacher_assist_s3_presign_expiration_seconds)),
+    )
+
+
+def _assignment_grading_review_item_out(
+    row: TeacherAssistAssignmentGradingReviewItem,
+) -> AssignmentGradingReviewItemOut:
+    return AssignmentGradingReviewItemOut(
+        id=row.id,
+        grading_review_id=row.grading_review_id,
+        criterion_title=row.criterion_title,
+        score_suggestion=row.score_suggestion,
+        max_score=row.max_score,
+        feedback_summary=row.feedback_summary,
+        strengths=list(row.strengths or []),
+        improvement_areas=list(row.improvement_areas or []),
+        teacher_notes=row.teacher_notes,
+        sort_order=row.sort_order,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _assignment_grading_review_out(row: TeacherAssistAssignmentGradingReview) -> AssignmentGradingReviewOut:
+    return AssignmentGradingReviewOut(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        teacher_user_id=row.teacher_user_id,
+        assignment_id=row.assignment_id,
+        student_work_submission_id=row.student_work_submission_id,
+        student_number=row.student_number,
+        school_year_id=row.school_year_id,
+        grading_period_id=row.grading_period_id,
+        class_id=row.class_id,
+        subject_id=row.subject_id,
+        status=row.status,
+        review_source=row.review_source,
+        provider_name=row.provider_name,
+        provider_model=row.provider_model,
+        prompt_version=row.prompt_version,
+        ai_usage_event_id=row.ai_usage_event_id,
+        score_suggestion=row.score_suggestion,
+        max_score=row.max_score,
+        feedback_summary=row.feedback_summary,
+        strengths=list(row.strengths or []),
+        improvement_areas=list(row.improvement_areas or []),
+        teacher_notes=row.teacher_notes,
+        teacher_confirmed_score=row.teacher_confirmed_score,
+        teacher_confirmed_feedback=row.teacher_confirmed_feedback,
+        items=[_assignment_grading_review_item_out(item) for item in row.items],
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _activity_event_out(row: TeacherAssistActivityEvent) -> TeacherAssistActivityEventOut:
+    return TeacherAssistActivityEventOut(
+        id=row.id,
+        event_category=row.event_category,
+        event_type=row.event_type,
+        entity_type=row.entity_type,
+        entity_id=row.entity_id,
+        timestamp=row.event_timestamp,
+        summary_text=row.summary_text,
+        workflow_id=row.workflow_id,
+        school_year_id=row.school_year_id,
+        grading_period_id=row.grading_period_id,
+        class_id=row.class_id,
+        subject_id=row.subject_id,
+        details_json=row.details_json,
+        created_at=row.created_at,
+    )
+
+
+def _workspace_plan_summary_out(data: dict[str, object]) -> TeacherAssistWorkspacePlanSummaryOut:
+    return TeacherAssistWorkspacePlanSummaryOut(**data)
+
+
+def _workspace_assignment_summary_out(data: dict[str, object]) -> TeacherAssistWorkspaceAssignmentSummaryOut:
+    return TeacherAssistWorkspaceAssignmentSummaryOut(**data)
+
+
+def _workspace_packet_summary_out(data: dict[str, object]) -> TeacherAssistWorkspacePacketSummaryOut:
+    return TeacherAssistWorkspacePacketSummaryOut(**data)
+
+
+def _workspace_submission_summary_out(data: dict[str, object]) -> TeacherAssistWorkspaceSubmissionSummaryOut:
+    return TeacherAssistWorkspaceSubmissionSummaryOut(**data)
+
+
+def _workspace_grading_review_summary_out(
+    data: dict[str, object],
+) -> TeacherAssistWorkspaceGradingReviewSummaryOut:
+    return TeacherAssistWorkspaceGradingReviewSummaryOut(**data)
+
+
+def _workspace_workflow_summary_out(data: dict[str, object]) -> TeacherAssistWorkspaceWorkflowSummaryOut:
+    return TeacherAssistWorkspaceWorkflowSummaryOut(**data)
+
+
+def _workspace_needs_attention_out(data: dict[str, object]) -> TeacherAssistWorkspaceNeedsAttentionOut:
+    return TeacherAssistWorkspaceNeedsAttentionOut(**data)
+
+
+def _workspace_review_required_item_out(
+    data: dict[str, object],
+) -> TeacherAssistWorkspaceReviewRequiredItemOut:
+    return TeacherAssistWorkspaceReviewRequiredItemOut(**data)
+
+
+def _workspace_class_out(
+    data: dict[str, object], *, subject_ids_by_class: dict[uuid.UUID, list[uuid.UUID]]
+) -> TeacherAssistClassWorkspaceOut:
+    teacher_class = data["class_row"]
+    return TeacherAssistClassWorkspaceOut(
+        class_context=_class_out(teacher_class, subject_ids=subject_ids_by_class.get(teacher_class.id, [])),
+        active_plans=[_workspace_plan_summary_out(item) for item in data.get("active_plans", [])],
+        assignments=[_workspace_assignment_summary_out(item) for item in data.get("assignments", [])],
+        pending_grading_reviews=[
+            _workspace_grading_review_summary_out(item)
+            for item in data.get("pending_grading_reviews", [])
+        ],
+        recent_submissions=[
+            _workspace_submission_summary_out(item) for item in data.get("recent_submissions", [])
+        ],
+        workflow_summaries=[
+            _workspace_workflow_summary_out(item) for item in data.get("workflow_summaries", [])
+        ],
+        packet_summaries=[_workspace_packet_summary_out(item) for item in data.get("packet_summaries", [])],
+        needs_attention_count=int(data.get("needs_attention_count", 0)),
     )
 
 
@@ -815,9 +1146,56 @@ def read_teacher_assist_options(user: CurrentUser, db: DbSession) -> TeacherAssi
         assignment_print_output_formats=list(ASSIGNMENT_PRINT_OUTPUT_FORMATS),
         assignment_student_work_upload_statuses=list(ASSIGNMENT_STUDENT_WORK_UPLOAD_STATUSES),
         assignment_student_work_processing_statuses=list(ASSIGNMENT_STUDENT_WORK_PROCESSING_STATUSES),
+        assignment_grading_review_statuses=list(ASSIGNMENT_GRADING_REVIEW_STATUSES),
+        assignment_grading_review_sources=list(ASSIGNMENT_GRADING_REVIEW_SOURCES),
+        extraction_artifact_types=list(TEACHER_ASSIST_EXTRACTION_ARTIFACT_TYPES),
+        extraction_job_statuses=list(TEACHER_ASSIST_EXTRACTION_JOB_STATUSES),
+        extraction_review_statuses=list(EXTRACTION_REVIEW_STATUSES),
+        extraction_confidence_levels=list(EXTRACTION_CONFIDENCE_LEVELS),
         planning_draft_statuses=list(PLANNING_DRAFT_STATUSES),
         planning_scopes=list(PLANNING_SCOPES),
         supported_grade_levels=list(SUPPORTED_GRADE_LEVELS),
+    )
+
+
+@router.get("/workspace", response_model=TeacherAssistWorkspaceOut)
+def read_teacher_assist_workspace(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistWorkspaceOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    payload = get_teacher_assist_workspace(
+        db,
+        settings=settings,
+        tenant_id=tenant_id,
+        user_id=user.id,
+    )
+    class_subjects = _class_subject_map(list_class_subjects(db, tenant_id=tenant_id))
+    return TeacherAssistWorkspaceOut(
+        current_school_year=_school_year_out(payload["current_school_year"])
+        if payload.get("current_school_year") is not None
+        else None,
+        active_grading_period=_grading_period_out(payload["active_grading_period"])
+        if payload.get("active_grading_period") is not None
+        else None,
+        today_summary=TeacherAssistWorkspaceTodaySummaryOut(**dict(payload.get("today_summary") or {})),
+        class_workspaces=[
+            _workspace_class_out(item, subject_ids_by_class=class_subjects)
+            for item in payload.get("class_workspaces", [])
+        ],
+        needs_attention=[
+            _workspace_needs_attention_out(item) for item in payload.get("needs_attention", [])
+        ],
+        recent_activity=[_activity_event_out(item) for item in payload.get("recent_activity", [])],
+        active_workflows=[
+            _workspace_workflow_summary_out(item) for item in payload.get("active_workflows", [])
+        ],
+        review_required_items=[
+            _workspace_review_required_item_out(item)
+            for item in payload.get("review_required_items", [])
+        ],
+        workspace_stats=TeacherAssistWorkspaceStatsOut(**dict(payload.get("workspace_stats") or {})),
     )
 
 
@@ -1301,13 +1679,22 @@ def create_teacher_pacing_item_resource(
 def read_resources(user: CurrentUser, db: DbSession) -> list[ResourceOut]:
     tenant_id = _teacher_assist_tenant_id(db, user)
     counts = list_resource_link_counts(db, tenant_id=tenant_id)
+    rows = list_resources(db, tenant_id=tenant_id)
+    latest_state = latest_extraction_state_for_resources(
+        db,
+        tenant_id=tenant_id,
+        user_id=user.id,
+        resource_ids=[row.id for row in rows],
+    )
     return [
         _resource_out(
             row,
             linked_pacing_items_count=counts.pacing_items.get(row.id, 0),
             linked_planning_drafts_count=counts.planning_drafts.get(row.id, 0),
+            latest_extraction_job=latest_state.get(row.id, (None, None))[0],
+            latest_extracted_text=latest_state.get(row.id, (None, None))[1],
         )
-        for row in list_resources(db, tenant_id=tenant_id)
+        for row in rows
     ]
 
 
@@ -1322,7 +1709,12 @@ async def upload_teacher_resource(
 ) -> ResourceOut:
     tenant_id = _teacher_assist_tenant_id(db, user)
     try:
-        stored = await store_teacher_assist_upload(settings, tenant_id=tenant_id, upload=file)
+        stored = await store_teacher_assist_upload(
+            settings,
+            tenant_id=tenant_id,
+            upload=file,
+            area="resources",
+        )
         row = create_uploaded_resource(
             db,
             tenant_id=tenant_id,
@@ -1377,6 +1769,124 @@ def read_resource(
         row,
         linked_pacing_items_count=counts.pacing_items.get(row.id, 0),
         linked_planning_drafts_count=counts.planning_drafts.get(row.id, 0),
+        latest_extraction_job=row.extraction_jobs[0] if row.extraction_jobs else None,
+        latest_extracted_text=row.extracted_text_records[0] if row.extracted_text_records else None,
+    )
+
+
+@router.post("/resources/{resource_id}/extraction-jobs", response_model=TeacherAssistExtractionJobOut, status_code=201)
+def create_teacher_resource_extraction_job(
+    resource_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistExtractionJobOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = create_resource_extraction_job(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            resource_id=resource_id,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _extraction_job_out(row)
+
+
+@router.post("/resources/{resource_id}/extraction-jobs/retry", response_model=TeacherAssistExtractionJobOut, status_code=201)
+def retry_teacher_resource_extraction_job(
+    resource_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistExtractionJobOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = retry_latest_eligible_extraction_for_resource(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            resource_id=resource_id,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _extraction_job_out(row)
+
+
+@router.get("/resources/{resource_id}/extractions", response_model=list[TeacherAssistExtractionRunOut])
+def read_teacher_resource_extractions(
+    resource_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> list[TeacherAssistExtractionRunOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        rows = list_resource_extraction_runs(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            resource_id=resource_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [_extraction_run_out(job, record) for job, record in rows]
+
+
+@router.get("/resources/{resource_id}/download-url", response_model=TeacherAssistFileDownloadOut)
+def read_resource_download_url(
+    resource_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistFileDownloadOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = get_resource_or_404(db, tenant_id=tenant_id, resource_id=resource_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not row.storage_key or not row.original_filename or not row.mime_type:
+        raise HTTPException(status_code=400, detail="Resource does not have a stored file to download")
+    if not teacher_assist_file_exists(settings, storage_key=row.storage_key):
+        raise HTTPException(status_code=404, detail="Stored resource file not found")
+    return _file_download_out(
+        settings=settings,
+        url=get_teacher_assist_download_url(
+            settings,
+            storage_key=row.storage_key,
+            original_filename=row.original_filename,
+            mime_type=row.mime_type,
+        ),
+    )
+
+
+@router.get("/storage/local-download")
+def download_teacher_assist_local_file(
+    token: str = Query(..., min_length=1),
+    settings: Settings = Depends(settings_dep),
+) -> Response:
+    try:
+        download_request = resolve_teacher_assist_local_download(settings, token=token)
+        stream = open_teacher_assist_stream(settings, storage_key=download_request.storage_key)
+        try:
+            contents = stream.read()
+        finally:
+            stream.close()
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=contents,
+        media_type=download_request.mime_type,
+        headers={
+            "Content-Disposition": build_content_disposition(download_request.original_filename),
+            "Cache-Control": "private, max-age=60",
+        },
     )
 
 
@@ -1728,7 +2238,20 @@ def read_teacher_assignment_student_work(
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return [_assignment_student_work_out(row) for row in rows]
+    latest_state = latest_extraction_state_for_submissions(
+        db,
+        tenant_id=tenant_id,
+        user_id=user.id,
+        submission_ids=[row.id for row in rows],
+    )
+    return [
+        _assignment_student_work_out(
+            row,
+            latest_extraction_job=latest_state.get(row.id, (None, None))[0],
+            latest_extracted_text=latest_state.get(row.id, (None, None))[1],
+        )
+        for row in rows
+    ]
 
 
 @router.post("/assignments/{assignment_id}/student-work", response_model=AssignmentStudentWorkOut, status_code=201)
@@ -1744,7 +2267,12 @@ async def upload_teacher_assignment_student_work(
 ) -> AssignmentStudentWorkOut:
     tenant_id = _teacher_assist_tenant_id(db, user)
     try:
-        stored = await store_teacher_assist_upload(settings, tenant_id=tenant_id, upload=file)
+        stored = await store_teacher_assist_upload(
+            settings,
+            tenant_id=tenant_id,
+            upload=file,
+            area="student-work",
+        )
         row = create_student_work_submission(
             db,
             tenant_id=tenant_id,
@@ -1762,7 +2290,11 @@ async def upload_teacher_assignment_student_work(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _assignment_student_work_out(row)
+    return _assignment_student_work_out(
+        row,
+        latest_extraction_job=row.extraction_jobs[0] if row.extraction_jobs else None,
+        latest_extracted_text=row.extracted_text_records[0] if row.extracted_text_records else None,
+    )
 
 
 @router.get("/student-work/{submission_id}", response_model=AssignmentStudentWorkOut)
@@ -1781,7 +2313,312 @@ def read_teacher_assignment_student_work_submission(
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return _assignment_student_work_out(row)
+    return _assignment_student_work_out(
+        row,
+        latest_extraction_job=row.extraction_jobs[0] if row.extraction_jobs else None,
+        latest_extracted_text=row.extracted_text_records[0] if row.extracted_text_records else None,
+    )
+
+
+@router.post("/student-work/{submission_id}/extraction-jobs", response_model=TeacherAssistExtractionJobOut, status_code=201)
+def create_teacher_student_work_extraction_job(
+    submission_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistExtractionJobOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = create_student_work_extraction_job(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            submission_id=submission_id,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _extraction_job_out(row)
+
+
+@router.post(
+    "/student-work/{submission_id}/extraction-jobs/retry",
+    response_model=TeacherAssistExtractionJobOut,
+    status_code=201,
+)
+def retry_teacher_student_work_extraction_job(
+    submission_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistExtractionJobOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = retry_latest_eligible_extraction_for_submission(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            submission_id=submission_id,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _extraction_job_out(row)
+
+
+@router.get("/student-work/{submission_id}/extractions", response_model=list[TeacherAssistExtractionRunOut])
+def read_teacher_student_work_extractions(
+    submission_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> list[TeacherAssistExtractionRunOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        rows = list_student_work_extraction_runs(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            submission_id=submission_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [_extraction_run_out(job, record) for job, record in rows]
+
+
+@router.get("/extraction-jobs/{extraction_job_id}", response_model=TeacherAssistExtractionJobDetailOut)
+def read_teacher_extraction_job(
+    extraction_job_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> TeacherAssistExtractionJobDetailOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = get_extraction_job_detail(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            extraction_job_id=extraction_job_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    source_artifact = payload["source_artifact"]
+    return TeacherAssistExtractionJobDetailOut(
+        job=_extraction_job_out(payload["job"]),
+        extracted_text=(
+            _extracted_text_record_out(payload["extracted_text"])
+            if payload.get("extracted_text") is not None
+            else None
+        ),
+        lineage_jobs=[_extraction_job_out(row) for row in payload.get("lineage_jobs", [])],
+        retry_eligible=bool(payload.get("retry_eligible")),
+        cancel_eligible=bool(payload.get("cancel_eligible")),
+        processing_duration_seconds=payload.get("processing_duration_seconds"),
+        execution_timeline=list(payload.get("execution_timeline") or []),
+        source_artifact=TeacherAssistExtractionSourceArtifactOut(**source_artifact),
+        activity_events=[_activity_event_out(row) for row in payload.get("activity_events", [])],
+    )
+
+
+@router.patch("/extraction-jobs/{extraction_job_id}/cancel", response_model=TeacherAssistExtractionJobOut)
+def cancel_teacher_extraction_job(
+    extraction_job_id: uuid.UUID,
+    body: TeacherAssistExtractionJobCancelUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> TeacherAssistExtractionJobOut:
+    del body
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = cancel_extraction_job(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            extraction_job_id=extraction_job_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _extraction_job_out(row)
+
+
+@router.get("/extractions", response_model=list[TeacherAssistExtractionSummaryOut])
+def read_teacher_extraction_summaries(
+    user: CurrentUser,
+    db: DbSession,
+    limit: int = Query(default=100, ge=1, le=200),
+) -> list[TeacherAssistExtractionSummaryOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    rows = list_extraction_summaries(db, tenant_id=tenant_id, user_id=user.id, limit=limit)
+    return [
+        TeacherAssistExtractionSummaryOut(
+            job=_extraction_job_out(item["job"]),
+            extracted_text=(
+                _extracted_text_record_out(item["record"]) if item.get("record") is not None else None
+            ),
+            retry_eligible=bool(item.get("retry_eligible")),
+            processing_duration_seconds=item.get("processing_duration_seconds"),
+        )
+        for item in rows
+    ]
+
+
+@router.post("/extraction-jobs/{extraction_job_id}/retry", response_model=TeacherAssistExtractionJobOut, status_code=201)
+def retry_teacher_extraction_job(
+    extraction_job_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistExtractionJobOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = retry_extraction_job(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            extraction_job_id=extraction_job_id,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _extraction_job_out(row)
+
+
+@router.get("/extracted-text/{extracted_text_id}", response_model=TeacherAssistExtractedTextDetailAggregateOut)
+def read_teacher_extracted_text_detail(
+    extracted_text_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> TeacherAssistExtractedTextDetailAggregateOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = get_extracted_text_detail(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            extracted_text_id=extracted_text_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return TeacherAssistExtractedTextDetailAggregateOut(
+        record=_extracted_text_detail_out(payload["record"]),
+        job=_extraction_job_out(payload["job"]),
+        lineage_jobs=[_extraction_job_out(row) for row in payload.get("lineage_jobs", [])],
+        retry_eligible=bool(payload.get("retry_eligible")),
+        cancel_eligible=bool(payload.get("cancel_eligible")),
+        processing_duration_seconds=payload.get("processing_duration_seconds"),
+        activity_events=[_activity_event_out(row) for row in payload.get("activity_events", [])],
+    )
+
+
+@router.get("/extracted-text/{extracted_text_id}/history", response_model=TeacherAssistExtractedTextHistoryOut)
+def read_teacher_extracted_text_history(
+    extracted_text_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> TeacherAssistExtractedTextHistoryOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = get_extracted_text_history(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            extracted_text_id=extracted_text_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return TeacherAssistExtractedTextHistoryOut(
+        current_record=_extracted_text_detail_out(payload["current_record"]),
+        current_job=_extraction_job_out(payload["current_job"]),
+        attempt_jobs=[_extraction_job_out(row) for row in payload.get("attempt_jobs", [])],
+        attempt_records=[_extracted_text_record_out(row) for row in payload.get("attempt_records", [])],
+        activity_events=[_activity_event_out(row) for row in payload.get("activity_events", [])],
+    )
+
+
+@router.patch("/extracted-text/{extracted_text_id}/review-status", response_model=TeacherAssistExtractedTextRecordOut)
+def update_teacher_extracted_text_review_status(
+    extracted_text_id: uuid.UUID,
+    body: TeacherAssistExtractedTextReviewStatusUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> TeacherAssistExtractedTextRecordOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = update_extracted_text_review_status(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            extracted_text_id=extracted_text_id,
+            review_status=body.review_status,
+            teacher_review_notes=body.teacher_review_notes,
+            teacher_issue_reason=body.teacher_issue_reason,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _extracted_text_record_out(row)
+
+
+@router.put("/extracted-text/{extracted_text_id}/approved-text", response_model=TeacherAssistExtractedTextRecordOut)
+def update_teacher_extracted_text_approved_text(
+    extracted_text_id: uuid.UUID,
+    body: TeacherAssistExtractedTextApprovedTextUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> TeacherAssistExtractedTextRecordOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = save_extracted_text_approved_content(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            extracted_text_id=extracted_text_id,
+            approved_text=body.approved_text,
+            teacher_corrected_text=body.teacher_corrected_text,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _extracted_text_record_out(row)
+
+
+@router.get("/student-work/{submission_id}/download-url", response_model=TeacherAssistFileDownloadOut)
+def read_teacher_assignment_student_work_download_url(
+    submission_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistFileDownloadOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = get_student_work_submission_or_404(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            submission_id=submission_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not teacher_assist_file_exists(settings, storage_key=row.storage_key):
+        raise HTTPException(status_code=404, detail="Stored student-work file not found")
+    return _file_download_out(
+        settings=settings,
+        url=get_teacher_assist_download_url(
+            settings,
+            storage_key=row.storage_key,
+            original_filename=row.original_filename,
+            mime_type=row.mime_type,
+        ),
+    )
 
 
 @router.patch("/student-work/{submission_id}/status", response_model=AssignmentStudentWorkOut)
@@ -1829,6 +2666,129 @@ def update_teacher_assignment_student_work_packet_context(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _assignment_student_work_out(row)
+
+
+@router.get("/assignments/{assignment_id}/grading-reviews", response_model=list[AssignmentGradingReviewOut])
+def read_teacher_assignment_grading_reviews(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> list[AssignmentGradingReviewOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        rows = list_assignment_grading_reviews(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            assignment_id=assignment_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [_assignment_grading_review_out(row) for row in rows]
+
+
+@router.post("/student-work/{submission_id}/grading-review", response_model=AssignmentGradingReviewOut, status_code=201)
+def create_teacher_assignment_grading_review(
+    submission_id: uuid.UUID,
+    body: AssignmentGradingReviewCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> AssignmentGradingReviewOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = create_grading_review_from_student_work(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            student_work_submission_id=submission_id,
+            student_number=body.student_number,
+            score_suggestion=body.score_suggestion,
+            max_score=body.max_score,
+            feedback_summary=body.feedback_summary,
+            strengths=body.strengths,
+            improvement_areas=body.improvement_areas,
+            teacher_notes=body.teacher_notes,
+            items=[item.model_dump() for item in body.items],
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _assignment_grading_review_out(row)
+
+
+@router.get("/grading-reviews/{grading_review_id}", response_model=AssignmentGradingReviewOut)
+def read_teacher_assignment_grading_review(
+    grading_review_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> AssignmentGradingReviewOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = get_grading_review_or_404(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            grading_review_id=grading_review_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _assignment_grading_review_out(row)
+
+
+@router.put("/grading-reviews/{grading_review_id}", response_model=AssignmentGradingReviewOut)
+def update_teacher_assignment_grading_review(
+    grading_review_id: uuid.UUID,
+    body: AssignmentGradingReviewUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> AssignmentGradingReviewOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = update_grading_review(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            grading_review_id=grading_review_id,
+            status=body.status,
+            score_suggestion=body.score_suggestion,
+            max_score=body.max_score,
+            feedback_summary=body.feedback_summary,
+            strengths=body.strengths,
+            improvement_areas=body.improvement_areas,
+            teacher_notes=body.teacher_notes,
+            teacher_confirmed_score=body.teacher_confirmed_score,
+            teacher_confirmed_feedback=body.teacher_confirmed_feedback,
+            items=[item.model_dump() for item in body.items],
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _assignment_grading_review_out(row)
+
+
+@router.patch("/grading-reviews/{grading_review_id}/status", response_model=AssignmentGradingReviewOut)
+def update_teacher_assignment_grading_review_status(
+    grading_review_id: uuid.UUID,
+    body: AssignmentGradingReviewStatusUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> AssignmentGradingReviewOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = update_grading_review_status(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            grading_review_id=grading_review_id,
+            status=body.status,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _assignment_grading_review_out(row)
 
 
 @router.get("/planning-drafts", response_model=list[PlanningDraftOut])

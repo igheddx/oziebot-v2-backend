@@ -61,6 +61,13 @@ from oziebot_api.models.strategy_lifecycle import StrategyLifecycleEvent
 from oziebot_api.models.strategy_signal_pipeline import StrategyRun, StrategySignalRecord
 from oziebot_api.models.subscription_plan import SubscriptionPlan
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
+from oziebot_api.models.teacher_assist_activity_event import TeacherAssistActivityEvent
+from oziebot_api.models.teacher_assist_assignment_grading_review import TeacherAssistAssignmentGradingReview
+from oziebot_api.models.teacher_assist_assignment_grading_review_item import (
+    TeacherAssistAssignmentGradingReviewItem,
+)
+from oziebot_api.models.teacher_assist_extracted_text_record import TeacherAssistExtractedTextRecord
+from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtractionJob
 from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAssistAssignmentPrintPacket
 from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
 from oziebot_api.models.teacher_assist_assignment_resource import TeacherAssistAssignmentResource
@@ -171,6 +178,11 @@ __all__ = [
     "StrategySignalRecord",
     "SubscriptionPlan",
     "TeacherAssistAssignment",
+    "TeacherAssistActivityEvent",
+    "TeacherAssistAssignmentGradingReview",
+    "TeacherAssistAssignmentGradingReviewItem",
+    "TeacherAssistExtractedTextRecord",
+    "TeacherAssistExtractionJob",
     "TeacherAssistAssignmentPrintPacket",
     "TeacherAssistAssignmentPrintPage",
     "TeacherAssistAssignmentResource",

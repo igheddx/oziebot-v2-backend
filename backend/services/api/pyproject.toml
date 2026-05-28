@@ -25,6 +25,8 @@ dependencies = [
   "PyJWT>=2.8",
   "python-multipart>=0.0.9",
   "qrcode>=8.0",
+  "boto3>=1.35",
+  "botocore>=1.35",
 ]
 
 [project.optional-dependencies]

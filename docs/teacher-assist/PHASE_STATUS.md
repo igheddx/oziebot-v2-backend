@@ -2,7 +2,7 @@
 
 ## Current Implemented Baseline
 
-Phases 1 through 12 have been implemented according to the latest implementation summary.
+Phases 1 through 18 have been implemented according to the latest implementation summary.
 
 Operational TeacherAssist access setup is also in place through an idempotent admin seed script for the requested Dominic and Awele user access/bootstrap flow.
 
@@ -62,6 +62,22 @@ QR-coded printable assignment packet foundation, tenant-safe packet/page persist
 
 Uploaded student-work intake foundation, anonymous STUDENT # submission persistence, software-only upload metadata capture, optional packet/page linkage, and assignment-workspace submission review controls.
 
+## Phase 15
+
+Grading review foundation, anonymous STUDENT # teacher-review persistence, software-only/manual review creation, teacher confirmation validation, and assignment-workspace grading review controls.
+
+## Phase 16
+
+Unified TeacherAssist workspace, append-only activity-event foundation, class-centric operational grouping, needs-attention aggregation, recent activity feed, and workspace dashboard routing.
+
+## Phase 17
+
+Storage-provider hardening, private S3-ready object storage abstraction, backend-generated temporary download URLs, Lightsail/Docker runtime configuration, and AWS bucket/IAM bootstrap guidance.
+
+## Phase 18
+
+OCR intake and artifact-processing foundation, extraction-job persistence, extracted-text records, mock-first OCR provider seam, worker-managed storage-backed extraction, extraction status APIs, activity-event expansion, and workspace/frontend extraction visibility.
+
 ## Next Phase
 
-OCR-free review remains the current limit; later phases can add scan-content extraction or grading flows on top of the stored submission metadata.
+The next recommended phase is extraction remediation and teacher-review drill-down so TeacherAssist can move from mock extraction foundations into richer review actions, retry tooling, and later real-provider OCR evaluation without introducing grading automation or mastery auto-commit.

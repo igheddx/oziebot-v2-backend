@@ -268,3 +268,70 @@ Implications:
 - packet/page linkage is optional and can be added after upload when QR packet context exists
 - intake remains software-only and must not create AI usage, OCR output, grading artifacts, or mastery updates
 - review status is teacher-controlled and intentionally lightweight until later grading phases exist
+
+## ADR-025: Grading review persists teacher confirmation before automation
+
+TeacherAssist grading review should start as a tenant-safe, anonymous student-work review layer where teacher confirmation is the durable source of truth before any AI suggestion, mastery update, or gradebook commit exists.
+
+Reason:
+Teachers need a review workspace tied to uploaded work and assignment context before higher-risk automation is introduced, and privacy rules still require anonymous `STUDENT #` handling with no student-name storage.
+
+Implications:
+- grading reviews link assignment, submission, class, subject, grading-period, school-year, tenant, teacher, and anonymous `student_number`
+- initial review creation is software-only with `review_source = manual` and no provider call, OCR run, AI usage event, mastery update, or gradebook commit
+- teacher-confirmed outcomes must be explicit and validated before a review can move to `teacher_confirmed`
+- provider/model/prompt/usage fields exist only as safe placeholders for later guarded AI phases
+
+## ADR-026: Workspace orchestration is backend-composed
+
+TeacherAssist operational workspace views should be composed by a backend read-model/orchestration layer instead of making the frontend stitch together plans, workflows, assignments, uploads, packets, and grading reviews independently.
+
+Reason:
+Teachers need a single operational view of what requires attention, and the composition logic for tenant safety, teacher ownership, review state, workflow status, and class grouping belongs in one durable backend seam.
+
+Implications:
+- `/v1/teacher-assist/workspace` is the primary operational aggregation endpoint
+- frontend workspace screens consume a composed payload instead of issuing many domain-specific stitching requests
+- class-centric grouping, attention rules, and review-required logic remain consistent across clients
+- future operational expansions should extend the read model rather than duplicate orchestration in the UI
+
+## ADR-027: TeacherAssist activity history uses append-only relational events
+
+TeacherAssist operational history should use a lightweight append-only relational activity-event table instead of mutable audit rows or external event-streaming infrastructure.
+
+Reason:
+The product needs durable recent-activity history and operational visibility now, but not the complexity of Kafka-style event sourcing.
+
+Implications:
+- activity events are tenant-scoped, user-scoped, and intentionally non-PII
+- event rows are append-only and never rewritten as a source of historical truth
+- services record activity through reusable helpers rather than inline duplicated logging
+- the unified workspace timeline and future operational views query relational events directly
+
+## ADR-028: TeacherAssist file storage stays provider-abstracted and private
+
+TeacherAssist file handling should run through a dedicated storage abstraction that supports local development storage and private S3-backed production storage without hardcoding S3 logic into API routes.
+
+Reason:
+TeacherAssist needs a scalable object-storage foundation for uploads, exports, OCR inputs, and generated artifacts, but it must preserve local fallback, backend control, privacy, and deployment flexibility.
+
+Implications:
+- storage operations flow through `services/teacher_assist/storage.py`
+- supported backends are `local` and `s3`
+- stored object keys use TeacherAssist-scoped prefixes such as `teacher-assist/resources/...` and `teacher-assist/student-work/...`
+- S3 buckets remain private with no public ACLs, website hosting, or CDN exposure as part of this phase
+- download access uses backend-generated temporary URLs rather than permanent object URLs or exposed filesystem paths
+
+## ADR-029: Extraction stays async, mock-first, and teacher-review-first
+
+TeacherAssist extraction should run as a tenant-safe async job on top of the private storage abstraction, default to a mock OCR provider, and persist sensitive extracted-text previews without triggering grading or mastery side effects.
+
+Reason:
+Extraction is long-running, storage-backed, and privacy-sensitive, so it needs durable job status, explicit teacher control, and isolation from grading automation while the OCR seam matures.
+
+Implications:
+- uploaded files are read only through `services/teacher_assist/storage.py`
+- extraction state is persisted through dedicated extraction-job and extracted-text records
+- mock OCR remains the default provider until real-provider safety and quality rules are ready
+- extracted text is treated as sensitive and may be redacted when PII-like content is detected
+- extraction completion must not create AI usage events, grading reviews, mastery updates, or parent communication outputs

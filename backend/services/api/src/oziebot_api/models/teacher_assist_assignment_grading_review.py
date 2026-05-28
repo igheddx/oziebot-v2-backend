@@ -3,14 +3,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Uuid
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from oziebot_api.db.base import Base
 
 
-class TeacherAssistStudentWorkSubmission(Base):
-    __tablename__ = "assignment_student_work_submissions"
+class TeacherAssistAssignmentGradingReview(Base):
+    __tablename__ = "assignment_grading_reviews"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
@@ -31,18 +31,14 @@ class TeacherAssistStudentWorkSubmission(Base):
         nullable=False,
         index=True,
     )
-    assignment_print_packet_id: Mapped[uuid.UUID | None] = mapped_column(
+    student_work_submission_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("assignment_print_packets.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("assignment_student_work_submissions.id", ondelete="CASCADE"),
+        nullable=False,
         index=True,
+        unique=True,
     )
-    assignment_print_page_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("assignment_print_pages.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
+    student_number: Mapped[int] = mapped_column(nullable=False)
     school_year_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("school_years.id", ondelete="CASCADE"),
@@ -67,71 +63,64 @@ class TeacherAssistStudentWorkSubmission(Base):
         nullable=False,
         index=True,
     )
-    student_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
-    mime_type: Mapped[str] = mapped_column(String(255), nullable=False)
-    file_size: Mapped[int] = mapped_column(Integer, nullable=False)
-    storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
-    upload_status: Mapped[str] = mapped_column(String(32), nullable=False)
-    processing_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    review_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ai_usage_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("teacher_assist_ai_usage_events.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    score_suggestion: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    feedback_summary: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    strengths: Mapped[list[str]] = mapped_column(JSON(), nullable=False, default=list)
+    improvement_areas: Mapped[list[str]] = mapped_column(JSON(), nullable=False, default=list)
+    teacher_notes: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    teacher_confirmed_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    teacher_confirmed_feedback: Mapped[str | None] = mapped_column(Text(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     tenant: Mapped["Tenant"] = relationship("Tenant")
     teacher_user: Mapped["User"] = relationship("User")
     assignment: Mapped["TeacherAssistAssignment"] = relationship(
-        "TeacherAssistAssignment", back_populates="student_work_submissions"
+        "TeacherAssistAssignment", back_populates="grading_reviews"
     )
-    assignment_print_packet: Mapped["TeacherAssistAssignmentPrintPacket | None"] = relationship(
-        "TeacherAssistAssignmentPrintPacket",
-        back_populates="student_work_submissions",
-    )
-    assignment_print_page: Mapped["TeacherAssistAssignmentPrintPage | None"] = relationship(
-        "TeacherAssistAssignmentPrintPage",
-        back_populates="student_work_submissions",
+    student_work_submission: Mapped["TeacherAssistStudentWorkSubmission"] = relationship(
+        "TeacherAssistStudentWorkSubmission",
+        back_populates="grading_reviews",
     )
     school_year: Mapped["TeacherAssistSchoolYear"] = relationship("TeacherAssistSchoolYear")
     grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship("TeacherAssistGradingPeriod")
     teacher_class: Mapped["TeacherAssistClass"] = relationship("TeacherAssistClass")
     subject: Mapped["TeacherAssistSubject"] = relationship("TeacherAssistSubject")
-    grading_reviews: Mapped[list["TeacherAssistAssignmentGradingReview"]] = relationship(
-        "TeacherAssistAssignmentGradingReview",
-        back_populates="student_work_submission",
+    ai_usage_event: Mapped["TeacherAssistAIUsageEvent | None"] = relationship("TeacherAssistAIUsageEvent")
+    items: Mapped[list["TeacherAssistAssignmentGradingReviewItem"]] = relationship(
+        "TeacherAssistAssignmentGradingReviewItem",
+        back_populates="grading_review",
         cascade="all, delete-orphan",
-        order_by="TeacherAssistAssignmentGradingReview.updated_at.desc()",
-    )
-    extraction_jobs: Mapped[list["TeacherAssistExtractionJob"]] = relationship(
-        "TeacherAssistExtractionJob",
-        back_populates="student_work_submission",
-        cascade="all, delete-orphan",
-        order_by="TeacherAssistExtractionJob.created_at.desc()",
-    )
-    extracted_text_records: Mapped[list["TeacherAssistExtractedTextRecord"]] = relationship(
-        "TeacherAssistExtractedTextRecord",
-        back_populates="student_work_submission",
-        cascade="all, delete-orphan",
-        order_by="TeacherAssistExtractedTextRecord.created_at.desc()",
+        order_by="TeacherAssistAssignmentGradingReviewItem.sort_order.asc(), TeacherAssistAssignmentGradingReviewItem.created_at.asc()",
     )
 
 
 from typing import TYPE_CHECKING  # noqa: E402
 
 if TYPE_CHECKING:
+    from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsageEvent
     from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
-    from oziebot_api.models.teacher_assist_assignment_grading_review import (
-        TeacherAssistAssignmentGradingReview,
+    from oziebot_api.models.teacher_assist_assignment_grading_review_item import (
+        TeacherAssistAssignmentGradingReviewItem,
     )
-    from oziebot_api.models.teacher_assist_extracted_text_record import (
-        TeacherAssistExtractedTextRecord,
-    )
-    from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtractionJob
-    from oziebot_api.models.teacher_assist_assignment_print_packet import (
-        TeacherAssistAssignmentPrintPacket,
-    )
-    from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
     from oziebot_api.models.teacher_assist_class import TeacherAssistClass
     from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
     from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
+    from oziebot_api.models.teacher_assist_student_work_submission import (
+        TeacherAssistStudentWorkSubmission,
+    )
     from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
     from oziebot_api.models.tenant import Tenant
     from oziebot_api.models.user import User

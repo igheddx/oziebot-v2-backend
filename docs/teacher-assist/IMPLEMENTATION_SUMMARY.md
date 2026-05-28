@@ -303,6 +303,524 @@ This document summarizes the current Oziebot repo findings and the proposed impl
 - Real-provider regeneration still depends on the existing guarded backend configuration and remains disabled by default.
 - Deeper collaborative approval/governance workflows for shared-plan edits are still not implemented.
 
+## Phase 17 - TeacherAssist Storage Hardening + S3 Migration Foundation
+
+### What was implemented
+
+- Hardened TeacherAssist storage behind a provider abstraction in `services/teacher_assist/storage.py`.
+- Added provider support for:
+  - `local`
+  - `s3`
+- Added provider operations for:
+  - `save_file()`
+  - `delete_file()`
+  - `get_download_url()`
+  - `file_exists()`
+  - `open_stream()`
+- Kept the API layer storage-provider agnostic by routing TeacherAssist file operations through the storage service instead of hardcoding S3 inside routes.
+- Preserved local storage as the default development backend while enabling S3-backed private object storage for production.
+- Refactored TeacherAssist upload key generation to use provider-safe object keys such as:
+  - `teacher-assist/resources/{tenant_id}/{uuid}.pdf`
+  - `teacher-assist/student-work/{tenant_id}/{uuid}.pdf`
+- Added private download-url foundations for:
+  - uploaded resource-library files
+  - uploaded student-work submissions
+- Added local signed-download fallback for development and presigned S3 URL support for production.
+- Updated TeacherAssist frontend surfaces to support download actions for stored resources and student-work files without rewriting the broader upload UX.
+- Added AWS delivery artifacts for bucket bootstrap and least-privilege IAM guidance without introducing Terraform or CDK.
+
+### Migration notes
+
+- No database migration was required.
+- Existing metadata fields remain the source of truth:
+  - `storage_key`
+  - `mime_type`
+  - `original_filename`
+  - `file_size`
+- Existing TeacherAssist upload APIs continue to work with the new provider abstraction.
+
+### Backend files added or updated
+
+- `backend/services/api/src/oziebot_api/services/teacher_assist/storage.py`
+- `backend/services/api/src/oziebot_api/config.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/pyproject.toml`
+- `backend/services/api/tests/test_teacher_assist_storage.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+- `docker-compose.yml`
+- `docker-compose.lean.yml`
+
+### Frontend files updated
+
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-resources-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-assignments-screen.tsx`
+
+### Infrastructure artifacts added
+
+- `infrastructure/aws/teacher-assist/bootstrap-private-uploads-bucket.sh`
+- `infrastructure/aws/teacher-assist/teacher-assist-uploads-iam-policy.json`
+
+### AWS CLI bucket bootstrap script
+
+- Use:
+  - `bash infrastructure/aws/teacher-assist/bootstrap-private-uploads-bucket.sh`
+- Behavior:
+  - creates or reuses a private bucket named like `teacherassist-prod-uploads-<account>-<region>`
+  - blocks all public access
+  - enforces bucket-owner object ownership and disables ACL-based object control
+  - enables SSE-S3 default encryption
+  - creates `teacher-assist/resources/`, `student-work/`, `print-packets/`, `exports/`, and `temp/` prefixes
+  - applies lifecycle expiration for:
+    - `teacher-assist/temp/`
+    - `teacher-assist/exports/`
+
+### Example IAM policy JSON
+
+- Path:
+  - `infrastructure/aws/teacher-assist/teacher-assist-uploads-iam-policy.json`
+- Scope:
+  - bucket-level list/location access limited to `teacher-assist/*`
+  - object-level `GetObject`, `PutObject`, `DeleteObject`, and multipart-upload permissions limited to `teacher-assist/*`
+- Important:
+  - replace `teacherassist-prod-uploads-ACCOUNT-REGION` with the real bucket name before attaching the policy
+
+### Environment-variable setup
+
+- New backend configuration:
+  - `TEACHER_ASSIST_STORAGE_BACKEND=local|s3`
+  - `TEACHER_ASSIST_STORAGE_ROOT=/tmp/oziebot-teacher-assist`
+  - `TEACHER_ASSIST_S3_BUCKET=teacherassist-prod-uploads-<account>-<region>`
+  - `TEACHER_ASSIST_S3_REGION=<aws-region>`
+  - `TEACHER_ASSIST_S3_PREFIX=teacher-assist`
+  - `TEACHER_ASSIST_S3_ENDPOINT=` optional override for S3-compatible endpoints
+  - `TEACHER_ASSIST_S3_PRESIGN_EXPIRATION_SECONDS=900`
+- Runtime dependencies added:
+  - `boto3`
+  - `botocore`
+
+### Local-dev instructions
+
+1. Keep `TEACHER_ASSIST_STORAGE_BACKEND=local`.
+2. Optionally override `TEACHER_ASSIST_STORAGE_ROOT` to a writable local directory.
+3. Run the existing API/frontend stacks normally; resource uploads and student-work uploads continue to use the existing routes.
+4. Local file downloads now use short-lived backend-signed download URLs instead of exposing filesystem paths.
+
+### Lightsail deployment notes
+
+1. Bootstrap the private S3 bucket with `bootstrap-private-uploads-bucket.sh`.
+2. Attach the least-privilege S3 policy to the IAM principal used by the backend runtime.
+3. Set the new `TEACHER_ASSIST_S3_*` variables in the Lightsail Docker Compose environment.
+4. Set `TEACHER_ASSIST_STORAGE_BACKEND=s3` for the backend container.
+5. Rebuild/redeploy the API container so the new `boto3` dependency and configuration are present.
+6. Keep the bucket private; do not add public bucket policies, website hosting, CDN exposure, or public ACLs.
+
+### Test coverage summary
+
+- Added unit coverage for:
+  - local provider save/read/delete behavior
+  - tenant-safe key generation
+  - storage provider selection
+  - S3 presigned URL generation
+  - S3 file existence/open/delete behavior with mocked clients
+  - signed local download-token validation
+- Added integration coverage for:
+  - resource upload key prefixes
+  - resource download-url generation and local download streaming
+  - student-work upload key prefixes
+  - student-work download-url tenant isolation
+  - existing upload metadata persistence
+
+### User-visible behavior after Phase 17
+
+1. Resource uploads and student-work uploads keep the same TeacherAssist workflows, but stored object keys are now provider-safe and S3-ready.
+2. Teachers can download stored resources and uploaded student-work files through backend-generated temporary download URLs.
+3. Frontend screens no longer need to expose local filesystem concepts; downloads stay backend-controlled and private.
+
+### Remaining gaps after Phase 17
+
+- Printable packet HTML views still exist as the current export path; packet-file persistence in object storage is only a foundation for later phases.
+- Direct-browser uploads are not implemented yet.
+- OCR, extraction queues, grading automation, embeddings, and public artifact delivery remain intentionally out of scope.
+- Retention cleanup jobs are not yet implemented; only S3 lifecycle recommendations and bootstrap wiring were added in this phase.
+
+### Next recommended phase
+
+- Phase 18 - OCR intake and artifact-processing foundation
+  - build async OCR/extraction orchestration on top of the new storage abstraction and private object storage without introducing grading automation or public file delivery
+
+## Phase 18 - OCR Intake + Artifact Processing Foundation
+
+### What was implemented
+
+- Added async TeacherAssist extraction foundations on top of the private storage abstraction.
+- Added durable persistence for:
+  - `teacher_assist_extraction_jobs`
+  - `teacher_assist_extracted_text_records`
+- Added a mock-first OCR provider seam through:
+  - `services/teacher_assist/ocr_provider.py`
+  - `services/teacher_assist/mock_ocr_provider.py`
+- Added artifact-processing sanitization through:
+  - `services/teacher_assist/artifact_processing.py`
+- Added worker-managed extraction execution through:
+  - `services/teacher_assist/extraction_jobs.py`
+  - the existing dedicated `teacher-assist-worker` loop
+- Kept extraction tenant-safe and backend-controlled:
+  - files are read only through `services/teacher_assist/storage.py`
+  - no public S3/object URLs are exposed
+  - no base64 blobs are stored in Postgres
+- Added sensitive extracted-text handling:
+  - persisted preview text
+  - text length metadata
+  - PII-like flagging/redaction seam
+- Added TeacherAssist activity events for:
+  - `extraction_started`
+  - `extraction_completed`
+  - `extraction_failed`
+  - `extraction_cancelled`
+- Extended the unified workspace to surface:
+  - failed extraction jobs
+  - student work ready for extraction
+  - extracted work ready for teacher review
+  - extraction counts in summary/stats
+- Updated TeacherAssist resource and student-work screens to show:
+  - extraction status
+  - start extraction actions
+  - cancel extraction for queued/running student-work jobs
+  - extracted text previews
+  - processing errors
+  - disabled “AI grading coming later” messaging
+
+### Migration summary
+
+- Added `049_teacher_assist_extraction_foundation.py`
+- New tables:
+  - `teacher_assist_extraction_jobs`
+  - `teacher_assist_extracted_text_records`
+- New indexed metadata includes:
+  - artifact type and source references
+  - school-year / grading-period / class / subject context
+  - status / retry / lease / heartbeat / timeout fields
+  - error metadata and execution logs
+- Rollback concern:
+  - downgrading this migration removes extraction-job history and extracted-text preview records
+
+### Backend files added or updated
+
+- `backend/services/api/alembic/versions/049_teacher_assist_extraction_foundation.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_extraction_job.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_extracted_text_record.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_resource_library_item.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_student_work_submission.py`
+- `backend/services/api/src/oziebot_api/models/__init__.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/extraction_jobs.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/artifact_processing.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/ocr_provider.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/mock_ocr_provider.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/workspace_service.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/activity_events.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/constants.py`
+- `backend/services/api/src/oziebot_api/config.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+- `backend/services/teacher-assist-worker/src/oziebot_teacher_assist_worker/__main__.py`
+
+### Frontend files added or updated
+
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-resources-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-assignments-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-workspace-screen.tsx`
+
+### API routes added
+
+- `POST /v1/teacher-assist/resources/{id}/extraction-jobs`
+- `GET /v1/teacher-assist/resources/{id}/extractions`
+- `POST /v1/teacher-assist/student-work/{id}/extraction-jobs`
+- `GET /v1/teacher-assist/student-work/{id}/extractions`
+- `GET /v1/teacher-assist/extraction-jobs/{id}`
+- `PATCH /v1/teacher-assist/extraction-jobs/{id}/cancel`
+
+### Activity-event types implemented
+
+- `extraction_started`
+- `extraction_completed`
+- `extraction_failed`
+- `extraction_cancelled`
+
+### Workspace aggregation behavior
+
+- Workspace summaries now include extraction failure counts, student-work-ready-for-extraction counts, and extracted-artifact-ready-for-review counts.
+- Class workspaces now include recent submissions with latest extraction status and teacher-review-ready flags.
+- Needs-attention aggregation now surfaces extraction failures, unextracted student work, and extracted work awaiting teacher review.
+- Review-required items now include extracted student-work artifacts when no grading review exists yet.
+
+### Needs-attention rules implemented
+
+- failed resource extraction job -> `critical`
+- failed student-work extraction job -> `critical`
+- student work uploaded with no completed extraction and no queued/running extraction job -> `warning`
+- extracted student work with no non-archived grading review yet -> `warning`
+
+### Storage/OCR provider behavior
+
+- extraction workers read file bytes only through the TeacherAssist storage abstraction
+- mock OCR is the default and only implemented provider in this phase
+- mock extraction persists safe preview text and provider metadata without creating AI usage events
+- PII-like content may be flagged/redacted before persistence
+
+### Frontend behavior
+
+1. Resource-library cards now show extraction status, preview text, queue actions, and extraction errors.
+2. Student-work rows and detail panels now show extraction status, queue/cancel actions, preview text, and a disabled AI-grading placeholder.
+3. Workspace summary cards, review queue, class submission cards, and needs-attention panels now reflect extraction operational state.
+
+### Tests added
+
+- tenant-safe extraction job creation for resources and student-work
+- storage-backed resource extraction completion and preview persistence
+- student-work extraction completion with no AI usage or grading-review side effects
+- extraction failure persistence
+- extraction cancellation rules
+- workspace extraction attention/review aggregation
+
+### Manual validation checklist
+
+1. Upload a TeacherAssist resource file and confirm `Start extraction` queues a job.
+2. Refresh the resource screen and confirm status changes to completed with a preview.
+3. Upload anonymous student work and confirm extraction can be queued from the student-work detail panel.
+4. Confirm queued/running student-work extraction can be cancelled.
+5. Confirm completed extraction does not auto-create a grading review or AI usage event.
+6. Open `/teacher-assist/workspace` and verify extraction failures / extraction-ready / review-ready states appear in summary cards and attention panels.
+7. Confirm extraction routes remain tenant-scoped by attempting cross-tenant access.
+
+### Known limitations
+
+- real OCR providers are not implemented yet; mock OCR remains the only provider
+- extracted text is preview-oriented and not yet paired with richer teacher remediation/history tooling
+- external-link resources still cannot be extracted because they do not have a stored file body
+- extraction completion does not yet trigger a dedicated downstream review workflow beyond workspace surfacing
+
+### Next recommended phase
+
+- Phase 19 - extraction remediation and teacher-review drill-down
+  - add richer retry tooling, extraction history/detail screens, teacher review actions on extracted artifacts, and guarded evaluation of real OCR providers without introducing grading automation
+
+## Phase 16 - Unified Teacher Workspace + Workflow Cohesion Layer
+
+### What was implemented
+
+- Added a backend-composed TeacherAssist operational workspace through:
+  - `GET /v1/teacher-assist/workspace`
+  - `workspace_service.py` read-model aggregation
+  - a new frontend workspace landing screen at `/teacher-assist/workspace`
+- Added durable append-only TeacherAssist activity events through:
+  - `teacher_assist_activity_events`
+  - reusable `record_activity_event(...)` helpers
+  - recent activity feed support for the last 50 events
+- Added workspace orchestration that aggregates:
+  - current school year and active grading period
+  - today summary counts
+  - class-centric workspaces
+  - needs-attention alerts
+  - recent activity
+  - active workflows
+  - teacher review-required items
+  - workspace stats
+- Added class-centric grouping so teachers can see, per class:
+  - active plans
+  - assignments
+  - pending grading reviews
+  - recent submissions
+  - workflow summaries
+  - packet summaries
+  - needs-attention count
+- Added needs-attention detection for:
+  - failed workflows
+  - retrying queued workflows
+  - cancelled workflows
+  - stale workflow heartbeats
+  - in-progress plans
+  - standards-alignment gaps
+  - general plan quality flags
+  - missing-context warnings
+  - student-work submissions pending review
+  - grading reviews awaiting teacher confirmation
+- Added activity-event recording hooks across existing TeacherAssist services for:
+  - workflow lifecycle changes
+  - plan creation/update/completion and section regeneration
+  - assignment create/update/status changes
+  - printable packet generation
+  - student-work upload/status changes
+  - grading-review creation/update/confirmation
+- Updated the TeacherAssist frontend so the workspace becomes the operational landing experience and shows:
+  - today summary cards
+  - grouped needs-attention panel
+  - class workspace cards
+  - review-required queue
+  - active workflow list
+  - recent activity timeline
+  - workspace stats
+
+### Migrations added
+
+- `048_teacher_assist_activity_events.py`
+  - creates the append-only `teacher_assist_activity_events` table plus supporting indexes
+
+### Backend files added or updated
+
+- `backend/services/api/alembic/versions/048_teacher_assist_activity_events.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_activity_event.py`
+- `backend/services/api/src/oziebot_api/models/__init__.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/activity_events.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/workspace_service.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/workflow_service.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/assignments.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/print_packets.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/student_work.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/grading_reviews.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+
+### Frontend files added or updated
+
+- `frontend/apps/web/components/teacher-assist/teacher-assist-workspace-screen.tsx`
+- `frontend/apps/web/app/teacher-assist/workspace/page.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-dashboard-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-nav.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-shell.tsx`
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+
+### Activity-event types implemented
+
+- `workflow_started`
+- `workflow_completed`
+- `workflow_failed`
+- `workflow_cancelled`
+- `plan_created`
+- `plan_updated`
+- `plan_regenerated`
+- `plan_completed`
+- `assignment_created`
+- `assignment_updated`
+- `assignment_status_changed`
+- `packet_generated`
+- `student_work_uploaded`
+- `student_work_status_changed`
+- `grading_review_created`
+- `grading_review_confirmed`
+- `grading_review_updated`
+- `section_regenerated`
+
+### User-visible behavior after Phase 16
+
+1. Teachers can land in one operational TeacherAssist workspace instead of stitching together plans, assignments, workflows, uploads, and reviews manually.
+2. Teachers can immediately see what needs attention, which classes are busiest, what was recently changed, and which reviews still need confirmation.
+3. Workflow failures, pending submissions, plan-quality warnings, and unconfirmed grading reviews are now operationally visible without enabling OCR, AI grading, mastery updates, or parent communication.
+
+### Manual validation checklist
+
+- Backend:
+  - `python3 -m ruff check src tests`
+  - `python3 -m pytest -q tests/test_teacher_assist_planning.py`
+- Frontend:
+  - `npm run lint`
+  - `npm run build`
+- Result notes:
+  - backend TeacherAssist suite passes
+  - frontend lint/build pass
+  - one pre-existing frontend warning remains outside TeacherAssist scope: `frontend/apps/web/deploy/aws/cloudfront-viewer-request.js` unused `handler`
+
+### Known limitations after Phase 16
+
+- Workspace polling is periodic and lightweight; live push notifications/websocket infrastructure is not implemented.
+- The workspace is intentionally summary-oriented and does not yet provide a dedicated workflow-remediation detail screen.
+- Activity events are relational and append-only foundations, not a broader event-streaming platform.
+- Frontend validation is currently lint/build only because this repo does not yet have a wired TeacherAssist frontend test harness.
+
+### Next recommended phase
+
+- Phase 17 - Workspace action drill-down and remediation flows
+  - add deeper workflow failure detail, retry/remediation affordances, richer review-required routing, and teacher action shortcuts on top of the unified workspace without introducing OCR, grading automation, or mastery auto-commit
+
+## Phase 15 - Grading Review Foundation + Teacher Confirmation
+
+### What was implemented
+
+- Added persisted grading-review foundations through:
+  - `assignment_grading_reviews`
+  - `assignment_grading_review_items`
+- Added tenant-safe backend grading-review APIs:
+  - `GET /v1/teacher-assist/assignments/{id}/grading-reviews`
+  - `POST /v1/teacher-assist/student-work/{id}/grading-review`
+  - `GET /v1/teacher-assist/grading-reviews/{id}`
+  - `PUT /v1/teacher-assist/grading-reviews/{id}`
+  - `PATCH /v1/teacher-assist/grading-reviews/{id}/status`
+- Added software-only grading review creation that:
+  - requires a visible teacher-owned assignment and student-work submission inside the current TeacherAssist tenant
+  - stores anonymous `student_number` only and rejects student-name/email-like feedback content
+  - copies assignment, class, subject, school-year, and grading-period context onto each review row
+  - preserves safe placeholder metadata for later AI phases: provider name/model, prompt version, usage id, and `review_source`
+  - avoids all OCR/provider usage, AI usage events, mastery updates, gradebook commits, and parent communication output
+- Added grading-review lifecycle support for:
+  - `draft`
+  - `ai_suggested`
+  - `teacher_reviewing`
+  - `teacher_confirmed`
+  - `returned_for_revision`
+  - `archived`
+- Added teacher-confirmation validation so `teacher_confirmed` requires a confirmed score or confirmed feedback.
+- Updated the assignments workspace to support:
+  - starting a grading review from an anonymous student-work submission
+  - grading review list/history per assignment
+  - manual review editing for score suggestion, max score, feedback summary, strengths, improvement areas, and teacher notes
+  - teacher-confirmed score/feedback entry and explicit status updates
+  - disabled placeholders for AI grading, mastery commit, and parent communication
+
+### Migration added
+
+- `047_teacher_assist_grading_review_foundation.py`
+  - creates grading-review and grading-review-item tables plus supporting indexes and relationships
+
+### Backend files added or updated
+
+- `backend/services/api/alembic/versions/047_teacher_assist_grading_review_foundation.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_assignment.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_assignment_grading_review.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_assignment_grading_review_item.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_student_work_submission.py`
+- `backend/services/api/src/oziebot_api/models/__init__.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/constants.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/grading_reviews.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+
+### Frontend files updated
+
+- `frontend/apps/web/components/teacher-assist/teacher-assist-assignments-screen.tsx`
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+
+### User-visible behavior after Phase 15
+
+1. Teachers can start a manual grading review from an anonymous student-work submission using `STUDENT #` only.
+2. The assignments workspace now shows grading review history, editable review details, and explicit teacher-confirmation fields.
+3. Provider/model/usage metadata remains visible as placeholders, while AI grading, mastery commit, and parent communication remain disabled.
+
+### Remaining gaps after Phase 15
+
+- OCR and scan-content extraction are still deferred.
+- AI/provider-assisted grading suggestions are not enabled.
+- Mastery updates, gradebook commit flows, and parent communication generation are still deferred.
+- Criterion-level item editing is persisted in the backend foundation, but the current frontend keeps review editing at the summary level.
+
 ## Phase 14 - Uploaded Student Work Intake Foundation
 
 ### What was implemented
@@ -331,7 +849,7 @@ This document summarizes the current Oziebot repo findings and the proposed impl
   - upload metadata display
   - manual review-status updates
   - optional packet/page linking after upload
-  - continued disabled placeholders for grading review and mastery updates
+  - continued disabled placeholders for later grading automation and mastery updates
 
 ### Migration added
 
@@ -368,7 +886,7 @@ This document summarizes the current Oziebot repo findings and the proposed impl
 ### Remaining gaps after Phase 14
 
 - OCR and any scan-content extraction are still deferred.
-- Grading-review execution and mastery updates are still deferred.
+- Grading-review automation and mastery updates are still deferred.
 - Submission intake currently stores upload metadata and linkage only; there is not yet a richer teacher annotation workflow.
 
 ## Phase 13 - QR-Coded Printable Assignment Packets

@@ -14,6 +14,7 @@ from oziebot_api.models.teacher_assist_class_subject import TeacherAssistClassSu
 from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
 from oziebot_api.models.teacher_assist_standard import TeacherAssistStandard
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
+from oziebot_api.services.teacher_assist.activity_events import record_activity_event
 from oziebot_api.services.teacher_assist.constants import (
     validate_assignment_status,
     validate_assignment_type,
@@ -385,6 +386,25 @@ def create_assignment(
     db.flush()
     _sync_assignment_standards(db, assignment=row, standard_ids=normalized_standard_ids)
     _sync_assignment_resources(db, assignment=row, resource_ids=normalized_resource_ids)
+    record_activity_event(
+        db,
+        tenant_id=row.tenant_id,
+        user_id=row.teacher_user_id,
+        event_type="assignment_created",
+        event_category="assignment",
+        entity_type="assignment",
+        entity_id=row.id,
+        school_year_id=row.school_year_id,
+        grading_period_id=row.grading_period_id,
+        class_id=row.class_id,
+        subject_id=row.subject_id,
+        summary_text=f"Created assignment '{row.title}'.",
+        details_json={
+            "assignment_type": row.assignment_type,
+            "status": row.status,
+            "source_plan_id": str(row.source_plan_id) if row.source_plan_id else None,
+        },
+    )
     db.flush()
     db.refresh(row)
     return row
@@ -423,6 +443,7 @@ def update_assignment(
         source_context_json=source_context_json,
     )
     normalized_assignment_type = validate_assignment_type(assignment_type)
+    prior_status = row.status
     normalized_status = _validate_assignment_status_transition(
         current_status=row.status,
         next_status=status or row.status,
@@ -454,6 +475,25 @@ def update_assignment(
     row.updated_at = datetime.now(UTC)
     _sync_assignment_standards(db, assignment=row, standard_ids=normalized_standard_ids)
     _sync_assignment_resources(db, assignment=row, resource_ids=normalized_resource_ids)
+    record_activity_event(
+        db,
+        tenant_id=row.tenant_id,
+        user_id=row.teacher_user_id,
+        event_type="assignment_updated",
+        event_category="assignment",
+        entity_type="assignment",
+        entity_id=row.id,
+        school_year_id=row.school_year_id,
+        grading_period_id=row.grading_period_id,
+        class_id=row.class_id,
+        subject_id=row.subject_id,
+        summary_text=f"Updated assignment '{row.title}'.",
+        details_json={
+            "assignment_type": row.assignment_type,
+            "status": row.status,
+            "previous_status": prior_status,
+        },
+    )
     db.flush()
     db.refresh(row)
     return row
@@ -468,8 +508,24 @@ def update_assignment_status(
     status: str,
 ) -> TeacherAssistAssignment:
     row = get_assignment_or_404(db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id)
+    previous_status = row.status
     row.status = _validate_assignment_status_transition(current_status=row.status, next_status=status)
     row.updated_at = datetime.now(UTC)
+    record_activity_event(
+        db,
+        tenant_id=row.tenant_id,
+        user_id=row.teacher_user_id,
+        event_type="assignment_status_changed",
+        event_category="assignment",
+        entity_type="assignment",
+        entity_id=row.id,
+        school_year_id=row.school_year_id,
+        grading_period_id=row.grading_period_id,
+        class_id=row.class_id,
+        subject_id=row.subject_id,
+        summary_text=f"Changed assignment '{row.title}' from {previous_status} to {row.status}.",
+        details_json={"previous_status": previous_status, "status": row.status},
+    )
     db.flush()
     return row
 

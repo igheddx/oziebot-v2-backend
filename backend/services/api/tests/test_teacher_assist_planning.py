@@ -9,7 +9,12 @@ from sqlalchemy.orm import Session
 from oziebot_api.config import Settings
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.platform_product import PlatformProduct
+from oziebot_api.models.teacher_assist_activity_event import TeacherAssistActivityEvent
 from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsageEvent
+from oziebot_api.models.teacher_assist_assignment_grading_review import TeacherAssistAssignmentGradingReview
+from oziebot_api.models.teacher_assist_extracted_text_record import TeacherAssistExtractedTextRecord
+from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
+from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
 from oziebot_api.models.tenant_product_access import TenantProductAccess
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.ai_provider import TeacherAssistAIProviderResult
@@ -19,6 +24,9 @@ from oziebot_api.services.teacher_assist.workflow_service import (
     claim_next_teacher_assist_workflow,
     process_claimed_teacher_assist_workflow_with_engine,
     process_next_teacher_assist_workflow_with_engine,
+)
+from oziebot_api.services.teacher_assist.extraction_jobs import (
+    process_next_teacher_assist_extraction_job_with_engine,
 )
 from oziebot_api.services.product_access import TEACHER_ASSIST_PRODUCT_KEY
 
@@ -81,6 +89,23 @@ def _run_teacher_assist_worker(
         settings=settings,
         workflow_id=uuid.UUID(workflow_id) if workflow_id else None,
         worker_name="teacher-assist-test-worker",
+    )
+    db_session.expire_all()
+    return str(claimed_id) if claimed_id is not None else None
+
+
+def _run_teacher_assist_extraction_worker(
+    db_session: Session,
+    *,
+    settings: Settings | None = None,
+    extraction_job_id: str | None = None,
+) -> str | None:
+    settings = settings or Settings(teacher_assist_worker_max_retries=0)
+    claimed_id = process_next_teacher_assist_extraction_job_with_engine(
+        db_session.get_bind(),
+        settings=settings,
+        extraction_job_id=uuid.UUID(extraction_job_id) if extraction_job_id else None,
+        worker_name="teacher-assist-extraction-test-worker",
     )
     db_session.expire_all()
     return str(claimed_id) if claimed_id is not None else None
@@ -576,6 +601,9 @@ def test_resource_upload_and_planning_draft_round_trip(client, db_session: Sessi
     assert resource_payload["resource_type"] == "pdf"
     assert resource_payload["original_filename"] == "curriculum-map.pdf"
     assert resource_payload["storage_key"]
+    assert resource_payload["storage_key"].startswith(
+        f"teacher-assist/resources/{resource_payload['tenant_id']}/"
+    )
     assert resource_payload["linked_pacing_items_count"] == 0
 
     draft = client.post(
@@ -634,6 +662,32 @@ def test_resource_upload_and_planning_draft_round_trip(client, db_session: Sessi
     assert drafts.status_code == 200, drafts.text
     assert drafts.json()[0]["resource_ids"] == [resource_payload["id"]]
     assert drafts.json()[0]["subject_ids"] == [subject["id"]]
+
+
+def test_teacher_resource_download_url_streams_private_file(client, db_session: Session):
+    email = "teacher-resource-download@example.com"
+    token = _register_user(client, email=email, tenant_name="Resource Download Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    upload = client.post(
+        "/v1/teacher-assist/resources/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("curriculum-map.pdf", b"%PDF-1.7 private resource", "application/pdf")},
+        data={"title": "Curriculum Map"},
+    )
+    assert upload.status_code == 201, upload.text
+
+    download = client.get(
+        f"/v1/teacher-assist/resources/{upload.json()['id']}/download-url",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert download.status_code == 200, download.text
+    assert download.json()["url"].startswith("/v1/teacher-assist/storage/local-download?token=")
+
+    streamed = client.get(download.json()["url"])
+    assert streamed.status_code == 200, streamed.text
+    assert streamed.content == b"%PDF-1.7 private resource"
+    assert "attachment;" in streamed.headers["content-disposition"].lower()
 
 
 def test_planning_draft_context_preview_and_ready_status(client, db_session: Session):
@@ -2944,7 +2998,7 @@ def test_assignment_student_work_upload_persists_metadata(client, db_session: Se
     assert payload["original_filename"] == "student-work-02.pdf"
     assert payload["mime_type"] == "application/pdf"
     assert payload["file_size"] > 0
-    assert payload["storage_key"].startswith("teacher-assist/")
+    assert payload["storage_key"].startswith(f"teacher-assist/student-work/{payload['tenant_id']}/")
     assert payload["upload_status"] == "uploaded"
     assert payload["processing_status"] == "pending_review"
 
@@ -3150,6 +3204,56 @@ def test_assignment_student_work_tenant_isolation(client, db_session: Session):
     assert foreign_list.status_code == 404
 
 
+def test_assignment_student_work_download_url_is_tenant_scoped(client, db_session: Session):
+    first_email = "teacher-student-work-download-a@example.com"
+    second_email = "teacher-student-work-download-b@example.com"
+    first_token = _register_user(client, email=first_email, tenant_name="Student Work Download Tenant A")
+    second_token = _register_user(client, email=second_email, tenant_name="Student Work Download Tenant B")
+    _grant_teacher_assist_access(db_session, email=first_email)
+    _grant_teacher_assist_access(db_session, email=second_email)
+
+    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Downloads")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Download Assignment",
+            "assignment_type": "writing",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/student-work",
+        headers={"Authorization": f"Bearer {first_token}"},
+        files={"file": ("student-1.pdf", b"%PDF-1.7 download test", "application/pdf")},
+        data={"student_number": "1"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    download = client.get(
+        f"/v1/teacher-assist/student-work/{uploaded.json()['id']}/download-url",
+        headers={"Authorization": f"Bearer {first_token}"},
+    )
+    assert download.status_code == 200, download.text
+    assert download.json()["url"].startswith("/v1/teacher-assist/storage/local-download?token=")
+
+    streamed = client.get(download.json()["url"])
+    assert streamed.status_code == 200, streamed.text
+    assert streamed.content == b"%PDF-1.7 download test"
+
+    foreign_download = client.get(
+        f"/v1/teacher-assist/student-work/{uploaded.json()['id']}/download-url",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign_download.status_code == 404
+
+
 def test_assignment_student_work_does_not_create_ai_usage_event(client, db_session: Session):
     email = "teacher-student-work-no-ai@example.com"
     token = _register_user(client, email=email, tenant_name="Student Work No AI Tenant")
@@ -3181,3 +3285,1024 @@ def test_assignment_student_work_does_not_create_ai_usage_event(client, db_sessi
     assert uploaded.status_code == 201, uploaded.text
     after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
     assert after_usage_count == before_usage_count
+
+
+def test_resource_extraction_job_completion_uses_storage_and_persists_preview(
+    client, db_session: Session, monkeypatch
+):
+    email = "teacher-resource-extraction@example.com"
+    token = _register_user(client, email=email, tenant_name="Resource Extraction Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    uploaded = client.post(
+        "/v1/teacher-assist/resources/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("resource-handout.pdf", b"%PDF-1.7 resource content", "application/pdf")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    resource = uploaded.json()
+
+    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    opened_keys: list[str] = []
+    from oziebot_api.services.teacher_assist import extraction_jobs as extraction_jobs_module
+
+    original_open_stream = extraction_jobs_module.open_teacher_assist_stream
+
+    def _tracking_open_stream(settings: Settings, *, storage_key: str):
+        opened_keys.append(storage_key)
+        return original_open_stream(settings, storage_key=storage_key)
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.extraction_jobs.open_teacher_assist_stream",
+        _tracking_open_stream,
+    )
+
+    created_job = client.post(
+        f"/v1/teacher-assist/resources/{resource['id']}/extraction-jobs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert created_job.status_code == 201, created_job.text
+    assert created_job.json()["status"] == "queued"
+
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job.json()["id"])
+
+    history = client.get(
+        f"/v1/teacher-assist/resources/{resource['id']}/extractions",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert history.status_code == 200, history.text
+    payload = history.json()
+    assert payload[0]["job"]["status"] == "completed"
+    assert payload[0]["extracted_text"]["preview_text"].startswith("[MOCK OCR]")
+    assert opened_keys == [resource["storage_key"]]
+
+    resource_detail = client.get(
+        f"/v1/teacher-assist/resources/{resource['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resource_detail.status_code == 200, resource_detail.text
+    assert resource_detail.json()["latest_extraction_job"]["status"] == "completed"
+    assert resource_detail.json()["latest_extracted_text"]["preview_text"].startswith("[MOCK OCR]")
+
+    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    assert after_usage_count == before_usage_count
+    event_types = db_session.scalars(
+        select(TeacherAssistActivityEvent.event_type).where(
+            TeacherAssistActivityEvent.entity_id == uuid.UUID(created_job.json()["id"])
+        )
+    ).all()
+    assert "extraction_started" in event_types
+    assert "extraction_completed" in event_types
+
+
+def test_student_work_extraction_completion_updates_workspace_without_ai_or_grading_side_effects(
+    client, db_session: Session
+):
+    email = "teacher-student-work-extraction@example.com"
+    token = _register_user(client, email=email, tenant_name="Student Work Extraction Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Extraction")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Extraction Assignment",
+            "assignment_type": "writing",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/student-work",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("student-3.txt", b"anonymous response body", "text/plain")},
+        data={"student_number": "3"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    submission = uploaded.json()
+
+    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    before_review_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAssignmentGradingReview)
+    )
+
+    created_job = client.post(
+        f"/v1/teacher-assist/student-work/{submission['id']}/extraction-jobs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert created_job.status_code == 201, created_job.text
+
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job.json()["id"])
+
+    detail = client.get(
+        f"/v1/teacher-assist/student-work/{submission['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["latest_extraction_job"]["status"] == "completed"
+    assert detail.json()["latest_extracted_text"]["preview_text"].startswith("[MOCK OCR]")
+
+    history = client.get(
+        f"/v1/teacher-assist/student-work/{submission['id']}/extractions",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert history.status_code == 200, history.text
+    assert history.json()[0]["job"]["status"] == "completed"
+    assert history.json()[0]["extracted_text"]["student_number"] == 3
+
+    workspace = client.get(
+        "/v1/teacher-assist/workspace",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert workspace.status_code == 200, workspace.text
+    workspace_payload = workspace.json()
+    assert workspace_payload["today_summary"]["student_work_ready_for_extraction_count"] == 0
+    assert workspace_payload["today_summary"]["extracted_artifacts_ready_for_teacher_review_count"] == 1
+    assert "extracted_work_ready_for_teacher_review" in {
+        item["type"] for item in workspace_payload["needs_attention"]
+    }
+    assert any(
+        item["entity_type"] == "student_work_submission"
+        for item in workspace_payload["review_required_items"]
+    )
+    assert workspace_payload["class_workspaces"][0]["recent_submissions"][0]["latest_extraction_status"] == "completed"
+    assert workspace_payload["class_workspaces"][0]["recent_submissions"][0][
+        "extraction_ready_for_teacher_review"
+    ] is True
+
+    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    after_review_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAssignmentGradingReview))
+    extracted_count = db_session.scalar(select(func.count()).select_from(TeacherAssistExtractedTextRecord))
+    assert after_usage_count == before_usage_count
+    assert after_review_count == before_review_count
+    assert extracted_count >= 1
+
+
+def test_student_work_extraction_failure_and_cancellation_rules(client, db_session: Session, monkeypatch):
+    email = "teacher-student-work-extraction-failure@example.com"
+    token = _register_user(client, email=email, tenant_name="Student Work Extraction Failure Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Extraction Failures")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Extraction Failure Assignment",
+            "assignment_type": "writing",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/student-work",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("student-1.pdf", b"%PDF-1.7 failure test", "application/pdf")},
+        data={"student_number": "1"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    cancelled_job = client.post(
+        f"/v1/teacher-assist/student-work/{uploaded.json()['id']}/extraction-jobs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert cancelled_job.status_code == 201, cancelled_job.text
+    cancelled = client.patch(
+        f"/v1/teacher-assist/extraction-jobs/{cancelled_job.json()['id']}/cancel",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "cancelled"},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert client.patch(
+        f"/v1/teacher-assist/extraction-jobs/{cancelled_job.json()['id']}/cancel",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "cancelled"},
+    ).status_code == 400
+
+    class _FailingProvider:
+        provider_name = "mock"
+
+        def extract_text(self, **_kwargs):
+            raise RuntimeError("mock OCR boom")
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.extraction_jobs.get_teacher_assist_ocr_provider",
+        lambda _settings: _FailingProvider(),
+    )
+    failed_job = client.post(
+        f"/v1/teacher-assist/student-work/{uploaded.json()['id']}/extraction-jobs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert failed_job.status_code == 201, failed_job.text
+
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=failed_job.json()["id"])
+
+    job_detail = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{failed_job.json()['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert job_detail.status_code == 200, job_detail.text
+    assert job_detail.json()["job"]["status"] == "failed"
+    assert job_detail.json()["job"]["error_code"] == "execution_failed"
+    assert job_detail.json()["extracted_text"] is None
+
+
+def test_extraction_job_creation_is_tenant_scoped(client, db_session: Session):
+    first_email = "teacher-extraction-scope-a@example.com"
+    second_email = "teacher-extraction-scope-b@example.com"
+    first_token = _register_user(client, email=first_email, tenant_name="Extraction Scope A")
+    second_token = _register_user(client, email=second_email, tenant_name="Extraction Scope B")
+    _grant_teacher_assist_access(db_session, email=first_email)
+    _grant_teacher_assist_access(db_session, email=second_email)
+
+    uploaded_resource = client.post(
+        "/v1/teacher-assist/resources/upload",
+        headers={"Authorization": f"Bearer {first_token}"},
+        files={"file": ("scope-resource.pdf", b"%PDF-1.7 scope", "application/pdf")},
+    )
+    assert uploaded_resource.status_code == 201, uploaded_resource.text
+
+    resource_foreign = client.post(
+        f"/v1/teacher-assist/resources/{uploaded_resource.json()['id']}/extraction-jobs",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert resource_foreign.status_code == 404
+
+    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Scope")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Extraction Scope Assignment",
+            "assignment_type": "writing",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+    uploaded_submission = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/student-work",
+        headers={"Authorization": f"Bearer {first_token}"},
+        files={"file": ("scope-student.pdf", b"%PDF-1.7 scope student", "application/pdf")},
+        data={"student_number": "1"},
+    )
+    assert uploaded_submission.status_code == 201, uploaded_submission.text
+
+    submission_foreign = client.post(
+        f"/v1/teacher-assist/student-work/{uploaded_submission.json()['id']}/extraction-jobs",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert submission_foreign.status_code == 404
+
+
+def test_assignment_grading_review_creation_from_student_work(client, db_session: Session):
+    email = "teacher-grading-review@example.com"
+    token = _register_user(client, email=email, tenant_name="Grading Review Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Grading")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Review Assignment",
+            "assignment_type": "short_answer",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/student-work",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("student-2.txt", b"student response", "text/plain")},
+        data={"student_number": "2"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    created = client.post(
+        f"/v1/teacher-assist/student-work/{uploaded.json()['id']}/grading-review",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "student_number": 2,
+            "max_score": 10,
+            "feedback_summary": "Solid reasoning with room to cite stronger evidence.",
+            "strengths": ["Clear reasoning"],
+            "improvement_areas": ["Use more evidence"],
+            "teacher_notes": "Manual review started.",
+        },
+    )
+    assert created.status_code == 201, created.text
+    payload = created.json()
+    assert payload["assignment_id"] == assignment.json()["id"]
+    assert payload["student_work_submission_id"] == uploaded.json()["id"]
+    assert payload["student_number"] == 2
+    assert payload["status"] == "draft"
+    assert payload["review_source"] == "manual"
+    assert payload["provider_name"] is None
+    assert payload["provider_model"] is None
+    assert payload["prompt_version"] is None
+    assert payload["ai_usage_event_id"] is None
+    assert payload["max_score"] == 10
+
+    listed = client.get(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/grading-reviews",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert listed.status_code == 200, listed.text
+    assert len(listed.json()) == 1
+    assert listed.json()[0]["id"] == payload["id"]
+
+    detail = client.get(
+        f"/v1/teacher-assist/grading-reviews/{payload['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["feedback_summary"] == payload["feedback_summary"]
+
+
+def test_assignment_grading_review_teacher_confirmation_validation(client, db_session: Session):
+    email = "teacher-grading-confirm@example.com"
+    token = _register_user(client, email=email, tenant_name="Grading Confirm Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Confirm")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Confirm Review Assignment",
+            "assignment_type": "writing",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/student-work",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("student-1.pdf", b"%PDF-1.7 submission", "application/pdf")},
+        data={"student_number": "1"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    created = client.post(
+        f"/v1/teacher-assist/student-work/{uploaded.json()['id']}/grading-review",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"student_number": 1, "max_score": 20},
+    )
+    assert created.status_code == 201, created.text
+
+    invalid = client.patch(
+        f"/v1/teacher-assist/grading-reviews/{created.json()['id']}/status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "teacher_confirmed"},
+    )
+    assert invalid.status_code == 400, invalid.text
+    assert "teacher confirmed" in invalid.json()["detail"].lower()
+
+    confirmed = client.put(
+        f"/v1/teacher-assist/grading-reviews/{created.json()['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "status": "teacher_confirmed",
+            "max_score": 20,
+            "teacher_confirmed_score": 18,
+            "teacher_confirmed_feedback": "Teacher confirmed final feedback.",
+            "items": [],
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "teacher_confirmed"
+    assert confirmed.json()["teacher_confirmed_score"] == 18
+
+
+def test_assignment_grading_review_rejects_pii_like_content(client, db_session: Session):
+    email = "teacher-grading-pii@example.com"
+    token = _register_user(client, email=email, tenant_name="Grading PII Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="PII")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "PII Review Assignment",
+            "assignment_type": "project",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/student-work",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("student-3.txt", b"submission", "text/plain")},
+        data={"student_number": "3"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    rejected = client.post(
+        f"/v1/teacher-assist/student-work/{uploaded.json()['id']}/grading-review",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "student_number": 3,
+            "feedback_summary": "Email the family at parent@example.com with this note.",
+        },
+    )
+    assert rejected.status_code == 400, rejected.text
+    assert "pii" in rejected.json()["detail"].lower()
+
+
+def test_assignment_grading_review_tenant_isolation_and_foreign_submission_blocked(client, db_session: Session):
+    first_email = "teacher-grading-a@example.com"
+    second_email = "teacher-grading-b@example.com"
+    first_token = _register_user(client, email=first_email, tenant_name="Grading Tenant A")
+    second_token = _register_user(client, email=second_email, tenant_name="Grading Tenant B")
+    _grant_teacher_assist_access(db_session, email=first_email)
+    _grant_teacher_assist_access(db_session, email=second_email)
+
+    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Isolation")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Isolation Review Assignment",
+            "assignment_type": "writing",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/student-work",
+        headers={"Authorization": f"Bearer {first_token}"},
+        files={"file": ("student-1.pdf", b"%PDF-1.7 grading", "application/pdf")},
+        data={"student_number": "1"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    foreign_create = client.post(
+        f"/v1/teacher-assist/student-work/{uploaded.json()['id']}/grading-review",
+        headers={"Authorization": f"Bearer {second_token}"},
+        json={"student_number": 1},
+    )
+    assert foreign_create.status_code == 404
+
+    created = client.post(
+        f"/v1/teacher-assist/student-work/{uploaded.json()['id']}/grading-review",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={"student_number": 1},
+    )
+    assert created.status_code == 201, created.text
+
+    foreign_get = client.get(
+        f"/v1/teacher-assist/grading-reviews/{created.json()['id']}",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign_get.status_code == 404
+
+
+def test_assignment_grading_review_does_not_create_ai_usage_or_other_side_effects(client, db_session: Session):
+    email = "teacher-grading-no-ai@example.com"
+    token = _register_user(client, email=email, tenant_name="Grading No AI Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="No AI Review")
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "No AI Review Assignment",
+            "assignment_type": "homework",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment.json()['id']}/student-work",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("student-4.txt", b"manual review only", "text/plain")},
+        data={"student_number": "4"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    created = client.post(
+        f"/v1/teacher-assist/student-work/{uploaded.json()['id']}/grading-review",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"student_number": 4, "max_score": 5},
+    )
+    assert created.status_code == 201, created.text
+    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    assert after_usage_count == before_usage_count
+    assert created.json()["review_source"] == "manual"
+    assert created.json()["ai_usage_event_id"] is None
+    assert created.json()["provider_name"] is None
+
+
+def test_teacher_assist_workspace_aggregates_operational_state_and_activity(client, db_session: Session):
+    email = "teacher-workspace@example.com"
+    token = _register_user(client, email=email, tenant_name="Workspace Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Workspace")
+    second_class = client.post(
+        "/v1/teacher-assist/classes",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "name": "Workspace Block B",
+            "grade_level": "5",
+            "student_count": 18,
+        },
+    )
+    assert second_class.status_code == 201, second_class.text
+    attached = client.post(
+        "/v1/teacher-assist/class-subjects",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"class_id": second_class.json()["id"], "subject_id": context["subject"]["id"]},
+    )
+    assert attached.status_code == 201, attached.text
+
+    workflow = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert workflow.status_code == 202, workflow.text
+    completed_workflow_id = workflow.json()["id"]
+    _run_teacher_assist_worker(db_session, workflow_id=completed_workflow_id)
+
+    weekly_plans = client.get(
+        "/v1/teacher-assist/weekly-plans",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert weekly_plans.status_code == 200, weekly_plans.text
+    weekly_plan_id = weekly_plans.json()[0]["id"]
+
+    failed_workflow = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert failed_workflow.status_code == 202, failed_workflow.text
+    failed_workflow_id = uuid.UUID(failed_workflow.json()["id"])
+
+    now = datetime.now(UTC)
+    weekly_plan_row = db_session.get(TeacherAssistWeeklyPlan, uuid.UUID(weekly_plan_id))
+    assert weekly_plan_row is not None
+    weekly_plan_row.content_json = {
+        **dict(weekly_plan_row.content_json or {}),
+        "quality_flags": ["mock-output", "standards-context-missing"],
+        "missing_context_warnings": ["Pacing guide context still needs review."],
+    }
+    weekly_plan_row.updated_at = now
+
+    failed_workflow_row = db_session.get(TeacherAssistWorkflow, failed_workflow_id)
+    assert failed_workflow_row is not None
+    failed_workflow_row.status = "failed"
+    failed_workflow_row.error_message = "TeacherAssist workflow failed in validation."
+    failed_workflow_row.updated_at = now
+    db_session.commit()
+
+    assignment = client.post(
+        "/v1/teacher-assist/assignments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Workspace Assignment",
+            "assignment_type": "writing",
+            "status": "ready",
+        },
+    )
+    assert assignment.status_code == 201, assignment.text
+    assignment_id = assignment.json()["id"]
+
+    packet = client.post(
+        f"/v1/teacher-assist/assignments/{assignment_id}/print-packets",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"pages_per_student": 1, "template_type": "lined_writing_page"},
+    )
+    assert packet.status_code == 201, packet.text
+
+    uploaded = client.post(
+        f"/v1/teacher-assist/assignments/{assignment_id}/student-work",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("student-2.pdf", b"%PDF-1.7 workspace", "application/pdf")},
+        data={"student_number": "2", "assignment_print_packet_id": packet.json()["id"]},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    review = client.post(
+        f"/v1/teacher-assist/student-work/{uploaded.json()['id']}/grading-review",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"student_number": 2, "max_score": 10, "feedback_summary": "Teacher review pending."},
+    )
+    assert review.status_code == 201, review.text
+
+    workspace = client.get(
+        "/v1/teacher-assist/workspace",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert workspace.status_code == 200, workspace.text
+    payload = workspace.json()
+
+    assert payload["current_school_year"]["id"] == context["school_year"]["id"]
+    assert payload["active_grading_period"]["id"] == context["grading_period"]["id"]
+    assert payload["today_summary"]["plans_needing_review_count"] == 1
+    assert payload["today_summary"]["grading_reviews_pending_confirmation_count"] == 1
+    assert payload["today_summary"]["recent_uploads_count"] == 1
+    assert payload["today_summary"]["workflow_failures_count"] == 1
+    assert payload["workspace_stats"]["active_plans_count"] == 1
+    assert payload["workspace_stats"]["plans_in_review_count"] == 1
+    assert payload["workspace_stats"]["pending_grading_reviews_count"] == 1
+    assert payload["workspace_stats"]["recent_upload_count"] == 1
+    assert payload["workspace_stats"]["workflow_failure_count"] == 1
+
+    attention_types = {item["type"] for item in payload["needs_attention"]}
+    assert {
+        "workflow_failed",
+        "plan_in_progress",
+        "missing_standards_alignment",
+        "plan_quality_flags",
+        "missing_context_warnings",
+        "submission_pending_review",
+        "grading_review_pending_confirmation",
+    }.issubset(attention_types)
+
+    class_workspaces = {item["class"]["id"]: item for item in payload["class_workspaces"]}
+    primary_workspace = class_workspaces[context["teacher_class"]["id"]]
+    assert len(primary_workspace["active_plans"]) == 1
+    assert len(primary_workspace["assignments"]) == 1
+    assert len(primary_workspace["pending_grading_reviews"]) == 1
+    assert len(primary_workspace["recent_submissions"]) == 1
+    assert len(primary_workspace["packet_summaries"]) == 1
+    assert primary_workspace["needs_attention_count"] >= 6
+    assert class_workspaces[second_class.json()["id"]]["assignments"] == []
+    assert class_workspaces[second_class.json()["id"]]["needs_attention_count"] == 0
+
+    activity_event_types = {item["event_type"] for item in payload["recent_activity"]}
+    assert {
+        "workflow_started",
+        "workflow_completed",
+        "plan_created",
+        "assignment_created",
+        "packet_generated",
+        "student_work_uploaded",
+        "grading_review_created",
+    }.issubset(activity_event_types)
+
+    user = db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    recorded_event_types = {
+        row.event_type
+        for row in db_session.scalars(
+            select(TeacherAssistActivityEvent).where(TeacherAssistActivityEvent.user_id == user.id)
+        ).all()
+    }
+    assert activity_event_types.issubset(recorded_event_types)
+
+
+def test_teacher_assist_workspace_is_tenant_scoped(client, db_session: Session):
+    first_email = "teacher-workspace-a@example.com"
+    second_email = "teacher-workspace-b@example.com"
+    first_token = _register_user(client, email=first_email, tenant_name="Workspace Tenant A")
+    second_token = _register_user(client, email=second_email, tenant_name="Workspace Tenant B")
+    _grant_teacher_assist_access(db_session, email=first_email)
+    _grant_teacher_assist_access(db_session, email=second_email)
+
+    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Scoped Workspace")
+    workflow = client.post(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
+        headers={"Authorization": f"Bearer {first_token}"},
+    )
+    assert workflow.status_code == 202, workflow.text
+    _run_teacher_assist_worker(db_session, workflow_id=workflow.json()["id"])
+
+    first_workspace = client.get(
+        "/v1/teacher-assist/workspace",
+        headers={"Authorization": f"Bearer {first_token}"},
+    )
+    assert first_workspace.status_code == 200, first_workspace.text
+    assert first_workspace.json()["class_workspaces"]
+    assert first_workspace.json()["recent_activity"]
+
+    second_workspace = client.get(
+        "/v1/teacher-assist/workspace",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert second_workspace.status_code == 200, second_workspace.text
+    second_payload = second_workspace.json()
+    assert second_payload["current_school_year"] is None
+    assert second_payload["active_grading_period"] is None
+    assert second_payload["class_workspaces"] == []
+    assert second_payload["needs_attention"] == []
+    assert second_payload["recent_activity"] == []
+    assert second_payload["active_workflows"] == []
+    assert second_payload["review_required_items"] == []
+
+
+def test_extraction_review_retry_approval_and_history(client, db_session: Session, monkeypatch):
+    email = "teacher-extraction-review@example.com"
+    token = _register_user(client, email=email, tenant_name="Extraction Review Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    uploaded = client.post(
+        "/v1/teacher-assist/resources/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("review-handout.pdf", b"%PDF-1.7 review content", "application/pdf")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    resource = uploaded.json()
+
+    created_job = client.post(
+        f"/v1/teacher-assist/resources/{resource['id']}/extraction-jobs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert created_job.status_code == 201, created_job.text
+    job_id = created_job.json()["id"]
+
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=job_id)
+
+    run_detail = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{job_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert run_detail.status_code == 200, run_detail.text
+    extracted = run_detail.json()["extracted_text"]
+    assert extracted["review_status"] == "pending_review"
+    assert extracted["confidence_level"] in {"low", "medium", "high"}
+    assert extracted["provider_confidence_score"] is not None
+
+    detail = client.get(
+        f"/v1/teacher-assist/extracted-text/{extracted['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["record"]["extracted_text"].startswith("[MOCK OCR]")
+    assert detail.json()["job"]["attempt_number"] == 1
+
+    started = client.patch(
+        f"/v1/teacher-assist/extracted-text/{extracted['id']}/review-status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"review_status": "teacher_reviewing"},
+    )
+    assert started.status_code == 200, started.text
+
+    corrected = client.put(
+        f"/v1/teacher-assist/extracted-text/{extracted['id']}/approved-text",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"teacher_corrected_text": "Teacher corrected extraction text."},
+    )
+    assert corrected.status_code == 200, corrected.text
+    assert corrected.json()["teacher_corrected_text"] == "Teacher corrected extraction text."
+
+    approved = client.patch(
+        f"/v1/teacher-assist/extracted-text/{extracted['id']}/review-status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"review_status": "teacher_approved"},
+    )
+    assert approved.status_code == 200, approved.text
+
+    approved_text = client.put(
+        f"/v1/teacher-assist/extracted-text/{extracted['id']}/approved-text",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"approved_text": "Teacher corrected extraction text."},
+    )
+    assert approved_text.status_code == 200, approved_text.text
+    assert approved_text.json()["approved_text"] == "Teacher corrected extraction text."
+
+    history = client.get(
+        f"/v1/teacher-assist/extracted-text/{extracted['id']}/history",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert history.status_code == 200, history.text
+    assert len(history.json()["attempt_jobs"]) == 1
+    event_types = {row["event_type"] for row in history.json()["activity_events"]}
+    assert "extraction_review_started" in event_types
+    assert "extraction_text_corrected" in event_types
+    assert "extraction_review_approved" in event_types
+
+    rejected = client.patch(
+        f"/v1/teacher-assist/extracted-text/{extracted['id']}/review-status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"review_status": "archived"},
+    )
+    assert rejected.status_code == 200, rejected.text
+
+
+def test_extraction_retry_creates_new_job_with_lineage(client, db_session: Session, monkeypatch):
+    email = "teacher-extraction-retry@example.com"
+    token = _register_user(client, email=email, tenant_name="Extraction Retry Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    uploaded = client.post(
+        "/v1/teacher-assist/resources/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("retry-handout.pdf", b"%PDF-1.7 retry content", "application/pdf")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    resource = uploaded.json()
+
+    created_job = client.post(
+        f"/v1/teacher-assist/resources/{resource['id']}/extraction-jobs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert created_job.status_code == 201, created_job.text
+    original_job_id = created_job.json()["id"]
+
+    class _FailingOCR:
+        provider_name = "mock"
+
+        def extract_text(self, **kwargs):
+            raise RuntimeError("mock extraction failure")
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.extraction_jobs.get_teacher_assist_ocr_provider",
+        lambda settings: _FailingOCR(),
+    )
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=original_job_id)
+
+    failed = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{original_job_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert failed.status_code == 200, failed.text
+    assert failed.json()["job"]["status"] == "failed"
+
+    retried = client.post(
+        f"/v1/teacher-assist/extraction-jobs/{original_job_id}/retry",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert retried.status_code == 201, retried.text
+    retry_payload = retried.json()
+    assert retry_payload["id"] != original_job_id
+    assert retry_payload["parent_extraction_job_id"] == original_job_id
+    assert retry_payload["retry_root_job_id"] == original_job_id
+    assert retry_payload["attempt_number"] == 2
+
+    summaries = client.get(
+        "/v1/teacher-assist/extractions",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert summaries.status_code == 200, summaries.text
+    assert len(summaries.json()) >= 2
+
+    workspace = client.get(
+        "/v1/teacher-assist/workspace",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert workspace.status_code == 200, workspace.text
+    assert workspace.json()["today_summary"]["extraction_failures_count"] >= 1
+
+
+def test_extraction_job_detail_includes_eligibility_and_artifact_metadata(client, db_session: Session):
+    email = "teacher-extraction-detail@example.com"
+    token = _register_user(client, email=email, tenant_name="Extraction Detail Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    uploaded = client.post(
+        "/v1/teacher-assist/resources/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("detail-handout.pdf", b"%PDF-1.7 detail content", "application/pdf")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    resource = uploaded.json()
+
+    created_job = client.post(
+        f"/v1/teacher-assist/resources/{resource['id']}/extraction-jobs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert created_job.status_code == 201, created_job.text
+    job_id = created_job.json()["id"]
+
+    queued_detail = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{job_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert queued_detail.status_code == 200, queued_detail.text
+    queued_payload = queued_detail.json()
+    assert queued_payload["cancel_eligible"] is True
+    assert queued_payload["retry_eligible"] is False
+    assert queued_payload["source_artifact"]["original_filename"] == "detail-handout.pdf"
+    assert "storage_key" not in queued_payload["source_artifact"]
+
+    blocked_retry = client.post(
+        f"/v1/teacher-assist/extraction-jobs/{job_id}/retry",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert blocked_retry.status_code == 400, blocked_retry.text
+
+
+def test_extraction_issue_flagging_and_mark_reviewed_without_grading_side_effects(
+    client, db_session: Session
+):
+    email = "teacher-extraction-issue@example.com"
+    token = _register_user(client, email=email, tenant_name="Extraction Issue Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    uploaded = client.post(
+        "/v1/teacher-assist/resources/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("issue-handout.pdf", b"%PDF-1.7 issue content", "application/pdf")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    resource = uploaded.json()
+
+    created_job = client.post(
+        f"/v1/teacher-assist/resources/{resource['id']}/extraction-jobs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert created_job.status_code == 201, created_job.text
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job.json()["id"])
+
+    extracted = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{created_job.json()['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()["extracted_text"]
+
+    flagged = client.patch(
+        f"/v1/teacher-assist/extracted-text/{extracted['id']}/review-status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "review_status": "issue_flagged",
+            "teacher_issue_reason": "Preview text looks incomplete for classroom use.",
+            "teacher_review_notes": "Retry after rescanning the original handout.",
+        },
+    )
+    assert flagged.status_code == 200, flagged.text
+    assert flagged.json()["review_status"] == "issue_flagged"
+    assert flagged.json()["teacher_issue_reason"] == "Preview text looks incomplete for classroom use."
+
+    blocked_from_issue = client.patch(
+        f"/v1/teacher-assist/extracted-text/{extracted['id']}/review-status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"review_status": "reviewed"},
+    )
+    assert blocked_from_issue.status_code == 400, blocked_from_issue.text
+
+    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    before_grading_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAssignmentGradingReview)
+    )
+
+    resumed = client.patch(
+        f"/v1/teacher-assist/extracted-text/{extracted['id']}/review-status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"review_status": "teacher_reviewing"},
+    )
+    assert resumed.status_code == 200, resumed.text
+
+    reviewed_ok = client.patch(
+        f"/v1/teacher-assist/extracted-text/{extracted['id']}/review-status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"review_status": "reviewed", "teacher_review_notes": "Acceptable after manual check."},
+    )
+    assert reviewed_ok.status_code == 200, reviewed_ok.text
+    assert reviewed_ok.json()["review_status"] == "reviewed"
+
+    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    after_grading_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAssignmentGradingReview)
+    )
+    assert after_usage_count == before_usage_count
+    assert after_grading_count == before_grading_count
+

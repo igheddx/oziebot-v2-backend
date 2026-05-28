@@ -44,10 +44,22 @@
 - Assignment model foundation
 - Assignment workspace and lifecycle controls
 - Software-only weekly-plan-to-assignment starter
+- Printable packet foundation
+- Student-work intake foundation
+- Manual grading-review foundation
+- Unified TeacherAssist workspace
+- Append-only activity-event foundation
+- Class-centric operational grouping and needs-attention surfacing
+- Recent activity timeline and review-required queue
+- Storage-provider abstraction with local and private S3 backends
+- Backend-generated temporary download URLs for stored TeacherAssist files
+- AWS bucket bootstrap and IAM guidance for TeacherAssist object storage
+- Async extraction jobs and extracted-text preview foundation on top of private TeacherAssist storage
+- Mock-first OCR provider seam and worker-managed artifact processing
 
 ## Current Direction
 
-TeacherAssist now supports a flexible instructional-planning foundation plus reusable-plan discovery, annual rollover foundations, dedicated worker-managed workflow execution, controlled real-provider instructional-plan execution, and a teacher-owned assignment foundation while preserving weekly compatibility and mock-first safety defaults.
+TeacherAssist now supports a flexible instructional-planning foundation plus reusable-plan discovery, annual rollover foundations, dedicated worker-managed workflow execution, controlled real-provider instructional-plan execution, teacher-owned assignment/review workflows, a unified operational workspace, and private object-storage foundations while preserving weekly compatibility and mock-first safety defaults.
 
 TeacherAssist is evolving toward:
 - reusable instructional planning
@@ -64,14 +76,18 @@ TeacherAssist is evolving toward:
 4. Reusable instructional asset library beyond plans
 5. Cross-school-year artifact reuse beyond plan copies
 6. Target grading-period remapping workflows
-7. Scan/upload ingestion workflows
-8. Teacher review workspace beyond plan-level review metadata
-9. Team/shared curriculum governance and approval flows
-10. Grading assistance workflows
-11. TEKS mastery matrix
-12. Lesson effectiveness insights
-13. Parent/newsletter communication assistant
-14. Export features such as PPTX/Google Slides-compatible outputs
+7. Workspace action drill-down and remediation flows
+8. Extraction retry/remediation workflows and teacher review drill-down
+9. Real OCR provider evaluation and guarded rollout
+10. Direct-browser upload and larger-file transfer workflows
+11. Retention cleanup jobs for temporary artifacts and exports
+12. Teacher review workspace beyond plan-level review metadata
+13. Team/shared curriculum governance and approval flows
+14. Grading assistance workflows
+15. TEKS mastery matrix
+16. Lesson effectiveness insights
+17. Parent/newsletter communication assistant
+18. Export features such as PPTX/Google Slides-compatible outputs
 
 ## Future Planning Model Direction
 
@@ -90,7 +106,7 @@ toward:
 
 ## Deferred / Not Yet
 
-- OCR
+- real OCR providers
 - handwriting extraction
 - embeddings
 - PPTX export
@@ -103,3 +119,4 @@ toward:
 - QR assignment ingestion
 - Google Classroom integration
 - SIS/gradebook integration
+- public CDN delivery for TeacherAssist files
