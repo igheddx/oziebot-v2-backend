@@ -107,7 +107,8 @@ toward:
 
 ## Deferred / Not Yet
 
-- real OCR providers
+- Azure OCR / Google Vision OCR adapters
+- persisted OCR daily usage accounting beyond config placeholders
 - handwriting extraction
 - embeddings
 - PPTX export

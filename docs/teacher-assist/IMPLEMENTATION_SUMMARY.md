@@ -771,7 +771,6 @@ This document summarizes the current Oziebot repo findings and the proposed impl
 
 ### Known limitations
 
-- real OCR providers are still not implemented; mock OCR remains the default and only active provider
 - teacher review notes and issue reasons are currently stored in `metadata_json`, not dedicated columns
 - artifact-level retry buttons are centered in the Extractions workspace; Resources/Assignments primarily link into drill-down rather than exposing every remediation action inline
 - approved extracted text is persisted for future downstream phases but is not yet consumed by AI grading or analytics workflows
@@ -779,7 +778,113 @@ This document summarizes the current Oziebot repo findings and the proposed impl
 ### Next recommended phase
 
 - Phase 20 - guarded real OCR provider integration
-  - introduce a config-guarded real OCR provider behind the existing provider seam, compare provider attempts using retry lineage, and keep teacher-approved text as the only downstream input without enabling grading automation or mastery auto-commit
+
+## Phase 20 - Guarded Real OCR Provider Integration
+
+### What already existed (Phases 18–19)
+
+- Mock-first OCR provider seam via `ocr_provider.py` and `mock_ocr_provider.py`
+- Extraction jobs, extracted-text records, worker-managed storage-backed execution
+- Teacher-review-first persistence (`pending_review` default, corrected/approved text fields)
+- Phase 19 retry lineage (`parent_extraction_job_id`, `retry_root_job_id`, `attempt_number`)
+- Extraction detail/history APIs and `/teacher-assist/extractions` drill-down UI
+- Confidence metadata and low-confidence workspace attention rules
+
+### What was added
+
+- Config-guarded real OCR provider integration with mock remaining the default
+- Provider-neutral OCR config/circuit breaker in `ocr_provider_config.py`
+- Structured OCR provider errors in `ocr_errors.py`
+- Real provider implementations:
+  - `textract_ocr_provider.py` (AWS Textract `detect_document_text`)
+  - `openai_vision_ocr_provider.py` (OpenAI vision JSON extraction)
+- OCR provider metadata persistence on extraction jobs:
+  - `provider_model`
+  - `provider_version`
+  - `provider_mode` (`mock` / `real`)
+  - `page_count`
+  - `processing_duration_ms`
+  - `estimated_cost_cents` placeholder
+- Preflight OCR guards for file size and MIME allowlists (real providers only)
+- Graceful failure codes:
+  - `provider_disabled`
+  - `provider_not_configured`
+  - `unsupported_mime_type`
+  - `provider_timeout`
+  - `provider_malformed_response`
+  - `provider_quota_exceeded`
+- Extraction UI updates showing provider mode/model/version/attempt/confidence/duration/cost placeholder
+- Real OCR messaging that output still requires teacher review
+
+### Migration added
+
+- `051_teacher_assist_ocr_provider_metadata.py`
+
+### Config / env variables added
+
+- `TEACHER_ASSIST_REAL_OCR_ENABLED` (default `false`)
+- `TEACHER_ASSIST_OCR_ALLOWED_PROVIDERS` (default `mock,textract,openai_vision`)
+- `TEACHER_ASSIST_OCR_ALLOWED_MODELS` (default `mock-ocr,textract-detect-document-text,gpt-4o-mini`)
+- `TEACHER_ASSIST_OCR_MAX_FILE_BYTES` (default `26214400`)
+- `TEACHER_ASSIST_OCR_MAX_PAGES` (default `15`)
+- `TEACHER_ASSIST_OCR_PROVIDER_TIMEOUT_SECONDS` (default `120`)
+- `TEACHER_ASSIST_OCR_DAILY_COST_LIMIT_CENTS` (default `0`, keeps real OCR disabled by policy)
+- `TEACHER_ASSIST_OCR_OPENAI_VISION_MODEL` (default `gpt-4o-mini`)
+- `TEACHER_ASSIST_OCR_AWS_REGION` (optional; defaults to TeacherAssist S3 region)
+
+Existing settings reused without frontend exposure:
+
+- `TEACHER_ASSIST_OCR_PROVIDER` (default `mock`)
+- `TEACHER_ASSIST_OPENAI_API_KEY` (OpenAI vision only, backend-only)
+
+### Backend files added or updated
+
+- `backend/services/api/alembic/versions/051_teacher_assist_ocr_provider_metadata.py`
+- `backend/services/api/src/oziebot_api/config.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_extraction_job.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/constants.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/ocr_errors.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/ocr_provider_config.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/ocr_provider.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/mock_ocr_provider.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/textract_ocr_provider.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/openai_vision_ocr_provider.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/extraction_jobs.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+
+### Frontend files updated
+
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-extraction-detail-screen.tsx`
+
+### Tests added / run
+
+- mock OCR remains default provider
+- real OCR blocked without enable flag / zero daily cost limit
+- missing OpenAI credentials fail safely
+- real OCR provider metadata persists on jobs/records
+- low-confidence real OCR stays `pending_review` and remains retry-eligible
+- retry lineage preserves provider attempts across failed/successful real OCR runs
+- real OCR does not create grading reviews or AI usage events
+- unsupported MIME types fail safely for real OCR providers
+- full TeacherAssist planning suite: **82 passed**
+- ruff check clean on changed backend OCR files
+- frontend lint/build successful
+
+### Remaining gaps
+
+- no persisted daily OCR usage accounting yet (cost limit is a config placeholder only)
+- OpenAI vision OCR does not create AI usage events even though it uses an LLM
+- Azure OCR / Google Vision adapters are not implemented yet (seam supports adding them)
+- handwriting-heavy and multi-page PDF async OCR remain limited
+- approved extracted text is still not consumed downstream
+
+### Next recommended phase
+
+- Phase 21 - teacher-approved extraction downstream consumption
+  - allow approved/corrected extraction text to feed future grading prep and analytics workflows without bypassing teacher review or enabling automatic grading/mastery commits
 
 ## Phase 16 - Unified Teacher Workspace + Workflow Cohesion Layer
 

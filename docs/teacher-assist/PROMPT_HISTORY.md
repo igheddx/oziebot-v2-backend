@@ -355,3 +355,24 @@ Result summary:
 - added the `/teacher-assist/extractions` operational workspace with remediation drill-down for both extracted-text review and job-only failure states
 - extended workspace attention surfaces for low-confidence, rejected, stale, and retry-required extraction items
 - kept AI usage, grading review creation, mastery updates, and gradebook commits out of extraction review actions
+
+## Phase 20 - Guarded Real OCR Provider Integration
+
+Date:
+Purpose:
+Introduce config-guarded real OCR providers behind the existing TeacherAssist OCR seam while keeping mock OCR as the default and preserving teacher-review-first behavior.
+
+Prompt summary:
+Add OCR config guards, provider-neutral real OCR implementations (Textract + OpenAI vision), provider metadata persistence, graceful provider failure handling, retry lineage across provider attempts, extraction UI provider messaging, and validation coverage without enabling grading automation, mastery updates, parent communication, or public object URLs.
+
+Non-goals:
+No AI grading, no mastery updates, no gradebook commits, no parent communication, no public file access, no direct browser uploads, and no trading-system changes.
+
+Files/areas expected to change:
+- OCR provider config/errors, real provider implementations, extraction job persistence, migration 051, schemas/API output, tests, extraction detail UI, and TeacherAssist docs
+
+Result summary:
+- delivered guarded real OCR provider integration with mock remaining default and explicit enable/cost-limit switches for real execution
+- persisted provider mode/model/version/confidence/page count/duration/cost metadata on extraction jobs and records
+- preserved teacher review-first behavior with no grading, mastery, or AI usage side effects from OCR extraction
+- extended extraction drill-down UI to show provider attempt metadata and real-OCR review messaging

@@ -98,6 +98,42 @@ class Settings(BaseSettings):
         default=4000,
         description="Soft text-length cap for TeacherAssist mock OCR placeholder output.",
     )
+    teacher_assist_real_ocr_enabled: bool = Field(
+        default=False,
+        description="Primary safety switch for any non-mock TeacherAssist OCR provider.",
+    )
+    teacher_assist_ocr_allowed_providers: str = Field(
+        default="mock,textract,openai_vision",
+        description="Comma-separated allowlist of TeacherAssist OCR providers.",
+    )
+    teacher_assist_ocr_allowed_models: str = Field(
+        default="mock-ocr,textract-detect-document-text,gpt-4o-mini",
+        description="Comma-separated allowlist of TeacherAssist OCR models.",
+    )
+    teacher_assist_ocr_max_file_bytes: int = Field(
+        default=25 * 1024 * 1024,
+        description="Maximum artifact size in bytes for TeacherAssist OCR execution.",
+    )
+    teacher_assist_ocr_max_pages: int = Field(
+        default=15,
+        description="Maximum page count allowed for TeacherAssist OCR execution.",
+    )
+    teacher_assist_ocr_provider_timeout_seconds: int = Field(
+        default=120,
+        description="Timeout for a single TeacherAssist OCR provider request.",
+    )
+    teacher_assist_ocr_daily_cost_limit_cents: int = Field(
+        default=0,
+        description="Daily TeacherAssist OCR cost limit in cents. Zero keeps real OCR disabled by policy.",
+    )
+    teacher_assist_ocr_openai_vision_model: str = Field(
+        default="gpt-4o-mini",
+        description="OpenAI vision model used when teacher_assist_ocr_provider=openai_vision.",
+    )
+    teacher_assist_ocr_aws_region: str | None = Field(
+        default=None,
+        description="AWS region for TeacherAssist Textract OCR. Defaults to TeacherAssist S3 region.",
+    )
     teacher_assist_extraction_timeout_seconds: int = Field(
         default=180,
         description="Max runtime for a TeacherAssist extraction attempt before timing out.",

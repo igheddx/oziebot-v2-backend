@@ -320,6 +320,12 @@ class TeacherAssistExtractionJobOut(BaseModel):
     status: TeacherAssistExtractionJobStatusLiteral
     progress_percent: int = 0
     provider_name: str | None = None
+    provider_model: str | None = None
+    provider_version: str | None = None
+    provider_mode: Literal["mock", "real"] | None = None
+    page_count: int | None = None
+    processing_duration_ms: int | None = None
+    estimated_cost_cents: int | None = None
     error_code: str | None = None
     error_message: str | None = None
     error_metadata_json: dict[str, Any] | None = None

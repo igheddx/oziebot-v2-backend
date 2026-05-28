@@ -1,3 +1,15 @@
+x-teacher-assist-env: &teacher-assist-env
+  TEACHER_ASSIST_STORAGE_BACKEND: ${TEACHER_ASSIST_STORAGE_BACKEND:-local}
+  TEACHER_ASSIST_STORAGE_ROOT: ${TEACHER_ASSIST_STORAGE_ROOT:-/tmp/oziebot-teacher-assist}
+  TEACHER_ASSIST_S3_BUCKET: ${TEACHER_ASSIST_S3_BUCKET:-}
+  TEACHER_ASSIST_S3_REGION: ${TEACHER_ASSIST_S3_REGION:-}
+  TEACHER_ASSIST_S3_PREFIX: ${TEACHER_ASSIST_S3_PREFIX:-teacher-assist}
+  TEACHER_ASSIST_S3_ENDPOINT: ${TEACHER_ASSIST_S3_ENDPOINT:-}
+  TEACHER_ASSIST_S3_PRESIGN_EXPIRATION_SECONDS: ${TEACHER_ASSIST_S3_PRESIGN_EXPIRATION_SECONDS:-900}
+  TEACHER_ASSIST_OCR_PROVIDER: ${TEACHER_ASSIST_OCR_PROVIDER:-mock}
+  TEACHER_ASSIST_REAL_OCR_ENABLED: ${TEACHER_ASSIST_REAL_OCR_ENABLED:-false}
+  TEACHER_ASSIST_OCR_DAILY_COST_LIMIT_CENTS: ${TEACHER_ASSIST_OCR_DAILY_COST_LIMIT_CENTS:-0}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -36,19 +48,28 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production-min-32-chars}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,https://app.oziebot.com}
-      TEACHER_ASSIST_STORAGE_BACKEND: ${TEACHER_ASSIST_STORAGE_BACKEND:-local}
-      TEACHER_ASSIST_STORAGE_ROOT: ${TEACHER_ASSIST_STORAGE_ROOT:-/tmp/oziebot-teacher-assist}
-      TEACHER_ASSIST_S3_BUCKET: ${TEACHER_ASSIST_S3_BUCKET:-}
-      TEACHER_ASSIST_S3_REGION: ${TEACHER_ASSIST_S3_REGION:-}
-      TEACHER_ASSIST_S3_PREFIX: ${TEACHER_ASSIST_S3_PREFIX:-teacher-assist}
-      TEACHER_ASSIST_S3_ENDPOINT: ${TEACHER_ASSIST_S3_ENDPOINT:-}
-      TEACHER_ASSIST_S3_PRESIGN_EXPIRATION_SECONDS: ${TEACHER_ASSIST_S3_PRESIGN_EXPIRATION_SECONDS:-900}
+      <<: *teacher-assist-env
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  teacher-assist-worker:
+    build:
+      context: .
+      dockerfile: backend/services/teacher-assist-worker/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://oziebot:oziebot@postgres:5432/oziebot}
+      TEACHER_ASSIST_WORKER_ENABLED: ${TEACHER_ASSIST_WORKER_ENABLED:-true}
+      TEACHER_ASSIST_WORKER_POLL_INTERVAL_SECONDS: ${TEACHER_ASSIST_WORKER_POLL_INTERVAL_SECONDS:-1.0}
+      <<: *teacher-assist-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
 
   strategy-engine:
     build:

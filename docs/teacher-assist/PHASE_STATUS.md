@@ -82,6 +82,10 @@ OCR intake and artifact-processing foundation, extraction-job persistence, extra
 
 Extraction remediation and teacher-review drill-down, extraction review statuses, confidence metadata, retry/lineage tracking, stale-job recovery, extraction detail/history APIs, issue flagging with teacher notes, workspace remediation attention rules, and the `/teacher-assist/extractions` operational review workspace.
 
+## Phase 20
+
+Guarded real OCR provider integration behind config switches, provider-neutral OCR seam with Textract and OpenAI vision implementations, OCR provider metadata persistence, graceful provider failure handling, retry lineage across real provider attempts, and extraction UI provider/mode/confidence messaging while preserving teacher-review-first behavior.
+
 ## Next Phase
 
-The next recommended phase is guarded real OCR provider integration so TeacherAssist can evaluate real extraction providers behind config guards while preserving teacher-approved text, retry lineage, and the no-grading-automation boundary.
+The next recommended phase is teacher-approved extraction downstream consumption so approved text can safely feed future grading prep and mastery workflows without bypassing teacher review.

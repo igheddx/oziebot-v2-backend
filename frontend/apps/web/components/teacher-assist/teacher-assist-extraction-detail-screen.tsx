@@ -17,6 +17,7 @@ import {
 import type {
   TeacherAssistExtractedTextDetailAggregate,
   TeacherAssistExtractedTextHistory,
+  TeacherAssistExtractionJob,
   TeacherAssistExtractionJobDetail,
   TeacherAssistExtractionSummary,
 } from "@/lib/teacher-assist-types";
@@ -37,6 +38,60 @@ function labelize(value: string) {
   return value
     .replaceAll("_", " ")
     .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function formatDurationMs(value: number | null | undefined) {
+  if (value == null) return "Unknown";
+  if (value < 1000) return `${value} ms`;
+  return `${(value / 1000).toFixed(1)} s`;
+}
+
+function formatCostCents(value: number | null | undefined) {
+  if (value == null) return "Not tracked";
+  if (value === 0) return "$0.00";
+  return `$${(value / 100).toFixed(2)}`;
+}
+
+function ProviderMetadataPanel({ job }: { job: TeacherAssistExtractionJob }) {
+  return (
+    <section className="ta-panel p-5">
+      <h2 className="text-lg font-semibold text-slate-900">OCR provider attempt</h2>
+      <dl className="mt-4 grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
+        <div>
+          <dt className="font-semibold text-slate-900">Mode</dt>
+          <dd>{labelize(job.provider_mode ?? "mock")}</dd>
+        </div>
+        <div>
+          <dt className="font-semibold text-slate-900">Provider</dt>
+          <dd>{job.provider_name ?? "mock"}</dd>
+        </div>
+        <div>
+          <dt className="font-semibold text-slate-900">Model</dt>
+          <dd>{job.provider_model ?? "Unknown"}</dd>
+        </div>
+        <div>
+          <dt className="font-semibold text-slate-900">Version</dt>
+          <dd>{job.provider_version ?? "Unknown"}</dd>
+        </div>
+        <div>
+          <dt className="font-semibold text-slate-900">Attempt</dt>
+          <dd>{job.attempt_number}</dd>
+        </div>
+        <div>
+          <dt className="font-semibold text-slate-900">Pages</dt>
+          <dd>{job.page_count ?? "Unknown"}</dd>
+        </div>
+        <div>
+          <dt className="font-semibold text-slate-900">Processing duration</dt>
+          <dd>{formatDurationMs(job.processing_duration_ms)}</dd>
+        </div>
+        <div>
+          <dt className="font-semibold text-slate-900">Estimated cost</dt>
+          <dd>{formatCostCents(job.estimated_cost_cents)}</dd>
+        </div>
+      </dl>
+    </section>
+  );
 }
 
 function confidenceClasses(level: string | null | undefined) {
@@ -96,8 +151,8 @@ function ExtractionList({
                       : "Resource extraction"}
                   </h2>
                   <p className="text-sm text-slate-600">
-                    Attempt {summary.job.attempt_number} · Provider {summary.job.provider_name ?? "mock"} · Updated{" "}
-                    {formatDateTime(summary.job.updated_at)}
+                    Attempt {summary.job.attempt_number} · Mode {labelize(summary.job.provider_mode ?? "mock")} · Provider{" "}
+                    {summary.job.provider_name ?? "mock"} · Updated {formatDateTime(summary.job.updated_at)}
                   </p>
                   {record?.preview_text ? (
                     <p className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
@@ -171,6 +226,7 @@ function ExtractionDetail({
   );
 
   const lowConfidence = detail.record.confidence_level === "low";
+  const realOcrOutput = detail.job.provider_mode === "real";
 
   return (
     <div className="space-y-6">
@@ -196,6 +252,9 @@ function ExtractionDetail({
                   ? ` (${Math.round(detail.record.provider_confidence_score * 100)}%)`
                   : ""}
               </span>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                {labelize(detail.job.provider_mode ?? "mock")} OCR · Attempt {detail.job.attempt_number}
+              </span>
             </div>
           </div>
           <Link href="/teacher-assist/extractions" className="ta-button-secondary">
@@ -203,6 +262,13 @@ function ExtractionDetail({
           </Link>
         </div>
       </section>
+
+      {realOcrOutput ? (
+        <section className="ta-alert ta-alert-info">
+          Real OCR output still requires teacher review. Approved text remains the only safe downstream input; grading,
+          mastery updates, and parent communication are not triggered automatically.
+        </section>
+      ) : null}
 
       {lowConfidence ? (
         <section className="ta-alert ta-alert-error">
@@ -222,6 +288,8 @@ function ExtractionDetail({
           Teacher issue flagged: {detail.record.teacher_issue_reason}
         </section>
       ) : null}
+
+      <ProviderMetadataPanel job={detail.job} />
 
       <section className="grid gap-4 lg:grid-cols-2">
         <article className="ta-panel p-5">
@@ -582,8 +650,8 @@ export function TeacherAssistExtractionDetailScreen() {
                   : jobDetail.source_artifact.original_filename}
               </h1>
               <p className="mt-2 text-sm text-slate-600">
-                Provider {jobDetail.job.provider_name ?? "mock"} · Attempt {jobDetail.job.attempt_number} ·{" "}
-                {labelize(jobDetail.job.status)}
+                Mode {labelize(jobDetail.job.provider_mode ?? "mock")} · Provider {jobDetail.job.provider_name ?? "mock"} ·
+                Attempt {jobDetail.job.attempt_number} · {labelize(jobDetail.job.status)}
               </p>
             </div>
             <Link href="/teacher-assist/extractions" className="ta-button-secondary">
@@ -591,6 +659,12 @@ export function TeacherAssistExtractionDetailScreen() {
             </Link>
           </div>
         </section>
+        {jobDetail.job.provider_mode === "real" ? (
+          <section className="ta-alert ta-alert-info">
+            Real OCR output still requires teacher review before any downstream use.
+          </section>
+        ) : null}
+        <ProviderMetadataPanel job={jobDetail.job} />
         <section className="ta-alert ta-alert-info">
           AI grading remains disabled. This drill-down shows extraction job status only.
         </section>

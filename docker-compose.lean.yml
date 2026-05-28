@@ -4,6 +4,18 @@
 # Does not replace ECS definitions in infrastructure/aws; ECS can be scaled to 0
 # while this stack runs. See README_LEAN_MODE.md.
 
+x-teacher-assist-env: &teacher-assist-env
+  TEACHER_ASSIST_STORAGE_BACKEND: ${TEACHER_ASSIST_STORAGE_BACKEND:-local}
+  TEACHER_ASSIST_STORAGE_ROOT: ${TEACHER_ASSIST_STORAGE_ROOT:-/tmp/oziebot-teacher-assist}
+  TEACHER_ASSIST_S3_BUCKET: ${TEACHER_ASSIST_S3_BUCKET:-}
+  TEACHER_ASSIST_S3_REGION: ${TEACHER_ASSIST_S3_REGION:-}
+  TEACHER_ASSIST_S3_PREFIX: ${TEACHER_ASSIST_S3_PREFIX:-teacher-assist}
+  TEACHER_ASSIST_S3_ENDPOINT: ${TEACHER_ASSIST_S3_ENDPOINT:-}
+  TEACHER_ASSIST_S3_PRESIGN_EXPIRATION_SECONDS: ${TEACHER_ASSIST_S3_PRESIGN_EXPIRATION_SECONDS:-900}
+  TEACHER_ASSIST_OCR_PROVIDER: ${TEACHER_ASSIST_OCR_PROVIDER:-mock}
+  TEACHER_ASSIST_REAL_OCR_ENABLED: ${TEACHER_ASSIST_REAL_OCR_ENABLED:-false}
+  TEACHER_ASSIST_OCR_DAILY_COST_LIMIT_CENTS: ${TEACHER_ASSIST_OCR_DAILY_COST_LIMIT_CENTS:-0}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -64,13 +76,7 @@ services:
       STRIPE_CHECKOUT_CANCEL_URL: ${STRIPE_CHECKOUT_CANCEL_URL:-}
       EXCHANGE_CREDENTIALS_ENCRYPTION_KEY: ${EXCHANGE_CREDENTIALS_ENCRYPTION_KEY:-}
       COINBASE_API_BASE_URL: ${COINBASE_API_BASE_URL:-https://api.coinbase.com}
-      TEACHER_ASSIST_STORAGE_BACKEND: ${TEACHER_ASSIST_STORAGE_BACKEND:-local}
-      TEACHER_ASSIST_STORAGE_ROOT: ${TEACHER_ASSIST_STORAGE_ROOT:-/tmp/oziebot-teacher-assist}
-      TEACHER_ASSIST_S3_BUCKET: ${TEACHER_ASSIST_S3_BUCKET:-}
-      TEACHER_ASSIST_S3_REGION: ${TEACHER_ASSIST_S3_REGION:-}
-      TEACHER_ASSIST_S3_PREFIX: ${TEACHER_ASSIST_S3_PREFIX:-teacher-assist}
-      TEACHER_ASSIST_S3_ENDPOINT: ${TEACHER_ASSIST_S3_ENDPOINT:-}
-      TEACHER_ASSIST_S3_PRESIGN_EXPIRATION_SECONDS: ${TEACHER_ASSIST_S3_PRESIGN_EXPIRATION_SECONDS:-900}
+      <<: *teacher-assist-env
       RUN_DB_MIGRATIONS_ON_STARTUP: ${RUN_DB_MIGRATIONS_ON_STARTUP:-1}
       # Lean: raise thresholds slightly to cut log noise/cost vs noisy local disk
       API_SLOW_REQUEST_MS: ${API_SLOW_REQUEST_MS:-2000}
@@ -91,6 +97,27 @@ services:
       resources:
         limits:
           memory: ${API_MEMORY_LIMIT:-1024M}
+    restart: unless-stopped
+
+  teacher-assist-worker:
+    build:
+      context: .
+      dockerfile: backend/services/teacher-assist-worker/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      TEACHER_ASSIST_WORKER_ENABLED: ${TEACHER_ASSIST_WORKER_ENABLED:-true}
+      TEACHER_ASSIST_WORKER_POLL_INTERVAL_SECONDS: ${TEACHER_ASSIST_WORKER_POLL_INTERVAL_SECONDS:-1.0}
+      <<: *teacher-assist-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    logging: *lean-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     restart: unless-stopped
 
   strategy-engine:

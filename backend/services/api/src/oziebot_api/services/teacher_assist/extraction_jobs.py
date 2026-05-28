@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import time
 import traceback
 import uuid
 
@@ -19,7 +20,12 @@ from oziebot_api.services.teacher_assist.constants import (
     validate_teacher_assist_extraction_artifact_type,
     validate_teacher_assist_extraction_job_status,
 )
+from oziebot_api.services.teacher_assist.ocr_errors import TeacherAssistOCRProviderError
 from oziebot_api.services.teacher_assist.ocr_provider import get_teacher_assist_ocr_provider
+from oziebot_api.services.teacher_assist.ocr_provider_config import (
+    assert_ocr_artifact_supported,
+    resolve_teacher_assist_ocr_provider_mode,
+)
 from oziebot_api.services.teacher_assist.planning import get_resource_or_404
 from oziebot_api.services.teacher_assist.storage import open_teacher_assist_stream
 from oziebot_api.services.teacher_assist.student_work import get_student_work_submission_or_404
@@ -139,13 +145,13 @@ def _ensure_job_still_active(
 
 
 def _mark_running_job_failed(
-    job: TeacherAssistExtractionJob, *, error_message: str, error_code: str
+    job: TeacherAssistExtractionJob, *, error_message: str, error_code: str, error_metadata: dict | None = None
 ) -> None:
     job.error_code = error_code
-    job.error_metadata_json = {
-        "error_code": error_code,
-        "traceback": traceback.format_exc(limit=5),
-    }
+    metadata = {"error_code": error_code, "traceback": traceback.format_exc(limit=5)}
+    if error_metadata:
+        metadata.update(error_metadata)
+    job.error_metadata_json = metadata
     _append_job_log(
         job,
         event="extraction_failed",
@@ -159,13 +165,19 @@ def _mark_job_for_retry_or_failure(
     *,
     exc: Exception,
     error_code: str,
+    error_metadata: dict | None = None,
 ) -> None:
     attempt_number = job.retry_count + 1
     job.retry_count = attempt_number
     job.error_code = error_code
     job.error_message = str(exc)
     job.updated_at = datetime.now(UTC)
-    _mark_running_job_failed(job, error_message=str(exc), error_code=error_code)
+    _mark_running_job_failed(
+        job,
+        error_message=str(exc),
+        error_code=error_code,
+        error_metadata=error_metadata,
+    )
     if attempt_number <= job.max_retries:
         job.status = validate_teacher_assist_extraction_job_status("queued")
         job.completed_at = None
@@ -634,14 +646,32 @@ def _persist_extraction_success(
         worker_name=worker_name,
         progress_percent=60,
     )
-    provider = get_teacher_assist_ocr_provider(settings)
-    provider_result = provider.extract_text(
-        artifact_type=job.artifact_type,
+    provider_name = settings.teacher_assist_ocr_provider.strip() or "mock"
+    assert_ocr_artifact_supported(
+        settings,
         mime_type=job.mime_type,
-        original_filename=job.original_filename,
-        file_bytes=file_bytes,
-        settings=settings,
+        file_size=len(file_bytes),
+        provider_name=provider_name,
     )
+    provider = get_teacher_assist_ocr_provider(settings)
+    provider_started = time.perf_counter()
+    try:
+        provider_result = provider.extract_text(
+            artifact_type=job.artifact_type,
+            mime_type=job.mime_type,
+            original_filename=job.original_filename,
+            file_bytes=file_bytes,
+            settings=settings,
+        )
+    except TeacherAssistOCRProviderError:
+        raise
+    except TimeoutError as exc:
+        raise TeacherAssistOCRProviderError(
+            "TeacherAssist OCR provider timed out",
+            error_code="provider_timeout",
+            metadata={"provider": provider_name},
+        ) from exc
+    processing_duration_ms = max(0, int((time.perf_counter() - provider_started) * 1000))
     sanitized = sanitize_extracted_text(provider_result.extracted_text)
     provider_metadata = dict(provider_result.metadata_json or {})
     confidence_score = provider_metadata.get("provider_confidence_score")
@@ -656,6 +686,12 @@ def _persist_extraction_success(
             confidence_score = float(confidence_score)
         except (TypeError, ValueError):
             confidence_score = None
+    provider_mode = str(provider_metadata.get("provider_mode") or resolve_teacher_assist_ocr_provider_mode(provider_result.provider))
+    page_count_raw = provider_metadata.get("page_count")
+    page_count = int(page_count_raw) if page_count_raw is not None else None
+    estimated_cost_raw = provider_metadata.get("estimated_cost_cents")
+    estimated_cost_cents = int(estimated_cost_raw) if estimated_cost_raw is not None else None
+    provider_version = provider_metadata.get("provider_version")
     now = datetime.now(UTC)
     record = TeacherAssistExtractedTextRecord(
         tenant_id=job.tenant_id,
@@ -687,18 +723,37 @@ def _persist_extraction_success(
             **provider_metadata,
             "provider": provider_result.provider,
             "model": provider_result.model,
+            "provider_mode": provider_mode,
+            "processing_duration_ms": processing_duration_ms,
         },
         created_at=now,
         updated_at=now,
     )
     session.add(record)
     session.flush()
+    job.provider_name = provider_result.provider
+    job.provider_model = provider_result.model
+    job.provider_version = str(provider_version) if provider_version is not None else None
+    job.provider_mode = provider_mode
+    job.page_count = page_count
+    job.processing_duration_ms = processing_duration_ms
+    job.estimated_cost_cents = estimated_cost_cents
     _set_job_status(job, status="completed", progress_percent=100)
     _append_job_log(
         job,
         event="extraction_completed",
         message="TeacherAssist extraction completed successfully",
-        metadata={"record_id": str(record.id), "provider": provider_result.provider, "model": provider_result.model},
+        metadata={
+            "record_id": str(record.id),
+            "provider": provider_result.provider,
+            "model": provider_result.model,
+            "provider_mode": provider_mode,
+            "confidence_level": confidence_level,
+            "page_count": page_count,
+            "processing_duration_ms": processing_duration_ms,
+            "estimated_cost_cents": estimated_cost_cents,
+            "low_confidence_output": bool(provider_metadata.get("low_confidence_output")),
+        },
     )
     record_activity_event(
         session,
@@ -729,11 +784,17 @@ def _persist_extraction_failure(
     extraction_job_id: uuid.UUID,
     exc: Exception,
     error_code: str,
+    error_metadata: dict | None = None,
 ) -> None:
     failure_session = factory()
     try:
         job = _refresh_extraction_job_for_execution(failure_session, extraction_job_id)
-        _mark_job_for_retry_or_failure(job, exc=exc, error_code=error_code)
+        _mark_job_for_retry_or_failure(
+            job,
+            exc=exc,
+            error_code=error_code,
+            error_metadata=error_metadata,
+        )
         if job.status == "failed":
             record_activity_event(
                 failure_session,
@@ -799,6 +860,15 @@ def _process_extraction_with_factory(
     except TeacherAssistExtractionCancelledError:
         session.rollback()
         _persist_extraction_cancelled(factory, extraction_job_id=extraction_job_id)
+    except TeacherAssistOCRProviderError as exc:
+        session.rollback()
+        _persist_extraction_failure(
+            factory,
+            extraction_job_id=extraction_job_id,
+            exc=exc,
+            error_code=exc.error_code,
+            error_metadata=exc.metadata,
+        )
     except TimeoutError as exc:
         session.rollback()
         _persist_extraction_failure(

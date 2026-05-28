@@ -279,6 +279,12 @@ export type TeacherAssistExtractionJob = {
   status: "queued" | "running" | "completed" | "failed" | "cancelled" | "skipped";
   progress_percent: number;
   provider_name: string | null;
+  provider_model: string | null;
+  provider_version: string | null;
+  provider_mode: "mock" | "real" | null;
+  page_count: number | null;
+  processing_duration_ms: number | null;
+  estimated_cost_cents: number | null;
   error_code: string | null;
   error_message: string | null;
   error_metadata_json: Record<string, unknown> | null;

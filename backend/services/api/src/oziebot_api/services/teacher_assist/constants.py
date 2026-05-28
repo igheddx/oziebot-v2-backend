@@ -82,7 +82,8 @@ TEACHER_ASSIST_WORKFLOW_STATUSES = ("queued", "running", "completed", "failed", 
 TEACHER_ASSIST_WORKFLOW_STEP_STATUSES = ("queued", "running", "completed", "failed", "skipped")
 WEEKLY_PLAN_STATUSES = ("in_progress", "completed")
 TEACHER_ASSIST_AI_PROVIDERS = ("mock", "openai")
-TEACHER_ASSIST_OCR_PROVIDERS = ("mock",)
+TEACHER_ASSIST_OCR_PROVIDERS = ("mock", "textract", "openai_vision")
+TEACHER_ASSIST_OCR_REAL_PROVIDERS = frozenset({"textract", "openai_vision"})
 TEACHER_ASSIST_AI_FIXTURE_MODES = ("off", "record", "replay")
 SUPPORTED_GRADE_LEVELS = ("Pre-K", "K", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12")
 

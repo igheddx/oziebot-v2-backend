@@ -33,7 +33,7 @@ class MockTeacherAssistOCRProvider:
             f"[MOCK OCR] TeacherAssist extracted a {artifact_label} artifact for teacher review.\n"
             f"[MOCK OCR] MIME type: {mime_type or 'application/octet-stream'}\n"
             f"[MOCK OCR] Bytes read through storage abstraction: {len(file_bytes)}\n"
-            "[MOCK OCR] Real OCR provider execution remains disabled in this phase."
+            "[MOCK OCR] Real OCR remains disabled unless explicitly enabled in server configuration."
         )
         confidence_score, confidence_level = _deterministic_mock_confidence(file_bytes)
         return TeacherAssistOCRProviderResult(
@@ -46,6 +46,10 @@ class MockTeacherAssistOCRProvider:
                 "original_filename_present": bool(original_filename),
                 "bytes_read": len(file_bytes),
                 "is_mock": True,
+                "provider_mode": "mock",
+                "provider_version": "mock-ocr",
+                "page_count": 1,
+                "estimated_cost_cents": 0,
                 "provider_confidence_score": confidence_score,
                 "confidence_level": confidence_level,
             },

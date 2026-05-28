@@ -3,7 +3,7 @@
 - Current planning route may still be named `/teacher-assist/weekly-planning`, even though the product direction is broader instructional planning.
 - Real provider calls are disabled by default.
 - Mock generation is currently the only safe default provider.
-- OCR extraction is now mock-first only; real OCR provider execution has not been introduced.
+- OCR extraction remains mock-first by default; real OCR providers are implemented but disabled unless explicitly enabled in server configuration.
 - Uploaded resource parsing is represented by extraction jobs and preview records, not real document understanding.
 - QR assignment-page identity is implemented only for generated printable packets; scan/upload ingestion is not implemented yet.
 - Printable assignment templates are currently limited to browser-print HTML output.

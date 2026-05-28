@@ -4306,3 +4306,352 @@ def test_extraction_issue_flagging_and_mark_reviewed_without_grading_side_effect
     assert after_usage_count == before_usage_count
     assert after_grading_count == before_grading_count
 
+
+def _create_resource_extraction_job(client, token: str, *, filename: str = "ocr-handout.pdf", content: bytes | None = None):
+    uploaded = client.post(
+        "/v1/teacher-assist/resources/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": (filename, content or b"%PDF-1.7 ocr content", "application/pdf")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    resource = uploaded.json()
+    created_job = client.post(
+        f"/v1/teacher-assist/resources/{resource['id']}/extraction-jobs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert created_job.status_code == 201, created_job.text
+    return resource, created_job.json()
+
+
+class _FakeRealOCRProvider:
+    provider_name = "textract"
+
+    def __init__(self, *, confidence_score: float = 0.92, text: str = "Real OCR extracted classroom text."):
+        self._confidence_score = confidence_score
+        self._text = text
+
+    def extract_text(self, **_kwargs):
+        from oziebot_api.services.teacher_assist.ocr_provider import TeacherAssistOCRProviderResult
+        from oziebot_api.services.teacher_assist.ocr_provider_config import confidence_level_from_score
+
+        confidence_level = confidence_level_from_score(self._confidence_score)
+        return TeacherAssistOCRProviderResult(
+            extracted_text=self._text,
+            provider="textract",
+            model="textract-detect-document-text",
+            metadata_json={
+                "is_mock": False,
+                "provider_mode": "real",
+                "provider_version": "detect_document_text",
+                "provider_confidence_score": self._confidence_score,
+                "confidence_level": confidence_level,
+                "page_count": 2,
+                "estimated_cost_cents": 12,
+                "low_confidence_output": confidence_level == "low",
+            },
+        )
+
+
+def test_mock_ocr_remains_default_provider(client, db_session: Session):
+    from oziebot_api.services.teacher_assist.ocr_provider import get_teacher_assist_ocr_provider
+
+    assert Settings().teacher_assist_ocr_provider == "mock"
+    assert get_teacher_assist_ocr_provider(Settings()).provider_name == "mock"
+
+    email = "teacher-ocr-default@example.com"
+    token = _register_user(client, email=email, tenant_name="OCR Default Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    _, created_job = _create_resource_extraction_job(client, token)
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job["id"])
+
+    detail = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{created_job['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail.status_code == 200, detail.text
+    payload = detail.json()
+    assert payload["job"]["provider_name"] == "mock"
+    assert payload["job"]["provider_mode"] == "mock"
+    assert payload["job"]["provider_model"] == "mock-ocr"
+    assert payload["extracted_text"]["review_status"] == "pending_review"
+    assert payload["extracted_text"]["preview_text"].startswith("[MOCK OCR]")
+
+
+def test_real_ocr_blocked_without_enable_flag(client, db_session: Session):
+    email = "teacher-ocr-blocked@example.com"
+    token = _register_user(client, email=email, tenant_name="OCR Blocked Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    _, created_job = _create_resource_extraction_job(client, token)
+
+    settings = Settings(
+        teacher_assist_ocr_provider="textract",
+        teacher_assist_real_ocr_enabled=False,
+        teacher_assist_ocr_daily_cost_limit_cents=500,
+        teacher_assist_worker_max_retries=0,
+    )
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job["id"], settings=settings)
+
+    detail = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{created_job['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["job"]["status"] == "failed"
+    assert detail.json()["job"]["error_code"] == "provider_disabled"
+
+
+def test_real_ocr_missing_cost_limit_fails_safe(client, db_session: Session):
+    email = "teacher-ocr-cost-limit@example.com"
+    token = _register_user(client, email=email, tenant_name="OCR Cost Limit Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    _, created_job = _create_resource_extraction_job(client, token)
+
+    settings = Settings(
+        teacher_assist_ocr_provider="textract",
+        teacher_assist_real_ocr_enabled=True,
+        teacher_assist_ocr_daily_cost_limit_cents=0,
+        teacher_assist_worker_max_retries=0,
+    )
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job["id"], settings=settings)
+
+    detail = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{created_job['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["job"]["error_code"] == "provider_disabled"
+
+
+def test_real_ocr_openai_missing_credentials_fail_safe(client, db_session: Session):
+    email = "teacher-ocr-openai-missing@example.com"
+    token = _register_user(client, email=email, tenant_name="OCR OpenAI Missing Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    uploaded = client.post(
+        "/v1/teacher-assist/resources/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("scan.png", b"\x89PNG\r\n", "image/png")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    created_job = client.post(
+        f"/v1/teacher-assist/resources/{uploaded.json()['id']}/extraction-jobs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert created_job.status_code == 201, created_job.text
+
+    settings = Settings(
+        teacher_assist_ocr_provider="openai_vision",
+        teacher_assist_real_ocr_enabled=True,
+        teacher_assist_ocr_daily_cost_limit_cents=500,
+        teacher_assist_openai_api_key=None,
+        teacher_assist_worker_max_retries=0,
+    )
+    _run_teacher_assist_extraction_worker(
+        db_session,
+        extraction_job_id=created_job.json()["id"],
+        settings=settings,
+    )
+
+    detail = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{created_job.json()['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["job"]["error_code"] == "provider_not_configured"
+
+
+def test_real_ocr_provider_metadata_persists(client, db_session: Session, monkeypatch):
+    email = "teacher-ocr-metadata@example.com"
+    token = _register_user(client, email=email, tenant_name="OCR Metadata Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    _, created_job = _create_resource_extraction_job(client, token)
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.extraction_jobs.get_teacher_assist_ocr_provider",
+        lambda _settings: _FakeRealOCRProvider(),
+    )
+    settings = Settings(
+        teacher_assist_ocr_provider="textract",
+        teacher_assist_real_ocr_enabled=True,
+        teacher_assist_ocr_daily_cost_limit_cents=500,
+        teacher_assist_worker_max_retries=0,
+    )
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job["id"], settings=settings)
+
+    detail = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{created_job['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail.status_code == 200, detail.text
+    job = detail.json()["job"]
+    record = detail.json()["extracted_text"]
+    assert job["provider_name"] == "textract"
+    assert job["provider_mode"] == "real"
+    assert job["provider_model"] == "textract-detect-document-text"
+    assert job["provider_version"] == "detect_document_text"
+    assert job["page_count"] == 2
+    assert job["processing_duration_ms"] is not None
+    assert job["estimated_cost_cents"] == 12
+    assert record["provider_confidence_score"] == pytest.approx(0.92)
+    assert record["confidence_level"] == "high"
+    assert record["metadata_json"]["provider_mode"] == "real"
+
+
+def test_low_confidence_real_ocr_stays_pending_review(client, db_session: Session, monkeypatch):
+    email = "teacher-ocr-low-confidence@example.com"
+    token = _register_user(client, email=email, tenant_name="OCR Low Confidence Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    _, created_job = _create_resource_extraction_job(client, token)
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.extraction_jobs.get_teacher_assist_ocr_provider",
+        lambda _settings: _FakeRealOCRProvider(confidence_score=0.12),
+    )
+    settings = Settings(
+        teacher_assist_ocr_provider="textract",
+        teacher_assist_real_ocr_enabled=True,
+        teacher_assist_ocr_daily_cost_limit_cents=500,
+        teacher_assist_worker_max_retries=0,
+    )
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job["id"], settings=settings)
+
+    detail = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{created_job['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail.status_code == 200, detail.text
+    payload = detail.json()
+    assert payload["job"]["status"] == "completed"
+    assert payload["extracted_text"]["review_status"] == "pending_review"
+    assert payload["extracted_text"]["confidence_level"] == "low"
+    assert payload["retry_eligible"] is True
+
+    workspace = client.get(
+        "/v1/teacher-assist/workspace",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert workspace.status_code == 200, workspace.text
+    assert workspace.json()["today_summary"]["low_confidence_extractions_count"] >= 1
+
+
+def test_ocr_retry_lineage_preserves_provider_attempts(client, db_session: Session, monkeypatch):
+    email = "teacher-ocr-lineage@example.com"
+    token = _register_user(client, email=email, tenant_name="OCR Lineage Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    _, created_job = _create_resource_extraction_job(client, token)
+    original_job_id = created_job["id"]
+
+    class _FailingRealOCR:
+        provider_name = "textract"
+
+        def extract_text(self, **_kwargs):
+            from oziebot_api.services.teacher_assist.ocr_errors import TeacherAssistOCRProviderError
+
+            raise TeacherAssistOCRProviderError(
+                "Textract quota exceeded",
+                error_code="provider_quota_exceeded",
+            )
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.extraction_jobs.get_teacher_assist_ocr_provider",
+        lambda _settings: _FailingRealOCR(),
+    )
+    settings = Settings(
+        teacher_assist_ocr_provider="textract",
+        teacher_assist_real_ocr_enabled=True,
+        teacher_assist_ocr_daily_cost_limit_cents=500,
+        teacher_assist_worker_max_retries=0,
+    )
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=original_job_id, settings=settings)
+
+    failed = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{original_job_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert failed.json()["job"]["error_code"] == "provider_quota_exceeded"
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.extraction_jobs.get_teacher_assist_ocr_provider",
+        lambda _settings: _FakeRealOCRProvider(),
+    )
+    retried = client.post(
+        f"/v1/teacher-assist/extraction-jobs/{original_job_id}/retry",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert retried.status_code == 201, retried.text
+    retry_job_id = retried.json()["id"]
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=retry_job_id, settings=settings)
+
+    retry_detail = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{retry_job_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert retry_detail.status_code == 200, retry_detail.text
+    retry_payload = retry_detail.json()
+    assert retry_payload["job"]["attempt_number"] == 2
+    assert retry_payload["job"]["parent_extraction_job_id"] == original_job_id
+    assert retry_payload["job"]["provider_mode"] == "real"
+    assert len(retry_payload["lineage_jobs"]) == 2
+
+
+def test_real_ocr_does_not_trigger_grading_mastery_or_ai_usage(client, db_session: Session, monkeypatch):
+    email = "teacher-ocr-no-side-effects@example.com"
+    token = _register_user(client, email=email, tenant_name="OCR Side Effects Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    _, created_job = _create_resource_extraction_job(client, token)
+
+    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    before_review_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAssignmentGradingReview))
+
+    monkeypatch.setattr(
+        "oziebot_api.services.teacher_assist.extraction_jobs.get_teacher_assist_ocr_provider",
+        lambda _settings: _FakeRealOCRProvider(),
+    )
+    settings = Settings(
+        teacher_assist_ocr_provider="textract",
+        teacher_assist_real_ocr_enabled=True,
+        teacher_assist_ocr_daily_cost_limit_cents=500,
+        teacher_assist_worker_max_retries=0,
+    )
+    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job["id"], settings=settings)
+
+    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    after_review_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAssignmentGradingReview))
+    assert after_usage_count == before_usage_count
+    assert after_review_count == before_review_count
+
+
+def test_unsupported_mime_type_blocks_ocr(client, db_session: Session):
+    email = "teacher-ocr-mime@example.com"
+    token = _register_user(client, email=email, tenant_name="OCR MIME Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    uploaded = client.post(
+        "/v1/teacher-assist/resources/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("notes.docx", b"PK docx bytes", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    created_job = client.post(
+        f"/v1/teacher-assist/resources/{uploaded.json()['id']}/extraction-jobs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert created_job.status_code == 201, created_job.text
+
+    settings = Settings(
+        teacher_assist_ocr_provider="textract",
+        teacher_assist_real_ocr_enabled=True,
+        teacher_assist_ocr_daily_cost_limit_cents=500,
+        teacher_assist_worker_max_retries=0,
+    )
+    _run_teacher_assist_extraction_worker(
+        db_session,
+        extraction_job_id=created_job.json()["id"],
+        settings=settings,
+    )
+
+    detail = client.get(
+        f"/v1/teacher-assist/extraction-jobs/{created_job.json()['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["job"]["error_code"] == "unsupported_mime_type"
+
