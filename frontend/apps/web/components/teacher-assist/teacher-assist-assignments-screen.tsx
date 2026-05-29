@@ -8,7 +8,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
 import { TeacherAssistFieldError, fieldErrorInputClass } from "@/components/teacher-assist/teacher-assist-field-error";
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
-import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
+import {
+  TeacherAssistInlineAlert,
+  sectionError,
+  sectionSuccess,
+  useTeacherAssistSectionAlerts,
+} from "@/components/teacher-assist/teacher-assist-inline-alert";
 import { buildApiUrl } from "@/lib/auth-service";
 import {
   cancelExtractionJob,
@@ -379,14 +384,14 @@ export function TeacherAssistAssignmentsScreen() {
   const [committingGradebook, setCommittingGradebook] = useState(false);
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
   const [statusDrafts, setStatusDrafts] = useState<Record<string, Assignment["status"]>>({});
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
+  const [pageError, setPageError] = useState<string | null>(null);
   const [studentWorkFileError, setStudentWorkFileError] = useState<string | null>(null);
   const [studentWorkUploadError, setStudentWorkUploadError] = useState<string | null>(null);
 
   const load = useCallback(async (currentFilters: Filters) => {
     setLoading(true);
-    setError(null);
+    setPageError(null);
     try {
       const [
         nextOptions,
@@ -435,7 +440,7 @@ export function TeacherAssistAssignmentsScreen() {
         setGradingReviewForm(emptyGradingReviewForm());
       }
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load assignments.");
+      setPageError(nextError instanceof Error ? nextError.message : "Could not load assignments.");
     } finally {
       setLoading(false);
     }
@@ -459,7 +464,13 @@ export function TeacherAssistAssignmentsScreen() {
             : "",
       }));
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load printable packets.");
+      setSectionAlert(
+        "printPacket",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not load printable packets.",
+          "Unable to load packets",
+        ),
+      );
       setPackets([]);
       setSelectedPacketId(null);
     } finally {
@@ -474,7 +485,13 @@ export function TeacherAssistAssignmentsScreen() {
       setGradingPrepSummary(nextSummary);
     } catch (nextError) {
       setGradingPrepSummary(null);
-      setError(nextError instanceof Error ? nextError.message : "Could not load grading prep summary.");
+      setSectionAlert(
+        "gradingReview",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not load grading prep summary.",
+          "Unable to load grading prep",
+        ),
+      );
     } finally {
       setGradingPrepLoading(false);
     }
@@ -499,7 +516,13 @@ export function TeacherAssistAssignmentsScreen() {
         return nextSubmissions[0]?.id ?? null;
       });
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load student work.");
+      setSectionAlert(
+        "studentWork",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not load student work.",
+          "Unable to load student work",
+        ),
+      );
       setSubmissions([]);
       setSelectedSubmissionId(null);
     } finally {
@@ -518,7 +541,13 @@ export function TeacherAssistAssignmentsScreen() {
         return nextReviews[0]?.id ?? null;
       });
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load grading reviews.");
+      setSectionAlert(
+        "gradingReview",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not load grading reviews.",
+          "Unable to load grading reviews",
+        ),
+      );
       setGradingReviews([]);
       setSelectedGradingReviewId(null);
     } finally {
@@ -585,13 +614,19 @@ export function TeacherAssistAssignmentsScreen() {
       return;
     }
     setPacketPagesLoading(true);
-    setError(null);
+    setPageError(null);
     void fetchAssignmentPrintPacketPages(selectedPacketId)
       .then((pages) => {
         setSelectedPacketPages(pages);
       })
       .catch((nextError) => {
-        setError(nextError instanceof Error ? nextError.message : "Could not load packet pages.");
+        setSectionAlert(
+          "printPacket",
+          sectionError(
+            nextError instanceof Error ? nextError.message : "Could not load packet pages.",
+            "Unable to load packet pages",
+          ),
+        );
         setSelectedPacketPages([]);
       })
       .finally(() => {
@@ -703,9 +738,8 @@ export function TeacherAssistAssignmentsScreen() {
   const handleEditAssignment = useCallback((assignment: Assignment) => {
     setEditingAssignmentId(assignment.id);
     setForm(formFromAssignment(assignment));
-    setNotice(null);
-    setError(null);
-  }, []);
+    clearSectionAlert("assignmentForm");
+  }, [clearSectionAlert]);
 
   const handlePacketAssignment = useCallback((assignmentId: string) => {
     setPacketAssignmentId(assignmentId);
@@ -720,9 +754,10 @@ export function TeacherAssistAssignmentsScreen() {
     setGradingReviews([]);
     setSelectedGradingReviewId(null);
     setGradingReviewForm(emptyGradingReviewForm());
-    setNotice(null);
-    setError(null);
-  }, []);
+    clearSectionAlert("printPacket");
+    clearSectionAlert("studentWork");
+    clearSectionAlert("gradingReview");
+  }, [clearSectionAlert]);
 
   useEffect(() => {
     if (!requestedAssignmentId || loading) return;
@@ -748,60 +783,88 @@ export function TeacherAssistAssignmentsScreen() {
 
   const handleSaveAssignment = useCallback(async () => {
     setSaving(true);
-    setError(null);
-    setNotice(null);
+    clearSectionAlert("assignmentForm");
     try {
       const payload = toAssignmentInput(form);
+      const wasEditing = Boolean(editingAssignmentId);
       const saved = editingAssignmentId
         ? await updateAssignment(editingAssignmentId, payload)
         : await createAssignment(payload);
       await load(filters);
       setEditingAssignmentId(saved.id);
       setForm(formFromAssignment(saved));
-      setNotice(editingAssignmentId ? "Assignment updated." : "Assignment created.");
+      setSectionAlert(
+        "assignmentForm",
+        sectionSuccess(
+          wasEditing ? "Your assignment changes were saved." : "The assignment was created successfully.",
+          wasEditing ? "Assignment updated" : "Assignment created",
+        ),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not save assignment.");
+      setSectionAlert(
+        "assignmentForm",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not save assignment.",
+          "Unable to save assignment",
+        ),
+      );
     } finally {
       setSaving(false);
     }
-  }, [editingAssignmentId, filters, form, load]);
+  }, [clearSectionAlert, editingAssignmentId, filters, form, load, setSectionAlert]);
 
   const handleStatusUpdate = useCallback(
     async (assignmentId: string) => {
       const nextStatus = statusDrafts[assignmentId];
       if (!nextStatus) return;
       setUpdatingStatusId(assignmentId);
-      setError(null);
-      setNotice(null);
+      clearSectionAlert("assignmentList");
       try {
         await updateAssignmentStatus(assignmentId, nextStatus);
         await load(filters);
-        setNotice("Assignment status updated.");
+        setSectionAlert(
+          "assignmentList",
+          sectionSuccess("Assignment status updated.", "Status updated"),
+        );
       } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "Could not update assignment status.");
+        setSectionAlert(
+          "assignmentList",
+          sectionError(
+            nextError instanceof Error ? nextError.message : "Could not update assignment status.",
+            "Unable to update status",
+          ),
+        );
       } finally {
         setUpdatingStatusId(null);
       }
     },
-    [filters, load, statusDrafts],
+    [clearSectionAlert, filters, load, setSectionAlert, statusDrafts],
   );
 
   const handleGeneratePacket = useCallback(async () => {
     if (!packetAssignmentId) return;
     setGeneratingPacket(true);
-    setError(null);
-    setNotice(null);
+    clearSectionAlert("printPacket");
     try {
       const created = await createAssignmentPrintPacket(packetAssignmentId, packetForm);
       await loadPackets(packetAssignmentId);
       setSelectedPacketId(created.id);
-      setNotice("Printable QR packet generated.");
+      setSectionAlert(
+        "printPacket",
+        sectionSuccess("Printable QR packet generated.", "Packet generated"),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not generate printable packet.");
+      setSectionAlert(
+        "printPacket",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not generate printable packet.",
+          "Unable to generate packet",
+        ),
+      );
     } finally {
       setGeneratingPacket(false);
     }
-  }, [loadPackets, packetAssignmentId, packetForm]);
+  }, [clearSectionAlert, loadPackets, packetAssignmentId, packetForm, setSectionAlert]);
 
   const handleUploadStudentWork = useCallback(async () => {
     if (!packetAssignmentId || !selectedSubmissionFile) {
@@ -812,7 +875,7 @@ export function TeacherAssistAssignmentsScreen() {
     setStudentWorkUploadProgress(0);
     setStudentWorkFileError(null);
     setStudentWorkUploadError(null);
-    setNotice(null);
+    clearSectionAlert("studentWork");
     try {
       const created = await uploadAssignmentStudentWork(
         packetAssignmentId,
@@ -830,7 +893,10 @@ export function TeacherAssistAssignmentsScreen() {
         ...current,
         assignment_print_packet_id: current.assignment_print_packet_id,
       }));
-      setNotice("Student work uploaded.");
+      setSectionAlert(
+        "studentWork",
+        sectionSuccess("Student work uploaded.", "Upload complete"),
+      );
     } catch (nextError) {
       setStudentWorkUploadError(
         nextError instanceof Error ? nextError.message : "Could not upload student work.",
@@ -839,20 +905,21 @@ export function TeacherAssistAssignmentsScreen() {
       setUploadingStudentWork(false);
       setStudentWorkUploadProgress(0);
     }
-  }, [loadStudentWork, packetAssignmentId, selectedSubmissionFile, studentWorkForm]);
+  }, [clearSectionAlert, loadStudentWork, packetAssignmentId, selectedSubmissionFile, setSectionAlert, studentWorkForm]);
 
   const handleStartGradingReview = useCallback(
     async (submission: AssignmentStudentWorkSubmission) => {
       const existing = reviewBySubmissionId[submission.id];
       if (existing) {
         setSelectedGradingReviewId(existing.id);
-        setNotice("Opened existing grading review.");
-        setError(null);
+        setSectionAlert(
+          "gradingReview",
+          sectionSuccess("Opened existing grading review.", "Review opened"),
+        );
         return;
       }
       setCreatingGradingReview(submission.id);
-      setError(null);
-      setNotice(null);
+      clearSectionAlert("gradingReview");
       try {
         const created = await createAssignmentGradingReview(submission.id, {
           student_number: submission.student_number,
@@ -861,88 +928,131 @@ export function TeacherAssistAssignmentsScreen() {
           await loadGradingReviews(packetAssignmentId);
         }
         setSelectedGradingReviewId(created.id);
-        setNotice("Grading review created.");
+        setSectionAlert(
+          "gradingReview",
+          sectionSuccess("Grading review created.", "Review created"),
+        );
       } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "Could not start grading review.");
+        setSectionAlert(
+          "gradingReview",
+          sectionError(
+            nextError instanceof Error ? nextError.message : "Could not start grading review.",
+            "Unable to start review",
+          ),
+        );
       } finally {
         setCreatingGradingReview(null);
       }
     },
-    [loadGradingReviews, packetAssignmentId, reviewBySubmissionId],
+    [loadGradingReviews, packetAssignmentId, reviewBySubmissionId, setSectionAlert, clearSectionAlert],
   );
 
   const handleDownloadSubmission = useCallback(async () => {
     if (!selectedSubmission) return;
     setDownloadingSubmissionId(selectedSubmission.id);
-    setError(null);
-    setNotice(null);
+    clearSectionAlert("studentWork");
     try {
       const download = await fetchAssignmentStudentWorkDownloadUrl(selectedSubmission.id);
       const nextUrl = download.url.startsWith("/") ? buildApiUrl(download.url) : download.url;
       window.open(nextUrl, "_blank", "noopener,noreferrer");
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not prepare the student-work download.");
+      setSectionAlert(
+        "studentWork",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not prepare the student-work download.",
+          "Download failed",
+        ),
+      );
     } finally {
       setDownloadingSubmissionId(null);
     }
-  }, [selectedSubmission]);
+  }, [clearSectionAlert, selectedSubmission, setSectionAlert]);
 
   const handleStartExtraction = useCallback(async () => {
     if (!selectedSubmission || !packetAssignmentId) return;
-    setError(null);
-    setNotice(null);
+    clearSectionAlert("studentWork");
     setStartingExtractionId(selectedSubmission.id);
     try {
       await createStudentWorkExtractionJob(selectedSubmission.id);
       await loadStudentWork(packetAssignmentId);
-      setNotice(`Extraction queued for STUDENT #${selectedSubmission.student_number}.`);
+      setSectionAlert(
+        "studentWork",
+        sectionSuccess(
+          `Extraction queued for STUDENT #${selectedSubmission.student_number}.`,
+          "Extraction queued",
+        ),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not queue extraction.");
+      setSectionAlert(
+        "studentWork",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not queue extraction.",
+          "Extraction failed",
+        ),
+      );
     } finally {
       setStartingExtractionId(null);
     }
-  }, [loadStudentWork, packetAssignmentId, selectedSubmission]);
+  }, [clearSectionAlert, loadStudentWork, packetAssignmentId, selectedSubmission, setSectionAlert]);
 
   const handleCancelExtraction = useCallback(async () => {
     const extractionJobId = selectedSubmission?.latest_extraction_job?.id;
     if (!selectedSubmission || !extractionJobId || !packetAssignmentId) return;
-    setError(null);
-    setNotice(null);
+    clearSectionAlert("studentWork");
     setCancellingExtractionId(extractionJobId);
     try {
       await cancelExtractionJob(extractionJobId);
       await loadStudentWork(packetAssignmentId);
-      setNotice(`Extraction cancelled for STUDENT #${selectedSubmission.student_number}.`);
+      setSectionAlert(
+        "studentWork",
+        sectionSuccess(
+          `Extraction cancelled for STUDENT #${selectedSubmission.student_number}.`,
+          "Extraction cancelled",
+        ),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not cancel extraction.");
+      setSectionAlert(
+        "studentWork",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not cancel extraction.",
+          "Unable to cancel extraction",
+        ),
+      );
     } finally {
       setCancellingExtractionId(null);
     }
-  }, [loadStudentWork, packetAssignmentId, selectedSubmission]);
+  }, [clearSectionAlert, loadStudentWork, packetAssignmentId, selectedSubmission, setSectionAlert]);
 
   const handleUpdateSubmissionStatus = useCallback(async () => {
     if (!selectedSubmission || !submissionContextForm) return;
     setSavingSubmissionStatus(true);
-    setError(null);
-    setNotice(null);
+    clearSectionAlert("studentWork");
     try {
       await updateAssignmentStudentWorkStatus(selectedSubmission.id, submissionContextForm.processing_status);
       if (packetAssignmentId) {
         await loadStudentWork(packetAssignmentId);
       }
-      setNotice("Student work status updated.");
+      setSectionAlert(
+        "studentWork",
+        sectionSuccess("Student work status updated.", "Status updated"),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not update student work status.");
+      setSectionAlert(
+        "studentWork",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not update student work status.",
+          "Unable to update status",
+        ),
+      );
     } finally {
       setSavingSubmissionStatus(false);
     }
-  }, [loadStudentWork, packetAssignmentId, selectedSubmission, submissionContextForm]);
+  }, [clearSectionAlert, loadStudentWork, packetAssignmentId, selectedSubmission, setSectionAlert, submissionContextForm]);
 
   const handleUpdateSubmissionContext = useCallback(async () => {
     if (!selectedSubmission || !submissionContextForm) return;
     setSavingSubmissionContext(true);
-    setError(null);
-    setNotice(null);
+    clearSectionAlert("studentWork");
     try {
       await updateAssignmentStudentWorkPacketContext(selectedSubmission.id, {
         assignment_print_packet_id: submissionContextForm.assignment_print_packet_id || null,
@@ -951,19 +1061,27 @@ export function TeacherAssistAssignmentsScreen() {
       if (packetAssignmentId) {
         await loadStudentWork(packetAssignmentId);
       }
-      setNotice("Student work packet context updated.");
+      setSectionAlert(
+        "studentWork",
+        sectionSuccess("Student work packet context updated.", "Context updated"),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not update packet context.");
+      setSectionAlert(
+        "studentWork",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not update packet context.",
+          "Unable to update context",
+        ),
+      );
     } finally {
       setSavingSubmissionContext(false);
     }
-  }, [loadStudentWork, packetAssignmentId, selectedSubmission, submissionContextForm]);
+  }, [clearSectionAlert, loadStudentWork, packetAssignmentId, selectedSubmission, setSectionAlert, submissionContextForm]);
 
   const handleSaveGradingReview = useCallback(async () => {
     if (!selectedGradingReview) return;
     setSavingGradingReview(true);
-    setError(null);
-    setNotice(null);
+    clearSectionAlert("gradingReview");
     try {
       await updateAssignmentGradingReview(selectedGradingReview.id, {
         status: gradingReviewForm.status,
@@ -980,37 +1098,53 @@ export function TeacherAssistAssignmentsScreen() {
       if (packetAssignmentId) {
         await loadGradingReviews(packetAssignmentId);
       }
-      setNotice("Grading review saved.");
+      setSectionAlert(
+        "gradingReview",
+        sectionSuccess("Grading review saved.", "Review saved"),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not save grading review.");
+      setSectionAlert(
+        "gradingReview",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not save grading review.",
+          "Unable to save review",
+        ),
+      );
     } finally {
       setSavingGradingReview(false);
     }
-  }, [gradingReviewForm, loadGradingReviews, packetAssignmentId, selectedGradingReview]);
+  }, [clearSectionAlert, gradingReviewForm, loadGradingReviews, packetAssignmentId, selectedGradingReview, setSectionAlert]);
 
   const handleUpdateGradingReviewStatus = useCallback(async () => {
     if (!selectedGradingReview) return;
     setSavingGradingReviewStatus(true);
-    setError(null);
-    setNotice(null);
+    clearSectionAlert("gradingReview");
     try {
       await updateAssignmentGradingReviewStatus(selectedGradingReview.id, gradingReviewForm.status);
       if (packetAssignmentId) {
         await loadGradingReviews(packetAssignmentId);
       }
-      setNotice("Grading review status updated.");
+      setSectionAlert(
+        "gradingReview",
+        sectionSuccess("Grading review status updated.", "Status updated"),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not update grading review status.");
+      setSectionAlert(
+        "gradingReview",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not update grading review status.",
+          "Unable to update status",
+        ),
+      );
     } finally {
       setSavingGradingReviewStatus(false);
     }
-  }, [gradingReviewForm.status, loadGradingReviews, packetAssignmentId, selectedGradingReview]);
+  }, [clearSectionAlert, gradingReviewForm.status, loadGradingReviews, packetAssignmentId, selectedGradingReview, setSectionAlert]);
 
   const handleGenerateAISuggestion = useCallback(async () => {
     if (!selectedGradingReview) return;
     setGeneratingAISuggestion(true);
-    setError(null);
-    setNotice(null);
+    clearSectionAlert("gradingReview");
     try {
       const result = await generateAssignmentGradingReviewAISuggestion(selectedGradingReview.id, {
         provider_mode: "mock",
@@ -1020,32 +1154,55 @@ export function TeacherAssistAssignmentsScreen() {
         await loadGradingReviews(packetAssignmentId);
       }
       setGradingReviewForm(reviewFormFromReview(result.review));
-      setNotice("AI grading suggestion saved as draft. Review and edit before confirming.");
+      setSectionAlert(
+        "gradingReview",
+        sectionSuccess(
+          "AI grading suggestion saved as draft. Review and edit before confirming.",
+          "AI suggestion ready",
+        ),
+      );
     } catch (nextError) {
       setAiSuggestionMeta(null);
-      setError(nextError instanceof Error ? nextError.message : "Could not generate AI grading suggestion.");
+      setSectionAlert(
+        "gradingReview",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not generate AI grading suggestion.",
+          "AI suggestion failed",
+        ),
+      );
     } finally {
       setGeneratingAISuggestion(false);
     }
-  }, [loadGradingReviews, packetAssignmentId, selectedGradingReview]);
+  }, [clearSectionAlert, loadGradingReviews, packetAssignmentId, selectedGradingReview, setSectionAlert]);
 
   const handleCommitToGradebook = useCallback(async () => {
     if (!selectedGradingReview) return;
     setCommittingGradebook(true);
-    setError(null);
-    setNotice(null);
+    clearSectionAlert("gradingReview");
     try {
       await commitGradingReviewToGradebook(selectedGradingReview.id, {});
       if (packetAssignmentId) {
         await loadGradingReviews(packetAssignmentId);
       }
-      setNotice("Grade committed to gradebook. Review commit history in the Gradebook workspace.");
+      setSectionAlert(
+        "gradingReview",
+        sectionSuccess(
+          "Grade committed to gradebook. Review commit history in the Gradebook workspace.",
+          "Grade committed",
+        ),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not commit grade to gradebook.");
+      setSectionAlert(
+        "gradingReview",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not commit grade to gradebook.",
+          "Unable to commit grade",
+        ),
+      );
     } finally {
       setCommittingGradebook(false);
     }
-  }, [loadGradingReviews, packetAssignmentId, selectedGradingReview]);
+  }, [clearSectionAlert, loadGradingReviews, packetAssignmentId, selectedGradingReview, setSectionAlert]);
 
   useEffect(() => {
     if (!selectedSubmission) {
@@ -1100,8 +1257,7 @@ export function TeacherAssistAssignmentsScreen() {
         description="Assignment packets, student-work intake, and grading review are software-only in this phase. No provider call, OCR, grading automation, mastery update, gradebook commit, or trading behavior is involved here."
       />
 
-      <TeacherAssistFormErrorSummary message={error} />
-      <TeacherAssistInlineStatus message={notice} onDismiss={() => setNotice(null)} />
+      <TeacherAssistFormErrorSummary title="Unable to load assignments" message={pageError} />
 
       <section className="grid gap-4 lg:grid-cols-3">
         <article className="ta-panel p-5">
@@ -1239,6 +1395,11 @@ export function TeacherAssistAssignmentsScreen() {
               move them through the later collection/review lifecycle manually.
             </p>
           </div>
+          <TeacherAssistInlineAlert
+            alert={getSectionAlert("assignmentList")}
+            onDismiss={() => clearSectionAlert("assignmentList")}
+            className="mt-4"
+          />
 
           {loading ? (
             <div className="mt-5 rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">
@@ -1351,6 +1512,12 @@ export function TeacherAssistAssignmentsScreen() {
               </button>
             ) : null}
           </div>
+
+          <TeacherAssistInlineAlert
+            alert={getSectionAlert("assignmentForm")}
+            onDismiss={() => clearSectionAlert("assignmentForm")}
+            className="mt-4"
+          />
 
           <div className="mt-5 space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
@@ -1605,6 +1772,11 @@ export function TeacherAssistAssignmentsScreen() {
               </span>
             ) : null}
           </div>
+          <TeacherAssistInlineAlert
+            alert={getSectionAlert("printPacket")}
+            onDismiss={() => clearSectionAlert("printPacket")}
+            className="mt-4"
+          />
 
           {!packetAssignment ? (
             <div className="mt-5 rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">
@@ -1831,6 +2003,11 @@ export function TeacherAssistAssignmentsScreen() {
               </span>
             ) : null}
           </div>
+          <TeacherAssistInlineAlert
+            alert={getSectionAlert("studentWork")}
+            onDismiss={() => clearSectionAlert("studentWork")}
+            className="mt-4"
+          />
 
           {!packetAssignment ? (
             <div className="mt-5 rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">
@@ -2042,6 +2219,11 @@ export function TeacherAssistAssignmentsScreen() {
               and feedback before any later automation exists.
             </p>
           </div>
+          <TeacherAssistInlineAlert
+            alert={getSectionAlert("gradingReview")}
+            onDismiss={() => clearSectionAlert("gradingReview")}
+            className="mt-4"
+          />
 
           {!selectedSubmission || !submissionContextForm ? (
             <div className="mt-5 rounded-2xl border border-dashed border-slate-200 px-4 py-5 text-sm text-slate-500">

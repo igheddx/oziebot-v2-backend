@@ -6,7 +6,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
-import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
+import {
+  TeacherAssistInlineAlert,
+  sectionError,
+  sectionSuccess,
+  useTeacherAssistSectionAlerts,
+} from "@/components/teacher-assist/teacher-assist-inline-alert";
 import {
   cancelExtractionJob,
   fetchExtractedTextDetail,
@@ -229,8 +234,7 @@ function ExtractionDetail({
     detail.record.student_work_submission_id,
     detail.record.teacher_corrected_text,
   ]);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
 
   useEffect(() => {
     setCorrectedText(detail.record.teacher_corrected_text ?? detail.record.extracted_text);
@@ -242,18 +246,27 @@ function ExtractionDetail({
   const runAction = useCallback(
     async (actionKey: string, action: () => Promise<void>) => {
       setBusyAction(actionKey);
-      setError(null);
+      clearSectionAlert("review");
       try {
         await action();
         await onReload();
-        setNotice("Extraction review updated.");
+        setSectionAlert(
+          "review",
+          sectionSuccess("Extraction review updated.", "Review updated"),
+        );
       } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "Could not update extraction review.");
+        setSectionAlert(
+          "review",
+          sectionError(
+            nextError instanceof Error ? nextError.message : "Could not update extraction review.",
+            "Unable to update review",
+          ),
+        );
       } finally {
         setBusyAction(null);
       }
     },
-    [onReload],
+    [clearSectionAlert, onReload, setSectionAlert],
   );
 
   const lowConfidence = detail.record.confidence_level === "low";
@@ -323,8 +336,10 @@ function ExtractionDetail({
           description="Provider confidence is low. Review the extracted text carefully before approving it for downstream use."
         />
       ) : null}
-      <TeacherAssistInlineStatus variant="info" message={notice} onDismiss={() => setNotice(null)} />
-      <TeacherAssistFormErrorSummary message={error} />
+      <TeacherAssistInlineAlert
+        alert={getSectionAlert("review")}
+        onDismiss={() => clearSectionAlert("review")}
+      />
 
       <TeacherAssistAlert
         variant="info"

@@ -4,7 +4,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
-import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
+import {
+  TeacherAssistInlineAlert,
+  sectionError,
+  sectionSuccess,
+  useTeacherAssistSectionAlerts,
+} from "@/components/teacher-assist/teacher-assist-inline-alert";
 import {
   createNewsletter,
   createNewsletterExport,
@@ -64,6 +69,7 @@ export function TeacherAssistNewslettersScreen() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedId = searchParams.get("id");
+  const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
 
   const [options, setOptions] = useState<TeacherAssistOptions | null>(null);
   const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
@@ -83,8 +89,7 @@ export function TeacherAssistNewslettersScreen() {
     subject_id: "",
     title: "",
   });
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const selectedVersion = useMemo(() => versions.at(-1) ?? null, [versions]);
@@ -120,7 +125,7 @@ export function TeacherAssistNewslettersScreen() {
   }, []);
 
   useEffect(() => {
-    loadLists().catch((error: Error) => setErrorMessage(error.message));
+    loadLists().catch((error: Error) => setPageError(error.message));
   }, [loadLists]);
 
   useEffect(() => {
@@ -134,17 +139,20 @@ export function TeacherAssistNewslettersScreen() {
       setEditContent(null);
       return;
     }
-    loadDetail(selectedId).catch((error: Error) => setErrorMessage(error.message));
+    loadDetail(selectedId).catch((error: Error) => setPageError(error.message));
   }, [loadDetail, selectedId]);
 
   async function handleCreate() {
     if (!createForm.school_year_id || !createForm.class_id || !createForm.subject_id) {
-      setErrorMessage("School year, class, and subject are required.");
+      setSectionAlert("createDraft", {
+        type: "error",
+        title: "Unable to create newsletter",
+        description: "School year, class, and subject are required.",
+      });
       return;
     }
     setBusy(true);
-    setErrorMessage(null);
-    setStatusMessage(null);
+    clearSectionAlert("createDraft");
     try {
       const created = await createNewsletter({
         school_year_id: createForm.school_year_id,
@@ -155,9 +163,15 @@ export function TeacherAssistNewslettersScreen() {
       await loadLists();
       setSelectedId(created.id);
       router.replace(`/teacher-assist/newsletters?id=${created.id}`);
-      setStatusMessage("Newsletter draft created.");
+      setSectionAlert(
+        "createDraft",
+        sectionSuccess("Newsletter draft created.", "Draft created"),
+      );
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not create newsletter.");
+      setSectionAlert(
+        "createDraft",
+        sectionError(error instanceof Error ? error.message : "Could not create newsletter.", "Unable to create newsletter"),
+      );
     } finally {
       setBusy(false);
     }
@@ -166,17 +180,20 @@ export function TeacherAssistNewslettersScreen() {
   async function handleGenerateDraft() {
     if (!newsletter) return;
     setBusy(true);
-    setErrorMessage(null);
+    clearSectionAlert("newsletterEditor");
     try {
       const payload = await generateNewsletterAIDraft(newsletter.id, {
         provider_mode: "mock",
         teacher_instructions: teacherInstructions.trim() || undefined,
       });
-      setStatusMessage(payload.message);
+      setSectionAlert("newsletterEditor", sectionSuccess(payload.message, "AI draft generated"));
       await loadDetail(newsletter.id);
       await loadLists();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not generate AI draft.");
+      setSectionAlert(
+        "newsletterEditor",
+        sectionError(error instanceof Error ? error.message : "Could not generate AI draft.", "AI draft failed"),
+      );
     } finally {
       setBusy(false);
     }
@@ -185,17 +202,20 @@ export function TeacherAssistNewslettersScreen() {
   async function handleRegenerateSection(section: NewsletterRegeneratableSection) {
     if (!newsletter) return;
     setBusy(true);
-    setErrorMessage(null);
+    clearSectionAlert("newsletterEditor");
     try {
       const payload = await regenerateNewsletterSection(newsletter.id, {
         section,
         provider_mode: "mock",
         teacher_instructions: teacherInstructions.trim() || undefined,
       });
-      setStatusMessage(payload.message);
+      setSectionAlert("newsletterEditor", sectionSuccess(payload.message, "Section regenerated"));
       await loadDetail(newsletter.id);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not regenerate section.");
+      setSectionAlert(
+        "newsletterEditor",
+        sectionError(error instanceof Error ? error.message : "Could not regenerate section.", "Regeneration failed"),
+      );
     } finally {
       setBusy(false);
     }
@@ -204,16 +224,22 @@ export function TeacherAssistNewslettersScreen() {
   async function handleSaveTeacherVersion() {
     if (!newsletter || !editContent) return;
     setBusy(true);
-    setErrorMessage(null);
+    clearSectionAlert("newsletterEditor");
     try {
       await createNewsletterVersion(newsletter.id, {
         content_json: { ...editContent, teacher_review_required: true },
         change_reason: changeReason.trim() || "Teacher reviewed newsletter draft.",
       });
-      setStatusMessage("Teacher-reviewed version saved. TeacherAssist does not send messages.");
+      setSectionAlert(
+        "newsletterEditor",
+        sectionSuccess("Teacher-reviewed version saved. TeacherAssist does not send messages.", "Version saved"),
+      );
       await loadDetail(newsletter.id);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not save teacher version.");
+      setSectionAlert(
+        "newsletterEditor",
+        sectionError(error instanceof Error ? error.message : "Could not save teacher version.", "Unable to save"),
+      );
     } finally {
       setBusy(false);
     }
@@ -222,13 +248,20 @@ export function TeacherAssistNewslettersScreen() {
   async function handleApprove() {
     if (!newsletter) return;
     setBusy(true);
+    clearSectionAlert("newsletterEditor");
     try {
       await updateNewsletter(newsletter.id, { status: "approved" });
-      setStatusMessage("Newsletter marked approved for your export/send workflow.");
+      setSectionAlert(
+        "newsletterEditor",
+        sectionSuccess("Newsletter marked approved for your export/send workflow.", "Newsletter approved"),
+      );
       await loadDetail(newsletter.id);
       await loadLists();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not approve newsletter.");
+      setSectionAlert(
+        "newsletterEditor",
+        sectionError(error instanceof Error ? error.message : "Could not approve newsletter.", "Unable to approve"),
+      );
     } finally {
       setBusy(false);
     }
@@ -237,14 +270,20 @@ export function TeacherAssistNewslettersScreen() {
   async function handleExport(format: NewsletterExportFormat) {
     if (!newsletter) return;
     setBusy(true);
-    setErrorMessage(null);
+    clearSectionAlert("newsletterEditor");
     try {
       const exportRow = await createNewsletterExport(newsletter.id, format);
       const download = await fetchNewsletterExportDownload(newsletter.id, exportRow.id);
       window.open(download.download_url, "_blank", "noopener,noreferrer");
-      setStatusMessage(`Exported ${format.toUpperCase()} for teacher-controlled distribution.`);
+      setSectionAlert(
+        "newsletterEditor",
+        sectionSuccess(`Exported ${format.toUpperCase()} for teacher-controlled distribution.`, "Export ready"),
+      );
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not export newsletter.");
+      setSectionAlert(
+        "newsletterEditor",
+        sectionError(error instanceof Error ? error.message : "Could not export newsletter.", "Export failed"),
+      );
     } finally {
       setBusy(false);
     }
@@ -253,12 +292,16 @@ export function TeacherAssistNewslettersScreen() {
   async function handleSaveNotes() {
     if (!newsletter) return;
     setBusy(true);
+    clearSectionAlert("newsletterEditor");
     try {
       await updateNewsletter(newsletter.id, { teacher_notes: teacherNotes });
-      setStatusMessage("Teacher notes saved.");
+      setSectionAlert("newsletterEditor", sectionSuccess("Teacher notes saved.", "Notes saved"));
       await loadDetail(newsletter.id);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not save notes.");
+      setSectionAlert(
+        "newsletterEditor",
+        sectionError(error instanceof Error ? error.message : "Could not save notes.", "Unable to save notes"),
+      );
     } finally {
       setBusy(false);
     }
@@ -275,13 +318,17 @@ export function TeacherAssistNewslettersScreen() {
         </p>
       </header>
 
-      <TeacherAssistFormErrorSummary message={errorMessage} />
-      <TeacherAssistInlineStatus message={statusMessage} onDismiss={() => setStatusMessage(null)} />
+      <TeacherAssistFormErrorSummary title="Unable to load newsletters" message={pageError} />
 
       <section className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)]">
         <aside className="space-y-4">
           <article className="ta-panel p-4">
             <h2 className="text-sm font-semibold text-slate-900">Create draft</h2>
+            <TeacherAssistInlineAlert
+              alert={getSectionAlert("createDraft")}
+              onDismiss={() => clearSectionAlert("createDraft")}
+              className="mt-3"
+            />
             <div className="mt-3 space-y-2">
               <select
                 className="ta-input"
@@ -380,6 +427,11 @@ export function TeacherAssistNewslettersScreen() {
                     {labelize(newsletter.status)}
                   </span>
                 </div>
+                <TeacherAssistInlineAlert
+                  alert={getSectionAlert("newsletterEditor")}
+                  onDismiss={() => clearSectionAlert("newsletterEditor")}
+                  className="mt-4"
+                />
                 <div className="mt-4 flex flex-wrap gap-2">
                   {newsletter.status !== "approved" && newsletter.status !== "archived" ? (
                     <button type="button" className="ta-button-secondary" disabled={busy} onClick={handleApprove}>

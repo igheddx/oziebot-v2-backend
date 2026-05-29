@@ -27,7 +27,12 @@ import {
   fieldErrorInputClass,
 } from "@/components/teacher-assist/teacher-assist-field-error";
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
-import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
+import {
+  TeacherAssistInlineAlert,
+  sectionError,
+  sectionSuccess,
+  useTeacherAssistSectionAlerts,
+} from "@/components/teacher-assist/teacher-assist-inline-alert";
 import type {
   GradingPeriod,
   SchoolYear,
@@ -139,10 +144,10 @@ function validateGradingPeriodForm(form: GradingPeriodForm): Partial<Record<keyo
 }
 
 export function TeacherAssistSettingsScreen() {
+  const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
   const [snapshot, setSnapshot] = useState<SetupSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
   const [profileForm, setProfileForm] = useState<TeacherProfile>({
@@ -169,7 +174,7 @@ export function TeacherAssistSettingsScreen() {
 
   const loadSnapshot = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setPageError(null);
     try {
       const [options, profile, schoolYears, gradingPeriods, classes, subjects, standards] =
         await Promise.all([
@@ -211,7 +216,7 @@ export function TeacherAssistSettingsScreen() {
       setEditingGradingPeriodId(null);
       setEditingClassId(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load TeacherAssist setup.");
+      setPageError(nextError instanceof Error ? nextError.message : "Could not load TeacherAssist setup.");
     } finally {
       setLoading(false);
     }
@@ -270,16 +275,26 @@ export function TeacherAssistSettingsScreen() {
     });
   };
 
-  const runSave = async (key: string, action: () => Promise<void>, successMessage: string) => {
+  const runSave = async (
+    sectionKey: string,
+    key: string,
+    action: () => Promise<void>,
+    successAlert: { title?: string; description: string },
+  ) => {
     setSavingKey(key);
-    setError(null);
-    setNotice(null);
+    clearSectionAlert(sectionKey);
     try {
       await action();
-      setNotice(successMessage);
+      setSectionAlert(sectionKey, sectionSuccess(successAlert.description, successAlert.title));
       await loadSnapshot();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Request failed.");
+      setSectionAlert(
+        sectionKey,
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Request failed.",
+          "Unable to save",
+        ),
+      );
     } finally {
       setSavingKey(null);
     }
@@ -296,8 +311,10 @@ export function TeacherAssistSettingsScreen() {
         </div>
       </section>
 
-      <TeacherAssistFormErrorSummary message={error} />
-      <TeacherAssistInlineStatus message={notice} onDismiss={() => setNotice(null)} />
+      <TeacherAssistFormErrorSummary
+        title="Unable to load settings"
+        message={pageError}
+      />
       {setupIssues.length > 0 ? (
         <TeacherAssistAlert
           variant="warning"
@@ -325,11 +342,17 @@ export function TeacherAssistSettingsScreen() {
                 </p>
               </div>
             </div>
+            <TeacherAssistInlineAlert
+              alert={getSectionAlert("profile")}
+              onDismiss={() => clearSectionAlert("profile")}
+              className="mt-4"
+            />
             <form
               className="mt-5 grid gap-4 lg:grid-cols-2"
               onSubmit={(event) => {
                 event.preventDefault();
                 void runSave(
+                  "profile",
                   "profile",
                   async () => {
                     await saveTeacherProfile({
@@ -339,7 +362,10 @@ export function TeacherAssistSettingsScreen() {
                       timezone: profileForm.timezone,
                     });
                   },
-                  "Teacher profile saved.",
+                  {
+                    title: "Profile saved",
+                    description: "Your teacher profile was saved successfully.",
+                  },
                 );
               }}
             >
@@ -425,12 +451,18 @@ export function TeacherAssistSettingsScreen() {
                 <p className="mt-1 text-sm text-slate-600">
                   Create and edit school years, then mark the active one for TeacherAssist planning.
                 </p>
+                <TeacherAssistInlineAlert
+                  alert={getSectionAlert("schoolYear")}
+                  onDismiss={() => clearSectionAlert("schoolYear")}
+                  className="mt-4"
+                />
               </div>
               <form
                 className="grid w-full gap-3 xl:max-w-3xl xl:grid-cols-4"
                 onSubmit={(event) => {
                   event.preventDefault();
                   void runSave(
+                    "schoolYear",
                     "school-year",
                     async () => {
                       const payload = {
@@ -445,7 +477,15 @@ export function TeacherAssistSettingsScreen() {
                         await createSchoolYear(payload);
                       }
                     },
-                    editingSchoolYearId ? "School year updated." : "School year created.",
+                    editingSchoolYearId
+                      ? {
+                          title: "School year updated",
+                          description: `${schoolYearForm.title || "School year"} was updated successfully.`,
+                        }
+                      : {
+                          title: "School year created",
+                          description: `${schoolYearForm.title || "School year"} was added successfully.`,
+                        },
                   );
                 }}
               >
@@ -541,6 +581,11 @@ export function TeacherAssistSettingsScreen() {
             <p className="mt-1 text-sm text-slate-600">
               Organize nine weeks, six weeks, semester, trimester, or custom periods inside a school year.
             </p>
+            <TeacherAssistInlineAlert
+              alert={getSectionAlert("gradingPeriods")}
+              onDismiss={() => clearSectionAlert("gradingPeriods")}
+              className="mt-4"
+            />
             <form
               className="mt-5 grid gap-3 xl:grid-cols-6"
               onSubmit={(event) => {
@@ -548,12 +593,16 @@ export function TeacherAssistSettingsScreen() {
                 const fieldErrors = validateGradingPeriodForm(gradingPeriodForm);
                 if (Object.keys(fieldErrors).length > 0) {
                   setGradingPeriodFieldErrors(fieldErrors);
-                  setError("Please correct the highlighted grading period fields below.");
-                  setNotice(null);
+                  setSectionAlert("gradingPeriods", {
+                    type: "error",
+                    title: "Unable to add grading period",
+                    description: "Please correct the highlighted fields below.",
+                  });
                   return;
                 }
                 setGradingPeriodFieldErrors({});
                 void runSave(
+                  "gradingPeriods",
                   "grading-period",
                   async () => {
                     const payload = {
@@ -570,7 +619,15 @@ export function TeacherAssistSettingsScreen() {
                       await createGradingPeriod(payload);
                     }
                   },
-                  editingGradingPeriodId ? "Grading period updated." : "Grading period created.",
+                  editingGradingPeriodId
+                    ? {
+                        title: "Grading period updated",
+                        description: `${gradingPeriodForm.title || "Grading period"} was updated successfully.`,
+                      }
+                    : {
+                        title: "Grading period added",
+                        description: `${gradingPeriodForm.title || "Grading period"} was added successfully.`,
+                      },
                 );
               }}
             >
@@ -730,11 +787,17 @@ export function TeacherAssistSettingsScreen() {
             <p className="mt-1 text-sm text-slate-600">
               Create classes, assign grade levels, and preview the anonymous STUDENT # range derived from student count.
             </p>
+            <TeacherAssistInlineAlert
+              alert={getSectionAlert("classes")}
+              onDismiss={() => clearSectionAlert("classes")}
+              className="mt-4"
+            />
             <form
               className="mt-5 grid gap-3 xl:grid-cols-4"
               onSubmit={(event) => {
                 event.preventDefault();
                 void runSave(
+                  "classes",
                   "class",
                   async () => {
                     const payload = {
@@ -749,7 +812,15 @@ export function TeacherAssistSettingsScreen() {
                       await createClass(payload);
                     }
                   },
-                  editingClassId ? "Class updated." : "Class created.",
+                  editingClassId
+                    ? {
+                        title: "Class updated",
+                        description: `${classForm.name || "Class"} was updated successfully.`,
+                      }
+                    : {
+                        title: "Class added",
+                        description: `${classForm.name || "Class"} was added successfully.`,
+                      },
                 );
               }}
             >
@@ -862,16 +933,25 @@ export function TeacherAssistSettingsScreen() {
             <p className="mt-1 text-sm text-slate-600">
               Create the subjects you teach, then attach them to classes.
             </p>
+            <TeacherAssistInlineAlert
+              alert={getSectionAlert("subjects")}
+              onDismiss={() => clearSectionAlert("subjects")}
+              className="mt-4"
+            />
             <form
               className="mt-5 grid gap-3 xl:grid-cols-3"
               onSubmit={(event) => {
                 event.preventDefault();
                 void runSave(
+                  "subjects",
                   "subject",
                   async () => {
                     await createSubject({ code: subjectForm.code || null, name: subjectForm.name });
                   },
-                  "Subject created.",
+                  {
+                    title: "Subject added",
+                    description: `${subjectForm.name || "Subject"} was added successfully.`,
+                  },
                 );
               }}
             >
@@ -910,11 +990,17 @@ export function TeacherAssistSettingsScreen() {
               </article>
               <article className="rounded-2xl border border-slate-200 bg-white p-4">
                 <h3 className="text-base font-semibold text-slate-900">Assign subjects to classes</h3>
+                <TeacherAssistInlineAlert
+                  alert={getSectionAlert("classSubjects")}
+                  onDismiss={() => clearSectionAlert("classSubjects")}
+                  className="mt-3"
+                />
                 <form
                   className="mt-3 space-y-3"
                   onSubmit={(event) => {
                     event.preventDefault();
                     void runSave(
+                      "classSubjects",
                       "class-subject",
                       async () => {
                         await attachClassSubject({
@@ -922,7 +1008,10 @@ export function TeacherAssistSettingsScreen() {
                           subject_id: classSubjectForm.subject_id,
                         });
                       },
-                      "Subject attached to class.",
+                      {
+                        title: "Subject attached",
+                        description: "The subject was attached to the class successfully.",
+                      },
                     );
                   }}
                 >
@@ -967,11 +1056,18 @@ export function TeacherAssistSettingsScreen() {
             <p className="mt-1 text-sm text-slate-600">
               Enter standards manually for now. Pacing-guide import is intentionally deferred to a later phase.
             </p>
+            <TeacherAssistInlineAlert
+              alert={getSectionAlert("standards")}
+              onDismiss={() => clearSectionAlert("standards")}
+              className="mt-4"
+            />
             <form
               className="mt-5 grid gap-3 xl:grid-cols-3"
               onSubmit={(event) => {
                 event.preventDefault();
+                const standardCode = standardForm.code.trim();
                 void runSave(
+                  "standards",
                   "standard",
                   async () => {
                     await createStandard({
@@ -983,7 +1079,12 @@ export function TeacherAssistSettingsScreen() {
                       school_year_id: standardForm.school_year_id || null,
                     });
                   },
-                  "Standard saved.",
+                  {
+                    title: "Standard added",
+                    description: standardCode
+                      ? `${standardCode} was added successfully.`
+                      : "The standard was added successfully.",
+                  },
                 );
               }}
             >

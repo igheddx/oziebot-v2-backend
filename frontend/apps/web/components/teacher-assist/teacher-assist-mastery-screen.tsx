@@ -6,7 +6,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
-import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
+import {
+  TeacherAssistInlineAlert,
+  sectionError,
+  sectionSuccess,
+  useTeacherAssistSectionAlerts,
+} from "@/components/teacher-assist/teacher-assist-inline-alert";
 import {
   commitMasteryEvaluation,
   createMasteryEvaluation,
@@ -162,8 +167,8 @@ export function TeacherAssistMasteryScreen() {
     commit_reason: "",
   });
   const [reversalReason, setReversalReason] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
+  const [pageError, setPageError] = useState<string | null>(null);
   const [reteachActionBusyStandardId, setReteachActionBusyStandardId] = useState<string | null>(null);
 
   const selectedMatrix = useMemo(
@@ -218,9 +223,9 @@ export function TeacherAssistMasteryScreen() {
         if (current && nextMatrices.some((row) => row.id === current)) return current;
         return nextMatrices[0]?.id ?? null;
       });
-      setError(null);
+      setPageError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load mastery matrices.");
+      setPageError(nextError instanceof Error ? nextError.message : "Could not load mastery matrices.");
     } finally {
       setLoading(false);
     }
@@ -251,9 +256,15 @@ export function TeacherAssistMasteryScreen() {
         ...current,
         standard_id: current.standard_id || nextMatrix.standards[0]?.standard_id || "",
       }));
-      setError(null);
+      setPageError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load mastery matrix detail.");
+      setSectionAlert(
+        "masteryMatrix",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not load mastery matrix detail.",
+          "Unable to load matrix",
+        ),
+      );
       setMatrix(null);
       setSummary(null);
       setStandardsSummary(null);
@@ -273,7 +284,13 @@ export function TeacherAssistMasteryScreen() {
         const summaryResult = await fetchStudentMasterySummary(matrixId, studentNumber);
         setStudentSummary(summaryResult);
       } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "Could not load student mastery summary.");
+        setSectionAlert(
+          "masteryMatrix",
+          sectionError(
+            nextError instanceof Error ? nextError.message : "Could not load student mastery summary.",
+            "Unable to load student summary",
+          ),
+        );
         setStudentSummary(null);
       }
     },
@@ -302,22 +319,30 @@ export function TeacherAssistMasteryScreen() {
     async (standardId: string) => {
       if (!selectedMatrixId) return;
       setReteachActionBusyStandardId(standardId);
-      setError(null);
-      setNotice(null);
+      clearSectionAlert("masteryMatrix");
       try {
         const plan = await createReteachPlan({
           mastery_matrix_id: selectedMatrixId,
           standard_id: standardId,
         });
-        setNotice("Reteach plan draft created. Generate an AI draft on the next screen.");
+        setSectionAlert(
+          "masteryMatrix",
+          sectionSuccess("Reteach plan draft created. Generate an AI draft on the next screen.", "Reteach plan created"),
+        );
         router.push(`/teacher-assist/reteach-plans?id=${plan.id}`);
       } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "Could not create reteach plan.");
+        setSectionAlert(
+          "masteryMatrix",
+          sectionError(
+            nextError instanceof Error ? nextError.message : "Could not create reteach plan.",
+            "Unable to create reteach plan",
+          ),
+        );
       } finally {
         setReteachActionBusyStandardId(null);
       }
     },
-    [router, selectedMatrixId],
+    [clearSectionAlert, router, selectedMatrixId, setSectionAlert],
   );
 
   const loadEvaluationDetail = useCallback(async (evaluationId: string) => {
@@ -329,10 +354,16 @@ export function TeacherAssistMasteryScreen() {
         commit_reason: "",
       });
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load mastery evaluation detail.");
+      setSectionAlert(
+        "masteryEvaluation",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not load mastery evaluation detail.",
+          "Unable to load evaluation",
+        ),
+      );
       setEvaluationDetail(null);
     }
-  }, []);
+  }, [setSectionAlert]);
 
   useEffect(() => {
     void loadMatrices();
@@ -360,12 +391,15 @@ export function TeacherAssistMasteryScreen() {
 
   const handleCreateMatrix = useCallback(async () => {
     if (!matrixForm.standard_id) {
-      setError("Select at least one standard for the mastery matrix.");
+      setSectionAlert("masteryMatrices", {
+        type: "error",
+        title: "Unable to create matrix",
+        description: "Select at least one standard for the mastery matrix.",
+      });
       return;
     }
     setSavingMatrix(true);
-    setNotice(null);
-    setError(null);
+    clearSectionAlert("masteryMatrices");
     try {
       const created = await createMasteryMatrix({
         school_year_id: matrixForm.school_year_id,
@@ -378,19 +412,24 @@ export function TeacherAssistMasteryScreen() {
       });
       setMatrices((current) => [created, ...current]);
       setSelectedMatrixId(created.id);
-      setNotice("Mastery matrix created.");
+      setSectionAlert("masteryMatrices", sectionSuccess("Mastery matrix created.", "Matrix created"));
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not create mastery matrix.");
+      setSectionAlert(
+        "masteryMatrices",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not create mastery matrix.",
+          "Unable to create matrix",
+        ),
+      );
     } finally {
       setSavingMatrix(false);
     }
-  }, [matrixForm]);
+  }, [clearSectionAlert, matrixForm, setSectionAlert]);
 
   const handleCreateEvaluation = useCallback(async () => {
     if (!selectedMatrixId || !evaluationForm.standard_id) return;
     setSavingEvaluation(true);
-    setNotice(null);
-    setError(null);
+    clearSectionAlert("masteryEvaluation");
     try {
       const created = await createMasteryEvaluation({
         mastery_matrix_id: selectedMatrixId,
@@ -403,19 +442,30 @@ export function TeacherAssistMasteryScreen() {
       });
       setSelectedEvaluationId(created.id);
       await loadMatrixDetail(selectedMatrixId);
-      setNotice("Draft mastery evaluation created. Teacher commit is required before it counts as active.");
+      setSectionAlert(
+        "masteryEvaluation",
+        sectionSuccess(
+          "Draft mastery evaluation created. Teacher commit is required before it counts as active.",
+          "Evaluation created",
+        ),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not create mastery evaluation.");
+      setSectionAlert(
+        "masteryEvaluation",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not create mastery evaluation.",
+          "Unable to create evaluation",
+        ),
+      );
     } finally {
       setSavingEvaluation(false);
     }
-  }, [evaluationForm, loadMatrixDetail, selectedMatrixId]);
+  }, [clearSectionAlert, evaluationForm, loadMatrixDetail, selectedMatrixId, setSectionAlert]);
 
   const handleCommitEvaluation = useCallback(async () => {
     if (!selectedEvaluationId || !selectedMatrixId) return;
     setCommitting(true);
-    setNotice(null);
-    setError(null);
+    clearSectionAlert("masteryEvaluation");
     try {
       const result = await commitMasteryEvaluation(selectedEvaluationId, {
         commit_reason: "Teacher confirmed mastery update.",
@@ -423,19 +473,24 @@ export function TeacherAssistMasteryScreen() {
       setEvaluationDetail({ evaluation: result.evaluation, commits: evaluationDetail?.commits ?? [] });
       await loadMatrixDetail(selectedMatrixId);
       await loadEvaluationDetail(selectedEvaluationId);
-      setNotice(result.message);
+      setSectionAlert("masteryEvaluation", sectionSuccess(result.message, "Evaluation committed"));
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not commit mastery evaluation.");
+      setSectionAlert(
+        "masteryEvaluation",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not commit mastery evaluation.",
+          "Unable to commit evaluation",
+        ),
+      );
     } finally {
       setCommitting(false);
     }
-  }, [evaluationDetail?.commits, loadEvaluationDetail, loadMatrixDetail, selectedEvaluationId, selectedMatrixId]);
+  }, [clearSectionAlert, evaluationDetail?.commits, loadEvaluationDetail, loadMatrixDetail, selectedEvaluationId, selectedMatrixId, setSectionAlert]);
 
   const handleCorrection = useCallback(async () => {
     if (!selectedEvaluationId || !selectedMatrixId) return;
     setCommitting(true);
-    setNotice(null);
-    setError(null);
+    clearSectionAlert("masteryEvaluation");
     try {
       const result = await createMasteryEvaluationCorrection(selectedEvaluationId, {
         mastery_level: correctionForm.mastery_level,
@@ -444,19 +499,24 @@ export function TeacherAssistMasteryScreen() {
       await loadMatrixDetail(selectedMatrixId);
       await loadEvaluationDetail(selectedEvaluationId);
       setEvaluationDetail({ evaluation: result.evaluation, commits: evaluationDetail?.commits ?? [] });
-      setNotice(result.message);
+      setSectionAlert("masteryEvaluation", sectionSuccess(result.message, "Correction committed"));
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not commit mastery correction.");
+      setSectionAlert(
+        "masteryEvaluation",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not commit mastery correction.",
+          "Unable to commit correction",
+        ),
+      );
     } finally {
       setCommitting(false);
     }
-  }, [correctionForm, evaluationDetail?.commits, loadEvaluationDetail, loadMatrixDetail, selectedEvaluationId, selectedMatrixId]);
+  }, [clearSectionAlert, correctionForm, evaluationDetail?.commits, loadEvaluationDetail, loadMatrixDetail, selectedEvaluationId, selectedMatrixId, setSectionAlert]);
 
   const handleReversal = useCallback(async () => {
     if (!selectedEvaluationId || !selectedMatrixId) return;
     setCommitting(true);
-    setNotice(null);
-    setError(null);
+    clearSectionAlert("masteryEvaluation");
     try {
       const result = await createMasteryEvaluationReversal(selectedEvaluationId, {
         commit_reason: reversalReason.trim(),
@@ -464,9 +524,15 @@ export function TeacherAssistMasteryScreen() {
       await loadMatrixDetail(selectedMatrixId);
       await loadEvaluationDetail(selectedEvaluationId);
       setEvaluationDetail({ evaluation: result.evaluation, commits: evaluationDetail?.commits ?? [] });
-      setNotice(result.message);
+      setSectionAlert("masteryEvaluation", sectionSuccess(result.message, "Evaluation reversed"));
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not reverse mastery evaluation.");
+      setSectionAlert(
+        "masteryEvaluation",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not reverse mastery evaluation.",
+          "Unable to reverse evaluation",
+        ),
+      );
     } finally {
       setCommitting(false);
     }
@@ -496,8 +562,7 @@ export function TeacherAssistMasteryScreen() {
         description="Mastery updates require explicit teacher commit. Grading confirmation and gradebook commits do not auto-update mastery in this phase."
       />
 
-      <TeacherAssistFormErrorSummary message={error} />
-      <TeacherAssistInlineStatus message={notice} onDismiss={() => setNotice(null)} />
+      <TeacherAssistFormErrorSummary title="Unable to load mastery workspace" message={pageError} />
 
       <section className="ta-panel p-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -588,6 +653,16 @@ export function TeacherAssistMasteryScreen() {
         <article className="ta-panel p-6">
           <h2 className="text-xl font-semibold text-slate-900">Mastery matrices</h2>
           <p className="mt-1 text-sm text-slate-600">Select a class/subject matrix or create a new one.</p>
+          <TeacherAssistInlineAlert
+            alert={getSectionAlert("masteryMatrices")}
+            onDismiss={() => clearSectionAlert("masteryMatrices")}
+            className="mt-4"
+          />
+          <TeacherAssistInlineAlert
+            alert={getSectionAlert("masteryMatrix")}
+            onDismiss={() => clearSectionAlert("masteryMatrix")}
+            className="mt-4"
+          />
           <div className="mt-4 space-y-2">
             {loading ? (
               <p className="text-sm text-slate-500">Loading matrices...</p>
@@ -852,6 +927,11 @@ export function TeacherAssistMasteryScreen() {
       </section>
 
       <section className="grid gap-6 xl:grid-cols-2">
+        <TeacherAssistInlineAlert
+          alert={getSectionAlert("masteryEvaluation")}
+          onDismiss={() => clearSectionAlert("masteryEvaluation")}
+          className="xl:col-span-2"
+        />
         <article className="ta-panel p-6">
           <h2 className="text-xl font-semibold text-slate-900">Create draft evaluation</h2>
           <p className="mt-1 text-sm text-slate-600">

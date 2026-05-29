@@ -4,7 +4,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
-import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
+import {
+  TeacherAssistInlineAlert,
+  sectionError,
+  sectionSuccess,
+  useTeacherAssistSectionAlerts,
+} from "@/components/teacher-assist/teacher-assist-inline-alert";
 import {
   createLessonReflection,
   createLessonReflectionVersion,
@@ -66,6 +71,7 @@ export function TeacherAssistReflectionsScreen() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedId = searchParams.get("id");
+  const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
 
   const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
   const [classes, setClasses] = useState<TeacherClass[]>([]);
@@ -90,8 +96,7 @@ export function TeacherAssistReflectionsScreen() {
     subject_id: "",
     title: "",
   });
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const selectedVersion = useMemo(() => versions.at(-1) ?? null, [versions]);
@@ -145,7 +150,7 @@ export function TeacherAssistReflectionsScreen() {
   }, []);
 
   useEffect(() => {
-    loadLists().catch((error: Error) => setErrorMessage(error.message));
+    loadLists().catch((error: Error) => setPageError(error.message));
   }, [loadLists]);
 
   useEffect(() => {
@@ -159,7 +164,7 @@ export function TeacherAssistReflectionsScreen() {
       setHistorical(null);
       return;
     }
-    loadDetail(selectedId).catch((error: Error) => setErrorMessage(error.message));
+    loadDetail(selectedId).catch((error: Error) => setPageError(error.message));
   }, [loadDetail, selectedId]);
 
   function buildContent(): LessonReflectionContent {
@@ -177,11 +182,15 @@ export function TeacherAssistReflectionsScreen() {
 
   async function handleCreate() {
     if (!createForm.school_year_id || !createForm.class_id || !createForm.subject_id) {
-      setErrorMessage("School year, class, and subject are required.");
+      setSectionAlert("createDraft", {
+        type: "error",
+        title: "Unable to create reflection",
+        description: "School year, class, and subject are required.",
+      });
       return;
     }
     setBusy(true);
-    setErrorMessage(null);
+    clearSectionAlert("createDraft");
     try {
       const created = await createLessonReflection({
         school_year_id: createForm.school_year_id,
@@ -192,9 +201,15 @@ export function TeacherAssistReflectionsScreen() {
       await loadLists();
       setSelectedId(created.id);
       router.replace(`/teacher-assist/reflections?id=${created.id}`);
-      setStatusMessage("Reflection workspace created.");
+      setSectionAlert(
+        "createDraft",
+        sectionSuccess("Reflection workspace created.", "Reflection created"),
+      );
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not create reflection.");
+      setSectionAlert(
+        "createDraft",
+        sectionError(error instanceof Error ? error.message : "Could not create reflection.", "Unable to create reflection"),
+      );
     } finally {
       setBusy(false);
     }
@@ -203,7 +218,7 @@ export function TeacherAssistReflectionsScreen() {
   async function handleSaveVersion() {
     if (!reflection) return;
     setBusy(true);
-    setErrorMessage(null);
+    clearSectionAlert("reflectionEditor");
     try {
       await createLessonReflectionVersion(reflection.id, {
         content_json: buildContent(),
@@ -211,9 +226,12 @@ export function TeacherAssistReflectionsScreen() {
       });
       await loadDetail(reflection.id);
       await loadLists();
-      setStatusMessage("Reflection saved.");
+      setSectionAlert("reflectionEditor", sectionSuccess("Reflection saved.", "Reflection saved"));
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not save reflection.");
+      setSectionAlert(
+        "reflectionEditor",
+        sectionError(error instanceof Error ? error.message : "Could not save reflection.", "Unable to save reflection"),
+      );
     } finally {
       setBusy(false);
     }
@@ -222,13 +240,16 @@ export function TeacherAssistReflectionsScreen() {
   async function handleAISuggestions() {
     if (!reflection) return;
     setBusy(true);
-    setErrorMessage(null);
+    clearSectionAlert("reflectionEditor");
     try {
       const payload = await generateLessonReflectionAISuggestions(reflection.id, {
         provider_mode: "mock",
         teacher_instructions: teacherInstructions.trim() || undefined,
       });
-      setStatusMessage("AI suggestions generated. Review and edit before saving.");
+      setSectionAlert(
+        "reflectionEditor",
+        sectionSuccess("AI suggestions generated. Review and edit before saving.", "AI suggestions ready"),
+      );
       setReflection(payload.lesson_reflection);
       const content = payload.version.content_json;
       setWhatWorked(listToLines(content.what_worked));
@@ -240,7 +261,10 @@ export function TeacherAssistReflectionsScreen() {
       await loadDetail(reflection.id);
       await loadLists();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not generate AI suggestions.");
+      setSectionAlert(
+        "reflectionEditor",
+        sectionError(error instanceof Error ? error.message : "Could not generate AI suggestions.", "AI suggestions failed"),
+      );
     } finally {
       setBusy(false);
     }
@@ -249,12 +273,16 @@ export function TeacherAssistReflectionsScreen() {
   async function handleArchive() {
     if (!reflection) return;
     setBusy(true);
+    clearSectionAlert("reflectionEditor");
     try {
       await updateLessonReflection(reflection.id, { status: "archived" });
       await loadLists();
-      setStatusMessage("Reflection archived.");
+      setSectionAlert("reflectionEditor", sectionSuccess("Reflection archived.", "Reflection archived"));
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not archive reflection.");
+      setSectionAlert(
+        "reflectionEditor",
+        sectionError(error instanceof Error ? error.message : "Could not archive reflection.", "Unable to archive"),
+      );
     } finally {
       setBusy(false);
     }
@@ -271,13 +299,17 @@ export function TeacherAssistReflectionsScreen() {
         </p>
       </header>
 
-      <TeacherAssistFormErrorSummary message={errorMessage} />
-      <TeacherAssistInlineStatus message={statusMessage} onDismiss={() => setStatusMessage(null)} />
+      <TeacherAssistFormErrorSummary title="Unable to load reflections" message={pageError} />
 
       <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
         <aside className="space-y-4">
           <section className="rounded-3xl border border-slate-200 bg-white p-4">
             <h2 className="text-sm font-semibold text-slate-900">Create reflection</h2>
+            <TeacherAssistInlineAlert
+              alert={getSectionAlert("createDraft")}
+              onDismiss={() => clearSectionAlert("createDraft")}
+              className="mt-3"
+            />
             <div className="mt-3 space-y-3">
               <select
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
@@ -421,6 +453,11 @@ export function TeacherAssistReflectionsScreen() {
                     </button>
                   </div>
                 </div>
+                <TeacherAssistInlineAlert
+                  alert={getSectionAlert("reflectionEditor")}
+                  onDismiss={() => clearSectionAlert("reflectionEditor")}
+                  className="mt-4"
+                />
                 <p className="mt-3 text-xs text-amber-700">
                   Teacher review required. AI suggestions are drafts only and never commit automatically.
                 </p>

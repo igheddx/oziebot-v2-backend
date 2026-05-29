@@ -4,7 +4,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
-import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
+import {
+  TeacherAssistInlineAlert,
+  sectionError,
+  sectionSuccess,
+  useTeacherAssistSectionAlerts,
+} from "@/components/teacher-assist/teacher-assist-inline-alert";
 import {
   fetchExportArtifactDetail,
   fetchExportArtifactDownload,
@@ -49,14 +54,14 @@ function statusClasses(status: string | null | undefined) {
 }
 
 export function TeacherAssistExportsScreen() {
+  const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
   const [exportsList, setExportsList] = useState<TeacherAssistExportArtifact[]>([]);
   const [selectedExportId, setSelectedExportId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TeacherAssistExportArtifactDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
 
   const loadExports = useCallback(async () => {
     setLoading(true);
@@ -67,9 +72,9 @@ export function TeacherAssistExportsScreen() {
         if (current && rows.some((row) => row.id === current)) return current;
         return rows[0]?.id ?? null;
       });
-      setError(null);
+      setPageError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load exports.");
+      setPageError(nextError instanceof Error ? nextError.message : "Could not load exports.");
       setExportsList([]);
       setSelectedExportId(null);
     } finally {
@@ -94,7 +99,13 @@ export function TeacherAssistExportsScreen() {
       })
       .catch((nextError) => {
         if (!cancelled) {
-          setError(nextError instanceof Error ? nextError.message : "Could not load export detail.");
+          setSectionAlert(
+            "exportDetail",
+            sectionError(
+              nextError instanceof Error ? nextError.message : "Could not load export detail.",
+              "Unable to load export detail",
+            ),
+          );
           setDetail(null);
         }
       })
@@ -104,7 +115,7 @@ export function TeacherAssistExportsScreen() {
     return () => {
       cancelled = true;
     };
-  }, [selectedExportId]);
+  }, [selectedExportId, setSectionAlert]);
 
   const summaryCards = useMemo(
     () => [
@@ -121,18 +132,29 @@ export function TeacherAssistExportsScreen() {
 
   const handleDownload = useCallback(async (exportId: string) => {
     setDownloadingId(exportId);
-    setNotice(null);
-    setError(null);
+    clearSectionAlert("exportDetail");
     try {
       const payload = await fetchExportArtifactDownload(exportId);
       window.open(payload.download_url, "_blank", "noopener,noreferrer");
-      setNotice(`Download started for ${payload.filename}. Open in PowerPoint or import into Google Slides manually.`);
+      setSectionAlert(
+        "exportDetail",
+        sectionSuccess(
+          `Download started for ${payload.filename}. Open in PowerPoint or import into Google Slides manually.`,
+          "Download started",
+        ),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not prepare export download.");
+      setSectionAlert(
+        "exportDetail",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not prepare export download.",
+          "Download failed",
+        ),
+      );
     } finally {
       setDownloadingId(null);
     }
-  }, []);
+  }, [clearSectionAlert, setSectionAlert]);
 
   return (
     <div className="space-y-6">
@@ -157,8 +179,7 @@ export function TeacherAssistExportsScreen() {
         </div>
       </section>
 
-      <TeacherAssistFormErrorSummary message={error} />
-      <TeacherAssistInlineStatus message={notice} onDismiss={() => setNotice(null)} />
+      <TeacherAssistFormErrorSummary title="Unable to load exports" message={pageError} />
 
       <section className="grid gap-4 md:grid-cols-4">
         {summaryCards.map((card) => (
@@ -212,6 +233,11 @@ export function TeacherAssistExportsScreen() {
 
         <article className="ta-panel p-6">
           <h2 className="text-xl font-semibold text-slate-900">Export detail</h2>
+          <TeacherAssistInlineAlert
+            alert={getSectionAlert("exportDetail")}
+            onDismiss={() => clearSectionAlert("exportDetail")}
+            className="mt-4"
+          />
           {detailLoading ? (
             <p className="mt-4 text-sm text-slate-600">Loading export detail...</p>
           ) : !detail ? (

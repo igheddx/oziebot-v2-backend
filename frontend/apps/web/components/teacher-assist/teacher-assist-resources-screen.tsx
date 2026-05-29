@@ -5,7 +5,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
-import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
+import {
+  TeacherAssistInlineAlert,
+  sectionError,
+  sectionSuccess,
+  useTeacherAssistSectionAlerts,
+} from "@/components/teacher-assist/teacher-assist-inline-alert";
 import { buildApiUrl } from "@/lib/auth-service";
 import {
   createResourceExtractionJob,
@@ -61,10 +66,10 @@ function extractionStatusClasses(status: string | null | undefined) {
 }
 
 export function TeacherAssistResourcesScreen() {
+  const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
   const [resources, setResources] = useState<ResourceLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
   const [uploads, setUploads] = useState<UploadEntry[]>([]);
   const [linkForm, setLinkForm] = useState<LinkForm>({
     title: "",
@@ -79,11 +84,11 @@ export function TeacherAssistResourcesScreen() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setPageError(null);
     try {
       setResources(await fetchResources());
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load resources.");
+      setPageError(nextError instanceof Error ? nextError.message : "Could not load resources.");
     } finally {
       setLoading(false);
     }
@@ -95,36 +100,49 @@ export function TeacherAssistResourcesScreen() {
 
   const handleDownloadResource = useCallback(async (resource: ResourceLibraryItem) => {
     if (!resource.storage_key) return;
-    setError(null);
-    setNotice(null);
+    clearSectionAlert("resourceLibrary");
     setDownloadingResourceId(resource.id);
     try {
       const download = await fetchResourceDownloadUrl(resource.id);
       const nextUrl = download.url.startsWith("/") ? buildApiUrl(download.url) : download.url;
       window.open(nextUrl, "_blank", "noopener,noreferrer");
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not prepare the file download.");
+      setSectionAlert(
+        "resourceLibrary",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not prepare the file download.",
+          "Download failed",
+        ),
+      );
     } finally {
       setDownloadingResourceId(null);
     }
-  }, []);
+  }, [clearSectionAlert, setSectionAlert]);
 
   const handleStartExtraction = useCallback(
     async (resource: ResourceLibraryItem) => {
-      setError(null);
-      setNotice(null);
+      clearSectionAlert("resourceLibrary");
       setStartingExtractionId(resource.id);
       try {
         await createResourceExtractionJob(resource.id);
         await load();
-        setNotice("Resource extraction queued.");
+        setSectionAlert(
+          "resourceLibrary",
+          sectionSuccess("Resource extraction queued.", "Extraction queued"),
+        );
       } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "Could not queue extraction.");
+        setSectionAlert(
+          "resourceLibrary",
+          sectionError(
+            nextError instanceof Error ? nextError.message : "Could not queue extraction.",
+            "Extraction failed",
+          ),
+        );
       } finally {
         setStartingExtractionId(null);
       }
     },
-    [load],
+    [clearSectionAlert, load, setSectionAlert],
   );
 
   const totalLinkedCount = useMemo(
@@ -158,7 +176,10 @@ export function TeacherAssistResourcesScreen() {
           ),
         );
         await load();
-        setNotice(`Uploaded ${file.name}.`);
+        setSectionAlert(
+          "upload",
+          sectionSuccess(`${file.name} was uploaded successfully.`, "Upload complete"),
+        );
       } catch (nextError) {
         const failureMessage = nextError instanceof Error ? nextError.message : "Upload failed.";
         setUploads((current) =>
@@ -174,12 +195,12 @@ export function TeacherAssistResourcesScreen() {
         );
       }
     },
-    [load],
+    [load, setSectionAlert],
   );
 
   const handleFiles = useCallback(
     async (files: File[]) => {
-      setNotice(null);
+      clearSectionAlert("upload");
       for (const file of files) {
         const entryId = `${file.name}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
         setUploads((current) => [
@@ -209,8 +230,7 @@ export function TeacherAssistResourcesScreen() {
         </div>
       </section>
 
-      <TeacherAssistFormErrorSummary message={error} />
-      <TeacherAssistInlineStatus message={notice} onDismiss={() => setNotice(null)} />
+      <TeacherAssistFormErrorSummary title="Unable to load resources" message={pageError} />
 
       <section className="grid gap-4 lg:grid-cols-3">
         <article className="ta-panel p-5">
@@ -241,6 +261,11 @@ export function TeacherAssistResourcesScreen() {
               mock-first in this phase.
             </p>
           </div>
+          <TeacherAssistInlineAlert
+            alert={getSectionAlert("upload")}
+            onDismiss={() => clearSectionAlert("upload")}
+            className="mt-4"
+          />
 
           <button
             type="button"
@@ -349,21 +374,34 @@ export function TeacherAssistResourcesScreen() {
           <p className="mt-1 text-sm text-slate-600">
             Capture district links, curriculum portals, or online references without uploading files.
           </p>
+          <TeacherAssistInlineAlert
+            alert={getSectionAlert("linkForm")}
+            onDismiss={() => clearSectionAlert("linkForm")}
+            className="mt-4"
+          />
           <form
             className="mt-5 space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
               setSavingLink(true);
-              setError(null);
-              setNotice(null);
+              clearSectionAlert("linkForm");
               void createLinkResource(linkForm)
                 .then(async () => {
                   setLinkForm({ title: "", description: "", external_url: "" });
-                  setNotice("Link resource saved.");
+                  setSectionAlert(
+                    "linkForm",
+                    sectionSuccess("The link resource was saved successfully.", "Link saved"),
+                  );
                   await load();
                 })
                 .catch((nextError) => {
-                  setError(nextError instanceof Error ? nextError.message : "Could not save link.");
+                  setSectionAlert(
+                    "linkForm",
+                    sectionError(
+                      nextError instanceof Error ? nextError.message : "Could not save link.",
+                      "Unable to save link",
+                    ),
+                  );
                 })
                 .finally(() => {
                   setSavingLink(false);
@@ -418,6 +456,11 @@ export function TeacherAssistResourcesScreen() {
             </p>
           </div>
         </div>
+        <TeacherAssistInlineAlert
+          alert={getSectionAlert("resourceLibrary")}
+          onDismiss={() => clearSectionAlert("resourceLibrary")}
+          className="mt-4"
+        />
 
         {loading ? (
           <p className="mt-5 text-sm text-slate-600">Loading resources...</p>

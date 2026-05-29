@@ -5,7 +5,12 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
-import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
+import {
+  TeacherAssistInlineAlert,
+  sectionError,
+  sectionSuccess,
+  useTeacherAssistSectionAlerts,
+} from "@/components/teacher-assist/teacher-assist-inline-alert";
 import {
   createGradebookRecordCorrection,
   createGradebookRecordReversal,
@@ -74,8 +79,8 @@ export function TeacherAssistGradebookScreen() {
     reason: "",
   });
   const [reversalReason, setReversalReason] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
+  const [pageError, setPageError] = useState<string | null>(null);
 
   const selectedAssignment = useMemo(
     () => assignments.find((assignment) => assignment.id === selectedAssignmentId) ?? null,
@@ -98,9 +103,9 @@ export function TeacherAssistGradebookScreen() {
         if (current && rows.some((row) => row.id === current)) return current;
         return rows[0]?.id ?? null;
       });
-      setError(null);
+      setPageError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load assignments.");
+      setPageError(nextError instanceof Error ? nextError.message : "Could not load assignments.");
       setAssignments([]);
       setSelectedAssignmentId(null);
     } finally {
@@ -117,9 +122,15 @@ export function TeacherAssistGradebookScreen() {
         if (current && rows.some((row) => row.id === current)) return current;
         return rows[0]?.id ?? null;
       });
-      setError(null);
+      setPageError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load grade records.");
+      setSectionAlert(
+        "gradeRecords",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not load grade records.",
+          "Unable to load grade records",
+        ),
+      );
       setRecords([]);
       setSelectedRecordId(null);
     } finally {
@@ -139,9 +150,15 @@ export function TeacherAssistGradebookScreen() {
         reason: "",
       });
       setReversalReason("");
-      setError(null);
+      setPageError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load grade record detail.");
+      setSectionAlert(
+        "gradeRecordDetail",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not load grade record detail.",
+          "Unable to load record detail",
+        ),
+      );
       setDetail(null);
     } finally {
       setDetailLoading(false);
@@ -173,24 +190,31 @@ export function TeacherAssistGradebookScreen() {
   const handleExport = useCallback(async () => {
     if (!selectedAssignmentId) return;
     setExportLoading(true);
-    setNotice(null);
-    setError(null);
+    clearSectionAlert("gradeRecords");
     try {
       const payload = await fetchAssignmentGradebookExport(selectedAssignmentId);
       setExportView(payload);
-      setNotice("Export-ready gradebook view generated.");
+      setSectionAlert(
+        "gradeRecords",
+        sectionSuccess("Export-ready gradebook view generated.", "Export view ready"),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not generate gradebook export view.");
+      setSectionAlert(
+        "gradeRecords",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not generate gradebook export view.",
+          "Export failed",
+        ),
+      );
     } finally {
       setExportLoading(false);
     }
-  }, [selectedAssignmentId]);
+  }, [clearSectionAlert, selectedAssignmentId, setSectionAlert]);
 
   const handleCorrection = useCallback(async () => {
     if (!selectedRecordId) return;
     setSavingCorrection(true);
-    setNotice(null);
-    setError(null);
+    clearSectionAlert("gradeRecordDetail");
     try {
       await createGradebookRecordCorrection(selectedRecordId, {
         committed_score: correctionForm.committed_score.trim()
@@ -204,32 +228,49 @@ export function TeacherAssistGradebookScreen() {
         await loadRecords(selectedAssignmentId);
       }
       await loadDetail(selectedRecordId);
-      setNotice("Grade correction committed with audit trail.");
+      setSectionAlert(
+        "gradeRecordDetail",
+        sectionSuccess("Grade correction committed with audit trail.", "Correction committed"),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not commit grade correction.");
+      setSectionAlert(
+        "gradeRecordDetail",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not commit grade correction.",
+          "Unable to commit correction",
+        ),
+      );
     } finally {
       setSavingCorrection(false);
     }
-  }, [correctionForm, loadDetail, loadRecords, selectedAssignmentId, selectedRecordId]);
+  }, [clearSectionAlert, correctionForm, loadDetail, loadRecords, selectedAssignmentId, selectedRecordId, setSectionAlert]);
 
   const handleReversal = useCallback(async () => {
     if (!selectedRecordId) return;
     setSavingReversal(true);
-    setNotice(null);
-    setError(null);
+    clearSectionAlert("gradeRecordDetail");
     try {
       await createGradebookRecordReversal(selectedRecordId, { reason: reversalReason.trim() });
       if (selectedAssignmentId) {
         await loadRecords(selectedAssignmentId);
       }
       await loadDetail(selectedRecordId);
-      setNotice("Grade reversed with audit trail.");
+      setSectionAlert(
+        "gradeRecordDetail",
+        sectionSuccess("Grade reversed with audit trail.", "Grade reversed"),
+      );
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not reverse grade.");
+      setSectionAlert(
+        "gradeRecordDetail",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not reverse grade.",
+          "Unable to reverse grade",
+        ),
+      );
     } finally {
       setSavingReversal(false);
     }
-  }, [loadDetail, loadRecords, reversalReason, selectedAssignmentId, selectedRecordId]);
+  }, [clearSectionAlert, loadDetail, loadRecords, reversalReason, selectedAssignmentId, selectedRecordId, setSectionAlert]);
 
   return (
     <div className="space-y-6">
@@ -248,8 +289,7 @@ export function TeacherAssistGradebookScreen() {
         </div>
       </section>
 
-      <TeacherAssistFormErrorSummary message={error} />
-      <TeacherAssistInlineStatus message={notice} onDismiss={() => setNotice(null)} />
+      <TeacherAssistFormErrorSummary title="Unable to load gradebook" message={pageError} />
 
       <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
         <article className="ta-panel p-5">
@@ -298,6 +338,11 @@ export function TeacherAssistGradebookScreen() {
               {exportLoading ? "Generating..." : "Generate Export View"}
             </button>
           </div>
+          <TeacherAssistInlineAlert
+            alert={getSectionAlert("gradeRecords")}
+            onDismiss={() => clearSectionAlert("gradeRecords")}
+            className="mt-4"
+          />
 
           {recordsLoading ? (
             <p className="mt-4 text-sm text-slate-500">Loading grade records...</p>
@@ -346,6 +391,10 @@ export function TeacherAssistGradebookScreen() {
                   <p className="text-sm text-slate-500">Loading record detail...</p>
                 ) : (
                   <div className="space-y-4">
+                    <TeacherAssistInlineAlert
+                      alert={getSectionAlert("gradeRecordDetail")}
+                      onDismiss={() => clearSectionAlert("gradeRecordDetail")}
+                    />
                     <div>
                       <p className="text-sm font-semibold text-slate-900">
                         STUDENT #{detail.record.student_number}

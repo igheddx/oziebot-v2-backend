@@ -6,6 +6,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
 import {
+  TeacherAssistInlineAlert,
+  sectionError,
+  useTeacherAssistSectionAlerts,
+} from "@/components/teacher-assist/teacher-assist-inline-alert";
+import {
   attachPlanningDraftResource,
   createPlanningDraft,
   fetchClasses,
@@ -194,9 +199,10 @@ function workflowStatusMessage(workflow: TeacherAssistWorkflow) {
 }
 
 export function TeacherAssistWeeklyPlanningScreen() {
+  const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
   const [message, setMessage] = useState<WorkspaceMessage | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [draftForm, setDraftForm] = useState<DraftForm>(emptyDraftForm());
@@ -207,7 +213,7 @@ export function TeacherAssistWeeklyPlanningScreen() {
   const load = useCallback(
     async (preferredDraftId?: string | null) => {
       setLoading(true);
-      setError(null);
+      setPageError(null);
       try {
         const [
           schoolYears,
@@ -267,7 +273,7 @@ export function TeacherAssistWeeklyPlanningScreen() {
           }));
         }
       } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "Could not load planning workspace.");
+        setPageError(nextError instanceof Error ? nextError.message : "Could not load planning workspace.");
       } finally {
         setLoading(false);
       }
@@ -281,7 +287,13 @@ export function TeacherAssistWeeklyPlanningScreen() {
       const preview = await fetchPlanningDraftContextPreview(draftId);
       setContextPreview(preview);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load draft context preview.");
+      setSectionAlert(
+        "draftWorkspace",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not load draft context preview.",
+          "Unable to load context preview",
+        ),
+      );
     } finally {
       setPreviewLoading(false);
     }
@@ -453,7 +465,7 @@ export function TeacherAssistWeeklyPlanningScreen() {
   const persistDraft = useCallback(
     async (targetStatus: "draft" | "ready" = "draft") => {
       setSavingKey(targetStatus);
-      setError(null);
+      clearSectionAlert("draftWorkspace");
       setMessage(null);
       try {
         const body = {
@@ -509,18 +521,24 @@ export function TeacherAssistWeeklyPlanningScreen() {
         await load(savedDraft.id);
         await loadPreview(savedDraft.id);
       } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "Could not save planning draft.");
+        setSectionAlert(
+          "draftWorkspace",
+          sectionError(
+            nextError instanceof Error ? nextError.message : "Could not save planning draft.",
+            "Unable to save draft",
+          ),
+        );
       } finally {
         setSavingKey(null);
       }
     },
-    [activeDraftId, draftForm, load, loadPreview],
+    [activeDraftId, clearSectionAlert, draftForm, load, loadPreview, setSectionAlert],
   );
 
   const handleGenerate = useCallback(async () => {
     if (!activeDraftId) return;
     setSavingKey("generate");
-    setError(null);
+    clearSectionAlert("draftWorkspace");
     setMessage(null);
     try {
       await startWeeklyPlanWorkflow(activeDraftId);
@@ -531,13 +549,17 @@ export function TeacherAssistWeeklyPlanningScreen() {
       await load(activeDraftId);
       await loadPreview(activeDraftId);
     } catch (nextError) {
-      setError(
-        nextError instanceof Error ? nextError.message : "Could not start instructional-plan workflow.",
+      setSectionAlert(
+        "draftWorkspace",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not start instructional-plan workflow.",
+          "Workflow failed",
+        ),
       );
     } finally {
       setSavingKey(null);
     }
-  }, [activeDraftId, load, loadPreview]);
+  }, [activeDraftId, clearSectionAlert, load, loadPreview, setSectionAlert]);
 
   const resetWorkspace = () => {
     setActiveDraftId(null);
@@ -575,10 +597,7 @@ export function TeacherAssistWeeklyPlanningScreen() {
         description="TeacherAssist workflows here are persisted and worker-driven. Mock remains the safe default, and any real-provider execution stays explicitly gated by backend config."
       />
 
-      <TeacherAssistFormErrorSummary message={error} />
-      {primaryAlert ? (
-        <TeacherAssistAlert variant={primaryAlert.tone} description={primaryAlert.text} />
-      ) : null}
+      <TeacherAssistFormErrorSummary title="Unable to load planning workspace" message={pageError} />
 
       <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
         <article className="ta-panel p-6">
@@ -606,6 +625,15 @@ export function TeacherAssistWeeklyPlanningScreen() {
               </button>
             </div>
           </div>
+
+          <TeacherAssistInlineAlert
+            alert={getSectionAlert("draftWorkspace")}
+            onDismiss={() => clearSectionAlert("draftWorkspace")}
+            className="mt-4"
+          />
+          {primaryAlert ? (
+            <TeacherAssistAlert variant={primaryAlert.tone} description={primaryAlert.text} className="mt-4" />
+          ) : null}
 
           <form
             className="mt-6 space-y-5"
@@ -957,7 +985,7 @@ export function TeacherAssistWeeklyPlanningScreen() {
                   onClick={() => {
                     void (async () => {
                       setSavingKey("return-to-draft");
-                      setError(null);
+                      clearSectionAlert("draftWorkspace");
                       try {
                         const updated = await updatePlanningDraftStatus(activeDraftId, "draft");
                         setDraftForm(draftFormFromDraft(updated));
@@ -968,10 +996,14 @@ export function TeacherAssistWeeklyPlanningScreen() {
                         await load(activeDraftId);
                         await loadPreview(activeDraftId);
                       } catch (nextError) {
-                        setError(
-                          nextError instanceof Error
-                            ? nextError.message
-                            : "Could not move the draft back to draft status.",
+                        setSectionAlert(
+                          "draftWorkspace",
+                          sectionError(
+                            nextError instanceof Error
+                              ? nextError.message
+                              : "Could not move the draft back to draft status.",
+                            "Unable to update draft",
+                          ),
                         );
                       } finally {
                         setSavingKey(null);

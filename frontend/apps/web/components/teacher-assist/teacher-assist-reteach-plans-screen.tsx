@@ -5,7 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
-import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
+import {
+  TeacherAssistInlineAlert,
+  sectionError,
+  sectionSuccess,
+  useTeacherAssistSectionAlerts,
+} from "@/components/teacher-assist/teacher-assist-inline-alert";
 import {
   createReteachPlanVersion,
   fetchReteachPlan,
@@ -62,8 +67,8 @@ export function TeacherAssistReteachPlansScreen() {
   const [teacherInstructions, setTeacherInstructions] = useState("");
   const [changeReason, setChangeReason] = useState("");
   const [editContent, setEditContent] = useState<ReteachPlanContent | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
+  const [pageError, setPageError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const selectedVersion = useMemo(
@@ -95,7 +100,7 @@ export function TeacherAssistReteachPlansScreen() {
   }, []);
 
   useEffect(() => {
-    loadPlans().catch((error: Error) => setErrorMessage(error.message));
+    loadPlans().catch((error: Error) => setPageError(error.message));
   }, [loadPlans]);
 
   useEffect(() => {
@@ -111,14 +116,13 @@ export function TeacherAssistReteachPlansScreen() {
       setEditContent(null);
       return;
     }
-    loadPlanDetail(selectedPlanId).catch((error: Error) => setErrorMessage(error.message));
+    loadPlanDetail(selectedPlanId).catch((error: Error) => setPageError(error.message));
   }, [loadPlanDetail, selectedPlanId]);
 
   async function handleGenerateDraft() {
     if (!plan) return;
     setBusy(true);
-    setErrorMessage(null);
-    setStatusMessage(null);
+    clearSectionAlert("reteachPlan");
     try {
       const payload = await generateReteachPlanAIDraft(plan.id, {
         provider_mode: "mock",
@@ -126,9 +130,12 @@ export function TeacherAssistReteachPlansScreen() {
       });
       setPlan(payload.plan);
       await loadPlanDetail(plan.id);
-      setStatusMessage(payload.message);
+      setSectionAlert("reteachPlan", sectionSuccess(payload.message, "AI draft generated"));
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unable to generate AI draft.");
+      setSectionAlert(
+        "reteachPlan",
+        sectionError(error instanceof Error ? error.message : "Unable to generate AI draft.", "AI draft failed"),
+      );
     } finally {
       setBusy(false);
     }
@@ -137,8 +144,7 @@ export function TeacherAssistReteachPlansScreen() {
   async function handleSaveTeacherVersion() {
     if (!plan || !editContent) return;
     setBusy(true);
-    setErrorMessage(null);
-    setStatusMessage(null);
+    clearSectionAlert("reteachPlan");
     try {
       const saved = await createReteachPlanVersion(plan.id, {
         content_json: {
@@ -149,9 +155,15 @@ export function TeacherAssistReteachPlansScreen() {
       });
       await loadPlanDetail(plan.id);
       setSelectedVersionId(saved.id);
-      setStatusMessage("Teacher-reviewed version saved. Nothing was published automatically.");
+      setSectionAlert(
+        "reteachPlan",
+        sectionSuccess("Teacher-reviewed version saved. Nothing was published automatically.", "Version saved"),
+      );
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unable to save teacher version.");
+      setSectionAlert(
+        "reteachPlan",
+        sectionError(error instanceof Error ? error.message : "Unable to save teacher version.", "Unable to save"),
+      );
     } finally {
       setBusy(false);
     }
@@ -160,14 +172,17 @@ export function TeacherAssistReteachPlansScreen() {
   async function handleArchivePlan() {
     if (!plan) return;
     setBusy(true);
-    setErrorMessage(null);
+    clearSectionAlert("reteachPlan");
     try {
       const updated = await updateReteachPlan(plan.id, { status: "archived" });
       setPlan(updated);
       await loadPlans();
-      setStatusMessage("Reteach plan archived.");
+      setSectionAlert("reteachPlan", sectionSuccess("Reteach plan archived.", "Plan archived"));
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unable to archive plan.");
+      setSectionAlert(
+        "reteachPlan",
+        sectionError(error instanceof Error ? error.message : "Unable to archive plan.", "Unable to archive"),
+      );
     } finally {
       setBusy(false);
     }
@@ -184,8 +199,7 @@ export function TeacherAssistReteachPlansScreen() {
         </p>
       </header>
 
-      <TeacherAssistFormErrorSummary message={errorMessage} />
-      <TeacherAssistInlineStatus message={statusMessage} onDismiss={() => setStatusMessage(null)} />
+      <TeacherAssistFormErrorSummary title="Unable to load reteach plans" message={pageError} />
 
       <section className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)]">
         <aside className="ta-panel p-4">
@@ -243,6 +257,11 @@ export function TeacherAssistReteachPlansScreen() {
                     {labelize(plan.status)}
                   </span>
                 </div>
+                <TeacherAssistInlineAlert
+                  alert={getSectionAlert("reteachPlan")}
+                  onDismiss={() => clearSectionAlert("reteachPlan")}
+                  className="mt-4"
+                />
                 <p className="mt-3 text-xs text-slate-500">
                   Updated {formatDateTime(plan.updated_at)} · Matrix {plan.mastery_matrix_id.slice(0, 8)}…
                 </p>
