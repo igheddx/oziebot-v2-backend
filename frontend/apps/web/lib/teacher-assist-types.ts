@@ -1995,3 +1995,175 @@ export type CurriculumRolloverCopyResult = {
   copied_plans: WeeklyPlan[];
   warnings: string[];
 };
+
+export type TeacherAssistOnboardingStep = {
+  key: string;
+  title: string;
+  description: string;
+  complete: boolean;
+  navigation_href: string;
+  navigation_label: string;
+};
+
+export type TeacherAssistOnboardingProgress = {
+  steps: TeacherAssistOnboardingStep[];
+  completed_count: number;
+  total_count: number;
+  progress_percent: number;
+  is_complete: boolean;
+  completed_at: string | null;
+};
+
+export type TeacherAssistUserPreferences = {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  last_class_id: string | null;
+  last_grading_period_id: string | null;
+  last_subject_id: string | null;
+  preferred_landing: string;
+  recently_viewed: Array<Record<string, unknown>>;
+  onboarding_completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  onboarding: TeacherAssistOnboardingProgress | null;
+};
+
+export type TeacherAssistHomeClassCard = {
+  class_id: string;
+  class_name: string;
+  subject_names: string[];
+  student_count: number | null;
+  pending_reviews: number;
+  pending_grades: number;
+  mastery_alerts: number;
+  reteach_alerts: number;
+  open_action_count: number;
+  assignments_due: Array<{
+    assignment_id: string;
+    title: string;
+    due_date: string | null;
+  }>;
+  navigation_href: string;
+  actions: Array<{ label: string; href: string }>;
+};
+
+export type TeacherAssistHomePriorityItem = TeacherAssistActionWorkspaceItem & {
+  priority_level?: string;
+};
+
+export type TeacherAssistHomePriorities = {
+  items: TeacherAssistHomePriorityItem[];
+  grouped: Record<string, TeacherAssistHomePriorityItem[]>;
+  read_only: boolean;
+};
+
+export type TeacherAssistHomeTimelineEvent = {
+  event_type: string;
+  title: string;
+  event_date: string | null;
+  navigation_href: string;
+};
+
+export type TeacherAssistHomeMasteryAlert = {
+  alert_type: string;
+  title: string;
+  description: string | null;
+  navigation_href: string;
+};
+
+export type TeacherAssistHomeQuickAction = {
+  action_key: string;
+  label: string;
+  navigation_href: string;
+};
+
+export type TeacherAssistTeacherShortcuts = {
+  most_used_class: {
+    class_id: string;
+    class_name: string | null;
+    navigation_href: string;
+  } | null;
+  most_used_subject: {
+    subject_id: string;
+    subject_name: string | null;
+  } | null;
+  most_used_grading_period_id: string | null;
+  recent_assignments: Array<{
+    assignment_id: string;
+    title: string;
+    navigation_href: string;
+  }>;
+  recent_plans: Array<{
+    weekly_plan_id: string;
+    title: string;
+    navigation_href: string;
+  }>;
+  recent_reteach_plans: Array<{
+    reteach_plan_id: string;
+    title: string;
+    navigation_href: string;
+  }>;
+  recently_viewed: Array<Record<string, unknown>>;
+};
+
+export type TeacherAssistHomeWorkspace = {
+  summary: Record<string, unknown>;
+  priorities: TeacherAssistHomePriorities;
+  classes: TeacherAssistHomeClassCard[];
+  this_week: {
+    assignments_due_count: number;
+    completed_plans_count: number;
+    week_end_date: string;
+  };
+  mastery_alerts: TeacherAssistHomeMasteryAlert[];
+  quick_actions: TeacherAssistHomeQuickAction[];
+  shortcuts: TeacherAssistTeacherShortcuts;
+  timeline: TeacherAssistHomeTimelineEvent[];
+  recent_activity: TeacherAssistActionWorkspaceActivity[];
+  onboarding: TeacherAssistOnboardingProgress;
+  preferences: {
+    preferred_landing: string;
+    last_class_id: string | null;
+    last_subject_id: string | null;
+    last_grading_period_id: string | null;
+  };
+  read_only: boolean;
+};
+
+export type TeacherAssistWorkQueueSection = {
+  section_key: string;
+  title: string;
+  count: number;
+  items: TeacherAssistActionWorkspaceItem[];
+};
+
+export type TeacherAssistWorkQueue = {
+  summary: {
+    total_actionable: number;
+    critical_count: number;
+    high_count: number;
+    medium_count: number;
+  };
+  sections: TeacherAssistWorkQueueSection[];
+  items: TeacherAssistActionWorkspaceItem[];
+  read_only: boolean;
+};
+
+export type TeacherAssistClassOperationalWorkspace = {
+  class_id: string;
+  class_name: string;
+  grade_level: string | null;
+  student_count: number | null;
+  school_year_id: string;
+  summary: {
+    pending_actions_count: number;
+    assignment_count: number;
+    reteach_plan_count: number;
+    reflection_count: number;
+    mastery_matrix_count: number;
+  };
+  tabs: Record<string, unknown>;
+  recent_activity: TeacherAssistActionWorkspaceActivity[];
+  read_only: boolean;
+};

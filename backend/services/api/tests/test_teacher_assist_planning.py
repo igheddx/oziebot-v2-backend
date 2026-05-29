@@ -6687,3 +6687,94 @@ def test_lesson_reflection_tenant_isolation(client, db_session: Session):
     )
     assert foreign.status_code == 404, foreign.text
 
+
+def test_home_workspace_and_work_queue_read_only(client, db_session: Session):
+    email = "teacher-home-workspace@example.com"
+    token = _register_user(client, email=email, tenant_name="Home Workspace Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    before_audit = db_session.scalar(select(func.count()).select_from(TeacherAssistMasteryAuditEvent))
+    before_ai = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+
+    home = client.get("/v1/teacher-assist/home", headers={"Authorization": f"Bearer {token}"})
+    priorities = client.get("/v1/teacher-assist/home/priorities", headers={"Authorization": f"Bearer {token}"})
+    classes = client.get("/v1/teacher-assist/home/classes", headers={"Authorization": f"Bearer {token}"})
+    timeline = client.get("/v1/teacher-assist/home/timeline", headers={"Authorization": f"Bearer {token}"})
+    mastery_alerts = client.get(
+        "/v1/teacher-assist/home/mastery-alerts",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    quick_actions = client.get("/v1/teacher-assist/home/quick-actions", headers={"Authorization": f"Bearer {token}"})
+    work_queue = client.get("/v1/teacher-assist/work-queue", headers={"Authorization": f"Bearer {token}"})
+    preferences = client.get("/v1/teacher-assist/user-preferences", headers={"Authorization": f"Bearer {token}"})
+
+    assert home.status_code == 200, home.text
+    home_payload = home.json()
+    assert home_payload["read_only"] is True
+    assert "priorities" in home_payload
+    assert "onboarding" in home_payload
+    assert home_payload["onboarding"]["total_count"] == 10
+
+    assert priorities.status_code == 200, priorities.text
+    assert "items" in priorities.json()
+
+    assert classes.status_code == 200, classes.text
+    assert isinstance(classes.json(), list)
+
+    assert timeline.status_code == 200, timeline.text
+    assert isinstance(timeline.json(), list)
+
+    assert mastery_alerts.status_code == 200, mastery_alerts.text
+    assert isinstance(mastery_alerts.json(), list)
+
+    assert quick_actions.status_code == 200, quick_actions.text
+    assert len(quick_actions.json()) >= 4
+
+    assert work_queue.status_code == 200, work_queue.text
+    queue_payload = work_queue.json()
+    assert queue_payload["read_only"] is True
+    assert "sections" in queue_payload
+
+    assert preferences.status_code == 200, preferences.text
+    assert preferences.json()["preferred_landing"] == "home"
+
+    patched = client.patch(
+        "/v1/teacher-assist/user-preferences",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"preferred_landing": "work_queue"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["preferred_landing"] == "work_queue"
+
+    after_audit = db_session.scalar(select(func.count()).select_from(TeacherAssistMasteryAuditEvent))
+    after_ai = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    assert after_audit == before_audit
+    assert after_ai == before_ai
+
+
+def test_class_operational_workspace(client, db_session: Session):
+    email = "teacher-class-workspace@example.com"
+    token = _register_user(client, email=email, tenant_name="Class Workspace Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Class Workspace")
+
+    response = client.get(
+        f"/v1/teacher-assist/classes/{context['teacher_class']['id']}/workspace",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["class_id"] == context["teacher_class"]["id"]
+    assert payload["read_only"] is True
+    assert "tabs" in payload
+    assert "overview" in payload["tabs"]
+    assert "assignments" in payload["tabs"]
+
+    second_token = _register_user(client, email="foreign-class@example.com", tenant_name="Foreign Tenant")
+    _grant_teacher_assist_access(db_session, email="foreign-class@example.com")
+    foreign = client.get(
+        f"/v1/teacher-assist/classes/{context['teacher_class']['id']}/workspace",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign.status_code == 404, foreign.text
+

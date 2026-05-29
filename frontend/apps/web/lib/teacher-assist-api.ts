@@ -81,6 +81,10 @@ import type {
   StudentMasterySummary,
   TeacherAssistOptions,
   TeacherAssistWorkspace,
+  TeacherAssistHomeWorkspace,
+  TeacherAssistWorkQueue,
+  TeacherAssistClassOperationalWorkspace,
+  TeacherAssistUserPreferences,
   TeacherClass,
   TeacherProfile,
   WeeklyPlan,
@@ -139,6 +143,28 @@ export function fetchTeacherAssistActionWorkspace() {
 
 export function fetchTeacherAssistTodayWorkspace() {
   return readJson<TeacherAssistTodayWorkspace>("/v1/teacher-assist/today");
+}
+
+export function fetchTeacherAssistHomeWorkspace() {
+  return readJson<TeacherAssistHomeWorkspace>("/v1/teacher-assist/home");
+}
+
+export function fetchTeacherAssistWorkQueue() {
+  return readJson<TeacherAssistWorkQueue>("/v1/teacher-assist/work-queue");
+}
+
+export function fetchTeacherAssistClassOperationalWorkspace(classId: string) {
+  return readJson<TeacherAssistClassOperationalWorkspace>(
+    `/v1/teacher-assist/classes/${classId}/workspace`,
+  );
+}
+
+export function fetchTeacherAssistUserPreferences() {
+  return readJson<TeacherAssistUserPreferences>("/v1/teacher-assist/user-preferences");
+}
+
+export function patchTeacherAssistUserPreferences(body: Record<string, unknown>) {
+  return writeJson<TeacherAssistUserPreferences>("/v1/teacher-assist/user-preferences", "PATCH", body);
 }
 
 export function fetchTeacherProfile() {

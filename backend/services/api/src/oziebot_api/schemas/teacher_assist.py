@@ -311,6 +311,10 @@ class TeacherAssistOptionsOut(BaseModel):
     lesson_reflection_statuses: list[str] = Field(default_factory=list)
     lesson_reflection_version_sources: list[str] = Field(default_factory=list)
     lesson_effectiveness_classifications: list[str] = Field(default_factory=list)
+    teacher_assist_onboarding_step_keys: list[str] = Field(default_factory=list)
+    teacher_assist_home_priority_levels: list[str] = Field(default_factory=list)
+    teacher_assist_work_queue_section_keys: list[str] = Field(default_factory=list)
+    teacher_assist_quick_create_actions: list[str] = Field(default_factory=list)
     planning_draft_statuses: list[str]
     planning_scopes: list[str]
     supported_grade_levels: list[str]
@@ -1582,6 +1586,82 @@ class PlanningReflectionHintsOut(BaseModel):
     last_year_notes: list[str] = Field(default_factory=list)
     reflection_notes: list[str] = Field(default_factory=list)
     prior_effectiveness: list[dict[str, Any]] = Field(default_factory=list)
+    read_only: bool = True
+
+
+class TeacherAssistOnboardingStepOut(BaseModel):
+    key: str
+    title: str
+    description: str
+    complete: bool
+    navigation_href: str
+    navigation_label: str
+
+
+class TeacherAssistOnboardingProgressOut(BaseModel):
+    steps: list[TeacherAssistOnboardingStepOut] = Field(default_factory=list)
+    completed_count: int
+    total_count: int
+    progress_percent: int
+    is_complete: bool
+    completed_at: str | None = None
+
+
+class TeacherAssistUserPreferencesOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    user_id: uuid.UUID
+    last_class_id: uuid.UUID | None = None
+    last_grading_period_id: uuid.UUID | None = None
+    last_subject_id: uuid.UUID | None = None
+    preferred_landing: str
+    recently_viewed: list[dict[str, Any]] = Field(default_factory=list)
+    onboarding_completed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    onboarding: TeacherAssistOnboardingProgressOut | None = None
+
+
+class TeacherAssistUserPreferencesUpdate(BaseModel):
+    last_class_id: uuid.UUID | None = None
+    last_grading_period_id: uuid.UUID | None = None
+    last_subject_id: uuid.UUID | None = None
+    preferred_landing: str | None = None
+    recently_viewed: list[dict[str, Any]] | None = None
+    mark_onboarding_complete: bool = False
+
+
+class TeacherAssistHomeWorkspaceOut(BaseModel):
+    summary: dict[str, Any] = Field(default_factory=dict)
+    priorities: dict[str, Any] = Field(default_factory=dict)
+    classes: list[dict[str, Any]] = Field(default_factory=list)
+    this_week: dict[str, Any] = Field(default_factory=dict)
+    mastery_alerts: list[dict[str, Any]] = Field(default_factory=list)
+    quick_actions: list[dict[str, Any]] = Field(default_factory=list)
+    shortcuts: dict[str, Any] = Field(default_factory=dict)
+    timeline: list[dict[str, Any]] = Field(default_factory=list)
+    recent_activity: list[dict[str, Any]] = Field(default_factory=list)
+    onboarding: TeacherAssistOnboardingProgressOut
+    preferences: dict[str, Any] = Field(default_factory=dict)
+    read_only: bool = True
+
+
+class TeacherAssistWorkQueueOut(BaseModel):
+    summary: dict[str, Any] = Field(default_factory=dict)
+    sections: list[dict[str, Any]] = Field(default_factory=list)
+    items: list[dict[str, Any]] = Field(default_factory=list)
+    read_only: bool = True
+
+
+class TeacherAssistClassOperationalWorkspaceOut(BaseModel):
+    class_id: uuid.UUID
+    class_name: str
+    grade_level: str | None = None
+    student_count: int | None = None
+    school_year_id: uuid.UUID
+    summary: dict[str, Any] = Field(default_factory=dict)
+    tabs: dict[str, Any] = Field(default_factory=dict)
+    recent_activity: list[dict[str, Any]] = Field(default_factory=list)
     read_only: bool = True
 
 

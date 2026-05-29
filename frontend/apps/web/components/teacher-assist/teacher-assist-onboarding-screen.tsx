@@ -1,0 +1,135 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+
+import { TeacherAssistEmptyState } from "@/components/teacher-assist/teacher-assist-empty-state";
+import { fetchTeacherAssistHomeWorkspace } from "@/lib/teacher-assist-api";
+import type { TeacherAssistOnboardingProgress } from "@/lib/teacher-assist-types";
+
+function OnboardingProgressBar({ progress }: { progress: TeacherAssistOnboardingProgress }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="font-medium text-slate-700">Setup progress</span>
+        <span className="font-semibold text-sky-700">{progress.progress_percent}%</span>
+      </div>
+      <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-200">
+        <div
+          className="h-full rounded-full bg-sky-600 transition-all"
+          style={{ width: `${progress.progress_percent}%` }}
+        />
+      </div>
+      <p className="mt-2 text-xs text-slate-500">
+        {progress.completed_count} of {progress.total_count} steps complete
+      </p>
+    </div>
+  );
+}
+
+export function TeacherAssistOnboardingScreen() {
+  const [onboarding, setOnboarding] = useState<TeacherAssistOnboardingProgress | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const payload = await fetchTeacherAssistHomeWorkspace();
+    setOnboarding(payload.onboarding);
+  }, []);
+
+  useEffect(() => {
+    load().catch((err: Error) => setError(err.message));
+  }, [load]);
+
+  if (error) {
+    return <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>;
+  }
+  if (!onboarding) {
+    return <p className="text-sm text-slate-600">Loading onboarding...</p>;
+  }
+
+  if (onboarding.is_complete) {
+    return (
+      <div className="space-y-6">
+        <header className="ta-panel p-6 text-center">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Setup complete</p>
+          <h1 className="mt-2 text-3xl font-semibold text-slate-900">Your classroom is ready</h1>
+          <p className="mx-auto mt-3 max-w-xl text-sm text-slate-600">
+            You&apos;ve completed the Day 1 setup. Here are recommended next actions.
+          </p>
+        </header>
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: "Create lesson", href: "/teacher-assist/weekly-planning" },
+            { label: "Create assignment", href: "/teacher-assist/assignments" },
+            { label: "Review mastery", href: "/teacher-assist/mastery" },
+            { label: "Open Home Workspace", href: "/teacher-assist/home" },
+          ].map((action) => (
+            <Link key={action.href} href={action.href} className="ta-panel p-5 text-center transition hover:border-sky-300">
+              <span className="text-sm font-semibold text-sky-700">{action.label}</span>
+            </Link>
+          ))}
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <header className="ta-panel p-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">Get started</p>
+        <h1 className="mt-2 text-2xl font-semibold text-slate-900">Guided onboarding</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          Complete these steps to move from Day 1 setup to a productive classroom workflow.
+        </p>
+        <div className="mt-5">
+          <OnboardingProgressBar progress={onboarding} />
+        </div>
+      </header>
+
+      <section className="ta-panel p-5">
+        <h2 className="text-lg font-semibold text-slate-900">Setup steps</h2>
+        <ul className="mt-4 space-y-3">
+          {onboarding.steps.map((step, index) => (
+            <li
+              key={step.key}
+              className={`rounded-2xl border px-4 py-4 ${
+                step.complete ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"
+              }`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex gap-3">
+                  <span
+                    className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                      step.complete ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-700"
+                    }`}
+                  >
+                    {step.complete ? "✓" : index + 1}
+                  </span>
+                  <div>
+                    <p className="font-semibold text-slate-900">{step.title}</p>
+                    <p className="mt-1 text-sm text-slate-600">{step.description}</p>
+                  </div>
+                </div>
+                {!step.complete ? (
+                  <Link href={step.navigation_href} className="ta-button-secondary text-sm">
+                    {step.navigation_label}
+                  </Link>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {onboarding.completed_count === 0 ? (
+        <TeacherAssistEmptyState
+          title="Welcome to TeacherAssist"
+          description="Start with your teacher profile and school year, then add classes and your first plan."
+          whyItMatters="Onboarding aligns TeacherAssist with how you actually teach — by class, period, and workflow."
+          actionLabel="Open settings"
+          actionHref="/teacher-assist/settings"
+        />
+      ) : null}
+    </div>
+  );
+}

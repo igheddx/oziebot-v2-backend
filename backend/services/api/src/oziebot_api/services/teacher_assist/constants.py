@@ -132,6 +132,36 @@ LESSON_EFFECTIVENESS_CLASSIFICATIONS = (
 LESSON_EFFECTIVENESS_HIGHLY_THRESHOLD = 0.85
 LESSON_EFFECTIVENESS_EFFECTIVE_THRESHOLD = 0.70
 LESSON_EFFECTIVENESS_ADJUSTMENT_THRESHOLD = 0.40
+TEACHER_ASSIST_ONBOARDING_STEP_KEYS = (
+    "profile",
+    "school_year",
+    "grading_periods",
+    "classes",
+    "subjects",
+    "standards",
+    "resources",
+    "first_lesson_plan",
+    "first_assignment",
+    "first_mastery_matrix",
+)
+TEACHER_ASSIST_HOME_PRIORITY_LEVELS = ("critical", "high", "medium", "informational")
+TEACHER_ASSIST_PREFERRED_LANDINGS = ("home", "today", "work_queue")
+TEACHER_ASSIST_WORK_QUEUE_SECTION_KEYS = (
+    "reviews_needed",
+    "grades_pending",
+    "gradebook_commits",
+    "mastery_actions",
+    "reteach_actions",
+    "newsletter_actions",
+    "workflow_failures",
+)
+TEACHER_ASSIST_QUICK_CREATE_ACTIONS = (
+    "lesson",
+    "assignment",
+    "quiz",
+    "reteach_plan",
+    "newsletter",
+)
 TEACHER_ASSIST_EXTRACTION_ARTIFACT_TYPES = ("resource", "student_work")
 TEACHER_ASSIST_EXTRACTION_JOB_STATUSES = (
     "queued",

@@ -8,12 +8,13 @@ import { AppSwitcher } from "@/components/platform/app-switcher";
 import { useAuth } from "@/components/providers/auth-provider";
 import {
   TEACHER_ASSIST_NAV_GROUPS,
-  TEACHER_ASSIST_PRIMARY_LINK,
+  TEACHER_ASSIST_PRIMARY_LINKS,
+  TEACHER_ASSIST_QUICK_CREATE_LINKS,
   type TeacherAssistNavLink,
 } from "@/components/teacher-assist/teacher-assist-nav";
 
 function isActivePath(pathname: string, href: string) {
-  if (href === "/teacher-assist/today") {
+  if (href === "/teacher-assist/home") {
     return pathname === "/teacher-assist" || pathname === href || pathname.startsWith(`${href}/`);
   }
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -35,6 +36,37 @@ function NavLink({ item, pathname }: { item: TeacherAssistNavLink; pathname: str
   );
 }
 
+function QuickCreateMenu() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="ta-button-primary inline-flex h-10 items-center gap-2 px-4 text-sm"
+      >
+        Quick create
+        <span className="text-xs">{open ? "▲" : "▼"}</span>
+      </button>
+      {open ? (
+        <div className="absolute right-0 z-40 mt-2 min-w-52 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
+          {TEACHER_ASSIST_QUICK_CREATE_LINKS.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="block rounded-xl px-3 py-2 text-sm font-medium text-slate-700 hover:bg-sky-50 hover:text-sky-900"
+              onClick={() => setOpen(false)}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function TeacherAssistShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { logoutUser, user } = useAuth();
@@ -46,7 +78,7 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
         return group.key;
       }
     }
-    return TEACHER_ASSIST_NAV_GROUPS[0]?.key ?? "planning";
+    return TEACHER_ASSIST_NAV_GROUPS[0]?.key ?? "instruction";
   }, [pathname]);
 
   const [expandedGroup, setExpandedGroup] = useState<string>(activeGroupKey);
@@ -64,10 +96,11 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
                 Educator-focused workspace
               </h1>
               <p className="mt-2 text-sm leading-6 text-slate-600 sm:text-[15px]">
-                Start on Today, then move through planning, instruction, assessment, and mastery with fewer clicks.
+                Start on Home, use Work Queue for operational tasks, and manage each class from one place.
               </p>
             </div>
             <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <QuickCreateMenu />
               <AppSwitcher />
               <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3">
                 <p className="text-sm font-semibold text-slate-900">{user?.full_name ?? "Teacher"}</p>
@@ -86,7 +119,9 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-2">
-            <NavLink item={TEACHER_ASSIST_PRIMARY_LINK} pathname={pathname} />
+            {TEACHER_ASSIST_PRIMARY_LINKS.map((item) => (
+              <NavLink key={item.href} item={item} pathname={pathname} />
+            ))}
             <button
               type="button"
               className="inline-flex h-10 items-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 lg:hidden"
@@ -97,7 +132,7 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
           </div>
 
           <nav className={`mt-4 ${mobileNavOpen ? "block" : "hidden lg:block"}`}>
-            <div className="grid gap-3 lg:grid-cols-3 xl:grid-cols-6">
+            <div className="grid gap-3 lg:grid-cols-3 xl:grid-cols-5">
               {TEACHER_ASSIST_NAV_GROUPS.map((group) => {
                 const isExpanded = expandedGroup === group.key || mobileNavOpen;
                 return (

@@ -130,6 +130,10 @@ Weekly newsletter generation: `/teacher-assist/newsletters` workspace with draft
 
 Lesson effectiveness + teacher reflection: read-only weekly-plan lesson effectiveness scores (Highly Effective / Effective / Needs Adjustment / Ineffective), `/teacher-assist/reflections` workspace with versioned teacher notes, mock AI reflection suggestions (strengths/weaknesses/improvements), historical comparison across grading periods and prior school years, and planning context preview integration surfacing last-year notes and prior effectiveness — no grading changes, mastery modifications, or parent communication.
 
+## Phase 31.5
+
+Teacher experience completion: guided onboarding (`/teacher-assist/get-started`, 10-step 0–100% progress), Home workspace (`/teacher-assist/home`), Work Queue (`/teacher-assist/work-queue`), class operational workspace (`/teacher-assist/classes/{id}`), navigation redesign (Home, Work Queue, Instruction, Assessment, Insights, Content, Administration), global quick-create menu, smart shortcuts, user preferences persistence, priority engine, weekly timeline, and empty-state patterns — read-model only, no new AI capabilities, grading changes, mastery automation, parent communication, or LMS/SIS integration.
+
 ## Next Phase
 
 The next recommended phase is **Phase 32** (real-provider reflection AI, assignment effectiveness UI on Assignments, reteach plan publish into daily teaching, or teacher-controlled send handoff metadata — still no automatic outbound communication, mastery updates, or gradebook side effects).

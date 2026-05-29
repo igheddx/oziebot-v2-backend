@@ -9,79 +9,66 @@ export type TeacherAssistNavGroup = {
   links: TeacherAssistNavLink[];
 };
 
-export const TEACHER_ASSIST_PRIMARY_LINK: TeacherAssistNavLink = {
-  href: "/teacher-assist/today",
-  label: "Today",
-};
+export const TEACHER_ASSIST_PRIMARY_LINKS: TeacherAssistNavLink[] = [
+  { href: "/teacher-assist/home", label: "Home" },
+  { href: "/teacher-assist/work-queue", label: "Work Queue" },
+];
 
 export const TEACHER_ASSIST_NAV_GROUPS: TeacherAssistNavGroup[] = [
-  {
-    key: "planning",
-    label: "Planning",
-    links: [
-      { href: "/teacher-assist/weekly-planning", label: "Weekly Planning" },
-      { href: "/teacher-assist/plans", label: "Plans" },
-      { href: "/teacher-assist/pacing-guides", label: "Pacing Guides" },
-      { href: "/teacher-assist/resources", label: "Resources" },
-      { href: "/teacher-assist/curriculum-rollover", label: "Curriculum Rollover" },
-    ],
-  },
   {
     key: "instruction",
     label: "Instruction",
     links: [
+      { href: "/teacher-assist/plans", label: "Plans" },
       { href: "/teacher-assist/assignments", label: "Assignments" },
-      { href: "/teacher-assist/assignments/print-packets", label: "Print Packets" },
-      { href: "/teacher-assist/daily-teaching", label: "Daily Teaching" },
+      { href: "/teacher-assist/resources", label: "Resources" },
     ],
   },
   {
     key: "assessment",
     label: "Assessment",
     links: [
-      { href: "/teacher-assist/extractions", label: "Extractions" },
+      { href: "/teacher-assist/extractions", label: "Student Work" },
+      { href: "/teacher-assist/actions", label: "Reviews" },
       { href: "/teacher-assist/gradebook", label: "Gradebook" },
-      { href: "/teacher-assist/assessments", label: "Assessments" },
-    ],
-  },
-  {
-    key: "mastery",
-    label: "Mastery",
-    links: [
-      { href: "/teacher-assist/mastery", label: "Mastery" },
-      { href: "/teacher-assist/reteach-plans", label: "Reteach Plans" },
     ],
   },
   {
     key: "insights",
     label: "Insights",
     links: [
+      { href: "/teacher-assist/mastery", label: "Mastery" },
+      { href: "/teacher-assist/reteach-plans", label: "Reteach" },
       { href: "/teacher-assist/reflections", label: "Reflections" },
-      { href: "/teacher-assist/insights", label: "Insights" },
     ],
   },
   {
-    key: "communication",
-    label: "Communication",
-    links: [{ href: "/teacher-assist/newsletters", label: "Newsletters" }],
-  },
-  {
-    key: "operations",
-    label: "Operations",
+    key: "content",
+    label: "Content",
     links: [
-      { href: "/teacher-assist/actions", label: "Actions" },
-      { href: "/teacher-assist/workspace", label: "Workspace" },
+      { href: "/teacher-assist/newsletters", label: "Newsletters" },
       { href: "/teacher-assist/exports", label: "Exports" },
     ],
   },
   {
-    key: "settings",
-    label: "Settings",
+    key: "administration",
+    label: "Administration",
     links: [{ href: "/teacher-assist/settings", label: "Settings" }],
   },
 ];
 
+export const TEACHER_ASSIST_QUICK_CREATE_LINKS: TeacherAssistNavLink[] = [
+  { href: "/teacher-assist/weekly-planning", label: "Create lesson" },
+  { href: "/teacher-assist/assignments", label: "Create assignment" },
+  { href: "/teacher-assist/exports", label: "Create quiz" },
+  { href: "/teacher-assist/reteach-plans", label: "Create reteach plan" },
+  { href: "/teacher-assist/newsletters", label: "Create newsletter" },
+];
+
 export const TEACHER_ASSIST_NAV_LINKS: TeacherAssistNavLink[] = [
-  TEACHER_ASSIST_PRIMARY_LINK,
+  ...TEACHER_ASSIST_PRIMARY_LINKS,
   ...TEACHER_ASSIST_NAV_GROUPS.flatMap((group) => group.links),
 ];
+
+/** @deprecated Use TEACHER_ASSIST_PRIMARY_LINKS[0] */
+export const TEACHER_ASSIST_PRIMARY_LINK = TEACHER_ASSIST_PRIMARY_LINKS[0];

@@ -11,6 +11,7 @@
 - TEKS mastery matrix foundation is implemented with teacher-confirmed manual commits, correction/reversal lineage, and anonymous STUDENT # tracking. Phase 27 adds read-only heatmaps, rules-based reteach insights, and operational mastery dashboards. Phase 29 adds mock AI reteach plan drafts with teacher-required review and version history; real-provider reteach AI, automatic publish, and district analytics remain deferred.
 - Newsletter/communication assistant supports mock AI weekly newsletter drafts with teacher review, versioning, and HTML/PDF/DOCX export. TeacherAssist never sends messages automatically; real-provider newsletter AI and outbound send integrations remain deferred.
 - Lesson effectiveness scores are read-only analytics derived from assignments, mastery, grading outcomes, and reteach activity. Reflection workspaces support mock AI suggestions only; nothing updates grading, mastery, or parent communication automatically.
+- Phase 31.5 consolidates teacher UX around Home, Work Queue, and class workspaces, but legacy routes (`/today`, `/workspace`, `/actions`) remain available. Onboarding progress is computed from setup counts rather than explicit step-by-step teacher confirmation. Smart shortcuts infer usage from recent assignments/plans; there is no behavioral analytics pipeline.
 - Resource unlink/remove flows may still be deferred.
 - Static-export frontend constraints may influence route design.
 - TeacherAssist currently resolves the first accessible TeacherAssist tenant membership.

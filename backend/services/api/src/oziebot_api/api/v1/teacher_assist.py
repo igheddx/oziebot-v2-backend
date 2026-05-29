@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
@@ -70,6 +71,12 @@ from oziebot_api.schemas.teacher_assist import (
     TeacherAssistTodayPriorityItemOut,
     TeacherAssistTodaySummaryOut,
     TeacherAssistTodayWorkspaceOut,
+    TeacherAssistHomeWorkspaceOut,
+    TeacherAssistWorkQueueOut,
+    TeacherAssistClassOperationalWorkspaceOut,
+    TeacherAssistUserPreferencesOut,
+    TeacherAssistUserPreferencesUpdate,
+    TeacherAssistOnboardingProgressOut,
     TeacherAssistActivityEventOut,
     AssignmentGradingReviewAISuggestionCreate,
     AssignmentGradingReviewAISuggestionOut,
@@ -260,6 +267,10 @@ from oziebot_api.services.teacher_assist.constants import (
     LESSON_EFFECTIVENESS_CLASSIFICATIONS,
     LESSON_REFLECTION_STATUSES,
     LESSON_REFLECTION_VERSION_SOURCES,
+    TEACHER_ASSIST_ONBOARDING_STEP_KEYS,
+    TEACHER_ASSIST_HOME_PRIORITY_LEVELS,
+    TEACHER_ASSIST_WORK_QUEUE_SECTION_KEYS,
+    TEACHER_ASSIST_QUICK_CREATE_ACTIONS,
     NEWSLETTER_EXPORT_FORMATS,
     NEWSLETTER_REGENERATABLE_SECTIONS,
     NEWSLETTER_STATUSES,
@@ -273,6 +284,22 @@ from oziebot_api.services.teacher_assist.constants import (
     SUPPORTED_GRADE_LEVELS,
 )
 from oziebot_api.services.teacher_assist.action_workspace import get_teacher_assist_action_workspace
+from oziebot_api.services.teacher_assist.home_workspace import (
+    build_home_mastery_alerts,
+    build_home_priorities,
+    build_home_quick_actions,
+    build_home_classes,
+    build_home_timeline,
+    get_teacher_assist_home_workspace,
+)
+from oziebot_api.services.teacher_assist.class_workspace import get_teacher_assist_class_workspace
+from oziebot_api.services.teacher_assist.work_queue import build_teacher_assist_work_queue
+from oziebot_api.services.teacher_assist.user_preferences import (
+    build_onboarding_progress,
+    get_user_preferences_or_create,
+    serialize_user_preferences,
+    update_user_preferences,
+)
 from oziebot_api.services.teacher_assist.today_workspace import get_teacher_assist_today_workspace
 from oziebot_api.services.teacher_assist.assignments import (
     attach_assignment_resource,
@@ -1548,6 +1575,10 @@ def read_teacher_assist_options(user: CurrentUser, db: DbSession) -> TeacherAssi
         lesson_reflection_statuses=list(LESSON_REFLECTION_STATUSES),
         lesson_reflection_version_sources=list(LESSON_REFLECTION_VERSION_SOURCES),
         lesson_effectiveness_classifications=list(LESSON_EFFECTIVENESS_CLASSIFICATIONS),
+        teacher_assist_onboarding_step_keys=list(TEACHER_ASSIST_ONBOARDING_STEP_KEYS),
+        teacher_assist_home_priority_levels=list(TEACHER_ASSIST_HOME_PRIORITY_LEVELS),
+        teacher_assist_work_queue_section_keys=list(TEACHER_ASSIST_WORK_QUEUE_SECTION_KEYS),
+        teacher_assist_quick_create_actions=list(TEACHER_ASSIST_QUICK_CREATE_ACTIONS),
         extraction_artifact_types=list(TEACHER_ASSIST_EXTRACTION_ARTIFACT_TYPES),
         extraction_job_statuses=list(TEACHER_ASSIST_EXTRACTION_JOB_STATUSES),
         extraction_review_statuses=list(EXTRACTION_REVIEW_STATUSES),
@@ -1639,6 +1670,172 @@ def read_teacher_assist_action_workspace(
             for row in payload.get("recent_activity", [])
         ],
     )
+
+
+@router.get("/home", response_model=TeacherAssistHomeWorkspaceOut)
+def read_teacher_assist_home_workspace(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistHomeWorkspaceOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    payload = get_teacher_assist_home_workspace(
+        db,
+        settings=settings,
+        tenant_id=tenant_id,
+        user_id=user.id,
+    )
+    db.commit()
+    return TeacherAssistHomeWorkspaceOut(**payload)
+
+
+@router.get("/home/priorities")
+def read_teacher_assist_home_priorities(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict[str, Any]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    return build_home_priorities(
+        db,
+        settings=settings,
+        tenant_id=tenant_id,
+        user_id=user.id,
+    )
+
+
+@router.get("/home/classes")
+def read_teacher_assist_home_classes(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> list[dict[str, Any]]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    return build_home_classes(
+        db,
+        settings=settings,
+        tenant_id=tenant_id,
+        user_id=user.id,
+    )
+
+
+@router.get("/home/timeline")
+def read_teacher_assist_home_timeline(
+    user: CurrentUser,
+    db: DbSession,
+) -> list[dict[str, Any]]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    return build_home_timeline(db, tenant_id=tenant_id, user_id=user.id)
+
+
+@router.get("/home/mastery-alerts")
+def read_teacher_assist_home_mastery_alerts(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> list[dict[str, Any]]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    return build_home_mastery_alerts(
+        db,
+        settings=settings,
+        tenant_id=tenant_id,
+        user_id=user.id,
+    )
+
+
+@router.get("/home/quick-actions")
+def read_teacher_assist_home_quick_actions() -> list[dict[str, Any]]:
+    return build_home_quick_actions()
+
+
+@router.get("/work-queue", response_model=TeacherAssistWorkQueueOut)
+def read_teacher_assist_work_queue(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistWorkQueueOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    payload = build_teacher_assist_work_queue(
+        db,
+        settings=settings,
+        tenant_id=tenant_id,
+        user_id=user.id,
+    )
+    return TeacherAssistWorkQueueOut(**payload)
+
+
+@router.get("/classes/{class_id}/workspace", response_model=TeacherAssistClassOperationalWorkspaceOut)
+def read_teacher_assist_class_workspace(
+    class_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistClassOperationalWorkspaceOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = get_teacher_assist_class_workspace(
+            db,
+            settings=settings,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            class_id=class_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return TeacherAssistClassOperationalWorkspaceOut(**payload)
+
+
+@router.get("/user-preferences", response_model=TeacherAssistUserPreferencesOut)
+def read_teacher_assist_user_preferences(
+    user: CurrentUser,
+    db: DbSession,
+) -> TeacherAssistUserPreferencesOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    row = get_user_preferences_or_create(db, tenant_id=tenant_id, user_id=user.id)
+    onboarding = build_onboarding_progress(
+        db,
+        tenant_id=tenant_id,
+        user_id=user.id,
+        preferences=row,
+    )
+    db.commit()
+    payload = serialize_user_preferences(row)
+    payload["onboarding"] = onboarding
+    return TeacherAssistUserPreferencesOut(**payload)
+
+
+@router.patch("/user-preferences", response_model=TeacherAssistUserPreferencesOut)
+def patch_teacher_assist_user_preferences(
+    body: TeacherAssistUserPreferencesUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> TeacherAssistUserPreferencesOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = update_user_preferences(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            last_class_id=body.last_class_id,
+            last_grading_period_id=body.last_grading_period_id,
+            last_subject_id=body.last_subject_id,
+            preferred_landing=body.preferred_landing,
+            recently_viewed=body.recently_viewed,
+            mark_onboarding_complete=body.mark_onboarding_complete,
+        )
+        onboarding = build_onboarding_progress(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            preferences=row,
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    payload = serialize_user_preferences(row)
+    payload["onboarding"] = onboarding
+    return TeacherAssistUserPreferencesOut(**payload)
 
 
 @router.get("/today", response_model=TeacherAssistTodayWorkspaceOut)
