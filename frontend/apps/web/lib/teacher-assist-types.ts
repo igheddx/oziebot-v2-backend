@@ -21,8 +21,24 @@ export type TeacherAssistOptions = {
   assignment_student_work_processing_statuses: string[];
   assignment_grading_review_statuses: string[];
   assignment_grading_review_sources: string[];
+  assignment_grade_record_statuses?: string[];
+  assignment_gradebook_commit_types?: string[];
+  assignment_gradebook_commit_statuses?: string[];
+  assignment_gradebook_audit_event_types?: string[];
+  mastery_matrix_statuses?: string[];
+  mastery_levels?: string[];
+  mastery_evaluation_statuses?: string[];
+  mastery_commit_types?: string[];
+  mastery_commit_statuses?: string[];
+  mastery_evidence_source_types?: string[];
+  mastery_confidence_levels?: string[];
+  reteach_plan_statuses?: string[];
+  reteach_plan_version_sources?: string[];
   extraction_review_statuses?: string[];
   extraction_confidence_levels?: string[];
+  export_artifact_types?: string[];
+  export_artifact_statuses?: string[];
+  export_formats?: string[];
   planning_draft_statuses: string[];
   planning_scopes: string[];
   supported_grade_levels: string[];
@@ -399,6 +415,105 @@ export type TeacherAssistExtractionRun = {
   extracted_text: TeacherAssistExtractedTextRecord | null;
 };
 
+export type GradingPrepTextSource = "approved_text" | "teacher_corrected_text" | "extracted_text";
+
+export type TeacherAssistStudentWorkGradingPrepContext = {
+  student_work_submission_id: string;
+  assignment_id: string;
+  student_number: number;
+  ready_for_grading_prep: boolean;
+  blocked_reason: string | null;
+  review_status: ExtractionReviewStatus | null;
+  text_source: GradingPrepTextSource | null;
+  approved_text: string | null;
+  text_char_count: number | null;
+  extracted_text_record_id: string | null;
+  extraction_job_id: string | null;
+  ai_grading_enabled: boolean;
+  message: string;
+};
+
+export type TeacherAssistAssignmentGradingPrepSubmission = {
+  student_work_submission_id: string;
+  student_number: number;
+  ready_for_grading_prep: boolean;
+  blocked_reason: string | null;
+  review_status: ExtractionReviewStatus | null;
+  text_source: GradingPrepTextSource | null;
+  text_char_count: number | null;
+  extracted_text_record_id: string | null;
+  extraction_job_id: string | null;
+};
+
+export type TeacherAssistAssignmentGradingPrepSummary = {
+  assignment_id: string;
+  assignment_title: string;
+  total_submissions: number;
+  ready_for_grading_prep_count: number;
+  blocked_count: number;
+  submissions: TeacherAssistAssignmentGradingPrepSubmission[];
+  ai_grading_enabled: boolean;
+  message: string;
+};
+
+export type TeacherAssistExportArtifactType =
+  | "lesson_slides"
+  | "guided_notes"
+  | "multiple_choice_quiz"
+  | "exit_ticket"
+  | "short_answer_quiz";
+
+export type TeacherAssistExportArtifactStatus =
+  | "queued"
+  | "generating"
+  | "ready"
+  | "failed"
+  | "archived";
+
+export type TeacherAssistExportFormat = "pptx" | "json" | "printable_html";
+
+export type TeacherAssistExportArtifact = {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  source_plan_id: string;
+  source_assignment_id: string | null;
+  workflow_id: string | null;
+  artifact_type: TeacherAssistExportArtifactType;
+  artifact_status: TeacherAssistExportArtifactStatus;
+  title: string;
+  export_format: TeacherAssistExportFormat;
+  storage_key: string | null;
+  preview_json: Record<string, unknown>;
+  metadata_json: Record<string, unknown> | null;
+  provider_name: string | null;
+  provider_model: string | null;
+  prompt_version: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TeacherAssistExportArtifactDetail = {
+  artifact: TeacherAssistExportArtifact;
+  workflow_status: TeacherAssistWorkflow["status"] | null;
+  workflow_progress_percent: number | null;
+  workflow_error_message: string | null;
+  download_url: string | null;
+};
+
+export type TeacherAssistExportArtifactCreateInput = {
+  artifact_type: TeacherAssistExportArtifactType;
+  export_format?: TeacherAssistExportFormat;
+  provider_mode?: "mock" | "real";
+};
+
+export type TeacherAssistExportDownload = {
+  download_url: string;
+  filename: string;
+  mime_type: string;
+  expires_at: string;
+};
+
 export type AssignmentGradingReviewItem = {
   id: string;
   grading_review_id: string;
@@ -481,6 +596,108 @@ export type AssignmentGradingReviewUpdateInput = {
   teacher_confirmed_score?: number | null;
   teacher_confirmed_feedback?: string | null;
   items?: AssignmentGradingReviewCreateInput["items"];
+};
+
+export type AssignmentGradingReviewAISuggestionInput = {
+  provider_mode?: "mock" | "real";
+  teacher_instructions?: string | null;
+};
+
+export type AssignmentGradingReviewAISuggestion = {
+  review: AssignmentGradingReview;
+  confidence_level: "low" | "medium" | "high";
+  teacher_review_required: boolean;
+  rubric_notes: string | null;
+  text_source: string | null;
+  message: string;
+};
+
+export type AssignmentGradeRecord = {
+  id: string;
+  tenant_id: string;
+  teacher_user_id: string;
+  assignment_id: string;
+  student_work_submission_id: string;
+  grading_review_id: string;
+  student_number: number;
+  school_year_id: string;
+  grading_period_id: string | null;
+  class_id: string;
+  subject_id: string;
+  record_status: "active" | "superseded" | "reversed";
+  current_commit_id: string | null;
+  committed_score: number | null;
+  max_score: number | null;
+  committed_feedback: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AssignmentGradebookCommit = {
+  id: string;
+  tenant_id: string;
+  teacher_user_id: string;
+  grade_record_id: string;
+  assignment_id: string;
+  student_work_submission_id: string;
+  grading_review_id: string;
+  student_number: number;
+  school_year_id: string;
+  grading_period_id: string | null;
+  class_id: string;
+  subject_id: string;
+  commit_type: "initial_commit" | "correction" | "reversal";
+  commit_status: "active" | "superseded" | "reversed";
+  committed_score: number | null;
+  max_score: number | null;
+  committed_feedback: string | null;
+  teacher_confirmation_checkpoint_at: string;
+  reason: string | null;
+  supersedes_commit_id: string | null;
+  reversed_by_commit_id: string | null;
+  audit_metadata_json: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type AssignmentGradebookAuditEvent = {
+  id: string;
+  tenant_id: string;
+  teacher_user_id: string;
+  grade_record_id: string | null;
+  gradebook_commit_id: string | null;
+  assignment_id: string;
+  student_number: number;
+  event_type: string;
+  summary_text: string;
+  details_json: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type AssignmentGradeRecordDetail = {
+  record: AssignmentGradeRecord;
+  commits: AssignmentGradebookCommit[];
+  audit_events: AssignmentGradebookAuditEvent[];
+};
+
+export type AssignmentGradebookCommitResult = {
+  grade_record: AssignmentGradeRecord;
+  commit: AssignmentGradebookCommit;
+  message: string;
+};
+
+export type AssignmentGradebookExportView = {
+  assignment_id: string;
+  assignment_title: string;
+  assignment_type: string;
+  class_id: string;
+  subject_id: string;
+  school_year_id: string;
+  grading_period_id: string | null;
+  generated_at: string;
+  record_count: number;
+  active_record_count: number;
+  records: Array<Record<string, unknown>>;
+  commits: Array<Record<string, unknown>>;
 };
 
 export type PlanningDraft = {
@@ -747,6 +964,17 @@ export type TeacherAssistWorkspaceTodaySummary = {
   recently_approved_extractions_count: number;
 };
 
+export type TeacherAssistClassWorkspace = {
+  class: TeacherClass;
+  active_plans: TeacherAssistWorkspacePlanSummary[];
+  assignments: TeacherAssistWorkspaceAssignmentSummary[];
+  pending_grading_reviews: TeacherAssistWorkspaceGradingReviewSummary[];
+  recent_submissions: TeacherAssistWorkspaceSubmissionSummary[];
+  workflow_summaries: TeacherAssistWorkspaceWorkflowSummary[];
+  packet_summaries: TeacherAssistWorkspacePacketSummary[];
+  needs_attention_count: number;
+};
+
 export type TeacherAssistWorkspaceStats = {
   active_plans_count: number;
   plans_in_review_count: number;
@@ -765,15 +993,21 @@ export type TeacherAssistWorkspaceStats = {
   recently_approved_extractions_count: number;
 };
 
-export type TeacherAssistClassWorkspace = {
-  class: TeacherClass;
-  active_plans: TeacherAssistWorkspacePlanSummary[];
-  assignments: TeacherAssistWorkspaceAssignmentSummary[];
-  pending_grading_reviews: TeacherAssistWorkspaceGradingReviewSummary[];
-  recent_submissions: TeacherAssistWorkspaceSubmissionSummary[];
-  workflow_summaries: TeacherAssistWorkspaceWorkflowSummary[];
-  packet_summaries: TeacherAssistWorkspacePacketSummary[];
-  needs_attention_count: number;
+export type TeacherAssistWorkspaceMasteryInsights = {
+  matrix_count: number;
+  active_evaluation_count: number;
+  reteach_recommended_count: number;
+  low_mastery_alert_count: number;
+  unassessed_standard_count: number;
+  improving_standard_count: number;
+  declining_standard_count: number;
+  reteach_recommended_standards: Array<Record<string, unknown>>;
+  standards_needing_attention: Array<Record<string, unknown>>;
+  low_mastery_alerts: Array<Record<string, unknown>>;
+  improving_standards: Array<Record<string, unknown>>;
+  declining_standards: Array<Record<string, unknown>>;
+  unassessed_standards: Array<Record<string, unknown>>;
+  class_snapshots: Array<Record<string, unknown>>;
 };
 
 export type TeacherAssistWorkspace = {
@@ -786,6 +1020,536 @@ export type TeacherAssistWorkspace = {
   active_workflows: TeacherAssistWorkspaceWorkflowSummary[];
   review_required_items: TeacherAssistWorkspaceReviewRequiredItem[];
   workspace_stats: TeacherAssistWorkspaceStats;
+  mastery_insights: TeacherAssistWorkspaceMasteryInsights | null;
+};
+
+export type TeacherAssistActionWorkspaceSeverity =
+  | "critical"
+  | "warning"
+  | "review"
+  | "ready"
+  | "info";
+
+export type TeacherAssistActionWorkspaceSectionKey =
+  | "extractions"
+  | "grading"
+  | "gradebook"
+  | "workflows_exports"
+  | "planning_assignments";
+
+export type TeacherAssistActionWorkspaceNavigation = {
+  label: string;
+  href: string;
+};
+
+export type TeacherAssistActionWorkspaceItem = {
+  action_key: string;
+  action_type: string;
+  severity: TeacherAssistActionWorkspaceSeverity;
+  title: string;
+  description: string;
+  tenant_id: string;
+  school_year_id: string | null;
+  grading_period_id: string | null;
+  class_id: string | null;
+  assignment_id: string | null;
+  student_work_id: string | null;
+  grading_review_id: string | null;
+  gradebook_record_id: string | null;
+  workflow_id: string | null;
+  export_artifact_id: string | null;
+  extraction_job_id: string | null;
+  extracted_text_id: string | null;
+  navigation: TeacherAssistActionWorkspaceNavigation;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type TeacherAssistActionWorkspaceSection = {
+  section_key: TeacherAssistActionWorkspaceSectionKey;
+  title: string;
+  count: number;
+  items: TeacherAssistActionWorkspaceItem[];
+};
+
+export type TeacherAssistActionWorkspaceSummary = {
+  total_open_actions: number;
+  critical_count: number;
+  warning_count: number;
+  review_count: number;
+  ready_count: number;
+  mastery_alert_count: number;
+};
+
+export type TeacherAssistActionWorkspaceClassRollup = {
+  class_id: string;
+  class_name: string;
+  open_action_count: number;
+  extraction_count: number;
+  grading_count: number;
+  gradebook_count: number;
+  workflow_export_count: number;
+  planning_assignment_count: number;
+};
+
+export type TeacherAssistActionWorkspaceActivity = {
+  id: string;
+  event_category: string;
+  event_type: string;
+  entity_type: string;
+  entity_id: string;
+  summary_text: string;
+  class_id: string | null;
+  created_at: string;
+};
+
+export type TeacherAssistActionWorkspace = {
+  summary: TeacherAssistActionWorkspaceSummary;
+  sections: TeacherAssistActionWorkspaceSection[];
+  priority_items: TeacherAssistActionWorkspaceItem[];
+  class_rollups: TeacherAssistActionWorkspaceClassRollup[];
+  recent_activity: TeacherAssistActionWorkspaceActivity[];
+};
+
+export type TeacherAssistTodaySummary = {
+  total_open_actions: number;
+  critical_count: number;
+  warning_count: number;
+  review_count: number;
+  ready_count: number;
+  mastery_alert_count: number;
+  today_open_count: number;
+  items_needing_review_count: number;
+  grading_pending_count: number;
+  extraction_pending_count: number;
+  gradebook_pending_count: number;
+  reteach_plans_pending_count: number;
+  mastery_reteach_standard_count: number;
+};
+
+export type TeacherAssistTodayPriorityItem = TeacherAssistActionWorkspaceItem & {
+  today_category?: string | null;
+};
+
+export type TeacherAssistWorkflowStepStatus = "complete" | "in_progress" | "pending";
+
+export type TeacherAssistWorkflowProgressCard = {
+  assignment_id: string;
+  assignment_title: string;
+  class_id: string;
+  source_plan_id: string | null;
+  source_plan_title: string | null;
+  steps: Record<string, TeacherAssistWorkflowStepStatus>;
+  completed_step_count: number;
+  total_step_count: number;
+  progress_percent: number;
+  navigation_href: string;
+};
+
+export type TeacherAssistOnboardingChecklistItem = {
+  key: string;
+  title: string;
+  complete: boolean;
+  navigation_href: string;
+  navigation_label: string;
+};
+
+export type TeacherAssistOnboardingChecklist = {
+  items: TeacherAssistOnboardingChecklistItem[];
+  completed_count: number;
+  total_count: number;
+  is_complete: boolean;
+};
+
+export type TeacherAssistTodayWorkspace = {
+  summary: TeacherAssistTodaySummary;
+  priority_items: TeacherAssistTodayPriorityItem[];
+  categories: Record<string, TeacherAssistActionWorkspaceItem[]>;
+  workflow_progress_cards: TeacherAssistWorkflowProgressCard[];
+  onboarding_checklist: TeacherAssistOnboardingChecklist;
+  recent_activity: TeacherAssistActionWorkspaceActivity[];
+  current_school_year: SchoolYear | null;
+  active_grading_period: GradingPeriod | null;
+  mastery_insights: TeacherAssistWorkspaceMasteryInsights | null;
+};
+
+export type MasteryLevel =
+  | "not_assessed"
+  | "beginning"
+  | "developing"
+  | "mastery"
+  | "advanced";
+
+export type MasteryMatrixStatus = "draft" | "active" | "archived";
+export type MasteryEvaluationStatus = "draft" | "active" | "reversed";
+export type MasteryEvidenceSourceType =
+  | "assignment"
+  | "grading_review"
+  | "gradebook_commit"
+  | "manual_observation";
+
+export type MasteryMatrixStandard = {
+  id: string;
+  standard_id: string;
+  display_order: number;
+  target_mastery_level: MasteryLevel;
+  assessment_count: number;
+  standard_code: string | null;
+  standard_description: string | null;
+};
+
+export type MasteryMatrix = {
+  id: string;
+  tenant_id: string;
+  owner_user_id: string;
+  school_year_id: string;
+  grading_period_id: string | null;
+  class_id: string;
+  subject_id: string;
+  title: string;
+  status: MasteryMatrixStatus;
+  created_at: string;
+  updated_at: string;
+  standards: MasteryMatrixStandard[];
+};
+
+export type MasteryEvaluation = {
+  id: string;
+  tenant_id: string;
+  owner_user_id: string;
+  mastery_matrix_id: string;
+  student_number: number;
+  standard_id: string;
+  evaluation_status: MasteryEvaluationStatus;
+  mastery_level: MasteryLevel;
+  confidence_level: "low" | "medium" | "high" | null;
+  evidence_source_type: MasteryEvidenceSourceType | null;
+  evidence_source_id: string | null;
+  teacher_notes: string | null;
+  confirmed_by_user_id: string | null;
+  confirmed_at: string | null;
+  current_commit_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MasteryCommit = {
+  id: string;
+  mastery_evaluation_id: string;
+  mastery_matrix_id: string;
+  student_number: number;
+  standard_id: string;
+  commit_type: "initial_commit" | "correction" | "reversal";
+  commit_status: "active" | "superseded" | "reversed";
+  previous_mastery_level: MasteryLevel | null;
+  new_mastery_level: MasteryLevel;
+  confidence_level: "low" | "medium" | "high" | null;
+  evidence_source_type: MasteryEvidenceSourceType | null;
+  evidence_source_id: string | null;
+  teacher_notes: string | null;
+  commit_reason: string | null;
+  supersedes_commit_id: string | null;
+  reversed_by_commit_id: string | null;
+  reversed_at: string | null;
+  reversed_by_user_id: string | null;
+  created_at: string;
+};
+
+export type MasteryEvaluationDetail = {
+  evaluation: MasteryEvaluation;
+  commits: MasteryCommit[];
+};
+
+export type MasteryCommitResult = {
+  evaluation: MasteryEvaluation;
+  commit: MasteryCommit;
+  message: string;
+};
+
+export type MasteryMatrixSummary = {
+  mastery_matrix_id: string;
+  title: string;
+  status: MasteryMatrixStatus;
+  class_id: string;
+  subject_id: string;
+  school_year_id: string;
+  grading_period_id: string | null;
+  tracked_standard_count: number;
+  active_evaluation_count: number;
+  draft_evaluation_count: number;
+  reversed_evaluation_count: number;
+  student_count: number;
+  unassessed_standard_count: number;
+  reteach_candidate_count: number;
+  mastery_distribution: Record<string, number>;
+};
+
+export type MasteryMatrixStandardsSummary = {
+  mastery_matrix_id: string;
+  standards: Array<{
+    matrix_standard_id: string;
+    standard_id: string;
+    standard_code: string | null;
+    standard_description: string | null;
+    display_order: number;
+    target_mastery_level: MasteryLevel;
+    assessment_count: number;
+    active_evaluation_count: number;
+    reteach_candidate_count: number;
+    mastery_distribution: Record<string, number>;
+    is_unassessed: boolean;
+  }>;
+};
+
+export type MasteryMatrixStudentsSummary = {
+  mastery_matrix_id: string;
+  students: Array<{
+    student_number: number;
+    active_evaluation_count: number;
+    draft_evaluation_count: number;
+    reteach_candidate_count: number;
+    cells: Array<{
+      evaluation_id: string;
+      standard_id: string;
+      evaluation_status: MasteryEvaluationStatus;
+      mastery_level: MasteryLevel;
+      target_mastery_level: MasteryLevel;
+      needs_reteach: boolean;
+      confirmed_at: string | null;
+    }>;
+  }>;
+};
+
+export type MasteryMatrixReteachSummary = {
+  mastery_matrix_id: string;
+  reteach_candidate_count: number;
+  unassessed_standard_count: number;
+  reteach_items: Array<{
+    evaluation_id: string;
+    student_number: number;
+    standard_id: string;
+    standard_code: string | null;
+    current_mastery_level: MasteryLevel;
+    target_mastery_level: MasteryLevel;
+    evidence_source_type: MasteryEvidenceSourceType | null;
+    evidence_source_id: string | null;
+    confirmed_at: string | null;
+  }>;
+  unassessed_standards: Array<{
+    standard_id: string;
+    standard_code: string | null;
+    target_mastery_level: MasteryLevel;
+  }>;
+};
+
+export type ReteachOperationalStatus =
+  | "healthy"
+  | "monitor"
+  | "reteach_recommended"
+  | "critical_attention"
+  | "unassessed";
+
+export type AssignmentEffectivenessStatus =
+  | "effective"
+  | "mixed_results"
+  | "reteach_likely"
+  | "insufficient_data";
+
+export type StudentMasteryTrend = "improving" | "stable" | "declining" | "insufficient_data";
+export type StandardMasteryTrend = "improving" | "stable" | "declining" | "insufficient_data";
+
+export type MasteryHeatmapCell = {
+  standard_id: string;
+  mastery_level: MasteryLevel;
+  evaluation_id: string | null;
+  evaluation_count: number;
+  confirmed_at: string | null;
+  evidence_source_type: MasteryEvidenceSourceType | null;
+  evidence_source_id: string | null;
+  needs_reteach: boolean;
+};
+
+export type MasteryMatrixHeatmap = {
+  mastery_matrix_id: string;
+  title: string;
+  class_id: string;
+  subject_id: string;
+  school_year_id: string;
+  grading_period_id: string | null;
+  standards: Array<{
+    matrix_standard_id: string;
+    standard_id: string;
+    standard_code: string | null;
+    standard_description: string | null;
+    display_order: number;
+    target_mastery_level: MasteryLevel;
+    operational_status: ReteachOperationalStatus;
+    mastery_distribution: Record<string, number>;
+    evaluation_count: number;
+    last_assessed_at: string | null;
+  }>;
+  student_numbers: number[];
+  rows: Array<{
+    student_number: number;
+    cells: MasteryHeatmapCell[];
+  }>;
+  mastery_distribution: Record<string, number>;
+  active_evaluation_count: number;
+  student_count: number;
+};
+
+export type MasteryStandardInsight = {
+  matrix_standard_id: string;
+  standard_id: string;
+  standard_code: string | null;
+  standard_description: string | null;
+  display_order: number;
+  target_mastery_level: MasteryLevel;
+  mastery_percentage: number;
+  developing_percentage: number;
+  beginning_percentage: number;
+  not_assessed_percentage: number;
+  total_committed_evaluations: number;
+  recent_assessment_count: number;
+  recent_assignment_count: number;
+  last_assessed_at: string | null;
+  operational_status: ReteachOperationalStatus;
+  trend: StandardMasteryTrend;
+  is_unassessed: boolean;
+};
+
+export type MasteryMatrixReteachInsights = {
+  mastery_matrix_id: string;
+  title: string;
+  class_id: string;
+  subject_id: string;
+  school_year_id: string;
+  grading_period_id: string | null;
+  standard_insights: MasteryStandardInsight[];
+  status_counts: Record<string, number>;
+  panels: {
+    standards_needing_reteach: MasteryStandardInsight[];
+    standards_needing_attention: MasteryStandardInsight[];
+    strongest_standards: MasteryStandardInsight[];
+    weakest_standards: MasteryStandardInsight[];
+    improving_standards: MasteryStandardInsight[];
+    declining_standards: MasteryStandardInsight[];
+    unassessed_standards: MasteryStandardInsight[];
+  };
+};
+
+export type ReteachPlanStatus = "draft" | "ai_draft" | "teacher_review" | "archived";
+export type ReteachPlanVersionSource = "initial" | "ai_draft" | "teacher_edit";
+
+export type ReteachPlanContent = {
+  reteach_objectives?: string[];
+  instructional_strategies?: string[];
+  small_group_recommendations?: string[];
+  intervention_ideas?: string[];
+  vocabulary_focus?: string[];
+  assessment_checks?: string[];
+  teacher_review_required?: boolean;
+  is_ai_draft?: boolean;
+  prompt_version?: string;
+  [key: string]: unknown;
+};
+
+export type ReteachPlan = {
+  id: string;
+  tenant_id: string;
+  owner_user_id: string;
+  mastery_matrix_id: string;
+  standard_id: string;
+  school_year_id: string;
+  grading_period_id: string | null;
+  class_id: string;
+  subject_id: string;
+  title: string;
+  status: ReteachPlanStatus;
+  current_version_id: string | null;
+  latest_ai_usage_event_id: string | null;
+  created_at: string;
+  updated_at: string;
+  standard_code: string | null;
+  standard_description: string | null;
+};
+
+export type ReteachPlanVersion = {
+  id: string;
+  reteach_plan_id: string;
+  version_number: number;
+  version_source: ReteachPlanVersionSource;
+  content_json: ReteachPlanContent;
+  prompt_context_json: Record<string, unknown> | null;
+  provider_name: string | null;
+  provider_model: string | null;
+  prompt_version: string | null;
+  ai_usage_event_id: string | null;
+  created_by_user_id: string;
+  change_reason: string | null;
+  created_at: string;
+};
+
+export type ReteachPlanAIDraft = {
+  plan: ReteachPlan;
+  version: ReteachPlanVersion;
+  teacher_review_required: boolean;
+  provider_mode: string;
+  prompt_version: string;
+  message: string;
+};
+
+export type StudentMasterySummary = {
+  mastery_matrix_id: string;
+  student_number: number;
+  trend: StudentMasteryTrend;
+  active_evaluation_count: number;
+  average_mastery_rank: number | null;
+  recent_assessment_count: number;
+  recent_assignment_count: number;
+  mastery_states: Array<Record<string, unknown>>;
+  standards_needing_attention: Array<Record<string, unknown>>;
+  latest_assignment_evidence: Array<Record<string, unknown>>;
+  latest_grading_review_references: Array<Record<string, unknown>>;
+  latest_gradebook_commit_references: Array<Record<string, unknown>>;
+};
+
+export type AssignmentEffectiveness = {
+  assignment_id: string;
+  assignment_title: string;
+  class_id: string;
+  subject_id: string;
+  school_year_id: string;
+  grading_period_id: string | null;
+  linked_standards: Array<Record<string, unknown>>;
+  mastery_distribution: Record<string, number>;
+  developing_or_beginning_count: number;
+  average_mastery_rank: number | null;
+  mastery_percentage: number;
+  total_committed_evaluations: number;
+  grading_review_count: number;
+  gradebook_commit_count: number;
+  effectiveness_status: AssignmentEffectivenessStatus;
+};
+
+export type MasteryDashboard = {
+  filters: {
+    school_year_id: string | null;
+    grading_period_id: string | null;
+    class_id: string | null;
+    subject_id: string | null;
+  };
+  matrix_count: number;
+  active_evaluation_count: number;
+  student_count: number;
+  mastery_distribution: Record<string, number>;
+  matrix_snapshots: Array<Record<string, unknown>>;
+  standards_needing_attention: Array<Record<string, unknown>>;
+  reteach_recommended_standards: Array<Record<string, unknown>>;
+  low_mastery_alerts: Array<Record<string, unknown>>;
+  improving_standards: Array<Record<string, unknown>>;
+  declining_standards: Array<Record<string, unknown>>;
+  unassessed_standards: Array<Record<string, unknown>>;
 };
 
 export type WeeklyPlanContentStandard = {

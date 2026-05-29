@@ -10,6 +10,7 @@ import {
   fetchExtractedTextHistory,
   fetchExtractionJob,
   fetchExtractionSummaries,
+  fetchStudentWorkGradingPrepContext,
   retryExtractionJob,
   updateExtractedTextApprovedContent,
   updateExtractedTextReviewStatus,
@@ -20,6 +21,7 @@ import type {
   TeacherAssistExtractionJob,
   TeacherAssistExtractionJobDetail,
   TeacherAssistExtractionSummary,
+  TeacherAssistStudentWorkGradingPrepContext,
 } from "@/lib/teacher-assist-types";
 
 function formatDateTime(value: string | null) {
@@ -144,6 +146,13 @@ function ExtractionList({
                         Confidence {labelize(record.confidence_level)}
                       </span>
                     ) : null}
+                    {summary.job.artifact_type === "student_work" &&
+                    record &&
+                    (record.review_status === "teacher_approved" || record.review_status === "reviewed") ? (
+                      <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-800">
+                        Ready for grading prep
+                      </span>
+                    ) : null}
                   </div>
                   <h2 className="text-lg font-semibold text-slate-900">
                     {summary.job.artifact_type === "student_work"
@@ -197,7 +206,26 @@ function ExtractionDetail({
   const [approvedText, setApprovedText] = useState(detail.record.approved_text ?? "");
   const [issueReason, setIssueReason] = useState(detail.record.teacher_issue_reason ?? "");
   const [reviewNotes, setReviewNotes] = useState(detail.record.teacher_review_notes ?? "");
+  const [gradingPrepContext, setGradingPrepContext] = useState<TeacherAssistStudentWorkGradingPrepContext | null>(
+    null,
+  );
   const [busyAction, setBusyAction] = useState<string | null>(null);
+
+  useEffect(() => {
+    const submissionId = detail.record.student_work_submission_id;
+    if (!submissionId) {
+      setGradingPrepContext(null);
+      return;
+    }
+    void fetchStudentWorkGradingPrepContext(submissionId)
+      .then(setGradingPrepContext)
+      .catch(() => setGradingPrepContext(null));
+  }, [
+    detail.record.approved_text,
+    detail.record.review_status,
+    detail.record.student_work_submission_id,
+    detail.record.teacher_corrected_text,
+  ]);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -255,7 +283,23 @@ function ExtractionDetail({
               <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
                 {labelize(detail.job.provider_mode ?? "mock")} OCR · Attempt {detail.job.attempt_number}
               </span>
+              {gradingPrepContext?.ready_for_grading_prep ? (
+                <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-800">
+                  Ready for grading prep
+                </span>
+              ) : null}
             </div>
+            {gradingPrepContext ? (
+              <p
+                className={`mt-4 rounded-2xl px-4 py-3 text-sm ${
+                  gradingPrepContext.ready_for_grading_prep
+                    ? "bg-teal-50 text-teal-900"
+                    : "bg-amber-50 text-amber-900"
+                }`}
+              >
+                {gradingPrepContext.message}
+              </p>
+            ) : null}
           </div>
           <Link href="/teacher-assist/extractions" className="ta-button-secondary">
             Back to extractions

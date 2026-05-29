@@ -86,6 +86,42 @@ Extraction remediation and teacher-review drill-down, extraction review statuses
 
 Guarded real OCR provider integration behind config switches, provider-neutral OCR seam with Textract and OpenAI vision implementations, OCR provider metadata persistence, graceful provider failure handling, retry lineage across real provider attempts, and extraction UI provider/mode/confidence messaging while preserving teacher-review-first behavior.
 
+## Phase 21
+
+Teacher-approved extraction downstream consumption: read-only grading-prep context and assignment summary APIs, approved-text resolution with teacher-review gating, Assignments/Extractions **Ready for grading prep** UI, tenant isolation, and explicit preservation of disabled AI grading/mastery/parent-communication behavior.
+
+## Phase 22
+
+Artifact export foundation for weekly plans: async `artifact_export` workflows, persisted export artifacts, mock-first slide/quiz preview generation, worker-managed PPTX/JSON/HTML file storage, signed download URLs, weekly-plan export actions, and `/teacher-assist/exports` workspace — without Google OAuth/APIs, auto publishing, or grading automation.
+
+## Phase 23
+
+Guarded AI grading prep assist: mock-first AI grading suggestions from teacher-approved extraction text, `POST /grading-reviews/{id}/ai-suggestions`, draft `ai_suggested` review persistence, teacher-review-required UI in Assignments, AI usage/activity tracking, and explicit blocking when grading prep is not ready — without automatic gradebook commits, mastery updates, parent communication, or real provider execution.
+
+## Phase 24
+
+Gradebook commit foundation: teacher-confirmed-only manual commits via `POST /grading-reviews/{id}/gradebook-commit`, persisted grade records + commit history + audit events, correction/reversal support, export-ready assignment gradebook JSON, and `/teacher-assist/gradebook` workspace — without automatic commits, mastery updates, parent communication, LMS sync, or SIS integration.
+
+## Phase 25
+
+Operational UX cohesion + teacher action workspace: backend-composed `GET /action-workspace` read model, unified `/teacher-assist/actions` operational command center, cross-workspace navigation targets, class rollups, priority actions, and prominent workspace linkage — without new automation side effects, mastery updates, parent communication, LMS/SIS sync, or trading changes.
+
+## Phase 26
+
+Mastery matrix foundation + standards progress tracking: persisted mastery matrices, matrix standards, teacher-confirmed evaluations, commit history, audit events, class/standard/student summaries, reteach visibility, and `/teacher-assist/mastery` workspace — without automatic mastery mutation from grading or gradebook, parent communication, LMS/SIS sync, or trading changes.
+
+## Phase 27
+
+Mastery visualization + reteach insights: read-only heatmap aggregation, rules-based reteach insight panels, student drill-down summaries, assignment effectiveness read model, mastery dashboard, and workspace/action mastery visibility — without predictive AI, automated mastery mutation, persisted recommendation rows, parent communication, LMS/SIS sync, or trading changes.
+
+## Phase 28.5
+
+Teacher workflow UX polish + workflow cohesion: `/teacher-assist/today` landing page, workflow progress cards, grouped navigation, cross-linking, empty states, tablet-friendly layouts, and onboarding checklist — read-only composition with no AI, no workflow behavior changes, and no database migrations.
+
+## Phase 29
+
+AI-assisted reteach plan drafting: persisted reteach plans + version history, mock AI draft generation from mastery gaps (`POST /reteach-plans/{id}/ai-draft`), standards-focused anonymous prompting (STUDENT # only), AI usage tracking, teacher edit versioning, and mastery dashboard integration (weak standard → create plan → generate draft) — draft-only, teacher-review-required, with no automatic publish, mastery mutation, gradebook, or parent communication side effects.
+
 ## Next Phase
 
-The next recommended phase is teacher-approved extraction downstream consumption so approved text can safely feed future grading prep and mastery workflows without bypassing teacher review.
+The next recommended phase is **Phase 30** (teacher publish workflow for reviewed reteach plans into daily teaching / planning surfaces, assignment effectiveness UI on Assignments screen, or real-provider reteach AI behind existing guardrails — still no automatic mastery updates, parent communication, or gradebook side effects).

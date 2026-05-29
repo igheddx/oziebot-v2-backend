@@ -1,5 +1,5 @@
-import { TeacherAssistDashboardScreen } from "@/components/teacher-assist/teacher-assist-dashboard-screen";
+import { redirect } from "next/navigation";
 
 export default function TeacherAssistHomePage() {
-  return <TeacherAssistDashboardScreen />;
+  redirect("/teacher-assist/today");
 }

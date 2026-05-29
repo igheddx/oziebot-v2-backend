@@ -5,12 +5,14 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  createWeeklyPlanExport,
   fetchWeeklyPlan,
   fetchWeeklyPlanVersions,
   regenerateWeeklyPlanSection,
   updateWeeklyPlan,
 } from "@/lib/teacher-assist-api";
 import type {
+  TeacherAssistExportArtifactType,
   WeeklyPlan,
   WeeklyPlanContent,
   WeeklyPlanSectionKey,
@@ -71,6 +73,8 @@ export function TeacherAssistWeeklyPlanViewer() {
   const [regenProviderMode, setRegenProviderMode] = useState<"mock" | "real" | "">("");
   const [regenPreserveExistingContext, setRegenPreserveExistingContext] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
+  const [exportingType, setExportingType] = useState<TeacherAssistExportArtifactType | null>(null);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!plan) return;
@@ -194,6 +198,27 @@ export function TeacherAssistWeeklyPlanViewer() {
     }
   }
 
+  async function handleCreateExport(artifactType: TeacherAssistExportArtifactType) {
+    if (!plan) return;
+    setExportingType(artifactType);
+    setError(null);
+    setExportMessage(null);
+    try {
+      const created = await createWeeklyPlanExport(plan.id, {
+        artifact_type: artifactType,
+        provider_mode: "mock",
+      });
+      setExportMessage(
+        `Queued ${artifactType.replaceAll("_", " ")} export. Track progress in Exports while the worker generates the file.`,
+      );
+      void created;
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Could not queue export.");
+    } finally {
+      setExportingType(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <section className="ta-panel p-6 sm:p-8">
@@ -239,6 +264,7 @@ export function TeacherAssistWeeklyPlanViewer() {
 
       {error ? <section className="ta-alert ta-alert-error">{error}</section> : null}
       {saveMessage ? <section className="ta-alert ta-alert-success">{saveMessage}</section> : null}
+      {exportMessage ? <section className="ta-alert ta-alert-success">{exportMessage}</section> : null}
 
       {loading ? (
         <section className="ta-panel p-6">
@@ -246,6 +272,41 @@ export function TeacherAssistWeeklyPlanViewer() {
         </section>
       ) : plan ? (
         <>
+          <section className="ta-panel p-6">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">Instructional exports</h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  Queue async slide and quiz exports from this plan. PPTX downloads can be opened in PowerPoint
+                  or imported manually into Google Slides — no Google OAuth in this phase.
+                </p>
+              </div>
+              <Link href="/teacher-assist/exports" className="ta-button-secondary">
+                Open export workspace
+              </Link>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              {(
+                [
+                  ["lesson_slides", "Generate Slides"],
+                  ["guided_notes", "Generate Guided Notes"],
+                  ["multiple_choice_quiz", "Generate Quiz"],
+                  ["exit_ticket", "Generate Exit Ticket"],
+                ] as const
+              ).map(([artifactType, label]) => (
+                <button
+                  key={artifactType}
+                  type="button"
+                  className="ta-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={exportingType !== null}
+                  onClick={() => void handleCreateExport(artifactType)}
+                >
+                  {exportingType === artifactType ? "Queueing..." : label}
+                </button>
+              ))}
+            </div>
+          </section>
+
           <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
             <article className="ta-panel p-6">
               <div className="flex items-center justify-between gap-3">

@@ -27,6 +27,7 @@ dependencies = [
   "qrcode>=8.0",
   "boto3>=1.35",
   "botocore>=1.35",
+  "python-pptx>=1.0.2",
 ]
 
 [project.optional-dependencies]

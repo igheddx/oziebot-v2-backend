@@ -53,6 +53,45 @@ AssignmentGradingReviewStatusLiteral = Literal[
     "archived",
 ]
 AssignmentGradingReviewSourceLiteral = Literal["manual", "ai_placeholder"]
+AssignmentGradeRecordStatusLiteral = Literal["active", "superseded", "reversed"]
+AssignmentGradebookCommitTypeLiteral = Literal["initial_commit", "correction", "reversal"]
+AssignmentGradebookCommitStatusLiteral = Literal["active", "superseded", "reversed"]
+AssignmentGradebookAuditEventTypeLiteral = Literal[
+    "commit_created",
+    "commit_corrected",
+    "commit_reversed",
+    "commit_superseded",
+    "export_generated",
+]
+MasteryMatrixStatusLiteral = Literal["draft", "active", "archived"]
+MasteryLevelLiteral = Literal["not_assessed", "beginning", "developing", "mastery", "advanced"]
+MasteryEvaluationStatusLiteral = Literal["draft", "active", "reversed"]
+MasteryCommitTypeLiteral = Literal["initial_commit", "correction", "reversal"]
+MasteryCommitStatusLiteral = Literal["active", "superseded", "reversed"]
+MasteryEvidenceSourceTypeLiteral = Literal[
+    "assignment",
+    "grading_review",
+    "gradebook_commit",
+    "manual_observation",
+]
+MasteryConfidenceLevelLiteral = Literal["low", "medium", "high"]
+ReteachOperationalStatusLiteral = Literal[
+    "healthy",
+    "monitor",
+    "reteach_recommended",
+    "critical_attention",
+    "unassessed",
+]
+AssignmentEffectivenessStatusLiteral = Literal[
+    "effective",
+    "mixed_results",
+    "reteach_likely",
+    "insufficient_data",
+]
+StudentMasteryTrendLiteral = Literal["improving", "stable", "declining", "insufficient_data"]
+StandardMasteryTrendLiteral = Literal["improving", "stable", "declining", "insufficient_data"]
+ReteachPlanStatusLiteral = Literal["draft", "ai_draft", "teacher_review", "archived"]
+ReteachPlanVersionSourceLiteral = Literal["initial", "ai_draft", "teacher_edit"]
 TeacherAssistExtractionArtifactTypeLiteral = Literal["resource", "student_work"]
 TeacherAssistExtractionJobStatusLiteral = Literal[
     "queued",
@@ -83,10 +122,140 @@ TeacherAssistWorkflowTypeLiteral = Literal[
     "assessment_generation",
     "newsletter_generation",
     "grading_assist",
+    "artifact_export",
 ]
 TeacherAssistWorkflowStatusLiteral = Literal["queued", "running", "completed", "failed", "cancelled"]
 TeacherAssistWorkflowStepStatusLiteral = Literal["queued", "running", "completed", "failed", "skipped"]
 WeeklyPlanStatusLiteral = Literal["in_progress", "completed"]
+TeacherAssistExportArtifactTypeLiteral = Literal[
+    "lesson_slides",
+    "guided_notes",
+    "multiple_choice_quiz",
+    "exit_ticket",
+    "short_answer_quiz",
+]
+TeacherAssistExportArtifactStatusLiteral = Literal[
+    "queued",
+    "generating",
+    "ready",
+    "failed",
+    "archived",
+]
+TeacherAssistExportFormatLiteral = Literal["pptx", "json", "printable_html"]
+ActionWorkspaceSeverityLiteral = Literal["critical", "warning", "review", "ready", "info"]
+ActionWorkspaceSectionKeyLiteral = Literal[
+    "extractions",
+    "grading",
+    "gradebook",
+    "workflows_exports",
+    "planning_assignments",
+]
+
+
+class TeacherAssistActionWorkspaceNavigationOut(BaseModel):
+    label: str
+    href: str
+
+
+class TeacherAssistActionWorkspaceItemOut(BaseModel):
+    action_key: str
+    action_type: str
+    severity: ActionWorkspaceSeverityLiteral
+    title: str
+    description: str
+    tenant_id: uuid.UUID
+    school_year_id: uuid.UUID | None = None
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID | None = None
+    assignment_id: uuid.UUID | None = None
+    student_work_id: uuid.UUID | None = None
+    grading_review_id: uuid.UUID | None = None
+    gradebook_record_id: uuid.UUID | None = None
+    workflow_id: uuid.UUID | None = None
+    export_artifact_id: uuid.UUID | None = None
+    extraction_job_id: uuid.UUID | None = None
+    extracted_text_id: uuid.UUID | None = None
+    navigation: TeacherAssistActionWorkspaceNavigationOut
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class TeacherAssistActionWorkspaceSectionOut(BaseModel):
+    section_key: ActionWorkspaceSectionKeyLiteral
+    title: str
+    count: int
+    items: list[TeacherAssistActionWorkspaceItemOut] = Field(default_factory=list)
+
+
+class TeacherAssistActionWorkspaceSummaryOut(BaseModel):
+    total_open_actions: int
+    critical_count: int
+    warning_count: int
+    review_count: int
+    ready_count: int
+    mastery_alert_count: int = 0
+
+
+class TeacherAssistActionWorkspaceClassRollupOut(BaseModel):
+    class_id: uuid.UUID
+    class_name: str
+    open_action_count: int
+    extraction_count: int
+    grading_count: int
+    gradebook_count: int
+    workflow_export_count: int
+    planning_assignment_count: int
+
+
+class TeacherAssistActionWorkspaceActivityOut(BaseModel):
+    id: uuid.UUID
+    event_category: str
+    event_type: str
+    entity_type: str
+    entity_id: uuid.UUID
+    summary_text: str
+    class_id: uuid.UUID | None = None
+    created_at: datetime
+
+
+class TeacherAssistActionWorkspaceOut(BaseModel):
+    summary: TeacherAssistActionWorkspaceSummaryOut
+    sections: list[TeacherAssistActionWorkspaceSectionOut] = Field(default_factory=list)
+    priority_items: list[TeacherAssistActionWorkspaceItemOut] = Field(default_factory=list)
+    class_rollups: list[TeacherAssistActionWorkspaceClassRollupOut] = Field(default_factory=list)
+    recent_activity: list[TeacherAssistActionWorkspaceActivityOut] = Field(default_factory=list)
+
+
+class TeacherAssistTodaySummaryOut(BaseModel):
+    total_open_actions: int = 0
+    critical_count: int = 0
+    warning_count: int = 0
+    review_count: int = 0
+    ready_count: int = 0
+    mastery_alert_count: int = 0
+    today_open_count: int = 0
+    items_needing_review_count: int = 0
+    grading_pending_count: int = 0
+    extraction_pending_count: int = 0
+    gradebook_pending_count: int = 0
+    reteach_plans_pending_count: int = 0
+    mastery_reteach_standard_count: int = 0
+
+
+class TeacherAssistTodayPriorityItemOut(TeacherAssistActionWorkspaceItemOut):
+    today_category: str | None = None
+
+
+class TeacherAssistTodayWorkspaceOut(BaseModel):
+    summary: TeacherAssistTodaySummaryOut
+    priority_items: list[TeacherAssistTodayPriorityItemOut] = Field(default_factory=list)
+    categories: dict[str, list[TeacherAssistActionWorkspaceItemOut]] = Field(default_factory=dict)
+    workflow_progress_cards: list[dict[str, Any]] = Field(default_factory=list)
+    onboarding_checklist: dict[str, Any] = Field(default_factory=dict)
+    recent_activity: list[TeacherAssistActionWorkspaceActivityOut] = Field(default_factory=list)
+    current_school_year: SchoolYearOut | None = None
+    active_grading_period: GradingPeriodOut | None = None
+    mastery_insights: TeacherAssistWorkspaceMasteryInsightsOut | None = None
 
 
 class TeacherAssistOptionsOut(BaseModel):
@@ -106,6 +275,22 @@ class TeacherAssistOptionsOut(BaseModel):
     extraction_job_statuses: list[str]
     extraction_review_statuses: list[str]
     extraction_confidence_levels: list[str]
+    export_artifact_types: list[str]
+    export_artifact_statuses: list[str]
+    export_formats: list[str]
+    assignment_grade_record_statuses: list[str]
+    assignment_gradebook_commit_types: list[str]
+    assignment_gradebook_commit_statuses: list[str]
+    assignment_gradebook_audit_event_types: list[str]
+    mastery_matrix_statuses: list[str]
+    mastery_levels: list[str]
+    mastery_evaluation_statuses: list[str]
+    mastery_commit_types: list[str]
+    mastery_commit_statuses: list[str]
+    mastery_evidence_source_types: list[str]
+    mastery_confidence_levels: list[str]
+    reteach_plan_statuses: list[str] = Field(default_factory=list)
+    reteach_plan_version_sources: list[str] = Field(default_factory=list)
     planning_draft_statuses: list[str]
     planning_scopes: list[str]
     supported_grade_levels: list[str]
@@ -634,6 +819,20 @@ class AssignmentGradingReviewStatusUpdate(BaseModel):
     status: AssignmentGradingReviewStatusLiteral
 
 
+class AssignmentGradingReviewAISuggestionCreate(BaseModel):
+    provider_mode: Literal["mock", "real"] = "mock"
+    teacher_instructions: str | None = Field(default=None, max_length=1000)
+
+
+class AssignmentGradingReviewAISuggestionOut(BaseModel):
+    review: AssignmentGradingReviewOut
+    confidence_level: Literal["low", "medium", "high"]
+    teacher_review_required: bool = True
+    rubric_notes: str | None = None
+    text_source: str | None = None
+    message: str
+
+
 class AssignmentGradingReviewItemOut(BaseModel):
     id: uuid.UUID
     grading_review_id: uuid.UUID
@@ -677,6 +876,434 @@ class AssignmentGradingReviewOut(BaseModel):
     items: list[AssignmentGradingReviewItemOut] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class AssignmentGradebookCommitCreate(BaseModel):
+    teacher_confirmation_note: str | None = Field(default=None, max_length=1000)
+
+
+class AssignmentGradeRecordCorrectionCreate(BaseModel):
+    committed_score: float | None = None
+    max_score: float | None = None
+    committed_feedback: str | None = Field(default=None, max_length=4000)
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+class AssignmentGradeRecordReversalCreate(BaseModel):
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+class AssignmentGradebookCommitOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    teacher_user_id: uuid.UUID
+    grade_record_id: uuid.UUID
+    assignment_id: uuid.UUID
+    student_work_submission_id: uuid.UUID
+    grading_review_id: uuid.UUID
+    student_number: int
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    commit_type: AssignmentGradebookCommitTypeLiteral
+    commit_status: AssignmentGradebookCommitStatusLiteral
+    committed_score: float | None = None
+    max_score: float | None = None
+    committed_feedback: str | None = None
+    teacher_confirmation_checkpoint_at: datetime
+    reason: str | None = None
+    supersedes_commit_id: uuid.UUID | None = None
+    reversed_by_commit_id: uuid.UUID | None = None
+    audit_metadata_json: dict[str, Any] | None = None
+    created_at: datetime
+
+
+class AssignmentGradeRecordOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    teacher_user_id: uuid.UUID
+    assignment_id: uuid.UUID
+    student_work_submission_id: uuid.UUID
+    grading_review_id: uuid.UUID
+    student_number: int
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    record_status: AssignmentGradeRecordStatusLiteral
+    current_commit_id: uuid.UUID | None = None
+    committed_score: float | None = None
+    max_score: float | None = None
+    committed_feedback: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssignmentGradeRecordDetailOut(BaseModel):
+    record: AssignmentGradeRecordOut
+    commits: list[AssignmentGradebookCommitOut] = Field(default_factory=list)
+    audit_events: list["AssignmentGradebookAuditEventOut"] = Field(default_factory=list)
+
+
+class AssignmentGradebookAuditEventOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    teacher_user_id: uuid.UUID
+    grade_record_id: uuid.UUID | None = None
+    gradebook_commit_id: uuid.UUID | None = None
+    assignment_id: uuid.UUID
+    student_number: int
+    event_type: AssignmentGradebookAuditEventTypeLiteral
+    summary_text: str
+    details_json: dict[str, Any] | None = None
+    created_at: datetime
+
+
+class AssignmentGradebookCommitResultOut(BaseModel):
+    grade_record: AssignmentGradeRecordOut
+    commit: AssignmentGradebookCommitOut
+    message: str
+
+
+class AssignmentGradebookExportViewOut(BaseModel):
+    assignment_id: uuid.UUID
+    assignment_title: str
+    assignment_type: str
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    generated_at: datetime
+    record_count: int
+    active_record_count: int
+    records: list[dict[str, Any]] = Field(default_factory=list)
+    commits: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class MasteryMatrixStandardOut(BaseModel):
+    id: uuid.UUID
+    standard_id: uuid.UUID
+    display_order: int
+    target_mastery_level: MasteryLevelLiteral
+    assessment_count: int
+    standard_code: str | None = None
+    standard_description: str | None = None
+
+
+class MasteryMatrixOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    owner_user_id: uuid.UUID
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    title: str
+    status: MasteryMatrixStatusLiteral
+    created_at: datetime
+    updated_at: datetime
+    standards: list[MasteryMatrixStandardOut] = Field(default_factory=list)
+
+
+class MasteryMatrixCreate(BaseModel):
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    title: str = Field(min_length=1, max_length=255)
+    status: MasteryMatrixStatusLiteral = "active"
+    standard_ids: list[uuid.UUID] = Field(min_length=1)
+    target_mastery_level: MasteryLevelLiteral = "mastery"
+
+
+class MasteryMatrixUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    status: MasteryMatrixStatusLiteral | None = None
+    standard_ids: list[uuid.UUID] | None = None
+    target_mastery_level: MasteryLevelLiteral | None = None
+
+
+class MasteryEvaluationOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    owner_user_id: uuid.UUID
+    mastery_matrix_id: uuid.UUID
+    student_number: int
+    standard_id: uuid.UUID
+    evaluation_status: MasteryEvaluationStatusLiteral
+    mastery_level: MasteryLevelLiteral
+    confidence_level: MasteryConfidenceLevelLiteral | None = None
+    evidence_source_type: MasteryEvidenceSourceTypeLiteral | None = None
+    evidence_source_id: uuid.UUID | None = None
+    teacher_notes: str | None = None
+    confirmed_by_user_id: uuid.UUID | None = None
+    confirmed_at: datetime | None = None
+    current_commit_id: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MasteryEvaluationCreate(BaseModel):
+    mastery_matrix_id: uuid.UUID
+    student_number: int = Field(ge=1)
+    standard_id: uuid.UUID
+    mastery_level: MasteryLevelLiteral
+    confidence_level: MasteryConfidenceLevelLiteral | None = None
+    evidence_source_type: MasteryEvidenceSourceTypeLiteral | None = None
+    evidence_source_id: uuid.UUID | None = None
+    teacher_notes: str | None = Field(default=None, max_length=4000)
+
+
+class MasteryEvaluationUpdate(BaseModel):
+    mastery_level: MasteryLevelLiteral | None = None
+    confidence_level: MasteryConfidenceLevelLiteral | None = None
+    evidence_source_type: MasteryEvidenceSourceTypeLiteral | None = None
+    evidence_source_id: uuid.UUID | None = None
+    teacher_notes: str | None = Field(default=None, max_length=4000)
+    clear_evidence: bool = False
+
+
+class MasteryCommitOut(BaseModel):
+    id: uuid.UUID
+    mastery_evaluation_id: uuid.UUID
+    mastery_matrix_id: uuid.UUID
+    student_number: int
+    standard_id: uuid.UUID
+    commit_type: MasteryCommitTypeLiteral
+    commit_status: MasteryCommitStatusLiteral
+    previous_mastery_level: MasteryLevelLiteral | None = None
+    new_mastery_level: MasteryLevelLiteral
+    confidence_level: MasteryConfidenceLevelLiteral | None = None
+    evidence_source_type: MasteryEvidenceSourceTypeLiteral | None = None
+    evidence_source_id: uuid.UUID | None = None
+    teacher_notes: str | None = None
+    commit_reason: str | None = None
+    supersedes_commit_id: uuid.UUID | None = None
+    reversed_by_commit_id: uuid.UUID | None = None
+    reversed_at: datetime | None = None
+    reversed_by_user_id: uuid.UUID | None = None
+    created_at: datetime
+
+
+class MasteryEvaluationCommitCreate(BaseModel):
+    commit_reason: str | None = Field(default=None, max_length=4000)
+
+
+class MasteryEvaluationCorrectionCreate(BaseModel):
+    mastery_level: MasteryLevelLiteral
+    confidence_level: MasteryConfidenceLevelLiteral | None = None
+    teacher_notes: str | None = Field(default=None, max_length=4000)
+    commit_reason: str = Field(min_length=1, max_length=4000)
+
+
+class MasteryEvaluationReversalCreate(BaseModel):
+    commit_reason: str = Field(min_length=1, max_length=4000)
+
+
+class MasteryCommitResultOut(BaseModel):
+    evaluation: MasteryEvaluationOut
+    commit: MasteryCommitOut
+    message: str
+
+
+class MasteryEvaluationDetailOut(BaseModel):
+    evaluation: MasteryEvaluationOut
+    commits: list[MasteryCommitOut] = Field(default_factory=list)
+
+
+class MasteryMatrixSummaryOut(BaseModel):
+    mastery_matrix_id: uuid.UUID
+    title: str
+    status: MasteryMatrixStatusLiteral
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    tracked_standard_count: int
+    active_evaluation_count: int
+    draft_evaluation_count: int
+    reversed_evaluation_count: int
+    student_count: int
+    unassessed_standard_count: int
+    reteach_candidate_count: int
+    mastery_distribution: dict[str, int]
+
+
+class MasteryMatrixStandardsSummaryOut(BaseModel):
+    mastery_matrix_id: uuid.UUID
+    standards: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class MasteryMatrixStudentsSummaryOut(BaseModel):
+    mastery_matrix_id: uuid.UUID
+    students: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class MasteryMatrixReteachSummaryOut(BaseModel):
+    mastery_matrix_id: uuid.UUID
+    reteach_candidate_count: int
+    unassessed_standard_count: int
+    reteach_items: list[dict[str, Any]] = Field(default_factory=list)
+    unassessed_standards: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class MasteryMatrixHeatmapOut(BaseModel):
+    mastery_matrix_id: uuid.UUID
+    title: str
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    standards: list[dict[str, Any]] = Field(default_factory=list)
+    student_numbers: list[int] = Field(default_factory=list)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    mastery_distribution: dict[str, int] = Field(default_factory=dict)
+    active_evaluation_count: int = 0
+    student_count: int = 0
+
+
+class MasteryMatrixReteachInsightsOut(BaseModel):
+    mastery_matrix_id: uuid.UUID
+    title: str
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    standard_insights: list[dict[str, Any]] = Field(default_factory=list)
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    panels: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+
+
+class StudentMasterySummaryOut(BaseModel):
+    mastery_matrix_id: uuid.UUID
+    student_number: int
+    trend: StudentMasteryTrendLiteral
+    active_evaluation_count: int = 0
+    average_mastery_rank: float | None = None
+    recent_assessment_count: int = 0
+    recent_assignment_count: int = 0
+    mastery_states: list[dict[str, Any]] = Field(default_factory=list)
+    standards_needing_attention: list[dict[str, Any]] = Field(default_factory=list)
+    latest_assignment_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    latest_grading_review_references: list[dict[str, Any]] = Field(default_factory=list)
+    latest_gradebook_commit_references: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AssignmentEffectivenessOut(BaseModel):
+    assignment_id: uuid.UUID
+    assignment_title: str
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    linked_standards: list[dict[str, Any]] = Field(default_factory=list)
+    mastery_distribution: dict[str, int] = Field(default_factory=dict)
+    developing_or_beginning_count: int = 0
+    average_mastery_rank: float | None = None
+    mastery_percentage: float = 0.0
+    total_committed_evaluations: int = 0
+    grading_review_count: int = 0
+    gradebook_commit_count: int = 0
+    effectiveness_status: AssignmentEffectivenessStatusLiteral
+
+
+class MasteryDashboardOut(BaseModel):
+    filters: dict[str, uuid.UUID | None] = Field(default_factory=dict)
+    matrix_count: int = 0
+    active_evaluation_count: int = 0
+    student_count: int = 0
+    mastery_distribution: dict[str, int] = Field(default_factory=dict)
+    matrix_snapshots: list[dict[str, Any]] = Field(default_factory=list)
+    standards_needing_attention: list[dict[str, Any]] = Field(default_factory=list)
+    reteach_recommended_standards: list[dict[str, Any]] = Field(default_factory=list)
+    low_mastery_alerts: list[dict[str, Any]] = Field(default_factory=list)
+    improving_standards: list[dict[str, Any]] = Field(default_factory=list)
+    declining_standards: list[dict[str, Any]] = Field(default_factory=list)
+    unassessed_standards: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class TeacherAssistWorkspaceMasteryInsightsOut(BaseModel):
+    matrix_count: int = 0
+    active_evaluation_count: int = 0
+    reteach_recommended_count: int = 0
+    low_mastery_alert_count: int = 0
+    unassessed_standard_count: int = 0
+    improving_standard_count: int = 0
+    declining_standard_count: int = 0
+    reteach_recommended_standards: list[dict[str, Any]] = Field(default_factory=list)
+    standards_needing_attention: list[dict[str, Any]] = Field(default_factory=list)
+    low_mastery_alerts: list[dict[str, Any]] = Field(default_factory=list)
+    improving_standards: list[dict[str, Any]] = Field(default_factory=list)
+    declining_standards: list[dict[str, Any]] = Field(default_factory=list)
+    unassessed_standards: list[dict[str, Any]] = Field(default_factory=list)
+    class_snapshots: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ReteachPlanCreate(BaseModel):
+    mastery_matrix_id: uuid.UUID
+    standard_id: uuid.UUID
+    title: str | None = Field(default=None, max_length=255)
+
+
+class ReteachPlanUpdate(BaseModel):
+    title: str | None = Field(default=None, max_length=255)
+    status: ReteachPlanStatusLiteral | None = None
+
+
+class ReteachPlanVersionCreate(BaseModel):
+    content_json: dict[str, Any]
+    change_reason: str | None = Field(default=None, max_length=4000)
+
+
+class ReteachPlanAIDraftCreate(BaseModel):
+    provider_mode: Literal["mock", "real"] = "mock"
+    teacher_instructions: str | None = Field(default=None, max_length=4000)
+
+
+class ReteachPlanVersionOut(BaseModel):
+    id: uuid.UUID
+    reteach_plan_id: uuid.UUID
+    version_number: int
+    version_source: ReteachPlanVersionSourceLiteral
+    content_json: dict[str, Any]
+    prompt_context_json: dict[str, Any] | None = None
+    provider_name: str | None = None
+    provider_model: str | None = None
+    prompt_version: str | None = None
+    ai_usage_event_id: uuid.UUID | None = None
+    created_by_user_id: uuid.UUID
+    change_reason: str | None = None
+    created_at: datetime
+
+
+class ReteachPlanOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    owner_user_id: uuid.UUID
+    mastery_matrix_id: uuid.UUID
+    standard_id: uuid.UUID
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    title: str
+    status: ReteachPlanStatusLiteral
+    current_version_id: uuid.UUID | None = None
+    latest_ai_usage_event_id: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    standard_code: str | None = None
+    standard_description: str | None = None
+
+
+class ReteachPlanAIDraftOut(BaseModel):
+    plan: ReteachPlanOut
+    version: ReteachPlanVersionOut
+    teacher_review_required: bool = True
+    provider_mode: str
+    prompt_version: str
+    message: str
 
 
 class PlanningDraftCreate(BaseModel):
@@ -1060,6 +1687,91 @@ class TeacherAssistWorkspaceOut(BaseModel):
     active_workflows: list[TeacherAssistWorkspaceWorkflowSummaryOut] = Field(default_factory=list)
     review_required_items: list[TeacherAssistWorkspaceReviewRequiredItemOut] = Field(default_factory=list)
     workspace_stats: TeacherAssistWorkspaceStatsOut
+    mastery_insights: TeacherAssistWorkspaceMasteryInsightsOut | None = None
+
+
+GradingPrepTextSourceLiteral = Literal["approved_text", "teacher_corrected_text", "extracted_text"]
+
+
+class TeacherAssistStudentWorkGradingPrepContextOut(BaseModel):
+    student_work_submission_id: uuid.UUID
+    assignment_id: uuid.UUID
+    student_number: int
+    ready_for_grading_prep: bool
+    blocked_reason: str | None = None
+    review_status: ExtractionReviewStatusLiteral | None = None
+    text_source: GradingPrepTextSourceLiteral | None = None
+    approved_text: str | None = None
+    text_char_count: int | None = None
+    extracted_text_record_id: uuid.UUID | None = None
+    extraction_job_id: uuid.UUID | None = None
+    ai_grading_enabled: bool = False
+    message: str
+
+
+class TeacherAssistAssignmentGradingPrepSubmissionOut(BaseModel):
+    student_work_submission_id: uuid.UUID
+    student_number: int
+    ready_for_grading_prep: bool
+    blocked_reason: str | None = None
+    review_status: ExtractionReviewStatusLiteral | None = None
+    text_source: GradingPrepTextSourceLiteral | None = None
+    text_char_count: int | None = None
+    extracted_text_record_id: uuid.UUID | None = None
+    extraction_job_id: uuid.UUID | None = None
+
+
+class TeacherAssistAssignmentGradingPrepSummaryOut(BaseModel):
+    assignment_id: uuid.UUID
+    assignment_title: str
+    total_submissions: int
+    ready_for_grading_prep_count: int
+    blocked_count: int
+    submissions: list[TeacherAssistAssignmentGradingPrepSubmissionOut] = Field(default_factory=list)
+    ai_grading_enabled: bool = False
+    message: str
+
+
+class TeacherAssistExportArtifactCreate(BaseModel):
+    artifact_type: TeacherAssistExportArtifactTypeLiteral
+    export_format: TeacherAssistExportFormatLiteral | None = None
+    provider_mode: Literal["mock", "real"] = "mock"
+
+
+class TeacherAssistExportArtifactOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    user_id: uuid.UUID
+    source_plan_id: uuid.UUID
+    source_assignment_id: uuid.UUID | None = None
+    workflow_id: uuid.UUID | None = None
+    artifact_type: TeacherAssistExportArtifactTypeLiteral
+    artifact_status: TeacherAssistExportArtifactStatusLiteral
+    title: str
+    export_format: TeacherAssistExportFormatLiteral
+    storage_key: str | None = None
+    preview_json: dict[str, Any]
+    metadata_json: dict[str, Any] | None = None
+    provider_name: str | None = None
+    provider_model: str | None = None
+    prompt_version: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TeacherAssistExportArtifactDetailOut(BaseModel):
+    artifact: TeacherAssistExportArtifactOut
+    workflow_status: TeacherAssistWorkflowStatusLiteral | None = None
+    workflow_progress_percent: int | None = None
+    workflow_error_message: str | None = None
+    download_url: str | None = None
+
+
+class TeacherAssistExportDownloadOut(BaseModel):
+    download_url: str
+    filename: str
+    mime_type: str
+    expires_at: datetime
 
 
 class TeacherAssistWorkflowCancelUpdate(BaseModel):

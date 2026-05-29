@@ -18,6 +18,7 @@ ACTIVITY_EVENT_CATEGORIES = (
     "submission",
     "packet",
     "review",
+    "export",
     "system",
 )
 
@@ -39,6 +40,13 @@ ACTIVITY_EVENT_TYPES = (
     "grading_review_created",
     "grading_review_confirmed",
     "grading_review_updated",
+    "grading_review_ai_suggested",
+    "gradebook_commit_created",
+    "gradebook_commit_corrected",
+    "gradebook_commit_reversed",
+    "mastery_commit_created",
+    "mastery_commit_corrected",
+    "mastery_commit_reversed",
     "section_regenerated",
     "extraction_started",
     "extraction_completed",
@@ -50,6 +58,12 @@ ACTIVITY_EVENT_TYPES = (
     "extraction_review_rejected",
     "extraction_text_corrected",
     "extraction_issue_flagged",
+    "export_queued",
+    "export_completed",
+    "export_failed",
+    "reteach_plan_created",
+    "reteach_plan_ai_drafted",
+    "reteach_plan_version_created",
 )
 
 

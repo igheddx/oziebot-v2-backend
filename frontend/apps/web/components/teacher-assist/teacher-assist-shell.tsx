@@ -2,30 +2,69 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useMemo, useState } from "react";
 
 import { AppSwitcher } from "@/components/platform/app-switcher";
 import { useAuth } from "@/components/providers/auth-provider";
-import { TEACHER_ASSIST_NAV_LINKS } from "@/components/teacher-assist/teacher-assist-nav";
+import {
+  TEACHER_ASSIST_NAV_GROUPS,
+  TEACHER_ASSIST_PRIMARY_LINK,
+  type TeacherAssistNavLink,
+} from "@/components/teacher-assist/teacher-assist-nav";
+
+function isActivePath(pathname: string, href: string) {
+  if (href === "/teacher-assist/today") {
+    return pathname === "/teacher-assist" || pathname === href || pathname.startsWith(`${href}/`);
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function NavLink({ item, pathname }: { item: TeacherAssistNavLink; pathname: string }) {
+  const active = isActivePath(pathname, item.href);
+  return (
+    <Link
+      href={item.href}
+      className={`inline-flex min-h-10 items-center rounded-2xl border px-3 py-2 text-sm font-semibold transition ${
+        active
+          ? "border-sky-300 bg-sky-50 text-sky-900"
+          : "border-slate-200 bg-white/80 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+      }`}
+    >
+      {item.label}
+    </Link>
+  );
+}
 
 export function TeacherAssistShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { logoutUser, user } = useAuth();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  const activeGroupKey = useMemo(() => {
+    for (const group of TEACHER_ASSIST_NAV_GROUPS) {
+      if (group.links.some((link) => isActivePath(pathname, link.href))) {
+        return group.key;
+      }
+    }
+    return TEACHER_ASSIST_NAV_GROUPS[0]?.key ?? "planning";
+  }, [pathname]);
+
+  const [expandedGroup, setExpandedGroup] = useState<string>(activeGroupKey);
 
   return (
     <div className="teacher-assist-theme min-h-dvh bg-background text-foreground">
-      <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
-        <header className="ta-panel sticky top-4 z-30 px-5 py-5 sm:px-6">
+      <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
+        <header className="ta-panel sticky top-3 z-30 px-4 py-4 sm:top-4 sm:px-6 sm:py-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="max-w-2xl">
               <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">
                 TeacherAssist AI
               </p>
-              <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
+              <h1 className="mt-2 text-xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
                 Educator-focused workspace
               </h1>
               <p className="mt-2 text-sm leading-6 text-slate-600 sm:text-[15px]">
-                Calm, desktop-first navigation for the TeacherAssist product module. Trading remains
-                isolated in its own dark shell.
+                Start on Today, then move through planning, instruction, assessment, and mastery with fewer clicks.
               </p>
             </div>
             <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-end">
@@ -46,31 +85,45 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
             </div>
           </div>
 
-          <nav className="mt-5 flex flex-wrap gap-2">
-            {TEACHER_ASSIST_NAV_LINKS.map((item) => {
-              const active =
-                item.href === "/teacher-assist/workspace"
-                  ? pathname === "/teacher-assist" ||
-                    pathname === item.href ||
-                    pathname.startsWith(`${item.href}/`)
-                  : pathname === item.href || pathname.startsWith(`${item.href}/`);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`inline-flex h-11 items-center rounded-2xl border px-4 text-sm font-semibold transition ${
-                    active
-                      ? "border-sky-300 bg-sky-50 text-sky-900"
-                      : "border-slate-200 bg-white/80 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
+          <div className="mt-5 flex flex-wrap items-center gap-2">
+            <NavLink item={TEACHER_ASSIST_PRIMARY_LINK} pathname={pathname} />
+            <button
+              type="button"
+              className="inline-flex h-10 items-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 lg:hidden"
+              onClick={() => setMobileNavOpen((current) => !current)}
+            >
+              {mobileNavOpen ? "Hide menu" : "Browse areas"}
+            </button>
+          </div>
+
+          <nav className={`mt-4 ${mobileNavOpen ? "block" : "hidden lg:block"}`}>
+            <div className="grid gap-3 lg:grid-cols-3 xl:grid-cols-6">
+              {TEACHER_ASSIST_NAV_GROUPS.map((group) => {
+                const isExpanded = expandedGroup === group.key || mobileNavOpen;
+                return (
+                  <section key={group.key} className="rounded-2xl border border-slate-200 bg-white/70 p-3">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between text-left"
+                      onClick={() => setExpandedGroup((current) => (current === group.key ? "" : group.key))}
+                    >
+                      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {group.label}
+                      </span>
+                      <span className="text-xs text-slate-400 lg:hidden">{isExpanded ? "−" : "+"}</span>
+                    </button>
+                    <div className={`mt-2 flex flex-wrap gap-2 ${isExpanded ? "flex" : "hidden lg:flex"}`}>
+                      {group.links.map((item) => (
+                        <NavLink key={item.href} item={item} pathname={pathname} />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
           </nav>
         </header>
-        <main className="flex-1 py-6">{children}</main>
+        <main className="flex-1 py-4 sm:py-6">{children}</main>
       </div>
     </div>
   );

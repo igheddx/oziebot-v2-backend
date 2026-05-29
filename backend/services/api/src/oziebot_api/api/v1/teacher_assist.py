@@ -21,8 +21,19 @@ from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAss
 from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
 from oziebot_api.models.teacher_assist_assignment_resource import TeacherAssistAssignmentResource
 from oziebot_api.models.teacher_assist_assignment_standard import TeacherAssistAssignmentStandard
+from oziebot_api.models.teacher_assist_export_artifact import TeacherAssistExportArtifact
+from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
+from oziebot_api.models.teacher_assist_assignment_gradebook_audit_event import (
+    TeacherAssistAssignmentGradebookAuditEvent,
+)
+from oziebot_api.models.teacher_assist_assignment_gradebook_commit import (
+    TeacherAssistAssignmentGradebookCommit,
+)
 from oziebot_api.models.teacher_assist_extracted_text_record import TeacherAssistExtractedTextRecord
 from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtractionJob
+from oziebot_api.models.teacher_assist_mastery_commit import TeacherAssistMasteryCommit
+from oziebot_api.models.teacher_assist_mastery_evaluation import TeacherAssistMasteryEvaluation
+from oziebot_api.models.teacher_assist_mastery_matrix import TeacherAssistMasteryMatrix
 from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
 from oziebot_api.models.teacher_assist_class import TeacherAssistClass
 from oziebot_api.models.teacher_assist_class_subject import TeacherAssistClassSubject
@@ -31,6 +42,8 @@ from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsag
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
 from oziebot_api.models.teacher_assist_pacing_item import TeacherAssistPacingItem
 from oziebot_api.models.teacher_assist_profile import TeacherAssistProfile
+from oziebot_api.models.teacher_assist_reteach_plan import TeacherAssistReteachPlan
+from oziebot_api.models.teacher_assist_reteach_plan_version import TeacherAssistReteachPlanVersion
 from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
 from oziebot_api.models.teacher_assist_planning_input_draft import TeacherAssistPlanningInputDraft
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
@@ -42,12 +55,33 @@ from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
 from oziebot_api.models.teacher_assist_workflow_step import TeacherAssistWorkflowStep
 from oziebot_api.schemas.teacher_assist import (
     AssignmentCreate,
+    TeacherAssistActionWorkspaceActivityOut,
+    TeacherAssistActionWorkspaceClassRollupOut,
+    TeacherAssistActionWorkspaceItemOut,
+    TeacherAssistActionWorkspaceNavigationOut,
+    TeacherAssistActionWorkspaceOut,
+    TeacherAssistActionWorkspaceSectionOut,
+    TeacherAssistActionWorkspaceSummaryOut,
+    TeacherAssistTodayPriorityItemOut,
+    TeacherAssistTodaySummaryOut,
+    TeacherAssistTodayWorkspaceOut,
     TeacherAssistActivityEventOut,
+    AssignmentGradingReviewAISuggestionCreate,
+    AssignmentGradingReviewAISuggestionOut,
     AssignmentGradingReviewCreate,
     AssignmentGradingReviewItemOut,
     AssignmentGradingReviewOut,
     AssignmentGradingReviewStatusUpdate,
     AssignmentGradingReviewUpdate,
+    AssignmentGradebookAuditEventOut,
+    AssignmentGradebookCommitCreate,
+    AssignmentGradebookCommitOut,
+    AssignmentGradebookCommitResultOut,
+    AssignmentGradebookExportViewOut,
+    AssignmentGradeRecordCorrectionCreate,
+    AssignmentGradeRecordDetailOut,
+    AssignmentGradeRecordOut,
+    AssignmentGradeRecordReversalCreate,
     AssignmentOut,
     AssignmentPrintPacketCreate,
     AssignmentPrintPacketOut,
@@ -68,6 +102,28 @@ from oziebot_api.schemas.teacher_assist import (
     CurriculumRolloverCopyOut,
     GradingPeriodCreate,
     GradingPeriodOut,
+    AssignmentEffectivenessOut,
+    MasteryCommitOut,
+    MasteryCommitResultOut,
+    MasteryEvaluationCommitCreate,
+    MasteryEvaluationCorrectionCreate,
+    MasteryEvaluationCreate,
+    MasteryEvaluationDetailOut,
+    MasteryEvaluationOut,
+    MasteryEvaluationReversalCreate,
+    MasteryEvaluationUpdate,
+    MasteryDashboardOut,
+    MasteryMatrixCreate,
+    MasteryMatrixHeatmapOut,
+    MasteryMatrixOut,
+    MasteryMatrixReteachInsightsOut,
+    MasteryMatrixReteachSummaryOut,
+    MasteryMatrixStandardsSummaryOut,
+    MasteryMatrixStandardOut,
+    MasteryMatrixStudentsSummaryOut,
+    MasteryMatrixSummaryOut,
+    MasteryMatrixUpdate,
+    StudentMasterySummaryOut,
     InstructionalPlanLibraryItemOut,
     PacingGuideCreate,
     PacingGuideOut,
@@ -82,6 +138,13 @@ from oziebot_api.schemas.teacher_assist import (
     PlanningDraftReadinessOut,
     PlanningDraftResourceCreate,
     PlanningDraftStatusUpdate,
+    ReteachPlanAIDraftCreate,
+    ReteachPlanAIDraftOut,
+    ReteachPlanCreate,
+    ReteachPlanOut,
+    ReteachPlanUpdate,
+    ReteachPlanVersionCreate,
+    ReteachPlanVersionOut,
     ResourceLinkCreate,
     ResourceOut,
     SchoolYearCreate,
@@ -103,6 +166,10 @@ from oziebot_api.schemas.teacher_assist import (
     TeacherAssistExtractionRunOut,
     TeacherAssistExtractionSourceArtifactOut,
     TeacherAssistExtractionSummaryOut,
+    TeacherAssistExportArtifactCreate,
+    TeacherAssistExportArtifactDetailOut,
+    TeacherAssistExportArtifactOut,
+    TeacherAssistExportDownloadOut,
     TeacherAssistOptionsOut,
     TeacherAssistWorkflowCancelUpdate,
     TeacherAssistAIUsageEventOut,
@@ -112,12 +179,15 @@ from oziebot_api.schemas.teacher_assist import (
     TeacherAssistWorkspaceGradingReviewSummaryOut,
     TeacherAssistWorkspaceNeedsAttentionOut,
     TeacherAssistWorkflowOut,
+    TeacherAssistWorkspaceMasteryInsightsOut,
     TeacherAssistWorkspaceOut,
     TeacherAssistWorkspacePacketSummaryOut,
     TeacherAssistWorkspacePlanSummaryOut,
     TeacherAssistWorkspaceReviewRequiredItemOut,
     TeacherAssistWorkspaceStatsOut,
     TeacherAssistWorkspaceSubmissionSummaryOut,
+    TeacherAssistStudentWorkGradingPrepContextOut,
+    TeacherAssistAssignmentGradingPrepSummaryOut,
     TeacherAssistWorkspaceTodaySummaryOut,
     TeacherAssistWorkspaceWorkflowSummaryOut,
     TeacherAssistWorkflowStepOut,
@@ -139,19 +209,37 @@ from oziebot_api.services.teacher_assist.constants import (
     ASSIGNMENT_PRINT_TEMPLATE_TYPES,
     ASSIGNMENT_GRADING_REVIEW_SOURCES,
     ASSIGNMENT_GRADING_REVIEW_STATUSES,
+    ASSIGNMENT_GRADE_RECORD_STATUSES,
+    ASSIGNMENT_GRADEBOOK_AUDIT_EVENT_TYPES,
+    ASSIGNMENT_GRADEBOOK_COMMIT_STATUSES,
+    ASSIGNMENT_GRADEBOOK_COMMIT_TYPES,
     TEACHER_ASSIST_EXTRACTION_ARTIFACT_TYPES,
     TEACHER_ASSIST_EXTRACTION_JOB_STATUSES,
     EXTRACTION_CONFIDENCE_LEVELS,
     EXTRACTION_REVIEW_STATUSES,
+    TEACHER_ASSIST_EXPORT_ARTIFACT_STATUSES,
+    TEACHER_ASSIST_EXPORT_ARTIFACT_TYPES,
+    TEACHER_ASSIST_EXPORT_FORMATS,
     ASSIGNMENT_STUDENT_WORK_PROCESSING_STATUSES,
     ASSIGNMENT_STUDENT_WORK_UPLOAD_STATUSES,
     GRADING_PERIOD_TYPES,
+    MASTERY_COMMIT_STATUSES,
+    MASTERY_COMMIT_TYPES,
+    MASTERY_CONFIDENCE_LEVELS,
+    MASTERY_EVALUATION_STATUSES,
+    MASTERY_EVIDENCE_SOURCE_TYPES,
+    MASTERY_LEVELS,
+    MASTERY_MATRIX_STATUSES,
+    RETEACH_PLAN_STATUSES,
+    RETEACH_PLAN_VERSION_SOURCES,
     PLANNING_SCOPES,
     PLANNING_DRAFT_STATUSES,
     RESOURCE_TYPES,
     STANDARD_TYPES,
     SUPPORTED_GRADE_LEVELS,
 )
+from oziebot_api.services.teacher_assist.action_workspace import get_teacher_assist_action_workspace
+from oziebot_api.services.teacher_assist.today_workspace import get_teacher_assist_today_workspace
 from oziebot_api.services.teacher_assist.assignments import (
     attach_assignment_resource,
     attach_assignment_standard,
@@ -163,6 +251,69 @@ from oziebot_api.services.teacher_assist.assignments import (
     list_assignments,
     update_assignment,
     update_assignment_status,
+)
+from oziebot_api.services.teacher_assist.export_artifacts import (
+    build_export_artifact_detail,
+    get_export_artifact_download_url,
+    list_export_artifacts,
+)
+from oziebot_api.services.teacher_assist.export_generation import create_weekly_plan_export
+from oziebot_api.services.teacher_assist.gradebook_commits import (
+    build_assignment_gradebook_export_view,
+    commit_grade_from_grading_review,
+    create_grade_correction,
+    create_grade_reversal,
+    get_grade_record_or_404,
+    list_assignment_grade_records,
+    list_grade_record_commits,
+    list_gradebook_audit_events,
+)
+from oziebot_api.services.teacher_assist.grading_ai_assist import generate_grading_review_ai_suggestion
+from oziebot_api.services.teacher_assist.mastery_commit_service import (
+    commit_mastery_evaluation,
+    correct_mastery_evaluation,
+    create_mastery_evaluation,
+    get_mastery_evaluation_or_404,
+    list_mastery_evaluation_commits,
+    reverse_mastery_evaluation,
+    serialize_mastery_commit,
+    serialize_mastery_evaluation,
+    update_mastery_evaluation,
+)
+from oziebot_api.services.teacher_assist.mastery_matrix import (
+    create_mastery_matrix,
+    get_mastery_matrix_or_404,
+    list_mastery_matrices,
+    serialize_mastery_matrix,
+    update_mastery_matrix,
+)
+from oziebot_api.services.teacher_assist.assignment_effectiveness import build_assignment_effectiveness
+from oziebot_api.services.teacher_assist.mastery_dashboard import build_mastery_dashboard
+from oziebot_api.services.teacher_assist.mastery_heatmaps import (
+    build_mastery_matrix_heatmap,
+    build_student_mastery_summary,
+)
+from oziebot_api.services.teacher_assist.reteach_insights import build_mastery_matrix_reteach_insights
+from oziebot_api.services.teacher_assist.reteach_plan_ai_assist import generate_reteach_plan_ai_draft
+from oziebot_api.services.teacher_assist.reteach_plans import (
+    create_reteach_plan,
+    create_teacher_reteach_plan_version as save_teacher_reteach_plan_version,
+    get_reteach_plan_or_404,
+    list_reteach_plan_versions,
+    list_reteach_plans,
+    serialize_reteach_plan,
+    serialize_reteach_plan_version,
+    update_reteach_plan,
+)
+from oziebot_api.services.teacher_assist.mastery_visualization import (
+    build_mastery_matrix_reteach_summary,
+    build_mastery_matrix_standards_summary,
+    build_mastery_matrix_students_summary,
+    build_mastery_matrix_summary,
+)
+from oziebot_api.services.teacher_assist.grading_prep_service import (
+    get_assignment_grading_prep_summary,
+    get_student_work_grading_prep_context,
 )
 from oziebot_api.services.teacher_assist.grading_reviews import (
     create_grading_review_from_student_work,
@@ -653,6 +804,29 @@ def _file_download_out(*, settings: Settings, url: str) -> TeacherAssistFileDown
     )
 
 
+def _export_artifact_out(row: TeacherAssistExportArtifact) -> TeacherAssistExportArtifactOut:
+    return TeacherAssistExportArtifactOut(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        user_id=row.user_id,
+        source_plan_id=row.source_plan_id,
+        source_assignment_id=row.source_assignment_id,
+        workflow_id=row.workflow_id,
+        artifact_type=row.artifact_type,
+        artifact_status=row.artifact_status,
+        title=row.title,
+        export_format=row.export_format,
+        storage_key=row.storage_key,
+        preview_json=dict(row.preview_json or {}),
+        metadata_json=row.metadata_json,
+        provider_name=row.provider_name,
+        provider_model=row.provider_model,
+        prompt_version=row.prompt_version,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
 def _assignment_grading_review_item_out(
     row: TeacherAssistAssignmentGradingReviewItem,
 ) -> AssignmentGradingReviewItemOut:
@@ -701,6 +875,134 @@ def _assignment_grading_review_out(row: TeacherAssistAssignmentGradingReview) ->
         items=[_assignment_grading_review_item_out(item) for item in row.items],
         created_at=row.created_at,
         updated_at=row.updated_at,
+    )
+
+
+def _assignment_gradebook_commit_out(
+    row: TeacherAssistAssignmentGradebookCommit,
+) -> AssignmentGradebookCommitOut:
+    return AssignmentGradebookCommitOut(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        teacher_user_id=row.teacher_user_id,
+        grade_record_id=row.grade_record_id,
+        assignment_id=row.assignment_id,
+        student_work_submission_id=row.student_work_submission_id,
+        grading_review_id=row.grading_review_id,
+        student_number=row.student_number,
+        school_year_id=row.school_year_id,
+        grading_period_id=row.grading_period_id,
+        class_id=row.class_id,
+        subject_id=row.subject_id,
+        commit_type=row.commit_type,
+        commit_status=row.commit_status,
+        committed_score=row.committed_score,
+        max_score=row.max_score,
+        committed_feedback=row.committed_feedback,
+        teacher_confirmation_checkpoint_at=row.teacher_confirmation_checkpoint_at,
+        reason=row.reason,
+        supersedes_commit_id=row.supersedes_commit_id,
+        reversed_by_commit_id=row.reversed_by_commit_id,
+        audit_metadata_json=row.audit_metadata_json,
+        created_at=row.created_at,
+    )
+
+
+def _assignment_grade_record_out(row: TeacherAssistAssignmentGradeRecord) -> AssignmentGradeRecordOut:
+    return AssignmentGradeRecordOut(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        teacher_user_id=row.teacher_user_id,
+        assignment_id=row.assignment_id,
+        student_work_submission_id=row.student_work_submission_id,
+        grading_review_id=row.grading_review_id,
+        student_number=row.student_number,
+        school_year_id=row.school_year_id,
+        grading_period_id=row.grading_period_id,
+        class_id=row.class_id,
+        subject_id=row.subject_id,
+        record_status=row.record_status,
+        current_commit_id=row.current_commit_id,
+        committed_score=row.committed_score,
+        max_score=row.max_score,
+        committed_feedback=row.committed_feedback,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _assignment_gradebook_audit_event_out(
+    row: TeacherAssistAssignmentGradebookAuditEvent,
+) -> AssignmentGradebookAuditEventOut:
+    return AssignmentGradebookAuditEventOut(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        teacher_user_id=row.teacher_user_id,
+        grade_record_id=row.grade_record_id,
+        gradebook_commit_id=row.gradebook_commit_id,
+        assignment_id=row.assignment_id,
+        student_number=row.student_number,
+        event_type=row.event_type,
+        summary_text=row.summary_text,
+        details_json=row.details_json,
+        created_at=row.created_at,
+    )
+
+
+def _mastery_matrix_out(matrix: TeacherAssistMasteryMatrix) -> MasteryMatrixOut:
+    payload = serialize_mastery_matrix(matrix)
+    return MasteryMatrixOut(
+        id=payload["id"],  # type: ignore[arg-type]
+        tenant_id=payload["tenant_id"],  # type: ignore[arg-type]
+        owner_user_id=payload["owner_user_id"],  # type: ignore[arg-type]
+        school_year_id=payload["school_year_id"],  # type: ignore[arg-type]
+        grading_period_id=payload.get("grading_period_id"),  # type: ignore[arg-type]
+        class_id=payload["class_id"],  # type: ignore[arg-type]
+        subject_id=payload["subject_id"],  # type: ignore[arg-type]
+        title=str(payload["title"]),
+        status=payload["status"],  # type: ignore[arg-type]
+        created_at=payload["created_at"],  # type: ignore[arg-type]
+        updated_at=payload["updated_at"],  # type: ignore[arg-type]
+        standards=[MasteryMatrixStandardOut(**dict(row)) for row in payload.get("standards", [])],
+    )
+
+
+def _mastery_evaluation_out(row: TeacherAssistMasteryEvaluation) -> MasteryEvaluationOut:
+    payload = serialize_mastery_evaluation(row)
+    return MasteryEvaluationOut(**payload)  # type: ignore[arg-type]
+
+
+def _mastery_commit_out(row: TeacherAssistMasteryCommit) -> MasteryCommitOut:
+    payload = serialize_mastery_commit(row)
+    return MasteryCommitOut(**payload)  # type: ignore[arg-type]
+
+
+def _action_workspace_item_out(data: dict[str, object]) -> TeacherAssistActionWorkspaceItemOut:
+    navigation = dict(data.get("navigation") or {})
+    return TeacherAssistActionWorkspaceItemOut(
+        action_key=str(data["action_key"]),
+        action_type=str(data["action_type"]),
+        severity=data["severity"],  # type: ignore[arg-type]
+        title=str(data["title"]),
+        description=str(data["description"]),
+        tenant_id=data["tenant_id"],  # type: ignore[arg-type]
+        school_year_id=data.get("school_year_id"),  # type: ignore[arg-type]
+        grading_period_id=data.get("grading_period_id"),  # type: ignore[arg-type]
+        class_id=data.get("class_id"),  # type: ignore[arg-type]
+        assignment_id=data.get("assignment_id"),  # type: ignore[arg-type]
+        student_work_id=data.get("student_work_id"),  # type: ignore[arg-type]
+        grading_review_id=data.get("grading_review_id"),  # type: ignore[arg-type]
+        gradebook_record_id=data.get("gradebook_record_id"),  # type: ignore[arg-type]
+        workflow_id=data.get("workflow_id"),  # type: ignore[arg-type]
+        export_artifact_id=data.get("export_artifact_id"),  # type: ignore[arg-type]
+        extraction_job_id=data.get("extraction_job_id"),  # type: ignore[arg-type]
+        extracted_text_id=data.get("extracted_text_id"),  # type: ignore[arg-type]
+        navigation=TeacherAssistActionWorkspaceNavigationOut(
+            label=str(navigation.get("label") or "Open"),
+            href=str(navigation.get("href") or "/teacher-assist/workspace"),
+        ),
+        created_at=data.get("created_at"),  # type: ignore[arg-type]
+        updated_at=data.get("updated_at"),  # type: ignore[arg-type]
     )
 
 
@@ -1154,10 +1456,26 @@ def read_teacher_assist_options(user: CurrentUser, db: DbSession) -> TeacherAssi
         assignment_student_work_processing_statuses=list(ASSIGNMENT_STUDENT_WORK_PROCESSING_STATUSES),
         assignment_grading_review_statuses=list(ASSIGNMENT_GRADING_REVIEW_STATUSES),
         assignment_grading_review_sources=list(ASSIGNMENT_GRADING_REVIEW_SOURCES),
+        assignment_grade_record_statuses=list(ASSIGNMENT_GRADE_RECORD_STATUSES),
+        assignment_gradebook_commit_types=list(ASSIGNMENT_GRADEBOOK_COMMIT_TYPES),
+        assignment_gradebook_commit_statuses=list(ASSIGNMENT_GRADEBOOK_COMMIT_STATUSES),
+        assignment_gradebook_audit_event_types=list(ASSIGNMENT_GRADEBOOK_AUDIT_EVENT_TYPES),
+        mastery_matrix_statuses=list(MASTERY_MATRIX_STATUSES),
+        mastery_levels=list(MASTERY_LEVELS),
+        mastery_evaluation_statuses=list(MASTERY_EVALUATION_STATUSES),
+        mastery_commit_types=list(MASTERY_COMMIT_TYPES),
+        mastery_commit_statuses=list(MASTERY_COMMIT_STATUSES),
+        mastery_evidence_source_types=list(MASTERY_EVIDENCE_SOURCE_TYPES),
+        mastery_confidence_levels=list(MASTERY_CONFIDENCE_LEVELS),
+        reteach_plan_statuses=list(RETEACH_PLAN_STATUSES),
+        reteach_plan_version_sources=list(RETEACH_PLAN_VERSION_SOURCES),
         extraction_artifact_types=list(TEACHER_ASSIST_EXTRACTION_ARTIFACT_TYPES),
         extraction_job_statuses=list(TEACHER_ASSIST_EXTRACTION_JOB_STATUSES),
         extraction_review_statuses=list(EXTRACTION_REVIEW_STATUSES),
         extraction_confidence_levels=list(EXTRACTION_CONFIDENCE_LEVELS),
+        export_artifact_types=list(TEACHER_ASSIST_EXPORT_ARTIFACT_TYPES),
+        export_artifact_statuses=list(TEACHER_ASSIST_EXPORT_ARTIFACT_STATUSES),
+        export_formats=list(TEACHER_ASSIST_EXPORT_FORMATS),
         planning_draft_statuses=list(PLANNING_DRAFT_STATUSES),
         planning_scopes=list(PLANNING_SCOPES),
         supported_grade_levels=list(SUPPORTED_GRADE_LEVELS),
@@ -1202,6 +1520,92 @@ def read_teacher_assist_workspace(
             for item in payload.get("review_required_items", [])
         ],
         workspace_stats=TeacherAssistWorkspaceStatsOut(**dict(payload.get("workspace_stats") or {})),
+        mastery_insights=TeacherAssistWorkspaceMasteryInsightsOut(**dict(payload.get("mastery_insights") or {}))
+        if payload.get("mastery_insights") is not None
+        else None,
+    )
+
+
+@router.get("/action-workspace", response_model=TeacherAssistActionWorkspaceOut)
+def read_teacher_assist_action_workspace(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistActionWorkspaceOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    payload = get_teacher_assist_action_workspace(
+        db,
+        settings=settings,
+        tenant_id=tenant_id,
+        user_id=user.id,
+    )
+    return TeacherAssistActionWorkspaceOut(
+        summary=TeacherAssistActionWorkspaceSummaryOut(**dict(payload.get("summary") or {})),
+        sections=[
+            TeacherAssistActionWorkspaceSectionOut(
+                section_key=section["section_key"],  # type: ignore[arg-type]
+                title=str(section["title"]),
+                count=int(section["count"]),
+                items=[_action_workspace_item_out(item) for item in section.get("items", [])],
+            )
+            for section in payload.get("sections", [])
+        ],
+        priority_items=[_action_workspace_item_out(item) for item in payload.get("priority_items", [])],
+        class_rollups=[
+            TeacherAssistActionWorkspaceClassRollupOut(**dict(row))
+            for row in payload.get("class_rollups", [])
+        ],
+        recent_activity=[
+            TeacherAssistActionWorkspaceActivityOut(**dict(row))
+            for row in payload.get("recent_activity", [])
+        ],
+    )
+
+
+@router.get("/today", response_model=TeacherAssistTodayWorkspaceOut)
+def read_teacher_assist_today_workspace(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistTodayWorkspaceOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    payload = get_teacher_assist_today_workspace(
+        db,
+        settings=settings,
+        tenant_id=tenant_id,
+        user_id=user.id,
+    )
+    priority_items: list[TeacherAssistTodayPriorityItemOut] = []
+    for item in payload.get("priority_items", []):
+        base = _action_workspace_item_out(item)
+        priority_items.append(
+            TeacherAssistTodayPriorityItemOut(
+                **base.model_dump(),
+                today_category=str(item.get("today_category")) if item.get("today_category") else None,
+            )
+        )
+    categories: dict[str, list[TeacherAssistActionWorkspaceItemOut]] = {}
+    for key, rows in dict(payload.get("categories") or {}).items():
+        categories[key] = [_action_workspace_item_out(row) for row in rows]
+    return TeacherAssistTodayWorkspaceOut(
+        summary=TeacherAssistTodaySummaryOut(**dict(payload.get("summary") or {})),
+        priority_items=priority_items,
+        categories=categories,
+        workflow_progress_cards=list(payload.get("workflow_progress_cards") or []),
+        onboarding_checklist=dict(payload.get("onboarding_checklist") or {}),
+        recent_activity=[
+            TeacherAssistActionWorkspaceActivityOut(**dict(row))
+            for row in payload.get("recent_activity", [])
+        ],
+        current_school_year=_school_year_out(payload["current_school_year"])
+        if payload.get("current_school_year") is not None
+        else None,
+        active_grading_period=_grading_period_out(payload["active_grading_period"])
+        if payload.get("active_grading_period") is not None
+        else None,
+        mastery_insights=TeacherAssistWorkspaceMasteryInsightsOut(**dict(payload.get("mastery_insights") or {}))
+        if payload.get("mastery_insights") is not None
+        else None,
     )
 
 
@@ -2693,6 +3097,50 @@ def read_teacher_assignment_grading_reviews(
     return [_assignment_grading_review_out(row) for row in rows]
 
 
+@router.get(
+    "/assignments/{assignment_id}/grading-prep-summary",
+    response_model=TeacherAssistAssignmentGradingPrepSummaryOut,
+)
+def read_teacher_assignment_grading_prep_summary(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> TeacherAssistAssignmentGradingPrepSummaryOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = get_assignment_grading_prep_summary(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            assignment_id=assignment_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return TeacherAssistAssignmentGradingPrepSummaryOut.model_validate(payload)
+
+
+@router.get(
+    "/student-work/{submission_id}/grading-prep-context",
+    response_model=TeacherAssistStudentWorkGradingPrepContextOut,
+)
+def read_teacher_student_work_grading_prep_context(
+    submission_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> TeacherAssistStudentWorkGradingPrepContextOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = get_student_work_grading_prep_context(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            submission_id=submission_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return TeacherAssistStudentWorkGradingPrepContextOut.model_validate(payload)
+
+
 @router.post("/student-work/{submission_id}/grading-review", response_model=AssignmentGradingReviewOut, status_code=201)
 def create_teacher_assignment_grading_review(
     submission_id: uuid.UUID,
@@ -2795,6 +3243,929 @@ def update_teacher_assignment_grading_review_status(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _assignment_grading_review_out(row)
+
+
+@router.post(
+    "/grading-reviews/{grading_review_id}/ai-suggestions",
+    response_model=AssignmentGradingReviewAISuggestionOut,
+)
+def create_teacher_assignment_grading_review_ai_suggestion(
+    grading_review_id: uuid.UUID,
+    body: AssignmentGradingReviewAISuggestionCreate,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> AssignmentGradingReviewAISuggestionOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row, response_meta = generate_grading_review_ai_suggestion(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            grading_review_id=grading_review_id,
+            provider_mode=body.provider_mode,
+            teacher_instructions=body.teacher_instructions,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return AssignmentGradingReviewAISuggestionOut(
+        review=_assignment_grading_review_out(row),
+        confidence_level=response_meta["confidence_level"],  # type: ignore[arg-type]
+        teacher_review_required=bool(response_meta["teacher_review_required"]),
+        rubric_notes=str(response_meta["rubric_notes"]) if response_meta.get("rubric_notes") else None,
+        text_source=str(response_meta["text_source"]) if response_meta.get("text_source") else None,
+        message=str(response_meta["message"]),
+    )
+
+
+@router.post(
+    "/grading-reviews/{grading_review_id}/gradebook-commit",
+    response_model=AssignmentGradebookCommitResultOut,
+    status_code=201,
+)
+def create_teacher_assignment_gradebook_commit(
+    grading_review_id: uuid.UUID,
+    body: AssignmentGradebookCommitCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> AssignmentGradebookCommitResultOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        grade_record, commit = commit_grade_from_grading_review(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            grading_review_id=grading_review_id,
+            teacher_confirmation_note=body.teacher_confirmation_note,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return AssignmentGradebookCommitResultOut(
+        grade_record=_assignment_grade_record_out(grade_record),
+        commit=_assignment_gradebook_commit_out(commit),
+        message="Grade committed to gradebook. Mastery updates, parent communication, and LMS sync remain disabled.",
+    )
+
+
+@router.get("/assignments/{assignment_id}/gradebook-records", response_model=list[AssignmentGradeRecordOut])
+def read_teacher_assignment_gradebook_records(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    record_status: str | None = Query(default=None),
+) -> list[AssignmentGradeRecordOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        rows = list_assignment_grade_records(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            assignment_id=assignment_id,
+            record_status=record_status,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [_assignment_grade_record_out(row) for row in rows]
+
+
+@router.get("/gradebook/records/{grade_record_id}", response_model=AssignmentGradeRecordDetailOut)
+def read_teacher_gradebook_record_detail(
+    grade_record_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> AssignmentGradeRecordDetailOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        record = get_grade_record_or_404(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            grade_record_id=grade_record_id,
+        )
+        commits = list_grade_record_commits(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            grade_record_id=grade_record_id,
+        )
+        audit_events = list_gradebook_audit_events(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            grade_record_id=grade_record_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return AssignmentGradeRecordDetailOut(
+        record=_assignment_grade_record_out(record),
+        commits=[_assignment_gradebook_commit_out(row) for row in commits],
+        audit_events=[_assignment_gradebook_audit_event_out(row) for row in audit_events],
+    )
+
+
+@router.post(
+    "/gradebook/records/{grade_record_id}/corrections",
+    response_model=AssignmentGradebookCommitResultOut,
+)
+def create_teacher_gradebook_record_correction(
+    grade_record_id: uuid.UUID,
+    body: AssignmentGradeRecordCorrectionCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> AssignmentGradebookCommitResultOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        grade_record, commit = create_grade_correction(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            grade_record_id=grade_record_id,
+            committed_score=body.committed_score,
+            max_score=body.max_score,
+            committed_feedback=body.committed_feedback,
+            reason=body.reason,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return AssignmentGradebookCommitResultOut(
+        grade_record=_assignment_grade_record_out(grade_record),
+        commit=_assignment_gradebook_commit_out(commit),
+        message="Grade correction committed with audit trail.",
+    )
+
+
+@router.post(
+    "/gradebook/records/{grade_record_id}/reversals",
+    response_model=AssignmentGradebookCommitResultOut,
+)
+def create_teacher_gradebook_record_reversal(
+    grade_record_id: uuid.UUID,
+    body: AssignmentGradeRecordReversalCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> AssignmentGradebookCommitResultOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        grade_record, commit = create_grade_reversal(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            grade_record_id=grade_record_id,
+            reason=body.reason,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return AssignmentGradebookCommitResultOut(
+        grade_record=_assignment_grade_record_out(grade_record),
+        commit=_assignment_gradebook_commit_out(commit),
+        message="Grade reversed with audit trail.",
+    )
+
+
+@router.get("/assignments/{assignment_id}/gradebook-export", response_model=AssignmentGradebookExportViewOut)
+def read_teacher_assignment_gradebook_export(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> AssignmentGradebookExportViewOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = build_assignment_gradebook_export_view(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            assignment_id=assignment_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return AssignmentGradebookExportViewOut(
+        assignment_id=uuid.UUID(str(payload["assignment_id"])),
+        assignment_title=str(payload["assignment_title"]),
+        assignment_type=str(payload["assignment_type"]),
+        class_id=uuid.UUID(str(payload["class_id"])),
+        subject_id=uuid.UUID(str(payload["subject_id"])),
+        school_year_id=uuid.UUID(str(payload["school_year_id"])),
+        grading_period_id=uuid.UUID(str(payload["grading_period_id"])) if payload.get("grading_period_id") else None,
+        generated_at=payload["generated_at"],
+        record_count=int(payload["record_count"]),
+        active_record_count=int(payload["active_record_count"]),
+        records=list(payload["records"]),
+        commits=list(payload["commits"]),
+    )
+
+
+@router.get("/gradebook/audit-events", response_model=list[AssignmentGradebookAuditEventOut])
+def read_teacher_gradebook_audit_events(
+    user: CurrentUser,
+    db: DbSession,
+    assignment_id: uuid.UUID | None = Query(default=None),
+    grade_record_id: uuid.UUID | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=250),
+) -> list[AssignmentGradebookAuditEventOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        rows = list_gradebook_audit_events(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            assignment_id=assignment_id,
+            grade_record_id=grade_record_id,
+            limit=limit,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [_assignment_gradebook_audit_event_out(row) for row in rows]
+
+
+@router.get("/mastery-matrices", response_model=list[MasteryMatrixOut])
+def read_teacher_mastery_matrices(
+    user: CurrentUser,
+    db: DbSession,
+    school_year_id: uuid.UUID | None = Query(default=None),
+    grading_period_id: uuid.UUID | None = Query(default=None),
+    class_id: uuid.UUID | None = Query(default=None),
+    subject_id: uuid.UUID | None = Query(default=None),
+    status: str | None = Query(default=None),
+) -> list[MasteryMatrixOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    rows = list_mastery_matrices(
+        db,
+        tenant_id=tenant_id,
+        user_id=user.id,
+        school_year_id=school_year_id,
+        grading_period_id=grading_period_id,
+        class_id=class_id,
+        subject_id=subject_id,
+        status=status,
+    )
+    return [
+        _mastery_matrix_out(
+            get_mastery_matrix_or_404(
+                db,
+                tenant_id=tenant_id,
+                user_id=user.id,
+                mastery_matrix_id=row.id,
+                load_standards=True,
+            )
+        )
+        for row in rows
+    ]
+
+
+@router.post("/mastery-matrices", response_model=MasteryMatrixOut, status_code=201)
+def create_teacher_mastery_matrix(
+    body: MasteryMatrixCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> MasteryMatrixOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        matrix = create_mastery_matrix(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            school_year_id=body.school_year_id,
+            grading_period_id=body.grading_period_id,
+            class_id=body.class_id,
+            subject_id=body.subject_id,
+            title=body.title,
+            status=body.status,
+            standard_ids=body.standard_ids,
+            target_mastery_level=body.target_mastery_level,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _mastery_matrix_out(matrix)
+
+
+@router.get("/mastery-matrices/{mastery_matrix_id}", response_model=MasteryMatrixOut)
+def read_teacher_mastery_matrix(
+    mastery_matrix_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> MasteryMatrixOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        matrix = get_mastery_matrix_or_404(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_matrix_id=mastery_matrix_id,
+            load_standards=True,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _mastery_matrix_out(matrix)
+
+
+@router.put("/mastery-matrices/{mastery_matrix_id}", response_model=MasteryMatrixOut)
+def update_teacher_mastery_matrix(
+    mastery_matrix_id: uuid.UUID,
+    body: MasteryMatrixUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> MasteryMatrixOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        matrix = update_mastery_matrix(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_matrix_id=mastery_matrix_id,
+            title=body.title,
+            status=body.status,
+            standard_ids=body.standard_ids,
+            target_mastery_level=body.target_mastery_level,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _mastery_matrix_out(matrix)
+
+
+@router.post("/mastery-evaluations", response_model=MasteryEvaluationOut, status_code=201)
+def create_teacher_mastery_evaluation(
+    body: MasteryEvaluationCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> MasteryEvaluationOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        evaluation = create_mastery_evaluation(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_matrix_id=body.mastery_matrix_id,
+            student_number=body.student_number,
+            standard_id=body.standard_id,
+            mastery_level=body.mastery_level,
+            confidence_level=body.confidence_level,
+            evidence_source_type=body.evidence_source_type,
+            evidence_source_id=body.evidence_source_id,
+            teacher_notes=body.teacher_notes,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _mastery_evaluation_out(evaluation)
+
+
+@router.put("/mastery-evaluations/{mastery_evaluation_id}", response_model=MasteryEvaluationOut)
+def update_teacher_mastery_evaluation(
+    mastery_evaluation_id: uuid.UUID,
+    body: MasteryEvaluationUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> MasteryEvaluationOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        evaluation = update_mastery_evaluation(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_evaluation_id=mastery_evaluation_id,
+            mastery_level=body.mastery_level,
+            confidence_level=body.confidence_level,
+            evidence_source_type=body.evidence_source_type,
+            evidence_source_id=body.evidence_source_id,
+            teacher_notes=body.teacher_notes,
+            clear_evidence=body.clear_evidence,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _mastery_evaluation_out(evaluation)
+
+
+@router.get("/mastery-evaluations/{mastery_evaluation_id}", response_model=MasteryEvaluationDetailOut)
+def read_teacher_mastery_evaluation_detail(
+    mastery_evaluation_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> MasteryEvaluationDetailOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        evaluation = get_mastery_evaluation_or_404(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_evaluation_id=mastery_evaluation_id,
+        )
+        commits = list_mastery_evaluation_commits(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_evaluation_id=mastery_evaluation_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return MasteryEvaluationDetailOut(
+        evaluation=_mastery_evaluation_out(evaluation),
+        commits=[_mastery_commit_out(row) for row in commits],
+    )
+
+
+@router.post(
+    "/mastery-evaluations/{mastery_evaluation_id}/commit",
+    response_model=MasteryCommitResultOut,
+    status_code=201,
+)
+def create_teacher_mastery_evaluation_commit(
+    mastery_evaluation_id: uuid.UUID,
+    body: MasteryEvaluationCommitCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> MasteryCommitResultOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        evaluation, commit = commit_mastery_evaluation(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_evaluation_id=mastery_evaluation_id,
+            commit_reason=body.commit_reason,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return MasteryCommitResultOut(
+        evaluation=_mastery_evaluation_out(evaluation),
+        commit=_mastery_commit_out(commit),
+        message="Mastery committed by teacher confirmation. No automatic gradebook, parent, or LMS side effects.",
+    )
+
+
+@router.post(
+    "/mastery-evaluations/{mastery_evaluation_id}/corrections",
+    response_model=MasteryCommitResultOut,
+)
+def create_teacher_mastery_evaluation_correction(
+    mastery_evaluation_id: uuid.UUID,
+    body: MasteryEvaluationCorrectionCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> MasteryCommitResultOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        evaluation, commit = correct_mastery_evaluation(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_evaluation_id=mastery_evaluation_id,
+            mastery_level=body.mastery_level,
+            confidence_level=body.confidence_level,
+            teacher_notes=body.teacher_notes,
+            commit_reason=body.commit_reason,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return MasteryCommitResultOut(
+        evaluation=_mastery_evaluation_out(evaluation),
+        commit=_mastery_commit_out(commit),
+        message="Mastery correction committed with lineage preserved.",
+    )
+
+
+@router.post(
+    "/mastery-evaluations/{mastery_evaluation_id}/reversals",
+    response_model=MasteryCommitResultOut,
+)
+def create_teacher_mastery_evaluation_reversal(
+    mastery_evaluation_id: uuid.UUID,
+    body: MasteryEvaluationReversalCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> MasteryCommitResultOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        evaluation, commit = reverse_mastery_evaluation(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_evaluation_id=mastery_evaluation_id,
+            commit_reason=body.commit_reason,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return MasteryCommitResultOut(
+        evaluation=_mastery_evaluation_out(evaluation),
+        commit=_mastery_commit_out(commit),
+        message="Mastery reversal committed. Reversed evaluations cannot be modified further.",
+    )
+
+
+@router.get("/mastery-matrices/{mastery_matrix_id}/summary", response_model=MasteryMatrixSummaryOut)
+def read_teacher_mastery_matrix_summary(
+    mastery_matrix_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> MasteryMatrixSummaryOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = build_mastery_matrix_summary(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_matrix_id=mastery_matrix_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return MasteryMatrixSummaryOut(**payload)
+
+
+@router.get("/mastery-matrices/{mastery_matrix_id}/standards", response_model=MasteryMatrixStandardsSummaryOut)
+def read_teacher_mastery_matrix_standards_summary(
+    mastery_matrix_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> MasteryMatrixStandardsSummaryOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = build_mastery_matrix_standards_summary(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_matrix_id=mastery_matrix_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return MasteryMatrixStandardsSummaryOut(**payload)
+
+
+@router.get("/mastery-matrices/{mastery_matrix_id}/students", response_model=MasteryMatrixStudentsSummaryOut)
+def read_teacher_mastery_matrix_students_summary(
+    mastery_matrix_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> MasteryMatrixStudentsSummaryOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = build_mastery_matrix_students_summary(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_matrix_id=mastery_matrix_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return MasteryMatrixStudentsSummaryOut(**payload)
+
+
+@router.get("/mastery-matrices/{mastery_matrix_id}/reteach-summary", response_model=MasteryMatrixReteachSummaryOut)
+def read_teacher_mastery_matrix_reteach_summary(
+    mastery_matrix_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> MasteryMatrixReteachSummaryOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = build_mastery_matrix_reteach_summary(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_matrix_id=mastery_matrix_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return MasteryMatrixReteachSummaryOut(**payload)
+
+
+@router.get("/mastery-matrices/{mastery_matrix_id}/heatmap", response_model=MasteryMatrixHeatmapOut)
+def read_teacher_mastery_matrix_heatmap(
+    mastery_matrix_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> MasteryMatrixHeatmapOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = build_mastery_matrix_heatmap(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_matrix_id=mastery_matrix_id,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return MasteryMatrixHeatmapOut(**payload)
+
+
+@router.get("/mastery-matrices/{mastery_matrix_id}/reteach-insights", response_model=MasteryMatrixReteachInsightsOut)
+def read_teacher_mastery_matrix_reteach_insights(
+    mastery_matrix_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> MasteryMatrixReteachInsightsOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = build_mastery_matrix_reteach_insights(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_matrix_id=mastery_matrix_id,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return MasteryMatrixReteachInsightsOut(**payload)
+
+
+@router.get(
+    "/mastery-matrices/{mastery_matrix_id}/student-summary/{student_number}",
+    response_model=StudentMasterySummaryOut,
+)
+def read_teacher_student_mastery_summary(
+    mastery_matrix_id: uuid.UUID,
+    student_number: int,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> StudentMasterySummaryOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = build_student_mastery_summary(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_matrix_id=mastery_matrix_id,
+            student_number=student_number,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return StudentMasterySummaryOut(**payload)
+
+
+@router.get("/assignments/{assignment_id}/effectiveness", response_model=AssignmentEffectivenessOut)
+def read_teacher_assignment_effectiveness(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> AssignmentEffectivenessOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = build_assignment_effectiveness(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            assignment_id=assignment_id,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return AssignmentEffectivenessOut(**payload)
+
+
+@router.get("/mastery-dashboard", response_model=MasteryDashboardOut)
+def read_teacher_mastery_dashboard(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+    school_year_id: uuid.UUID | None = Query(default=None),
+    grading_period_id: uuid.UUID | None = Query(default=None),
+    class_id: uuid.UUID | None = Query(default=None),
+    subject_id: uuid.UUID | None = Query(default=None),
+) -> MasteryDashboardOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    payload = build_mastery_dashboard(
+        db,
+        tenant_id=tenant_id,
+        user_id=user.id,
+        school_year_id=school_year_id,
+        grading_period_id=grading_period_id,
+        class_id=class_id,
+        subject_id=subject_id,
+        settings=settings,
+    )
+    return MasteryDashboardOut(**payload)
+
+
+def _reteach_plan_out(row: TeacherAssistReteachPlan) -> ReteachPlanOut:
+    return ReteachPlanOut(**serialize_reteach_plan(row))
+
+
+def _reteach_plan_version_out(row: TeacherAssistReteachPlanVersion) -> ReteachPlanVersionOut:
+    return ReteachPlanVersionOut(**serialize_reteach_plan_version(row))
+
+
+@router.get("/reteach-plans", response_model=list[ReteachPlanOut])
+def read_teacher_reteach_plans(
+    user: CurrentUser,
+    db: DbSession,
+    mastery_matrix_id: uuid.UUID | None = Query(default=None),
+    standard_id: uuid.UUID | None = Query(default=None),
+    status: str | None = Query(default=None),
+) -> list[ReteachPlanOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    rows = list_reteach_plans(
+        db,
+        tenant_id=tenant_id,
+        user_id=user.id,
+        mastery_matrix_id=mastery_matrix_id,
+        standard_id=standard_id,
+        status=status,
+    )
+    return [_reteach_plan_out(row) for row in rows]
+
+
+@router.post("/reteach-plans", response_model=ReteachPlanOut, status_code=201)
+def create_teacher_reteach_plan(
+    body: ReteachPlanCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> ReteachPlanOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = create_reteach_plan(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            mastery_matrix_id=body.mastery_matrix_id,
+            standard_id=body.standard_id,
+            title=body.title,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    row = get_reteach_plan_or_404(db, tenant_id=tenant_id, user_id=user.id, reteach_plan_id=row.id)
+    return _reteach_plan_out(row)
+
+
+@router.get("/reteach-plans/{reteach_plan_id}", response_model=ReteachPlanOut)
+def read_teacher_reteach_plan(
+    reteach_plan_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> ReteachPlanOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = get_reteach_plan_or_404(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            reteach_plan_id=reteach_plan_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _reteach_plan_out(row)
+
+
+@router.put("/reteach-plans/{reteach_plan_id}", response_model=ReteachPlanOut)
+def update_teacher_reteach_plan(
+    reteach_plan_id: uuid.UUID,
+    body: ReteachPlanUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> ReteachPlanOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = update_reteach_plan(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            reteach_plan_id=reteach_plan_id,
+            title=body.title,
+            status=body.status,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    row = get_reteach_plan_or_404(db, tenant_id=tenant_id, user_id=user.id, reteach_plan_id=row.id)
+    return _reteach_plan_out(row)
+
+
+@router.get("/reteach-plans/{reteach_plan_id}/versions", response_model=list[ReteachPlanVersionOut])
+def read_teacher_reteach_plan_versions(
+    reteach_plan_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> list[ReteachPlanVersionOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        rows = list_reteach_plan_versions(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            reteach_plan_id=reteach_plan_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [_reteach_plan_version_out(row) for row in rows]
+
+
+@router.post("/reteach-plans/{reteach_plan_id}/versions", response_model=ReteachPlanVersionOut, status_code=201)
+def create_teacher_reteach_plan_version(
+    reteach_plan_id: uuid.UUID,
+    body: ReteachPlanVersionCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> ReteachPlanVersionOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = save_teacher_reteach_plan_version(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            reteach_plan_id=reteach_plan_id,
+            content_json=body.content_json,
+            change_reason=body.change_reason,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _reteach_plan_version_out(row)
+
+
+@router.post("/reteach-plans/{reteach_plan_id}/ai-draft", response_model=ReteachPlanAIDraftOut)
+def create_teacher_reteach_plan_ai_draft(
+    reteach_plan_id: uuid.UUID,
+    body: ReteachPlanAIDraftCreate,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> ReteachPlanAIDraftOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        plan, version, response_meta = generate_reteach_plan_ai_draft(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            reteach_plan_id=reteach_plan_id,
+            provider_mode=body.provider_mode,
+            teacher_instructions=body.teacher_instructions,
+            settings=settings,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    plan = get_reteach_plan_or_404(db, tenant_id=tenant_id, user_id=user.id, reteach_plan_id=plan.id)
+    return ReteachPlanAIDraftOut(
+        plan=_reteach_plan_out(plan),
+        version=_reteach_plan_version_out(version),
+        teacher_review_required=bool(response_meta["teacher_review_required"]),
+        provider_mode=str(response_meta["provider_mode"]),
+        prompt_version=str(response_meta["prompt_version"]),
+        message=str(response_meta["message"]),
+    )
 
 
 @router.get("/planning-drafts", response_model=list[PlanningDraftOut])
@@ -3583,3 +4954,119 @@ def read_teacher_assist_weekly_plan_version(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _weekly_plan_version_out(row)
+
+
+@router.post(
+    "/weekly-plans/{weekly_plan_id}/exports",
+    response_model=TeacherAssistExportArtifactOut,
+    status_code=202,
+)
+def create_teacher_assist_weekly_plan_export(
+    weekly_plan_id: uuid.UUID,
+    body: TeacherAssistExportArtifactCreate,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistExportArtifactOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = create_weekly_plan_export(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            weekly_plan_id=weekly_plan_id,
+            artifact_type=body.artifact_type,
+            export_format=body.export_format,
+            provider_mode=body.provider_mode,
+            settings=settings,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _export_artifact_out(row)
+
+
+@router.get("/exports", response_model=list[TeacherAssistExportArtifactOut])
+def read_teacher_assist_exports(
+    user: CurrentUser,
+    db: DbSession,
+    artifact_type: str | None = Query(default=None),
+    artifact_status: str | None = Query(default=None),
+    source_plan_id: uuid.UUID | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[TeacherAssistExportArtifactOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        rows = list_export_artifacts(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            artifact_type=artifact_type,
+            artifact_status=artifact_status,
+            source_plan_id=source_plan_id,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [_export_artifact_out(row) for row in rows]
+
+
+@router.get("/exports/{export_artifact_id}", response_model=TeacherAssistExportArtifactDetailOut)
+def read_teacher_assist_export_detail(
+    export_artifact_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistExportArtifactDetailOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = build_export_artifact_detail(
+            db,
+            settings=settings,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            export_artifact_id=export_artifact_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    artifact = payload["artifact"]
+    return TeacherAssistExportArtifactDetailOut(
+        artifact=_export_artifact_out(artifact),
+        workflow_status=payload["workflow_status"],
+        workflow_progress_percent=payload["workflow_progress_percent"],
+        workflow_error_message=payload["workflow_error_message"],
+        download_url=payload["download_url"],
+    )
+
+
+@router.get("/exports/{export_artifact_id}/download", response_model=TeacherAssistExportDownloadOut)
+def read_teacher_assist_export_download(
+    export_artifact_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> TeacherAssistExportDownloadOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = get_export_artifact_download_url(
+            db,
+            settings=settings,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            export_artifact_id=export_artifact_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return TeacherAssistExportDownloadOut(
+        download_url=payload["download_url"],
+        filename=payload["filename"],
+        mime_type=payload["mime_type"],
+        expires_at=datetime.now(UTC)
+        + timedelta(seconds=max(1, settings.teacher_assist_s3_presign_expiration_seconds)),
+    )

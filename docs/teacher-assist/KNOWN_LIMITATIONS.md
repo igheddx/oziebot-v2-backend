@@ -8,7 +8,7 @@
 - QR assignment-page identity is implemented only for generated printable packets; scan/upload ingestion is not implemented yet.
 - Printable assignment templates are currently limited to browser-print HTML output.
 - Grading assistant workflows have not been implemented yet.
-- TEKS mastery matrix has not been implemented yet.
+- TEKS mastery matrix foundation is implemented with teacher-confirmed manual commits, correction/reversal lineage, and anonymous STUDENT # tracking. Phase 27 adds read-only heatmaps, rules-based reteach insights, and operational mastery dashboards. Phase 29 adds mock AI reteach plan drafts with teacher-required review and version history; real-provider reteach AI, automatic publish, and district analytics remain deferred.
 - Newsletter/communication assistant has not been implemented yet.
 - Resource unlink/remove flows may still be deferred.
 - Static-export frontend constraints may influence route design.
@@ -29,10 +29,10 @@
 - The assignment workspace is teacher-owned and single-user; collaborative assignment governance is not implemented yet.
 - Printable assignment packets are assignment-scoped and teacher-owned; broader packet sharing/governance workflows are not implemented yet.
 - Uploaded student-work intake now supports async extraction jobs, preview persistence, and teacher review drill-down, but real OCR quality and handwriting extraction are still limited.
-- Grading review is implemented as a manual teacher-confirmation-first foundation only; AI grading, mastery updates, gradebook commit, and parent communication are not implemented yet.
+- Grading review supports manual teacher confirmation and optional guarded AI draft suggestions. Teacher-confirmed manual gradebook commits are available via the Gradebook workspace; teacher-confirmed mastery tracking is available via the Mastery workspace. Parent communication, LMS sync, and SIS integration are not implemented yet.
 - Assignment resource-link editing exists only as a backend foundation and starter-copy seam; the frontend does not yet expose a richer assignment-resource editor.
 - The unified workspace now includes extraction remediation drill-down, but live push notifications and websocket-based updates are not implemented.
-- The unified workspace is optimized for operational summaries and attention surfacing; deeper cross-module remediation orchestration beyond extraction review is still deferred.
+- The unified workspace is optimized for operational summaries and attention surfacing; `/teacher-assist/actions` now provides the deeper cross-module action routing layer, but bulk remediation orchestration is still deferred.
 - TeacherAssist activity events are stored as append-only relational records for timeline/query use; broader event-stream infrastructure is not implemented.
 - TeacherAssist frontend validation remains lint/build only because the repo does not yet include a wired frontend test harness for this product area.
 - TeacherAssist object storage now supports local and private S3 backends, but direct-browser uploads are not implemented yet.
@@ -41,5 +41,5 @@
 - Lifecycle cleanup is currently infrastructure-guided for S3 `temp/` and `exports/` prefixes only; app-managed retention jobs are not implemented yet.
 - Extraction review notes and issue reasons are currently stored in record metadata rather than dedicated columns.
 - External-link resources do not have uploaded file bodies, so extraction applies only to stored resource files and uploaded student-work artifacts.
-- Extraction completion and teacher review do not create grading reviews, mastery updates, gradebook commits, or parent communication artifacts.
-- Approved extracted text is persisted for future downstream phases but is not yet consumed by AI grading or analytics workflows.
+- Extraction completion and teacher review do not automatically create grading reviews, gradebook commits, mastery updates, or parent communication artifacts. Gradebook commits require a separate teacher-confirmed manual action (Phase 24). The action workspace (Phase 25) surfaces ready-to-commit reviews but does not auto-commit.
+- Approved extracted text is now consumable through read-only grading-prep context/summary APIs after teacher approval, but AI grading and analytics workflows are not wired yet.

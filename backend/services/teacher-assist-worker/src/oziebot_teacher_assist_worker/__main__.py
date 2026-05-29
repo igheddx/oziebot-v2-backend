@@ -11,6 +11,9 @@ from oziebot_api.services.teacher_assist.extraction_jobs import (
     process_next_teacher_assist_extraction_job_with_engine,
     recover_stale_extraction_jobs,
 )
+from oziebot_api.services.teacher_assist.export_generation import (
+    process_next_teacher_assist_export_with_engine,
+)
 from oziebot_api.services.teacher_assist.workflow_service import (
     process_next_teacher_assist_workflow_with_engine,
 )
@@ -49,6 +52,12 @@ def main() -> None:
             settings=settings,
             worker_name="teacher-assist-worker",
         )
+        if claimed_id is None:
+            claimed_id = process_next_teacher_assist_export_with_engine(
+                engine,
+                settings=settings,
+                worker_name="teacher-assist-worker",
+            )
         if claimed_id is None:
             claimed_id = process_next_teacher_assist_workflow_with_engine(
                 engine,

@@ -34,7 +34,7 @@ def upgrade() -> None:
         sa.Column("attempt_number", sa.Integer(), nullable=False, server_default="1"),
     )
     op.create_foreign_key(
-        "fk_teacher_assist_extraction_jobs_parent_extraction_job_id",
+        "fk_ta_extraction_jobs_parent_job_id",
         "teacher_assist_extraction_jobs",
         "teacher_assist_extraction_jobs",
         ["parent_extraction_job_id"],
@@ -42,7 +42,7 @@ def upgrade() -> None:
         ondelete="SET NULL",
     )
     op.create_foreign_key(
-        "fk_teacher_assist_extraction_jobs_retry_root_job_id",
+        "fk_ta_extraction_jobs_retry_root_id",
         "teacher_assist_extraction_jobs",
         "teacher_assist_extraction_jobs",
         ["retry_root_job_id"],
@@ -95,7 +95,7 @@ def upgrade() -> None:
         sa.Column("source_extraction_job_id", sa.Uuid(), nullable=True),
     )
     op.create_foreign_key(
-        "fk_teacher_assist_extracted_text_records_reviewed_by_user_id",
+        "fk_ta_extracted_text_reviewed_by_user_id",
         "teacher_assist_extracted_text_records",
         "users",
         ["reviewed_by_user_id"],
@@ -103,7 +103,7 @@ def upgrade() -> None:
         ondelete="SET NULL",
     )
     op.create_foreign_key(
-        "fk_teacher_assist_extracted_text_records_source_extraction_job_id",
+        "fk_ta_extracted_text_source_job_id",
         "teacher_assist_extracted_text_records",
         "teacher_assist_extraction_jobs",
         ["source_extraction_job_id"],
@@ -144,12 +144,12 @@ def downgrade() -> None:
         table_name="teacher_assist_extracted_text_records",
     )
     op.drop_constraint(
-        "fk_teacher_assist_extracted_text_records_source_extraction_job_id",
+        "fk_ta_extracted_text_source_job_id",
         "teacher_assist_extracted_text_records",
         type_="foreignkey",
     )
     op.drop_constraint(
-        "fk_teacher_assist_extracted_text_records_reviewed_by_user_id",
+        "fk_ta_extracted_text_reviewed_by_user_id",
         "teacher_assist_extracted_text_records",
         type_="foreignkey",
     )
@@ -171,12 +171,12 @@ def downgrade() -> None:
         table_name="teacher_assist_extraction_jobs",
     )
     op.drop_constraint(
-        "fk_teacher_assist_extraction_jobs_retry_root_job_id",
+        "fk_ta_extraction_jobs_retry_root_id",
         "teacher_assist_extraction_jobs",
         type_="foreignkey",
     )
     op.drop_constraint(
-        "fk_teacher_assist_extraction_jobs_parent_extraction_job_id",
+        "fk_ta_extraction_jobs_parent_job_id",
         "teacher_assist_extraction_jobs",
         type_="foreignkey",
     )

@@ -32,7 +32,9 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const PUBLIC_PATHS = new Set(["/login"]);
+function isPublicPath(pathname: string): boolean {
+  return pathname === "/login" || pathname.startsWith("/login/");
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -95,7 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (status === "loading") return;
-    const isPublicPath = PUBLIC_PATHS.has(pathname);
+    const publicPath = isPublicPath(pathname);
     const isAdminPath = pathname.startsWith("/admin");
     const routeProductKey = productKeyForPathname(pathname);
     const products = user?.products ?? [];
@@ -107,7 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const productKeys = new Set(products.map((product) => product.product_key));
     const defaultRoute = routeForProductKey(defaultProduct);
 
-    if (status === "unauthenticated" && !isPublicPath) {
+    if (status === "unauthenticated" && !publicPath) {
       router.replace("/login");
       return;
     }
@@ -115,7 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       router.replace(defaultRoute);
       return;
     }
-    if (status === "authenticated" && (pathname === "/login" || pathname === "/")) {
+    if (status === "authenticated" && (publicPath || pathname === "/")) {
       router.replace(defaultRoute);
       return;
     }
@@ -180,7 +182,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [billing, coinbase, loginWithPassword, logoutUser, setDefaultProduct, status, user],
   );
 
-  if (status === "loading" && pathname !== "/login") {
+  if (status === "loading" && !isPublicPath(pathname)) {
     return (
       <div className="mx-auto flex min-h-dvh max-w-lg items-center justify-center px-6 text-sm text-muted">
         Loading session...

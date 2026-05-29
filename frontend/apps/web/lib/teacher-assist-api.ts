@@ -8,6 +8,12 @@ import {
 import type {
   Assignment,
   AssignmentGradingReview,
+  AssignmentGradingReviewAISuggestion,
+  AssignmentGradingReviewAISuggestionInput,
+  AssignmentGradebookCommitResult,
+  AssignmentGradebookExportView,
+  AssignmentGradeRecord,
+  AssignmentGradeRecordDetail,
   AssignmentGradingReviewCreateInput,
   AssignmentGradingReviewUpdateInput,
   AssignmentInput,
@@ -38,6 +44,30 @@ import type {
   TeacherAssistExtractionRun,
   TeacherAssistExtractionSummary,
   TeacherAssistFileDownload,
+  TeacherAssistAssignmentGradingPrepSummary,
+  TeacherAssistStudentWorkGradingPrepContext,
+  TeacherAssistExportArtifact,
+  TeacherAssistExportArtifactCreateInput,
+  TeacherAssistExportArtifactDetail,
+  TeacherAssistExportDownload,
+  TeacherAssistActionWorkspace,
+  TeacherAssistTodayWorkspace,
+  AssignmentEffectiveness,
+  MasteryCommitResult,
+  MasteryEvaluation,
+  MasteryEvaluationDetail,
+  MasteryDashboard,
+  ReteachPlan,
+  ReteachPlanAIDraft,
+  ReteachPlanVersion,
+  MasteryMatrix,
+  MasteryMatrixHeatmap,
+  MasteryMatrixReteachInsights,
+  MasteryMatrixReteachSummary,
+  MasteryMatrixStandardsSummary,
+  MasteryMatrixStudentsSummary,
+  MasteryMatrixSummary,
+  StudentMasterySummary,
   TeacherAssistOptions,
   TeacherAssistWorkspace,
   TeacherClass,
@@ -90,6 +120,14 @@ export function fetchTeacherAssistOptions() {
 
 export function fetchTeacherAssistWorkspace() {
   return readJson<TeacherAssistWorkspace>("/v1/teacher-assist/workspace");
+}
+
+export function fetchTeacherAssistActionWorkspace() {
+  return readJson<TeacherAssistActionWorkspace>("/v1/teacher-assist/action-workspace");
+}
+
+export function fetchTeacherAssistTodayWorkspace() {
+  return readJson<TeacherAssistTodayWorkspace>("/v1/teacher-assist/today");
 }
 
 export function fetchTeacherProfile() {
@@ -431,6 +469,18 @@ export function fetchAssignmentGradingReviews(id: string) {
   return readJson<AssignmentGradingReview[]>(`/v1/teacher-assist/assignments/${id}/grading-reviews`);
 }
 
+export function fetchAssignmentGradingPrepSummary(id: string) {
+  return readJson<TeacherAssistAssignmentGradingPrepSummary>(
+    `/v1/teacher-assist/assignments/${id}/grading-prep-summary`,
+  );
+}
+
+export function fetchStudentWorkGradingPrepContext(id: string) {
+  return readJson<TeacherAssistStudentWorkGradingPrepContext>(
+    `/v1/teacher-assist/student-work/${id}/grading-prep-context`,
+  );
+}
+
 export function createAssignmentGradingReview(
   studentWorkSubmissionId: string,
   body: AssignmentGradingReviewCreateInput,
@@ -461,6 +511,272 @@ export function updateAssignmentGradingReviewStatus(
   return writeJson<AssignmentGradingReview>(`/v1/teacher-assist/grading-reviews/${id}/status`, "PATCH", {
     status,
   });
+}
+
+export function generateAssignmentGradingReviewAISuggestion(
+  id: string,
+  body: AssignmentGradingReviewAISuggestionInput = { provider_mode: "mock" },
+) {
+  return writeJson<AssignmentGradingReviewAISuggestion>(
+    `/v1/teacher-assist/grading-reviews/${id}/ai-suggestions`,
+    "POST",
+    body as Record<string, unknown>,
+  );
+}
+
+export function commitGradingReviewToGradebook(
+  gradingReviewId: string,
+  body: { teacher_confirmation_note?: string | null } = {},
+) {
+  return writeJson<AssignmentGradebookCommitResult>(
+    `/v1/teacher-assist/grading-reviews/${gradingReviewId}/gradebook-commit`,
+    "POST",
+    body as Record<string, unknown>,
+  );
+}
+
+export function fetchAssignmentGradebookRecords(assignmentId: string, recordStatus?: string) {
+  const params = new URLSearchParams();
+  if (recordStatus) params.set("record_status", recordStatus);
+  const query = params.toString();
+  return readJson<AssignmentGradeRecord[]>(
+    `/v1/teacher-assist/assignments/${assignmentId}/gradebook-records${query ? `?${query}` : ""}`,
+  );
+}
+
+export function fetchGradebookRecordDetail(gradeRecordId: string) {
+  return readJson<AssignmentGradeRecordDetail>(`/v1/teacher-assist/gradebook/records/${gradeRecordId}`);
+}
+
+export function createGradebookRecordCorrection(
+  gradeRecordId: string,
+  body: {
+    committed_score?: number | null;
+    max_score?: number | null;
+    committed_feedback?: string | null;
+    reason: string;
+  },
+) {
+  return writeJson<AssignmentGradebookCommitResult>(
+    `/v1/teacher-assist/gradebook/records/${gradeRecordId}/corrections`,
+    "POST",
+    body as Record<string, unknown>,
+  );
+}
+
+export function createGradebookRecordReversal(gradeRecordId: string, body: { reason: string }) {
+  return writeJson<AssignmentGradebookCommitResult>(
+    `/v1/teacher-assist/gradebook/records/${gradeRecordId}/reversals`,
+    "POST",
+    body as Record<string, unknown>,
+  );
+}
+
+export function fetchAssignmentGradebookExport(assignmentId: string) {
+  return readJson<AssignmentGradebookExportView>(
+    `/v1/teacher-assist/assignments/${assignmentId}/gradebook-export`,
+  );
+}
+
+function buildQuery(params: Record<string, string | undefined>) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) search.set(key, value);
+  }
+  const query = search.toString();
+  return query ? `?${query}` : "";
+}
+
+export function fetchMasteryMatrices(filters: {
+  school_year_id?: string;
+  grading_period_id?: string;
+  class_id?: string;
+  subject_id?: string;
+  status?: string;
+} = {}) {
+  const query = buildQuery({
+    school_year_id: filters.school_year_id,
+    grading_period_id: filters.grading_period_id,
+    class_id: filters.class_id,
+    subject_id: filters.subject_id,
+    status: filters.status,
+  });
+  return readJson<MasteryMatrix[]>(`/v1/teacher-assist/mastery-matrices${query}`);
+}
+
+export function fetchMasteryMatrix(masteryMatrixId: string) {
+  return readJson<MasteryMatrix>(`/v1/teacher-assist/mastery-matrices/${masteryMatrixId}`);
+}
+
+export function createMasteryMatrix(body: Record<string, unknown>) {
+  return writeJson<MasteryMatrix>("/v1/teacher-assist/mastery-matrices", "POST", body);
+}
+
+export function updateMasteryMatrix(masteryMatrixId: string, body: Record<string, unknown>) {
+  return writeJson<MasteryMatrix>(`/v1/teacher-assist/mastery-matrices/${masteryMatrixId}`, "PUT", body);
+}
+
+export function createMasteryEvaluation(body: Record<string, unknown>) {
+  return writeJson<MasteryEvaluation>("/v1/teacher-assist/mastery-evaluations", "POST", body);
+}
+
+export function updateMasteryEvaluation(masteryEvaluationId: string, body: Record<string, unknown>) {
+  return writeJson<MasteryEvaluation>(
+    `/v1/teacher-assist/mastery-evaluations/${masteryEvaluationId}`,
+    "PUT",
+    body,
+  );
+}
+
+export function fetchMasteryEvaluationDetail(masteryEvaluationId: string) {
+  return readJson<MasteryEvaluationDetail>(
+    `/v1/teacher-assist/mastery-evaluations/${masteryEvaluationId}`,
+  );
+}
+
+export function commitMasteryEvaluation(masteryEvaluationId: string, body: Record<string, unknown> = {}) {
+  return writeJson<MasteryCommitResult>(
+    `/v1/teacher-assist/mastery-evaluations/${masteryEvaluationId}/commit`,
+    "POST",
+    body,
+  );
+}
+
+export function createMasteryEvaluationCorrection(
+  masteryEvaluationId: string,
+  body: Record<string, unknown>,
+) {
+  return writeJson<MasteryCommitResult>(
+    `/v1/teacher-assist/mastery-evaluations/${masteryEvaluationId}/corrections`,
+    "POST",
+    body,
+  );
+}
+
+export function createMasteryEvaluationReversal(
+  masteryEvaluationId: string,
+  body: Record<string, unknown>,
+) {
+  return writeJson<MasteryCommitResult>(
+    `/v1/teacher-assist/mastery-evaluations/${masteryEvaluationId}/reversals`,
+    "POST",
+    body,
+  );
+}
+
+export function fetchMasteryMatrixSummary(masteryMatrixId: string) {
+  return readJson<MasteryMatrixSummary>(`/v1/teacher-assist/mastery-matrices/${masteryMatrixId}/summary`);
+}
+
+export function fetchMasteryMatrixStandardsSummary(masteryMatrixId: string) {
+  return readJson<MasteryMatrixStandardsSummary>(
+    `/v1/teacher-assist/mastery-matrices/${masteryMatrixId}/standards`,
+  );
+}
+
+export function fetchMasteryMatrixStudentsSummary(masteryMatrixId: string) {
+  return readJson<MasteryMatrixStudentsSummary>(
+    `/v1/teacher-assist/mastery-matrices/${masteryMatrixId}/students`,
+  );
+}
+
+export function fetchMasteryMatrixReteachSummary(masteryMatrixId: string) {
+  return readJson<MasteryMatrixReteachSummary>(
+    `/v1/teacher-assist/mastery-matrices/${masteryMatrixId}/reteach-summary`,
+  );
+}
+
+export function fetchMasteryMatrixHeatmap(masteryMatrixId: string) {
+  return readJson<MasteryMatrixHeatmap>(`/v1/teacher-assist/mastery-matrices/${masteryMatrixId}/heatmap`);
+}
+
+export function fetchMasteryMatrixReteachInsights(masteryMatrixId: string) {
+  return readJson<MasteryMatrixReteachInsights>(
+    `/v1/teacher-assist/mastery-matrices/${masteryMatrixId}/reteach-insights`,
+  );
+}
+
+export function fetchStudentMasterySummary(masteryMatrixId: string, studentNumber: number) {
+  return readJson<StudentMasterySummary>(
+    `/v1/teacher-assist/mastery-matrices/${masteryMatrixId}/student-summary/${studentNumber}`,
+  );
+}
+
+export function fetchAssignmentEffectiveness(assignmentId: string) {
+  return readJson<AssignmentEffectiveness>(`/v1/teacher-assist/assignments/${assignmentId}/effectiveness`);
+}
+
+export function fetchMasteryDashboard(filters: {
+  school_year_id?: string;
+  grading_period_id?: string;
+  class_id?: string;
+  subject_id?: string;
+} = {}) {
+  const params = new URLSearchParams();
+  if (filters.school_year_id) params.set("school_year_id", filters.school_year_id);
+  if (filters.grading_period_id) params.set("grading_period_id", filters.grading_period_id);
+  if (filters.class_id) params.set("class_id", filters.class_id);
+  if (filters.subject_id) params.set("subject_id", filters.subject_id);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return readJson<MasteryDashboard>(`/v1/teacher-assist/mastery-dashboard${query}`);
+}
+
+export function fetchReteachPlans(filters: {
+  mastery_matrix_id?: string;
+  standard_id?: string;
+  status?: string;
+} = {}) {
+  const params = new URLSearchParams();
+  if (filters.mastery_matrix_id) params.set("mastery_matrix_id", filters.mastery_matrix_id);
+  if (filters.standard_id) params.set("standard_id", filters.standard_id);
+  if (filters.status) params.set("status", filters.status);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return readJson<ReteachPlan[]>(`/v1/teacher-assist/reteach-plans${query}`);
+}
+
+export function fetchReteachPlan(id: string) {
+  return readJson<ReteachPlan>(`/v1/teacher-assist/reteach-plans/${id}`);
+}
+
+export function createReteachPlan(body: {
+  mastery_matrix_id: string;
+  standard_id: string;
+  title?: string;
+}) {
+  return writeJson<ReteachPlan>("/v1/teacher-assist/reteach-plans", "POST", body);
+}
+
+export function updateReteachPlan(
+  id: string,
+  body: { title?: string; status?: string },
+) {
+  return writeJson<ReteachPlan>(`/v1/teacher-assist/reteach-plans/${id}`, "PUT", body);
+}
+
+export function fetchReteachPlanVersions(id: string) {
+  return readJson<ReteachPlanVersion[]>(`/v1/teacher-assist/reteach-plans/${id}/versions`);
+}
+
+export function createReteachPlanVersion(
+  id: string,
+  body: { content_json: Record<string, unknown>; change_reason?: string },
+) {
+  return writeJson<ReteachPlanVersion>(
+    `/v1/teacher-assist/reteach-plans/${id}/versions`,
+    "POST",
+    body,
+  );
+}
+
+export function generateReteachPlanAIDraft(
+  id: string,
+  body: { provider_mode?: "mock" | "real"; teacher_instructions?: string } = {},
+) {
+  return writeJson<ReteachPlanAIDraft>(
+    `/v1/teacher-assist/reteach-plans/${id}/ai-draft`,
+    "POST",
+    body,
+  );
 }
 
 export function createLinkResource(body: Record<string, unknown>) {
@@ -587,6 +903,42 @@ export function updateWeeklyPlanSharing(id: string, body: WeeklyPlanSharingUpdat
 
 export function fetchWeeklyPlanVersions(id: string) {
   return readJson<WeeklyPlanVersion[]>(`/v1/teacher-assist/weekly-plans/${id}/versions`);
+}
+
+export function createWeeklyPlanExport(
+  planId: string,
+  body: TeacherAssistExportArtifactCreateInput,
+) {
+  return writeJson<TeacherAssistExportArtifact>(
+    `/v1/teacher-assist/weekly-plans/${planId}/exports`,
+    "POST",
+    body as Record<string, unknown>,
+  );
+}
+
+export function fetchExportArtifacts(filters: {
+  artifact_type?: string;
+  artifact_status?: string;
+  source_plan_id?: string;
+  limit?: number;
+} = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return readJson<TeacherAssistExportArtifact[]>(
+    `/v1/teacher-assist/exports${query ? `?${query}` : ""}`,
+  );
+}
+
+export function fetchExportArtifactDetail(id: string) {
+  return readJson<TeacherAssistExportArtifactDetail>(`/v1/teacher-assist/exports/${id}`);
+}
+
+export function fetchExportArtifactDownload(id: string) {
+  return readJson<TeacherAssistExportDownload>(`/v1/teacher-assist/exports/${id}/download`);
 }
 
 export function attachPlanningDraftResource(id: string, resourceLibraryItemId: string) {

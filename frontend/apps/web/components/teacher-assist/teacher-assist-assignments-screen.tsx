@@ -2,23 +2,29 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { buildApiUrl } from "@/lib/auth-service";
 import {
   cancelExtractionJob,
+  commitGradingReviewToGradebook,
   createAssignment,
   createAssignmentGradingReview,
   createAssignmentPrintPacket,
   createStudentWorkExtractionJob,
   fetchAssignmentGradingReviews,
+  fetchAssignmentGradebookRecords,
+  fetchAssignmentGradingPrepSummary,
   fetchAssignmentStudentWork,
   fetchAssignmentPrintPacketPages,
   fetchAssignmentPrintPackets,
   fetchAssignments,
   fetchAssignmentStudentWorkDownloadUrl,
+  fetchStudentWorkGradingPrepContext,
   fetchClasses,
   fetchGradingPeriods,
+  generateAssignmentGradingReviewAISuggestion,
   fetchSchoolYears,
   fetchStandards,
   fetchSubjects,
@@ -34,6 +40,8 @@ import {
 import type {
   Assignment,
   AssignmentGradingReview,
+  AssignmentGradingReviewAISuggestion,
+  AssignmentGradeRecord,
   AssignmentInput,
   AssignmentPrintPacket,
   AssignmentPrintPage,
@@ -42,6 +50,8 @@ import type {
   SchoolYear,
   Standard,
   Subject,
+  TeacherAssistAssignmentGradingPrepSummary,
+  TeacherAssistStudentWorkGradingPrepContext,
   TeacherAssistOptions,
   TeacherClass,
 } from "@/lib/teacher-assist-types";
@@ -299,6 +309,8 @@ function PacketPreviewCard({
 }
 
 export function TeacherAssistAssignmentsScreen() {
+  const searchParams = useSearchParams();
+  const requestedAssignmentId = searchParams.get("assignment_id");
   const [options, setOptions] = useState<TeacherAssistOptions | null>(null);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
@@ -326,6 +338,12 @@ export function TeacherAssistAssignmentsScreen() {
   >({});
   const [submissions, setSubmissions] = useState<AssignmentStudentWorkSubmission[]>([]);
   const [gradingReviews, setGradingReviews] = useState<AssignmentGradingReview[]>([]);
+  const [gradingPrepSummary, setGradingPrepSummary] = useState<TeacherAssistAssignmentGradingPrepSummary | null>(
+    null,
+  );
+  const [gradingPrepContext, setGradingPrepContext] = useState<TeacherAssistStudentWorkGradingPrepContext | null>(
+    null,
+  );
   const [studentWorkForm, setStudentWorkForm] = useState<StudentWorkUploadForm>(emptyStudentWorkUploadForm);
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(null);
   const [selectedGradingReviewId, setSelectedGradingReviewId] = useState<string | null>(null);
@@ -337,6 +355,7 @@ export function TeacherAssistAssignmentsScreen() {
   const [packetPagesLoading, setPacketPagesLoading] = useState(false);
   const [submissionsLoading, setSubmissionsLoading] = useState(false);
   const [gradingReviewsLoading, setGradingReviewsLoading] = useState(false);
+  const [gradingPrepLoading, setGradingPrepLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generatingPacket, setGeneratingPacket] = useState(false);
   const [uploadingStudentWork, setUploadingStudentWork] = useState(false);
@@ -349,6 +368,11 @@ export function TeacherAssistAssignmentsScreen() {
   const [creatingGradingReview, setCreatingGradingReview] = useState<string | null>(null);
   const [savingGradingReview, setSavingGradingReview] = useState(false);
   const [savingGradingReviewStatus, setSavingGradingReviewStatus] = useState(false);
+  const [generatingAISuggestion, setGeneratingAISuggestion] = useState(false);
+  const [aiSuggestionMeta, setAiSuggestionMeta] = useState<AssignmentGradingReviewAISuggestion | null>(null);
+  const [gradeRecords, setGradeRecords] = useState<AssignmentGradeRecord[]>([]);
+  const [gradeRecordsLoading, setGradeRecordsLoading] = useState(false);
+  const [committingGradebook, setCommittingGradebook] = useState(false);
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
   const [statusDrafts, setStatusDrafts] = useState<Record<string, Assignment["status"]>>({});
   const [error, setError] = useState<string | null>(null);
@@ -437,6 +461,28 @@ export function TeacherAssistAssignmentsScreen() {
     }
   }, []);
 
+  const loadGradingPrepSummary = useCallback(async (assignmentId: string) => {
+    setGradingPrepLoading(true);
+    try {
+      const nextSummary = await fetchAssignmentGradingPrepSummary(assignmentId);
+      setGradingPrepSummary(nextSummary);
+    } catch (nextError) {
+      setGradingPrepSummary(null);
+      setError(nextError instanceof Error ? nextError.message : "Could not load grading prep summary.");
+    } finally {
+      setGradingPrepLoading(false);
+    }
+  }, []);
+
+  const loadGradingPrepContext = useCallback(async (submissionId: string) => {
+    try {
+      const nextContext = await fetchStudentWorkGradingPrepContext(submissionId);
+      setGradingPrepContext(nextContext);
+    } catch {
+      setGradingPrepContext(null);
+    }
+  }, []);
+
   const loadStudentWork = useCallback(async (assignmentId: string) => {
     setSubmissionsLoading(true);
     try {
@@ -453,7 +499,8 @@ export function TeacherAssistAssignmentsScreen() {
     } finally {
       setSubmissionsLoading(false);
     }
-  }, []);
+    void loadGradingPrepSummary(assignmentId);
+  }, [loadGradingPrepSummary]);
 
   const loadGradingReviews = useCallback(async (assignmentId: string) => {
     setGradingReviewsLoading(true);
@@ -470,6 +517,15 @@ export function TeacherAssistAssignmentsScreen() {
       setSelectedGradingReviewId(null);
     } finally {
       setGradingReviewsLoading(false);
+    }
+    setGradeRecordsLoading(true);
+    try {
+      const nextRecords = await fetchAssignmentGradebookRecords(assignmentId);
+      setGradeRecords(nextRecords);
+    } catch {
+      setGradeRecords([]);
+    } finally {
+      setGradeRecordsLoading(false);
     }
   }, []);
 
@@ -499,6 +555,8 @@ export function TeacherAssistAssignmentsScreen() {
       setStudentWorkForm(emptyStudentWorkUploadForm());
       setGradingReviews([]);
       setSelectedGradingReviewId(null);
+      setGradingPrepSummary(null);
+      setGradingPrepContext(null);
       setGradingReviewForm(emptyGradingReviewForm());
       return;
     }
@@ -506,6 +564,14 @@ export function TeacherAssistAssignmentsScreen() {
     void loadStudentWork(packetAssignmentId);
     void loadGradingReviews(packetAssignmentId);
   }, [loadGradingReviews, loadPackets, loadStudentWork, packetAssignmentId]);
+
+  useEffect(() => {
+    if (!selectedSubmissionId) {
+      setGradingPrepContext(null);
+      return;
+    }
+    void loadGradingPrepContext(selectedSubmissionId);
+  }, [loadGradingPrepContext, selectedSubmissionId]);
 
   useEffect(() => {
     if (!selectedPacketId) {
@@ -566,6 +632,22 @@ export function TeacherAssistAssignmentsScreen() {
   const reviewBySubmissionId = useMemo(
     () => Object.fromEntries(gradingReviews.map((review) => [review.student_work_submission_id, review])),
     [gradingReviews],
+  );
+  const activeGradeRecordByReviewId = useMemo(
+    () =>
+      Object.fromEntries(
+        gradeRecords
+          .filter((record) => record.record_status === "active")
+          .map((record) => [record.grading_review_id, record]),
+      ),
+    [gradeRecords],
+  );
+  const gradingPrepBySubmissionId = useMemo(
+    () =>
+      Object.fromEntries(
+        (gradingPrepSummary?.submissions ?? []).map((item) => [item.student_work_submission_id, item]),
+      ),
+    [gradingPrepSummary],
   );
 
   const availableSubjects = useMemo(() => {
@@ -635,6 +717,19 @@ export function TeacherAssistAssignmentsScreen() {
     setNotice(null);
     setError(null);
   }, []);
+
+  useEffect(() => {
+    if (!requestedAssignmentId || loading) return;
+    if (!assignments.some((assignment) => assignment.id === requestedAssignmentId)) return;
+    if (packetAssignmentId === requestedAssignmentId) return;
+    handlePacketAssignment(requestedAssignmentId);
+  }, [
+    assignments,
+    handlePacketAssignment,
+    loading,
+    packetAssignmentId,
+    requestedAssignmentId,
+  ]);
 
   const handleToggleStandard = useCallback((standardId: string) => {
     setForm((current) => ({
@@ -902,6 +997,47 @@ export function TeacherAssistAssignmentsScreen() {
     }
   }, [gradingReviewForm.status, loadGradingReviews, packetAssignmentId, selectedGradingReview]);
 
+  const handleGenerateAISuggestion = useCallback(async () => {
+    if (!selectedGradingReview) return;
+    setGeneratingAISuggestion(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await generateAssignmentGradingReviewAISuggestion(selectedGradingReview.id, {
+        provider_mode: "mock",
+      });
+      setAiSuggestionMeta(result);
+      if (packetAssignmentId) {
+        await loadGradingReviews(packetAssignmentId);
+      }
+      setGradingReviewForm(reviewFormFromReview(result.review));
+      setNotice("AI grading suggestion saved as draft. Review and edit before confirming.");
+    } catch (nextError) {
+      setAiSuggestionMeta(null);
+      setError(nextError instanceof Error ? nextError.message : "Could not generate AI grading suggestion.");
+    } finally {
+      setGeneratingAISuggestion(false);
+    }
+  }, [loadGradingReviews, packetAssignmentId, selectedGradingReview]);
+
+  const handleCommitToGradebook = useCallback(async () => {
+    if (!selectedGradingReview) return;
+    setCommittingGradebook(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await commitGradingReviewToGradebook(selectedGradingReview.id, {});
+      if (packetAssignmentId) {
+        await loadGradingReviews(packetAssignmentId);
+      }
+      setNotice("Grade committed to gradebook. Review commit history in the Gradebook workspace.");
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Could not commit grade to gradebook.");
+    } finally {
+      setCommittingGradebook(false);
+    }
+  }, [loadGradingReviews, packetAssignmentId, selectedGradingReview]);
+
   useEffect(() => {
     if (!selectedSubmission) {
       setSubmissionContextForm(null);
@@ -922,9 +1058,13 @@ export function TeacherAssistAssignmentsScreen() {
   useEffect(() => {
     if (!selectedGradingReview) {
       setGradingReviewForm(emptyGradingReviewForm());
+      setAiSuggestionMeta(null);
       return;
     }
     setGradingReviewForm(reviewFormFromReview(selectedGradingReview));
+    if (selectedGradingReview.status !== "ai_suggested") {
+      setAiSuggestionMeta(null);
+    }
   }, [selectedGradingReview]);
 
   return (
@@ -1691,6 +1831,17 @@ export function TeacherAssistAssignmentsScreen() {
             </div>
           ) : (
             <div className="mt-5 space-y-5">
+              {gradingPrepSummary ? (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                  <p className="font-semibold">Grading prep readiness</p>
+                  <p className="mt-1">
+                    {gradingPrepLoading
+                      ? "Refreshing grading prep summary..."
+                      : `${gradingPrepSummary.ready_for_grading_prep_count} of ${gradingPrepSummary.total_submissions} submissions are ready for guarded AI grading suggestions.`}
+                  </p>
+                </div>
+              ) : null}
+
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="flex flex-col gap-2">
                   <span className="ta-label">Student number</span>
@@ -1770,6 +1921,7 @@ export function TeacherAssistAssignmentsScreen() {
                   <div className="mt-3 space-y-3">
                     {submissions.map((submission) => {
                       const linkedReview = reviewBySubmissionId[submission.id];
+                      const gradingPrepItem = gradingPrepBySubmissionId[submission.id];
                       return (
                         <div
                           key={submission.id}
@@ -1804,6 +1956,11 @@ export function TeacherAssistAssignmentsScreen() {
                               {linkedReview ? (
                                 <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
                                   Review: {labelize(linkedReview.status)}
+                                </span>
+                              ) : null}
+                              {gradingPrepItem?.ready_for_grading_prep ? (
+                                <span className="rounded-full bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-800">
+                                  Ready for grading prep
                                 </span>
                               ) : null}
                             </div>
@@ -1909,11 +2066,25 @@ export function TeacherAssistAssignmentsScreen() {
                   >
                     {labelize(selectedSubmission.latest_extraction_job?.status ?? "not_started")}
                   </span>
+                  {gradingPrepContext?.ready_for_grading_prep ? (
+                    <span className="rounded-full bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-800">
+                      Ready for grading prep
+                    </span>
+                  ) : null}
                 </div>
                 <p className="mt-2 text-sm text-slate-600">
-                  Extraction reads the uploaded file through private TeacherAssist storage and keeps
-                  later AI grading disabled in this phase.
+                  Extraction reads the uploaded file through private TeacherAssist storage. Approved text
+                  unlocks draft AI grading suggestions in the grading review panel below.
                 </p>
+                {gradingPrepContext?.ready_for_grading_prep ? (
+                  <p className="mt-2 rounded-xl bg-teal-50 px-3 py-2 text-sm text-teal-900">
+                    {gradingPrepContext.message}
+                  </p>
+                ) : gradingPrepContext && !gradingPrepContext.ready_for_grading_prep ? (
+                  <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    {gradingPrepContext.message}
+                  </p>
+                ) : null}
                 {selectedSubmission.latest_extraction_job?.error_message ? (
                   <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
                     {selectedSubmission.latest_extraction_job.error_message}
@@ -1978,7 +2149,7 @@ export function TeacherAssistAssignmentsScreen() {
                     </button>
                   ) : null}
                   <button type="button" disabled className="ta-button-secondary opacity-60">
-                    AI grading coming later
+                    Gradebook sync coming later
                   </button>
                 </div>
               </div>
@@ -2104,8 +2275,8 @@ export function TeacherAssistAssignmentsScreen() {
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Grading reviews</p>
                     <p className="mt-1 text-sm text-slate-500">
-                      Manual, teacher-confirmed review only. No AI grading, mastery commit, or parent
-                      messaging yet.
+                      Draft AI suggestions use teacher-approved extraction text only. Teachers must review,
+                      edit, and manually confirm. No gradebook commit, mastery update, or parent messaging.
                     </p>
                   </div>
                   <button
@@ -2177,6 +2348,54 @@ export function TeacherAssistAssignmentsScreen() {
                   </div>
                 ) : (
                   <div className="mt-5 space-y-4">
+                    {gradingPrepContext?.ready_for_grading_prep ? (
+                      <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-sky-950">Guarded AI grading assist</p>
+                            <p className="mt-1 text-sm text-sky-900">
+                              Generate a draft score and feedback suggestion from teacher-approved extraction
+                              text. You must review and confirm manually.
+                            </p>
+                            {aiSuggestionMeta?.teacher_review_required ||
+                            selectedGradingReview.status === "ai_suggested" ? (
+                              <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                                Teacher review required — this suggestion is a draft only.
+                              </p>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleGenerateAISuggestion();
+                            }}
+                            disabled={
+                              generatingAISuggestion || selectedGradingReview.status === "teacher_confirmed"
+                            }
+                            className="ta-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {generatingAISuggestion ? "Generating..." : "Generate AI Suggestion"}
+                          </button>
+                        </div>
+                        {aiSuggestionMeta ? (
+                          <p className="mt-3 text-sm text-sky-900">
+                            {aiSuggestionMeta.message} Confidence: {labelize(aiSuggestionMeta.confidence_level)}.
+                            {aiSuggestionMeta.text_source
+                              ? ` Source: ${labelize(aiSuggestionMeta.text_source)}.`
+                              : ""}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                        <p className="font-semibold">AI suggestion blocked</p>
+                        <p className="mt-1">
+                          {gradingPrepContext?.message ??
+                            "Approve or correct extracted text before requesting AI grading suggestions."}
+                        </p>
+                      </div>
+                    )}
+
                     <div className="grid gap-4 md:grid-cols-2">
                       <label className="flex flex-col gap-2">
                         <span className="ta-label">Review status</span>
@@ -2356,7 +2575,37 @@ export function TeacherAssistAssignmentsScreen() {
                       >
                         {savingGradingReviewStatus ? "Updating..." : "Update Review Status"}
                       </button>
+                      {selectedGradingReview.status === "teacher_confirmed" ? (
+                        activeGradeRecordByReviewId[selectedGradingReview.id] ? (
+                          <Link href="/teacher-assist/gradebook" className="ta-button-secondary">
+                            View Gradebook Commit
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleCommitToGradebook();
+                            }}
+                            disabled={committingGradebook || gradeRecordsLoading}
+                            className="ta-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {committingGradebook ? "Committing..." : "Commit to Gradebook"}
+                          </button>
+                        )
+                      ) : null}
                     </div>
+                    {selectedGradingReview.status === "teacher_confirmed" &&
+                    activeGradeRecordByReviewId[selectedGradingReview.id] ? (
+                      <p className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                        Grade committed for STUDENT #{selectedGradingReview.student_number}. Open Gradebook for
+                        corrections, reversals, and export views.
+                      </p>
+                    ) : selectedGradingReview.status === "teacher_confirmed" ? (
+                      <p className="rounded-xl bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                        Review is teacher-confirmed. Commit to gradebook manually when ready — no automatic
+                        grade commits occur.
+                      </p>
+                    ) : null}
                   </div>
                 )}
               </div>

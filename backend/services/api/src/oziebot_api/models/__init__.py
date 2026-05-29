@@ -67,6 +67,21 @@ from oziebot_api.models.teacher_assist_assignment_grading_review_item import (
     TeacherAssistAssignmentGradingReviewItem,
 )
 from oziebot_api.models.teacher_assist_extracted_text_record import TeacherAssistExtractedTextRecord
+from oziebot_api.models.teacher_assist_export_artifact import TeacherAssistExportArtifact
+from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
+from oziebot_api.models.teacher_assist_assignment_gradebook_audit_event import (
+    TeacherAssistAssignmentGradebookAuditEvent,
+)
+from oziebot_api.models.teacher_assist_assignment_gradebook_commit import (
+    TeacherAssistAssignmentGradebookCommit,
+)
+from oziebot_api.models.teacher_assist_mastery_audit_event import TeacherAssistMasteryAuditEvent
+from oziebot_api.models.teacher_assist_mastery_commit import TeacherAssistMasteryCommit
+from oziebot_api.models.teacher_assist_mastery_evaluation import TeacherAssistMasteryEvaluation
+from oziebot_api.models.teacher_assist_mastery_matrix import TeacherAssistMasteryMatrix
+from oziebot_api.models.teacher_assist_mastery_matrix_standard import TeacherAssistMasteryMatrixStandard
+from oziebot_api.models.teacher_assist_reteach_plan import TeacherAssistReteachPlan
+from oziebot_api.models.teacher_assist_reteach_plan_version import TeacherAssistReteachPlanVersion
 from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtractionJob
 from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAssistAssignmentPrintPacket
 from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
@@ -183,6 +198,17 @@ __all__ = [
     "TeacherAssistAssignmentGradingReviewItem",
     "TeacherAssistExtractedTextRecord",
     "TeacherAssistExtractionJob",
+    "TeacherAssistExportArtifact",
+    "TeacherAssistAssignmentGradeRecord",
+    "TeacherAssistAssignmentGradebookCommit",
+    "TeacherAssistAssignmentGradebookAuditEvent",
+    "TeacherAssistMasteryAuditEvent",
+    "TeacherAssistMasteryCommit",
+    "TeacherAssistMasteryEvaluation",
+    "TeacherAssistMasteryMatrix",
+    "TeacherAssistMasteryMatrixStandard",
+    "TeacherAssistReteachPlan",
+    "TeacherAssistReteachPlanVersion",
     "TeacherAssistAssignmentPrintPacket",
     "TeacherAssistAssignmentPrintPage",
     "TeacherAssistAssignmentResource",

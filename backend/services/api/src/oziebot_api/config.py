@@ -206,6 +206,30 @@ class Settings(BaseSettings):
         default="mock",
         description="Comma-separated allowlist of TeacherAssist AI models.",
     )
+    teacher_assist_reteach_mastery_healthy_threshold: float = Field(
+        default=0.80,
+        description="Mastery percentage threshold for healthy reteach operational status.",
+    )
+    teacher_assist_reteach_mastery_monitor_threshold: float = Field(
+        default=0.50,
+        description="Mastery percentage threshold for monitor reteach operational status.",
+    )
+    teacher_assist_reteach_mastery_recommended_threshold: float = Field(
+        default=0.25,
+        description="Mastery percentage threshold for reteach_recommended operational status.",
+    )
+    teacher_assist_assignment_effectiveness_healthy_threshold: float = Field(
+        default=0.70,
+        description="Mastery percentage threshold for effective assignment status.",
+    )
+    teacher_assist_assignment_effectiveness_mixed_threshold: float = Field(
+        default=0.40,
+        description="Mastery percentage threshold for mixed_results assignment status.",
+    )
+    teacher_assist_mastery_analytics_recent_days: int = Field(
+        default=14,
+        description="Recent window in days for mastery analytics counts and trends.",
+    )
 
 
 def get_settings() -> Settings:

@@ -1,7 +1,5 @@
-"use client";
-
-import { TeacherAssistWorkspaceScreen } from "@/components/teacher-assist/teacher-assist-workspace-screen";
+import { TeacherAssistTodayScreen } from "@/components/teacher-assist/teacher-assist-today-screen";
 
 export function TeacherAssistDashboardScreen() {
-  return <TeacherAssistWorkspaceScreen />;
+  return <TeacherAssistTodayScreen />;
 }

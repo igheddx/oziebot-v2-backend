@@ -21,6 +21,8 @@ from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPla
 from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
 from oziebot_api.services.teacher_assist.activity_events import list_recent_activity_events
 from oziebot_api.services.teacher_assist.extraction_review_service import is_stale_extraction_job
+from oziebot_api.services.teacher_assist.mastery_dashboard import build_mastery_dashboard
+from oziebot_api.services.teacher_assist.mastery_workspace_insights import build_workspace_mastery_insights
 
 
 def _uuid_from_value(value: Any) -> uuid.UUID | None:
@@ -819,6 +821,16 @@ def get_teacher_assist_workspace(
         and (_as_utc_datetime(row.reviewed_at) or datetime.min.replace(tzinfo=UTC)) >= recent_cutoff
     )
 
+    mastery_dashboard = build_mastery_dashboard(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        school_year_id=current_school_year.id if current_school_year else None,
+        grading_period_id=active_grading_period.id if active_grading_period else None,
+        settings=settings,
+    )
+    mastery_insights = build_workspace_mastery_insights(mastery_dashboard)
+
     return {
         "current_school_year": current_school_year,
         "active_grading_period": active_grading_period,
@@ -903,4 +915,5 @@ def get_teacher_assist_workspace(
             "stale_extraction_jobs_count": stale_extraction_job_count,
             "recently_approved_extractions_count": recently_approved_count,
         },
+        "mastery_insights": mastery_insights,
     }

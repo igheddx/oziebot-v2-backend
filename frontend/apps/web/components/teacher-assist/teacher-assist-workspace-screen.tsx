@@ -244,6 +244,47 @@ export function TeacherAssistWorkspaceScreen() {
 
       {error ? <section className="ta-alert ta-alert-error">{error}</section> : null}
 
+      {workspace?.mastery_insights ? (
+        <section className="ta-panel p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-900">Mastery visibility</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Read-only committed mastery analytics. No draft evaluations or automated changes.
+              </p>
+            </div>
+            <Link href="/teacher-assist/today" className="ta-button-secondary">
+              Open today workspace
+            </Link>
+            <Link href="/teacher-assist/mastery" className="ta-button-secondary">
+              Open mastery workspace
+            </Link>
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <SummaryCard
+              label="Reteach recommended"
+              value={workspace.mastery_insights.reteach_recommended_count}
+              detail="Standards below configured mastery thresholds."
+            />
+            <SummaryCard
+              label="Low mastery alerts"
+              value={workspace.mastery_insights.low_mastery_alert_count}
+              detail="Critical attention standards across matrices."
+            />
+            <SummaryCard
+              label="Improving standards"
+              value={workspace.mastery_insights.improving_standard_count}
+              detail="Deterministic recent trend improvement."
+            />
+            <SummaryCard
+              label="Unassessed standards"
+              value={workspace.mastery_insights.unassessed_standard_count}
+              detail="Tracked standards without committed evaluations."
+            />
+          </div>
+        </section>
+      ) : null}
+
       <section className="grid gap-4 lg:grid-cols-3 xl:grid-cols-3">
         <SummaryCard
           label="Active workflows"
@@ -319,8 +360,20 @@ export function TeacherAssistWorkspaceScreen() {
         />
       </section>
 
+      <section className="ta-panel flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">Operational action workspace</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            Open the unified command center for failed jobs, review queues, gradebook-ready work, and exports.
+          </p>
+        </div>
+        <Link href="/teacher-assist/actions" className="ta-button-primary shrink-0">
+          Open Actions Workspace
+        </Link>
+      </section>
+
       <section className="flex flex-wrap gap-3">
-        <Link href="/teacher-assist/extractions" className="ta-button-primary">
+        <Link href="/teacher-assist/extractions" className="ta-button-secondary">
           Open Extractions Workspace
         </Link>
       </section>

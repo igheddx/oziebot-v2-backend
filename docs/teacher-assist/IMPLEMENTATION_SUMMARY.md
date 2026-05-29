@@ -4,6 +4,18 @@
 
 This document summarizes the current Oziebot repo findings and the proposed implementation foundation for adding **TeacherAssist AI** as a separate product module without disrupting the existing trading platform.
 
+## Current implemented baseline
+
+**Phases 1–29** are implemented. Latest completed work:
+
+- **Phase 27** — Mastery visualization + reteach insights (read-only analytics)
+- **Phase 28.5** — Teacher workflow UX polish + workflow cohesion (Today landing, nav groups, progress cards)
+- **Phase 29** — AI-assisted reteach plan drafting (mock AI drafts, versioning, mastery integration)
+
+**Next recommended:** Phase 30 — teacher publish workflow for reviewed reteach plans, assignment effectiveness UI on Assignments, or real-provider reteach AI (teacher-confirmed only; no automatic mastery, gradebook, or parent side effects).
+
+See also: `docs/teacher-assist/PHASE_STATUS.md`, `docs/teacher-assist/KNOWN_LIMITATIONS.md`.
+
 ## Operational Access Setup - TeacherAssist AI Seed / Admin Script
 
 ### What was implemented
@@ -773,7 +785,7 @@ This document summarizes the current Oziebot repo findings and the proposed impl
 
 - teacher review notes and issue reasons are currently stored in `metadata_json`, not dedicated columns
 - artifact-level retry buttons are centered in the Extractions workspace; Resources/Assignments primarily link into drill-down rather than exposing every remediation action inline
-- approved extracted text is persisted for future downstream phases but is not yet consumed by AI grading or analytics workflows
+- approved extracted text is consumable for grading-prep readiness checks (Phase 21), but AI grading and analytics workflows are not wired yet
 
 ### Next recommended phase
 
@@ -879,12 +891,719 @@ Existing settings reused without frontend exposure:
 - OpenAI vision OCR does not create AI usage events even though it uses an LLM
 - Azure OCR / Google Vision adapters are not implemented yet (seam supports adding them)
 - handwriting-heavy and multi-page PDF async OCR remain limited
-- approved extracted text is still not consumed downstream
+- approved extracted text is consumable for grading-prep readiness checks; guarded AI grading suggestions (Phase 23) and manual gradebook commits (Phase 24) are implemented — mastery analytics remain deferred
 
 ### Next recommended phase
 
 - Phase 21 - teacher-approved extraction downstream consumption
-  - allow approved/corrected extraction text to feed future grading prep and analytics workflows without bypassing teacher review or enabling automatic grading/mastery commits
+  - read-only grading-prep context and assignment summary APIs with teacher-review gating before downstream grading workflows
+
+## Phase 21 - Teacher-Approved Extraction Downstream Consumption
+
+### What was implemented
+
+- Added read-only grading-prep resolution so only teacher-approved or teacher-corrected extracted text can be used as downstream input for future grading-prep and analytics workflows
+- Approved-text priority:
+  1. `approved_text`
+  2. `teacher_corrected_text`
+  3. `extracted_text` only when `review_status` is `teacher_approved` or `reviewed`
+- Blocked downstream use for `pending_review`, `teacher_reviewing`, `teacher_rejected`, `issue_flagged`, `needs_retry`, and `archived`
+- Added read-only APIs:
+  - `GET /v1/teacher-assist/student-work/{id}/grading-prep-context`
+  - `GET /v1/teacher-assist/assignments/{id}/grading-prep-summary`
+- Added frontend grading-prep readiness UI in Assignments and Extractions showing **Ready for grading prep** only after teacher approval
+- Preserved tenant isolation and STUDENT # privacy (no new PII exposure beyond existing submission scoping)
+
+### Explicit non-goals preserved
+
+- AI grading remains disabled (`ai_grading_enabled: false` on all grading-prep responses)
+- No mastery updates
+- No parent communication
+- No gradebook commits from grading-prep read endpoints (manual teacher-confirmed commits added in Phase 24)
+- No AI usage events created by grading-prep read endpoints
+- No OpenAI or OCR provider calls from grading-prep logic
+- No trading-system changes
+
+### Backend files added or updated
+
+- `backend/services/api/src/oziebot_api/services/teacher_assist/grading_prep_service.py` (new)
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+
+### Frontend files updated
+
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-assignments-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-extraction-detail-screen.tsx`
+
+### Tests added / run
+
+- approved-text priority selection (`approved_text` > `teacher_corrected_text` > eligible `extracted_text`)
+- unapproved review statuses blocked from downstream resolution
+- grading-prep context ready after teacher approval workflow
+- assignment grading-prep summary counts ready vs blocked submissions
+- tenant isolation on grading-prep context and summary endpoints
+- grading-prep GET endpoints do not create AI usage events or grading reviews
+- ruff check clean on changed backend files
+- frontend lint/build successful
+
+### Manual validation checklist
+
+1. Upload student work, run extraction, and confirm grading-prep context is blocked while review status is `pending_review`.
+2. Start review, approve or mark reviewed, and confirm grading-prep context returns `ready_for_grading_prep: true` with resolved approved text.
+3. Open assignment grading-prep summary and confirm ready/blocked counts match submission review states.
+4. Confirm Assignments and Extractions show **Ready for grading prep** only after teacher approval.
+5. Confirm another tenant cannot read grading-prep context or summary for foreign submissions/assignments.
+6. Confirm no grading review, AI usage event, mastery workflow, or parent-communication side effects occur from grading-prep reads.
+
+### Remaining gaps
+
+- guarded AI grading suggestions now consume approved grading-prep text (Phase 23)
+- manual teacher-confirmed gradebook commits now available (Phase 24)
+- analytics/insights workflows do not yet consume approved text
+- extractions list uses review status for lightweight badges; detail/assignments use full API readiness checks
+- mastery updates and parent communication remain unimplemented by design
+
+### Next recommended phase
+
+- Phase 22 - artifact export foundation
+  - async slide/quiz export workflows with teacher download/review flows and no Google API integration
+
+## Phase 22 - Artifact Export Foundation (Google Slides + Quiz Export)
+
+### What was implemented
+
+- Added persisted export artifact foundation through `teacher_assist_export_artifacts`
+- Added async `artifact_export` workflow type processed by the TeacherAssist worker (never synchronous in API handlers)
+- Added mock-first export generation services:
+  - `export_templates.py` — deterministic slide/quiz preview JSON from weekly plan content
+  - `export_generation.py` — workflow claim/process, PPTX/JSON/HTML rendering, storage upload
+  - `export_artifacts.py` — persistence, listing, detail, signed download URLs
+- Supported export artifact types:
+  - Slides: `lesson_slides`, `guided_notes`
+  - Quiz: `multiple_choice_quiz`, `exit_ticket`, `short_answer_quiz`
+- Supported export formats: `pptx`, `json`, `printable_html`
+- Added worker-managed PPTX generation via `python-pptx` stored in private `exports` storage area
+- Added APIs:
+  - `POST /v1/teacher-assist/weekly-plans/{id}/exports` (202 queued)
+  - `GET /v1/teacher-assist/exports`
+  - `GET /v1/teacher-assist/exports/{id}`
+  - `GET /v1/teacher-assist/exports/{id}/download`
+- Added frontend weekly-plan export actions and `/teacher-assist/exports` workspace
+- Added export activity events (`export_queued`, `export_completed`, `export_failed`)
+
+### Explicit non-goals preserved
+
+- No Google OAuth, Google Slides API, Google Forms API, or Google Drive sync
+- No auto publishing, collaborative editing, or LMS integration
+- No AI grading, mastery updates, parent communication, or gradebook commits from export flows
+- No AI usage events from export generation (mock-first)
+- No trading-system changes
+
+### Migration added
+
+- `052_teacher_assist_export_artifacts.py`
+
+### Backend files added or updated
+
+- `backend/services/api/alembic/versions/052_teacher_assist_export_artifacts.py`
+- `backend/services/api/pyproject.toml` (`python-pptx`)
+- `backend/services/api/src/oziebot_api/models/teacher_assist_export_artifact.py`
+- `backend/services/api/src/oziebot_api/models/__init__.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/constants.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/activity_events.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/export_templates.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/export_artifacts.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/export_generation.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+- `backend/services/teacher-assist-worker/src/oziebot_teacher_assist_worker/__main__.py`
+
+### Frontend files added or updated
+
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-nav.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-weekly-plan-viewer.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-exports-screen.tsx`
+- `frontend/apps/web/app/teacher-assist/exports/page.tsx`
+
+### Tests added / run
+
+- tenant-safe export creation and listing isolation
+- workflow + export artifact persistence
+- PPTX storage upload and signed download URL generation
+- quiz mock preview structure (multiple choice / short answer / true-false)
+- failed export persistence with safe error metadata
+- export worker retry exhaustion to `failed`
+- no AI usage or grading review side effects from export generation
+- ruff check clean on export backend files
+- frontend lint/build successful
+
+### Manual validation checklist
+
+1. Generate lesson slides from a weekly plan.
+2. Confirm workflow row is created (`artifact_export`, `queued` → `completed`).
+3. Confirm export artifact row persists with preview JSON.
+4. Confirm PPTX uploads through private `exports` storage.
+5. Confirm signed download URL works.
+6. Confirm `/teacher-assist/exports` renders history and detail.
+7. Confirm failed exports persist errors safely.
+8. Confirm no Google APIs are called.
+9. Confirm no grading workflows are triggered.
+10. Confirm no trading systems are touched.
+
+### Remaining gaps
+
+- export retry UI is placeholder only (teachers re-queue from plan viewer)
+- real provider export generation remains guarded/disabled (mock-only templates today)
+- no Google Slides import automation — teachers import PPTX manually
+- assignment-scoped exports (`source_assignment_id`) not exposed in UI yet
+- workspace dashboard does not yet surface export attention counts
+
+### Next recommended phase
+
+- Phase 23 - guarded AI grading prep assist
+  - consume teacher-approved grading-prep context for teacher-confirmed AI scoring suggestions without automatic gradebook commits, mastery updates, or parent communication
+
+## Phase 24 - Gradebook Commit Foundation (Teacher-Confirmed Only)
+
+### What was implemented
+
+- gradebook commit tables for assignment grade records, commit history, and dedicated audit events
+- explicit teacher-only commit seam: `POST /grading-reviews/{id}/gradebook-commit` after `teacher_confirmed` review status
+- no automatic commits on review confirmation, AI suggestion, or extraction approval
+- grade correction and reversal flows with superseded/reversed commit lineage
+- export-ready assignment gradebook JSON view
+- `/teacher-assist/gradebook` workspace with commit history, audit trail, correction/reversal controls
+- Assignments UI **Commit to Gradebook** action for teacher-confirmed reviews
+
+### Backend files added or updated
+
+- `backend/services/api/alembic/versions/053_teacher_assist_gradebook_commit_foundation.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_assignment_grade_record.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_assignment_gradebook_commit.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_assignment_gradebook_audit_event.py`
+- `backend/services/api/src/oziebot_api/models/__init__.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/constants.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/gradebook_commits.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/activity_events.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/grading_prep_service.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+
+### Frontend files added or updated
+
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-nav.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-gradebook-screen.tsx`
+- `frontend/apps/web/app/teacher-assist/gradebook/page.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-assignments-screen.tsx`
+
+### API routes added
+
+- `POST /v1/teacher-assist/grading-reviews/{id}/gradebook-commit`
+- `GET /v1/teacher-assist/assignments/{id}/gradebook-records`
+- `GET /v1/teacher-assist/gradebook/records/{id}`
+- `POST /v1/teacher-assist/gradebook/records/{id}/corrections`
+- `POST /v1/teacher-assist/gradebook/records/{id}/reversals`
+- `GET /v1/teacher-assist/assignments/{id}/gradebook-export`
+- `GET /v1/teacher-assist/gradebook/audit-events`
+
+### Tests added / run
+
+- gradebook commit blocked until review is teacher-confirmed
+- teacher-confirmed review does not auto-commit
+- initial commit persists record, commit history, and audit events
+- correction supersedes prior commit; reversal blocks further corrections
+- tenant isolation on gradebook endpoints
+- no AI usage, workflow, mastery, or parent communication side effects from commits
+- ruff check clean on gradebook backend files
+
+### Manual validation checklist
+
+1. Confirm a grading review manually.
+2. Verify no gradebook record appears until **Commit to Gradebook** is clicked.
+3. Commit grade and confirm active grade record appears.
+4. Open `/teacher-assist/gradebook` and inspect commit history + audit trail.
+5. Commit a correction with reason and verify superseded prior commit.
+6. Reverse a grade with reason and verify record status becomes reversed.
+7. Generate export-ready gradebook JSON for the assignment.
+8. Confirm no mastery, parent communication, LMS, or SIS side effects occur.
+9. Confirm trading system is untouched.
+
+### Remaining gaps
+
+- no CSV/PDF export download yet (JSON export view only)
+- class-wide or grading-period gradebook rollups not implemented
+- LMS sync and SIS integration intentionally deferred
+
+### Next recommended phase
+
+- Phase 26 - mastery matrix foundation
+  - teacher-confirmed mastery tracking without automatic gradebook or parent communication side effects
+
+## Phase 25 - Operational UX Cohesion + Teacher Action Workspace
+
+### What was implemented
+
+- backend-composed read model at `GET /v1/teacher-assist/action-workspace`
+- unified operational action workspace aggregating extractions, grading, gradebook, workflows/exports, and planning/assignments
+- summary counts, prioritized action items, grouped sections, class rollups, and recent activity feed
+- safe TeacherAssist-only navigation targets for each action item
+- `/teacher-assist/actions` frontend route with summary cards, priority panel, grouped sections, and class rollups
+- Workspace summary page now links prominently to the Actions workspace
+- assignment and gradebook deep links via `?assignment_id=` query params
+
+### Backend files added or updated
+
+- `backend/services/api/src/oziebot_api/services/teacher_assist/action_workspace.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/constants.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+
+### Frontend files added or updated
+
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-nav.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-action-workspace-screen.tsx`
+- `frontend/apps/web/app/teacher-assist/actions/page.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-workspace-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-assignments-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-gradebook-screen.tsx`
+
+### API routes added
+
+- `GET /v1/teacher-assist/action-workspace`
+
+### Tests added / run
+
+- action workspace requires TeacherAssist product access
+- tenant isolation prevents cross-tenant action visibility
+- failed extraction jobs appear as critical action items
+- pending extracted text appears as review action items
+- AI-suggested grading reviews appear as review action items
+- teacher-confirmed uncommitted reviews appear as ready gradebook action items
+- failed export/workflow items appear as critical or warning items
+- navigation hrefs are safe TeacherAssist routes only
+- read endpoint creates no AI usage events, workflows, gradebook commits, or activity side effects
+
+### Manual validation checklist
+
+1. Open `/teacher-assist/actions`.
+2. Confirm summary cards show open action counts.
+3. Confirm failed extraction jobs appear under Extractions.
+4. Confirm extracted text pending teacher approval appears as review work.
+5. Confirm AI-suggested grading reviews appear as teacher-confirmation work.
+6. Confirm teacher-confirmed but uncommitted reviews appear as gradebook-ready work.
+7. Confirm failed exports or workflows appear in Workflows / Exports.
+8. Confirm each action routes to the correct existing detail/workspace page.
+9. Confirm viewing the action workspace does not mutate data.
+10. Confirm no AI usage events, gradebook commits, mastery updates, parent communication, Google API calls, LMS/SIS calls, or trading changes occur.
+
+### Remaining gaps
+
+- no live push notifications or websocket refresh beyond polling
+- no dedicated workflow-detail screen; failed/stale workflows route to weekly planning
+- action workspace does not yet support bulk remediation actions
+- mastery automation, parent communication, LMS/SIS sync, and trading changes intentionally deferred
+
+### Next recommended phase
+
+- Phase 30 - teacher publish workflow for reviewed reteach plans, assignment effectiveness UI on Assignments screen, or real-provider reteach AI (teacher-confirmed only)
+
+## Phase 28.5 - Teacher Workflow UX Polish + Workflow Cohesion
+
+### What was implemented
+
+- `GET /v1/teacher-assist/today` read-only Today workspace aggregating action queue, review items, mastery alerts, workflow progress cards, onboarding checklist, and recent activity
+- `/teacher-assist/today` preferred landing page (`/teacher-assist` redirects here)
+- Grouped navigation: Planning, Instruction, Assessment, Mastery, Operations, Settings
+- Workflow progress cards: Lesson Plan → Assignment → Student Work → Grading Review → Gradebook → Mastery
+- Reusable empty states, cross-link panels, onboarding checklist UI
+- Tablet/Chromebook-friendly responsive layouts (collapsible mobile nav, stacked cards)
+
+### Backend files added or updated
+
+- `backend/services/api/src/oziebot_api/services/teacher_assist/today_workspace.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+
+### Frontend files added or updated
+
+- `frontend/apps/web/app/teacher-assist/today/page.tsx`
+- `frontend/apps/web/app/teacher-assist/page.tsx` (redirect to Today)
+- `frontend/apps/web/components/teacher-assist/teacher-assist-today-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-nav.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-shell.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-empty-state.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-workflow-progress-card.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-onboarding-checklist.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-cross-links.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-dashboard-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-mastery-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-workspace-screen.tsx`
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+
+### Migration notes
+
+- No database migrations required (read-model composition only).
+
+### Manual validation checklist
+
+1. Open `/teacher-assist` and confirm redirect to `/teacher-assist/today`.
+2. Verify Today shows prioritized queue categories and counts.
+3. Confirm workflow progress cards render for assignments with pipeline steps.
+4. Complete onboarding checklist items and verify progress updates.
+5. Test grouped navigation on desktop and collapsible nav on tablet/mobile widths.
+6. Follow cross-links from Mastery to Today, Actions, and Assignments.
+7. Confirm viewing Today creates no mastery commits, AI usage, or workflow mutations.
+
+### Next recommended phase
+
+- Phase 30 - teacher publish workflow for reviewed reteach plans, assignment effectiveness UI on Assignments screen, or real-provider reteach AI behind existing guardrails (teacher-confirmed only)
+
+## Phase 29 - AI-Assisted Reteach Plan Drafting
+
+### What was implemented
+
+- Reteach plan foundation tied to mastery matrices and standards (`draft`, `ai_draft`, `teacher_review`, `archived`)
+- Version history for AI drafts and teacher edits (`initial`, `ai_draft`, `teacher_edit`)
+- Mock AI reteach draft generation with standards-focused prompting (mastery levels, class summaries, reteach insights; STUDENT # only — no student names)
+- AI usage event tracking (`reteach_plan_ai_draft`, provider/model/tokens/cost metadata)
+- Activity events: `reteach_plan_created`, `reteach_plan_ai_drafted`, `reteach_plan_version_created`
+- Mastery dashboard integration: weak / reteach-recommended standards → **Create reteach plan** → **Generate draft**
+- `/teacher-assist/reteach-plans` review workspace with version history and teacher save flow
+
+### Migration summary
+
+- **055** `teacher_assist_reteach_plans` — plan header, status, matrix/standard/class/subject linkage, current version pointer, latest AI usage pointer
+- **055** `teacher_assist_reteach_plan_versions` — versioned content JSON, prompt context JSON, provider metadata, AI usage FK
+- **Rollback:** drop version table then plan table (no cross-product FKs)
+
+### Backend files added
+
+- `backend/services/api/alembic/versions/055_teacher_assist_reteach_plan_foundation.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_reteach_plan.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_reteach_plan_version.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/reteach_plans.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/reteach_plan_ai_assist.py`
+
+### Backend files modified
+
+- `backend/services/api/src/oziebot_api/models/__init__.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/constants.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/prompt_contracts.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/activity_events.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+
+### Frontend files added
+
+- `frontend/apps/web/app/teacher-assist/reteach-plans/page.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-reteach-plans-screen.tsx`
+
+### Frontend files modified
+
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-nav.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-mastery-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-mastery-heatmap.tsx`
+
+### API routes added
+
+- `GET /v1/teacher-assist/reteach-plans`
+- `POST /v1/teacher-assist/reteach-plans`
+- `GET /v1/teacher-assist/reteach-plans/{id}`
+- `PUT /v1/teacher-assist/reteach-plans/{id}`
+- `GET /v1/teacher-assist/reteach-plans/{id}/versions`
+- `POST /v1/teacher-assist/reteach-plans/{id}/versions`
+- `POST /v1/teacher-assist/reteach-plans/{id}/ai-draft`
+
+### AI prompt contracts
+
+- Feature: `reteach_plan_ai_draft` (`RETEACH_PLAN_AI_FEATURE`)
+- Prompt version: `reteach-plan-ai-v1` (`RETEACH_PLAN_AI_PROMPT_VERSION`)
+- Input context: standard insight, mastery distribution, anonymous STUDENT # summaries, reteach insight counts, optional teacher instructions
+- Output fields: `reteach_objectives`, `instructional_strategies`, `small_group_recommendations`, `intervention_ideas`, `vocabulary_focus`, `assessment_checks`, `teacher_review_required`
+- Provider: mock-only in this phase; real provider path guarded and disabled
+
+### Tests added / run
+
+- reteach plan create + AI draft creates version + AI usage event
+- teacher edit creates second version and moves plan to `teacher_review`
+- prompt context is anonymous-only (STUDENT # summaries, no names)
+- tenant isolation on plan read and AI draft
+- AI draft creates no mastery audit side effects
+- full TeacherAssist planning suite: **121 passed**
+
+### Manual validation checklist
+
+1. Open `/teacher-assist/mastery`, select a matrix with committed evaluations.
+2. On **Standards needing reteach** or **Weakest standards**, click **Create reteach plan**.
+3. Confirm redirect to `/teacher-assist/reteach-plans?id=...` with plan status `draft`.
+4. Click **Generate draft** and confirm status becomes `ai_draft` with version `v1` (`ai_draft`).
+5. Review AI sections (objectives, strategies, small groups, interventions, vocabulary, assessment checks).
+6. Save a **teacher-reviewed version** and confirm status becomes `teacher_review` with `v2` (`teacher_edit`).
+7. Confirm no mastery commits, gradebook commits, or parent communication occur.
+8. Confirm AI usage event recorded with feature `reteach_plan_ai_draft`.
+9. Confirm another tenant cannot read or draft the plan (404).
+10. Archive a plan and confirm AI draft is blocked.
+
+### Remaining gaps
+
+- no real LLM provider execution for reteach drafts (mock only)
+- no publish/link workflow into daily teaching or weekly plans yet
+- no collaborative reteach plan sharing or admin moderation
+- no automatic mastery updates, parent communication, gradebook commits, LMS/SIS sync, or trading changes (intentionally deferred)
+
+### Next recommended phase
+
+- Phase 30 - teacher publish workflow for reviewed reteach plans into daily teaching / planning surfaces, assignment effectiveness UI on Assignments screen, or real-provider reteach AI (teacher-confirmed only; no automatic mastery, gradebook, or parent side effects)
+
+## Phase 27 - Mastery Visualization + Reteach Insights
+
+### What was implemented
+
+- read-only mastery heatmap aggregation (standards × anonymous STUDENT # rows, committed evaluations only)
+- rules-based reteach insight aggregation with configurable thresholds (`healthy`, `monitor`, `reteach_recommended`, `critical_attention`)
+- student mastery drill-down summaries with deterministic trend visibility
+- assignment effectiveness read model (assignment-linked evidence only)
+- operational mastery dashboard with class/subject/grading-period filters
+- workspace and action workspace mastery insight panels (read-only, no side effects)
+- `/teacher-assist/mastery` heatmap UI with reteach insight cards and drill-down hover metadata
+
+### Backend files added or updated
+
+- `backend/services/api/src/oziebot_api/services/teacher_assist/mastery_analytics_helpers.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/mastery_heatmaps.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/reteach_insights.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/assignment_effectiveness.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/mastery_dashboard.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/mastery_workspace_insights.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/workspace_service.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/action_workspace.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/constants.py`
+- `backend/services/api/src/oziebot_api/config.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+
+### Frontend files added or updated
+
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-mastery-heatmap.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-mastery-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-workspace-screen.tsx`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-action-workspace-screen.tsx`
+
+### API routes added
+
+- `GET /v1/teacher-assist/mastery-matrices/{id}/heatmap`
+- `GET /v1/teacher-assist/mastery-matrices/{id}/reteach-insights`
+- `GET /v1/teacher-assist/mastery-matrices/{id}/student-summary/{student_number}`
+- `GET /v1/teacher-assist/assignments/{id}/effectiveness`
+- `GET /v1/teacher-assist/mastery-dashboard`
+
+### Migration notes
+
+- **No new tables** in Phase 27 — all analytics are computed read models over Phase 26 mastery tables.
+- **No new indexes** required for initial rollout; large-matrix performance tuning may add composite indexes later.
+- **Rollback:** safe to revert API/service/frontend changes without database rollback.
+
+### Tests added / run
+
+- heatmap excludes draft evaluations (committed-only)
+- reteach threshold classification (`monitor` at 50% mastery)
+- tenant isolation on analytics endpoints
+- student summary + deterministic trend after correction lineage
+- dashboard/workspace/action analytics create no audit/AI side effects
+- full TeacherAssist planning suite: **118 passed**
+
+### Manual validation checklist
+
+1. Commit mastery evaluations for multiple STUDENT # rows.
+2. Open `/teacher-assist/mastery` and verify heatmap cells reflect committed levels only.
+3. Confirm draft evaluations do not appear in heatmap analytics.
+4. Review reteach insight cards (strongest/weakest/improving/declining/unassessed).
+5. Click a STUDENT # row and verify student drill-down summary loads.
+6. Open `/teacher-assist/workspace` and verify mastery insight counts appear.
+7. Open `/teacher-assist/actions` and verify mastery alert items link back to mastery workspace.
+8. Filter mastery dashboard by class, grading period, and subject.
+9. Confirm viewing analytics creates no new mastery commits, AI usage, workflows, or exports.
+
+### Remaining gaps
+
+- assignment effectiveness UI on Assignments screen not yet wired (API available)
+- no persisted reteach recommendation rows (by design — computed read models only)
+- standard trend accuracy limited without longer commit history windows
+- district analytics, predictive forecasting, and AI reteach plans remain deferred
+
+### Next recommended phase
+
+- Phase 28 - assignment effectiveness UI, reteach planning drafts, or guarded AI mastery suggestion drafts (teacher-confirmed only)
+
+## Phase 26 - Mastery Matrix Foundation + Standards Progress Tracking
+
+### What was implemented
+
+- persisted mastery matrices, matrix standards, evaluations, commit history, and audit events
+- teacher-confirmed-only mastery lifecycle: draft evaluation → explicit commit → correction/reversal lineage
+- evidence linkage via `evidence_source_type` / `evidence_source_id` for assignments, grading reviews, gradebook commits, and manual observations
+- class/standard/student read-model summaries and reteach visibility endpoints
+- `/teacher-assist/mastery` workspace with standards cards, student-number matrix, commit drill-down, and teacher-confirmed actions
+- no automatic mastery updates from grading confirmation, gradebook commits, or AI suggestions
+
+### Backend files added or updated
+
+- `backend/services/api/alembic/versions/054_teacher_assist_mastery_matrix_foundation.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_mastery_matrix.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_mastery_matrix_standard.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_mastery_evaluation.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_mastery_commit.py`
+- `backend/services/api/src/oziebot_api/models/teacher_assist_mastery_audit_event.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/mastery_matrix.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/mastery_commit_service.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/mastery_visualization.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/constants.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/activity_events.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+
+### Frontend files added or updated
+
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-nav.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-mastery-screen.tsx`
+- `frontend/apps/web/app/teacher-assist/mastery/page.tsx`
+
+### API routes added
+
+- `GET /v1/teacher-assist/mastery-matrices`
+- `POST /v1/teacher-assist/mastery-matrices`
+- `GET /v1/teacher-assist/mastery-matrices/{id}`
+- `PUT /v1/teacher-assist/mastery-matrices/{id}`
+- `POST /v1/teacher-assist/mastery-evaluations`
+- `PUT /v1/teacher-assist/mastery-evaluations/{id}`
+- `GET /v1/teacher-assist/mastery-evaluations/{id}`
+- `POST /v1/teacher-assist/mastery-evaluations/{id}/commit`
+- `POST /v1/teacher-assist/mastery-evaluations/{id}/corrections`
+- `POST /v1/teacher-assist/mastery-evaluations/{id}/reversals`
+- `GET /v1/teacher-assist/mastery-matrices/{id}/summary`
+- `GET /v1/teacher-assist/mastery-matrices/{id}/standards`
+- `GET /v1/teacher-assist/mastery-matrices/{id}/students`
+- `GET /v1/teacher-assist/mastery-matrices/{id}/reteach-summary`
+
+### Tests added / run
+
+- mastery matrix requires TeacherAssist product access
+- tenant isolation on mastery matrix endpoints
+- teacher commit required before active mastery counts in summaries
+- correction/reversal lineage persistence and reversed-state blocking
+- standards ownership validation against matrix subject/class context
+- no AI usage, gradebook, workflow, or parent communication side effects from mastery commits
+
+### Manual validation checklist
+
+1. Create a mastery matrix for a class and grading period.
+2. Add standards to the matrix.
+3. Create draft mastery evaluations for anonymous student numbers.
+4. Confirm teacher commit is required before mastery counts as active.
+5. Commit a correction and verify lineage persistence.
+6. Reverse a mastery commit and confirm reversal state visibility.
+7. Open mastery summaries and verify standards distributions and reteach visibility.
+8. Confirm no parent communication, AI auto-commit, LMS/SIS sync, or trading changes occur.
+
+### Remaining gaps
+
+- AI mastery suggestions remain deferred
+- reteach-plan generation remains deferred
+- district-level analytics and mastery forecasting remain deferred
+- parent communication and LMS/SIS sync intentionally deferred
+
+### Next recommended phase
+
+- Phase 28 - assignment effectiveness UI, reteach planning drafts, or guarded AI mastery suggestion drafts (teacher-confirmed only)
+
+## Phase 26 - Mastery Matrix Foundation + Standards Progress Tracking
+
+### What was implemented
+
+- guarded mock-first AI grading suggestion service that consumes only teacher-approved grading-prep context
+- `POST /v1/teacher-assist/grading-reviews/{id}/ai-suggestions` with draft suggestion fields persisted on grading reviews
+- teacher-review-required semantics: suggestions set `ai_suggested` status and never auto-confirm
+- Assignments grading review UI: **Generate AI Suggestion** when prep is ready, blocked reason when not
+- AI usage event + activity event tracking for suggestion generation
+- real provider mode remains guarded/disabled for this phase
+
+### Backend files added or updated
+
+- `backend/services/api/src/oziebot_api/services/teacher_assist/grading_ai_assist.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/prompt_contracts.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist/activity_events.py`
+- `backend/services/api/src/oziebot_api/schemas/teacher_assist.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist.py`
+- `backend/services/api/tests/test_teacher_assist_planning.py`
+
+### Frontend files added or updated
+
+- `frontend/apps/web/lib/teacher-assist-types.ts`
+- `frontend/apps/web/lib/teacher-assist-api.ts`
+- `frontend/apps/web/components/teacher-assist/teacher-assist-assignments-screen.tsx`
+
+### API routes added
+
+- `POST /v1/teacher-assist/grading-reviews/{id}/ai-suggestions`
+
+### Tests added / run
+
+- AI suggestion blocked when extraction is not teacher-approved
+- mock suggestion populates grading review fields and AI usage event
+- approved-text priority respected via grading-prep context
+- `teacher_confirmed` is never automatic
+- no workflow side effects from suggestion generation
+- tenant isolation on AI suggestion endpoint
+- real provider mode remains guarded/disabled
+
+### Manual validation checklist
+
+1. Upload student work.
+2. Run extraction.
+3. Confirm AI suggestion is blocked before teacher approval.
+4. Approve extracted text.
+5. Generate AI grading suggestion.
+6. Confirm suggestion appears as draft / teacher-review-required.
+7. Edit suggestion.
+8. Manually confirm grading review.
+9. Confirm AI suggestions do not auto-commit to gradebook (manual commit is a separate Phase 24 action).
+10. Confirm no mastery or parent communication side effects occur.
+11. Confirm trading system is untouched.
+
+### Remaining gaps
+
+- real provider grading assist execution remains disabled (mock-only MVP)
+- async worker path for long-running real provider suggestions not implemented
+- workspace dashboard does not yet surface AI-suggested reviews needing confirmation
+- no rubric-item-level AI suggestions yet (review-level fields only)
+
+### Next recommended phase
+
+- Phase 24 - gradebook commit foundation (teacher-confirmed only)
+  - persist teacher-confirmed grading review outcomes into a guarded gradebook commit seam without mastery automation or parent communication
 
 ## Phase 16 - Unified Teacher Workspace + Workflow Cohesion Layer
 
@@ -1092,9 +1811,9 @@ Existing settings reused without frontend exposure:
 
 ### Remaining gaps after Phase 15
 
-- OCR and scan-content extraction are still deferred.
-- AI/provider-assisted grading suggestions are not enabled.
-- Mastery updates, gradebook commit flows, and parent communication generation are still deferred.
+- OCR and scan-content extraction are still deferred (implemented in Phases 18–20).
+- AI/provider-assisted grading suggestions and manual gradebook commits are implemented in Phases 23–24.
+- Mastery updates and parent communication generation are still deferred.
 - Criterion-level item editing is persisted in the backend foundation, but the current frontend keeps review editing at the summary level.
 
 ## Phase 14 - Uploaded Student Work Intake Foundation
