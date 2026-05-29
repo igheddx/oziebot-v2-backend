@@ -9,7 +9,7 @@
 - Printable assignment templates are currently limited to browser-print HTML output.
 - Grading assistant workflows have not been implemented yet.
 - TEKS mastery matrix foundation is implemented with teacher-confirmed manual commits, correction/reversal lineage, and anonymous STUDENT # tracking. Phase 27 adds read-only heatmaps, rules-based reteach insights, and operational mastery dashboards. Phase 29 adds mock AI reteach plan drafts with teacher-required review and version history; real-provider reteach AI, automatic publish, and district analytics remain deferred.
-- Newsletter/communication assistant has not been implemented yet.
+- Newsletter/communication assistant supports mock AI weekly newsletter drafts with teacher review, versioning, and HTML/PDF/DOCX export. TeacherAssist never sends messages automatically; real-provider newsletter AI and outbound send integrations remain deferred.
 - Resource unlink/remove flows may still be deferred.
 - Static-export frontend constraints may influence route design.
 - TeacherAssist currently resolves the first accessible TeacherAssist tenant membership.

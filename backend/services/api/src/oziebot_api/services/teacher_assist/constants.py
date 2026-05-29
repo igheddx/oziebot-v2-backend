@@ -116,6 +116,10 @@ MASTERY_ANALYTICS_RECENT_DAYS = 14
 MASTERY_TREND_RANK_DELTA = 0.5
 RETEACH_PLAN_STATUSES = ("draft", "ai_draft", "teacher_review", "archived")
 RETEACH_PLAN_VERSION_SOURCES = ("initial", "ai_draft", "teacher_edit")
+NEWSLETTER_STATUSES = ("draft", "review", "approved", "archived")
+NEWSLETTER_VERSION_SOURCES = ("initial", "ai_draft", "ai_section_regen", "teacher_edit")
+NEWSLETTER_REGENERATABLE_SECTIONS = ("overview", "upcoming_learning", "teacher_message", "reminders")
+NEWSLETTER_EXPORT_FORMATS = ("html", "pdf", "docx")
 TEACHER_ASSIST_EXTRACTION_ARTIFACT_TYPES = ("resource", "student_work")
 TEACHER_ASSIST_EXTRACTION_JOB_STATUSES = (
     "queued",
@@ -406,6 +410,34 @@ def validate_reteach_plan_version_source(value: str | None) -> str:
     normalized = (value or "initial").strip().lower()
     if normalized not in RETEACH_PLAN_VERSION_SOURCES:
         raise ValueError("Unsupported reteach plan version source")
+    return normalized
+
+
+def validate_newsletter_status(value: str | None) -> str:
+    normalized = (value or "draft").strip().lower()
+    if normalized not in NEWSLETTER_STATUSES:
+        raise ValueError("Unsupported newsletter status")
+    return normalized
+
+
+def validate_newsletter_version_source(value: str | None) -> str:
+    normalized = (value or "initial").strip().lower()
+    if normalized not in NEWSLETTER_VERSION_SOURCES:
+        raise ValueError("Unsupported newsletter version source")
+    return normalized
+
+
+def validate_newsletter_regeneratable_section(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized not in NEWSLETTER_REGENERATABLE_SECTIONS:
+        raise ValueError("Unsupported newsletter section")
+    return normalized
+
+
+def validate_newsletter_export_format(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized not in NEWSLETTER_EXPORT_FORMATS:
+        raise ValueError("Unsupported newsletter export format")
     return normalized
 
 

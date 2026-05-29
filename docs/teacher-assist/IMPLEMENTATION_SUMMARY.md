@@ -6,13 +6,13 @@ This document summarizes the current Oziebot repo findings and the proposed impl
 
 ## Current implemented baseline
 
-**Phases 1–29** are implemented. Latest completed work:
+**Phases 1–30** are implemented. Latest completed work:
 
-- **Phase 27** — Mastery visualization + reteach insights (read-only analytics)
 - **Phase 28.5** — Teacher workflow UX polish + workflow cohesion (Today landing, nav groups, progress cards)
 - **Phase 29** — AI-assisted reteach plan drafting (mock AI drafts, versioning, mastery integration)
+- **Phase 30** — Weekly newsletter generation (mock AI drafts, section regen, export, no auto-send)
 
-**Next recommended:** Phase 30 — teacher publish workflow for reviewed reteach plans, assignment effectiveness UI on Assignments, or real-provider reteach AI (teacher-confirmed only; no automatic mastery, gradebook, or parent side effects).
+**Next recommended:** Phase 31 — teacher-controlled send handoff metadata, assignment effectiveness UI, or real-provider newsletter AI (no automatic outbound communication, mastery, or gradebook side effects).
 
 See also: `docs/teacher-assist/PHASE_STATUS.md`, `docs/teacher-assist/KNOWN_LIMITATIONS.md`.
 
@@ -1370,7 +1370,61 @@ Existing settings reused without frontend exposure:
 
 ### Next recommended phase
 
-- Phase 30 - teacher publish workflow for reviewed reteach plans into daily teaching / planning surfaces, assignment effectiveness UI on Assignments screen, or real-provider reteach AI (teacher-confirmed only; no automatic mastery, gradebook, or parent side effects)
+- Phase 31 - teacher-controlled send handoff metadata, assignment effectiveness UI on Assignments, or real-provider newsletter AI (no automatic outbound communication)
+
+## Phase 30 - Weekly Newsletter Generation
+
+### What was implemented
+
+- `/teacher-assist/newsletters` workspace with statuses: `draft`, `review`, `approved`, `archived`
+- Mock AI newsletter drafts from instructional activity (weekly plans, assignments, teacher notes, grading-period context)
+- PII-safe prompting: no student names, grades, behavior comments, or PII in AI context
+- Section regeneration: overview, upcoming learning, teacher message, reminders
+- Version history (`ai_draft`, `ai_section_regen`, `teacher_edit`)
+- Export HTML, PDF, DOCX for teacher-controlled distribution — **no email/SMS sending**
+
+### Migration summary
+
+- **056** `teacher_assist_newsletters`, `teacher_assist_newsletter_versions`, `teacher_assist_newsletter_exports`
+
+### API routes added
+
+- `GET/POST /v1/teacher-assist/newsletters`
+- `GET/PUT /v1/teacher-assist/newsletters/{id}`
+- `GET/POST /v1/teacher-assist/newsletters/{id}/versions`
+- `POST /v1/teacher-assist/newsletters/{id}/ai-draft`
+- `POST /v1/teacher-assist/newsletters/{id}/regenerate-section`
+- `POST /v1/teacher-assist/newsletters/{id}/exports`
+- `GET /v1/teacher-assist/newsletters/{id}/exports/{export_id}/download`
+
+### AI prompt contracts
+
+- Feature: `newsletter_generation` (`NEWSLETTER_AI_FEATURE`), prompt `newsletter-ai-v1`
+- Section regen: `newsletter_section_regeneration`, prompt `newsletter-section-v1`
+- Output: overview, what_we_learned, standards_covered, upcoming_topics, reminders, celebration_highlights, teacher_message
+
+### Tests added / run
+
+- newsletter create + AI draft + section regen + teacher version + approve + export (html/pdf/docx)
+- tenant isolation
+- full TeacherAssist planning suite: **123 passed**
+
+### Manual validation checklist
+
+1. Open `/teacher-assist/newsletters` and create a draft for a class/subject.
+2. Add teacher notes and generate an AI draft.
+3. Confirm status moves to `review` and sections populate without student PII.
+4. Regenerate reminders or teacher message section.
+5. Save a teacher-reviewed version and mark `approved`.
+6. Export HTML, PDF, and DOCX and download each file.
+7. Confirm TeacherAssist does not send any messages automatically.
+
+### Recommended Phase 31
+
+- Teacher-controlled send handoff metadata (export + copy workflow only)
+- Assignment effectiveness UI on Assignments screen
+- Real-provider newsletter AI behind existing guardrails
+- Still **no outbound communication**, automatic mastery updates, or gradebook side effects
 
 ## Phase 27 - Mastery Visualization + Reteach Insights
 

@@ -34,6 +34,10 @@ export type TeacherAssistOptions = {
   mastery_confidence_levels?: string[];
   reteach_plan_statuses?: string[];
   reteach_plan_version_sources?: string[];
+  newsletter_statuses?: string[];
+  newsletter_version_sources?: string[];
+  newsletter_regeneratable_sections?: string[];
+  newsletter_export_formats?: string[];
   extraction_review_statuses?: string[];
   extraction_confidence_levels?: string[];
   export_artifact_types?: string[];
@@ -1497,6 +1501,101 @@ export type ReteachPlanAIDraft = {
   provider_mode: string;
   prompt_version: string;
   message: string;
+};
+
+export type NewsletterStatus = "draft" | "review" | "approved" | "archived";
+export type NewsletterVersionSource = "initial" | "ai_draft" | "ai_section_regen" | "teacher_edit";
+export type NewsletterRegeneratableSection = "overview" | "upcoming_learning" | "teacher_message" | "reminders";
+export type NewsletterExportFormat = "html" | "pdf" | "docx";
+
+export type NewsletterContent = {
+  overview?: string;
+  what_we_learned?: string[];
+  standards_covered?: string[];
+  upcoming_topics?: string[];
+  reminders?: string[];
+  celebration_highlights?: string[];
+  teacher_message?: string;
+  teacher_review_required?: boolean;
+  is_ai_draft?: boolean;
+  prompt_version?: string;
+  last_regenerated_section?: string;
+  [key: string]: unknown;
+};
+
+export type Newsletter = {
+  id: string;
+  tenant_id: string;
+  owner_user_id: string;
+  school_year_id: string;
+  grading_period_id: string | null;
+  class_id: string;
+  subject_id: string;
+  title: string;
+  status: NewsletterStatus;
+  week_start_date: string | null;
+  week_end_date: string | null;
+  teacher_notes: string | null;
+  current_version_id: string | null;
+  latest_ai_usage_event_id: string | null;
+  created_at: string;
+  updated_at: string;
+  subject_name: string | null;
+  class_name: string | null;
+};
+
+export type NewsletterVersion = {
+  id: string;
+  newsletter_id: string;
+  version_number: number;
+  version_source: NewsletterVersionSource;
+  content_json: NewsletterContent;
+  prompt_context_json: Record<string, unknown> | null;
+  provider_name: string | null;
+  provider_model: string | null;
+  prompt_version: string | null;
+  ai_usage_event_id: string | null;
+  created_by_user_id: string;
+  change_reason: string | null;
+  created_at: string;
+};
+
+export type NewsletterAIDraft = {
+  newsletter: Newsletter;
+  version: NewsletterVersion;
+  teacher_review_required: boolean;
+  provider_mode: string;
+  prompt_version: string;
+  message: string;
+};
+
+export type NewsletterSectionRegenerate = {
+  newsletter: Newsletter;
+  version: NewsletterVersion;
+  teacher_review_required: boolean;
+  provider_mode: string;
+  prompt_version: string;
+  section: string;
+  message: string;
+};
+
+export type NewsletterExport = {
+  id: string;
+  newsletter_id: string;
+  newsletter_version_id: string | null;
+  export_format: NewsletterExportFormat;
+  file_size_bytes: number;
+  created_at: string;
+  download_filename: string;
+};
+
+export type NewsletterExportDownload = {
+  export_id: string;
+  newsletter_id: string;
+  export_format: string;
+  mime_type: string;
+  download_filename: string;
+  download_url: string;
 };
 
 export type StudentMasterySummary = {

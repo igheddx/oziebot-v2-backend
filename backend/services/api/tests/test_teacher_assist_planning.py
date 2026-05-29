@@ -6442,3 +6442,133 @@ def test_reteach_plan_tenant_isolation(client, db_session: Session):
     )
     assert foreign_draft.status_code == 404, foreign_draft.text
 
+
+def test_newsletter_create_ai_draft_section_regen_export_and_teacher_version(client, db_session: Session):
+    email = "teacher-newsletter@example.com"
+    token = _register_user(client, email=email, tenant_name="Newsletter Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    context, _weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Newsletter Science")
+
+    before_usage = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+
+    created = client.post(
+        "/v1/teacher-assist/newsletters",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "teacher_notes": "Highlight vocabulary routines this week.",
+        },
+    )
+    assert created.status_code == 201, created.text
+    newsletter = created.json()
+    assert newsletter["status"] == "draft"
+
+    drafted = client.post(
+        f"/v1/teacher-assist/newsletters/{newsletter['id']}/ai-draft",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"provider_mode": "mock", "teacher_instructions": "Keep tone warm and concise."},
+    )
+    assert drafted.status_code == 200, drafted.text
+    draft_payload = drafted.json()
+    assert draft_payload["teacher_review_required"] is True
+    assert draft_payload["prompt_version"] == "newsletter-ai-v1"
+    assert draft_payload["newsletter"]["status"] == "review"
+    content = draft_payload["version"]["content_json"]
+    assert content["what_we_learned"]
+    assert content["standards_covered"]
+    assert content["upcoming_topics"]
+    assert content["reminders"]
+    assert content["celebration_highlights"]
+    assert content["teacher_review_required"] is True
+    prompt_context = draft_payload["version"]["prompt_context_json"]
+    assert prompt_context["pii_policy"] == "NO_STUDENT_NAMES_GRADES_BEHAVIOR"
+    assert prompt_context["anonymous_only"] is True
+    assert "student_summaries" not in prompt_context
+
+    regen = client.post(
+        f"/v1/teacher-assist/newsletters/{newsletter['id']}/regenerate-section",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"section": "reminders", "provider_mode": "mock"},
+    )
+    assert regen.status_code == 200, regen.text
+    assert regen.json()["section"] == "reminders"
+    assert regen.json()["version"]["version_source"] == "ai_section_regen"
+
+    teacher_saved = client.post(
+        f"/v1/teacher-assist/newsletters/{newsletter['id']}/versions",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "content_json": {
+                **regen.json()["version"]["content_json"],
+                "teacher_message": "Teacher-approved family message.",
+            },
+            "change_reason": "Teacher reviewed newsletter draft.",
+        },
+    )
+    assert teacher_saved.status_code == 201, teacher_saved.text
+    assert teacher_saved.json()["version_source"] == "teacher_edit"
+
+    approved = client.put(
+        f"/v1/teacher-assist/newsletters/{newsletter['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "approved"},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "approved"
+
+    for export_format in ("html", "pdf", "docx"):
+        exported = client.post(
+            f"/v1/teacher-assist/newsletters/{newsletter['id']}/exports",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"export_format": export_format},
+        )
+        assert exported.status_code == 201, exported.text
+        export_id = exported.json()["id"]
+        download = client.get(
+            f"/v1/teacher-assist/newsletters/{newsletter['id']}/exports/{export_id}/download",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert download.status_code == 200, download.text
+        assert download.json()["download_url"]
+
+    after_usage = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    assert after_usage == before_usage + 2
+
+    activity = db_session.scalar(
+        select(TeacherAssistActivityEvent)
+        .where(TeacherAssistActivityEvent.event_type == "newsletter_ai_drafted")
+        .order_by(TeacherAssistActivityEvent.created_at.desc())
+    )
+    assert activity is not None
+
+
+def test_newsletter_tenant_isolation(client, db_session: Session):
+    first_email = "teacher-newsletter-a@example.com"
+    second_email = "teacher-newsletter-b@example.com"
+    first_token = _register_user(client, email=first_email, tenant_name="Newsletter Tenant A")
+    second_token = _register_user(client, email=second_email, tenant_name="Newsletter Tenant B")
+    _grant_teacher_assist_access(db_session, email=first_email)
+    _grant_teacher_assist_access(db_session, email=second_email)
+    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Newsletter A")
+    created = client.post(
+        "/v1/teacher-assist/newsletters",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    newsletter_id = created.json()["id"]
+
+    foreign = client.get(
+        f"/v1/teacher-assist/newsletters/{newsletter_id}",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign.status_code == 404, foreign.text
+

@@ -42,6 +42,9 @@ from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsag
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
 from oziebot_api.models.teacher_assist_pacing_item import TeacherAssistPacingItem
 from oziebot_api.models.teacher_assist_profile import TeacherAssistProfile
+from oziebot_api.models.teacher_assist_newsletter import TeacherAssistNewsletter
+from oziebot_api.models.teacher_assist_newsletter_export import TeacherAssistNewsletterExport
+from oziebot_api.models.teacher_assist_newsletter_version import TeacherAssistNewsletterVersion
 from oziebot_api.models.teacher_assist_reteach_plan import TeacherAssistReteachPlan
 from oziebot_api.models.teacher_assist_reteach_plan_version import TeacherAssistReteachPlanVersion
 from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
@@ -145,6 +148,18 @@ from oziebot_api.schemas.teacher_assist import (
     ReteachPlanUpdate,
     ReteachPlanVersionCreate,
     ReteachPlanVersionOut,
+    NewsletterAIDraftCreate,
+    NewsletterAIDraftOut,
+    NewsletterCreate,
+    NewsletterExportCreate,
+    NewsletterExportDownloadOut,
+    NewsletterExportOut,
+    NewsletterOut,
+    NewsletterSectionRegenerateCreate,
+    NewsletterSectionRegenerateOut,
+    NewsletterUpdate,
+    NewsletterVersionCreate,
+    NewsletterVersionOut,
     ResourceLinkCreate,
     ResourceOut,
     SchoolYearCreate,
@@ -230,6 +245,10 @@ from oziebot_api.services.teacher_assist.constants import (
     MASTERY_EVIDENCE_SOURCE_TYPES,
     MASTERY_LEVELS,
     MASTERY_MATRIX_STATUSES,
+    NEWSLETTER_EXPORT_FORMATS,
+    NEWSLETTER_REGENERATABLE_SECTIONS,
+    NEWSLETTER_STATUSES,
+    NEWSLETTER_VERSION_SOURCES,
     RETEACH_PLAN_STATUSES,
     RETEACH_PLAN_VERSION_SOURCES,
     PLANNING_SCOPES,
@@ -292,6 +311,25 @@ from oziebot_api.services.teacher_assist.mastery_dashboard import build_mastery_
 from oziebot_api.services.teacher_assist.mastery_heatmaps import (
     build_mastery_matrix_heatmap,
     build_student_mastery_summary,
+)
+from oziebot_api.services.teacher_assist.newsletter_ai_assist import (
+    generate_newsletter_ai_draft,
+    regenerate_newsletter_section,
+)
+from oziebot_api.services.teacher_assist.newsletter_exports import (
+    create_newsletter_export,
+    get_newsletter_export_download,
+    serialize_newsletter_export,
+)
+from oziebot_api.services.teacher_assist.newsletters import (
+    create_newsletter,
+    create_teacher_newsletter_version as save_teacher_newsletter_version,
+    get_newsletter_or_404,
+    list_newsletter_versions,
+    list_newsletters,
+    serialize_newsletter,
+    serialize_newsletter_version,
+    update_newsletter,
 )
 from oziebot_api.services.teacher_assist.reteach_insights import build_mastery_matrix_reteach_insights
 from oziebot_api.services.teacher_assist.reteach_plan_ai_assist import generate_reteach_plan_ai_draft
@@ -1469,6 +1507,10 @@ def read_teacher_assist_options(user: CurrentUser, db: DbSession) -> TeacherAssi
         mastery_confidence_levels=list(MASTERY_CONFIDENCE_LEVELS),
         reteach_plan_statuses=list(RETEACH_PLAN_STATUSES),
         reteach_plan_version_sources=list(RETEACH_PLAN_VERSION_SOURCES),
+        newsletter_statuses=list(NEWSLETTER_STATUSES),
+        newsletter_version_sources=list(NEWSLETTER_VERSION_SOURCES),
+        newsletter_regeneratable_sections=list(NEWSLETTER_REGENERATABLE_SECTIONS),
+        newsletter_export_formats=list(NEWSLETTER_EXPORT_FORMATS),
         extraction_artifact_types=list(TEACHER_ASSIST_EXTRACTION_ARTIFACT_TYPES),
         extraction_job_statuses=list(TEACHER_ASSIST_EXTRACTION_JOB_STATUSES),
         extraction_review_statuses=list(EXTRACTION_REVIEW_STATUSES),
@@ -4166,6 +4208,304 @@ def create_teacher_reteach_plan_ai_draft(
         prompt_version=str(response_meta["prompt_version"]),
         message=str(response_meta["message"]),
     )
+
+
+def _newsletter_out(row: TeacherAssistNewsletter) -> NewsletterOut:
+    return NewsletterOut(**serialize_newsletter(row))
+
+
+def _newsletter_version_out(row: TeacherAssistNewsletterVersion) -> NewsletterVersionOut:
+    return NewsletterVersionOut(**serialize_newsletter_version(row))
+
+
+@router.get("/newsletters", response_model=list[NewsletterOut])
+def read_teacher_newsletters(
+    user: CurrentUser,
+    db: DbSession,
+    school_year_id: uuid.UUID | None = Query(default=None),
+    grading_period_id: uuid.UUID | None = Query(default=None),
+    class_id: uuid.UUID | None = Query(default=None),
+    subject_id: uuid.UUID | None = Query(default=None),
+    status: str | None = Query(default=None),
+) -> list[NewsletterOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    rows = list_newsletters(
+        db,
+        tenant_id=tenant_id,
+        user_id=user.id,
+        school_year_id=school_year_id,
+        grading_period_id=grading_period_id,
+        class_id=class_id,
+        subject_id=subject_id,
+        status=status,
+    )
+    return [_newsletter_out(row) for row in rows]
+
+
+@router.post("/newsletters", response_model=NewsletterOut, status_code=201)
+def create_teacher_newsletter(
+    body: NewsletterCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> NewsletterOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = create_newsletter(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            school_year_id=body.school_year_id,
+            grading_period_id=body.grading_period_id,
+            class_id=body.class_id,
+            subject_id=body.subject_id,
+            title=body.title,
+            teacher_notes=body.teacher_notes,
+            week_start_date=body.week_start_date,
+            week_end_date=body.week_end_date,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    row = get_newsletter_or_404(db, tenant_id=tenant_id, user_id=user.id, newsletter_id=row.id)
+    return _newsletter_out(row)
+
+
+@router.get("/newsletters/{newsletter_id}", response_model=NewsletterOut)
+def read_teacher_newsletter(
+    newsletter_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> NewsletterOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = get_newsletter_or_404(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            newsletter_id=newsletter_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _newsletter_out(row)
+
+
+@router.put("/newsletters/{newsletter_id}", response_model=NewsletterOut)
+def update_teacher_newsletter(
+    newsletter_id: uuid.UUID,
+    body: NewsletterUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> NewsletterOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = update_newsletter(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            newsletter_id=newsletter_id,
+            title=body.title,
+            status=body.status,
+            teacher_notes=body.teacher_notes,
+            week_start_date=body.week_start_date,
+            week_end_date=body.week_end_date,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    row = get_newsletter_or_404(db, tenant_id=tenant_id, user_id=user.id, newsletter_id=row.id)
+    return _newsletter_out(row)
+
+
+@router.get("/newsletters/{newsletter_id}/versions", response_model=list[NewsletterVersionOut])
+def read_teacher_newsletter_versions(
+    newsletter_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> list[NewsletterVersionOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        rows = list_newsletter_versions(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            newsletter_id=newsletter_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [_newsletter_version_out(row) for row in rows]
+
+
+@router.post("/newsletters/{newsletter_id}/versions", response_model=NewsletterVersionOut, status_code=201)
+def create_teacher_newsletter_version(
+    newsletter_id: uuid.UUID,
+    body: NewsletterVersionCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> NewsletterVersionOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = save_teacher_newsletter_version(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            newsletter_id=newsletter_id,
+            content_json=body.content_json,
+            change_reason=body.change_reason,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _newsletter_version_out(row)
+
+
+@router.post("/newsletters/{newsletter_id}/ai-draft", response_model=NewsletterAIDraftOut)
+def create_teacher_newsletter_ai_draft(
+    newsletter_id: uuid.UUID,
+    body: NewsletterAIDraftCreate,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> NewsletterAIDraftOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        newsletter, version, response_meta = generate_newsletter_ai_draft(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            newsletter_id=newsletter_id,
+            provider_mode=body.provider_mode,
+            teacher_instructions=body.teacher_instructions,
+            settings=settings,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    newsletter = get_newsletter_or_404(
+        db, tenant_id=tenant_id, user_id=user.id, newsletter_id=newsletter.id
+    )
+    return NewsletterAIDraftOut(
+        newsletter=_newsletter_out(newsletter),
+        version=_newsletter_version_out(version),
+        teacher_review_required=bool(response_meta["teacher_review_required"]),
+        provider_mode=str(response_meta["provider_mode"]),
+        prompt_version=str(response_meta["prompt_version"]),
+        message=str(response_meta["message"]),
+    )
+
+
+@router.post("/newsletters/{newsletter_id}/regenerate-section", response_model=NewsletterSectionRegenerateOut)
+def regenerate_teacher_newsletter_section(
+    newsletter_id: uuid.UUID,
+    body: NewsletterSectionRegenerateCreate,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> NewsletterSectionRegenerateOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        newsletter, version, response_meta = regenerate_newsletter_section(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            newsletter_id=newsletter_id,
+            section=body.section,
+            provider_mode=body.provider_mode,
+            teacher_instructions=body.teacher_instructions,
+            settings=settings,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    newsletter = get_newsletter_or_404(
+        db, tenant_id=tenant_id, user_id=user.id, newsletter_id=newsletter.id
+    )
+    return NewsletterSectionRegenerateOut(
+        newsletter=_newsletter_out(newsletter),
+        version=_newsletter_version_out(version),
+        teacher_review_required=bool(response_meta["teacher_review_required"]),
+        provider_mode=str(response_meta["provider_mode"]),
+        prompt_version=str(response_meta["prompt_version"]),
+        section=str(response_meta["section"]),
+        message=str(response_meta["message"]),
+    )
+
+
+@router.post("/newsletters/{newsletter_id}/exports", response_model=NewsletterExportOut, status_code=201)
+def create_teacher_newsletter_export(
+    newsletter_id: uuid.UUID,
+    body: NewsletterExportCreate,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> NewsletterExportOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        export_row = create_newsletter_export(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            newsletter_id=newsletter_id,
+            export_format=body.export_format,
+            settings=settings,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    newsletter = get_newsletter_or_404(
+        db, tenant_id=tenant_id, user_id=user.id, newsletter_id=newsletter_id
+    )
+    payload = serialize_newsletter_export(export_row, title=newsletter.title)
+    return NewsletterExportOut(**payload)
+
+
+@router.get(
+    "/newsletters/{newsletter_id}/exports/{export_id}/download",
+    response_model=NewsletterExportDownloadOut,
+)
+def read_teacher_newsletter_export_download(
+    newsletter_id: uuid.UUID,
+    export_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> NewsletterExportDownloadOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = get_newsletter_export_download(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            newsletter_id=newsletter_id,
+            export_id=export_id,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return NewsletterExportDownloadOut(**payload)
 
 
 @router.get("/planning-drafts", response_model=list[PlanningDraftOut])

@@ -53,6 +53,11 @@ export const TEACHER_ASSIST_NAV_GROUPS: TeacherAssistNavGroup[] = [
     ],
   },
   {
+    key: "communication",
+    label: "Communication",
+    links: [{ href: "/teacher-assist/newsletters", label: "Newsletters" }],
+  },
+  {
     key: "operations",
     label: "Operations",
     links: [

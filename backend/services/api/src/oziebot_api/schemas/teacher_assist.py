@@ -92,6 +92,10 @@ StudentMasteryTrendLiteral = Literal["improving", "stable", "declining", "insuff
 StandardMasteryTrendLiteral = Literal["improving", "stable", "declining", "insufficient_data"]
 ReteachPlanStatusLiteral = Literal["draft", "ai_draft", "teacher_review", "archived"]
 ReteachPlanVersionSourceLiteral = Literal["initial", "ai_draft", "teacher_edit"]
+NewsletterStatusLiteral = Literal["draft", "review", "approved", "archived"]
+NewsletterVersionSourceLiteral = Literal["initial", "ai_draft", "ai_section_regen", "teacher_edit"]
+NewsletterRegeneratableSectionLiteral = Literal["overview", "upcoming_learning", "teacher_message", "reminders"]
+NewsletterExportFormatLiteral = Literal["html", "pdf", "docx"]
 TeacherAssistExtractionArtifactTypeLiteral = Literal["resource", "student_work"]
 TeacherAssistExtractionJobStatusLiteral = Literal[
     "queued",
@@ -291,6 +295,10 @@ class TeacherAssistOptionsOut(BaseModel):
     mastery_confidence_levels: list[str]
     reteach_plan_statuses: list[str] = Field(default_factory=list)
     reteach_plan_version_sources: list[str] = Field(default_factory=list)
+    newsletter_statuses: list[str] = Field(default_factory=list)
+    newsletter_version_sources: list[str] = Field(default_factory=list)
+    newsletter_regeneratable_sections: list[str] = Field(default_factory=list)
+    newsletter_export_formats: list[str] = Field(default_factory=list)
     planning_draft_statuses: list[str]
     planning_scopes: list[str]
     supported_grade_levels: list[str]
@@ -1304,6 +1312,120 @@ class ReteachPlanAIDraftOut(BaseModel):
     provider_mode: str
     prompt_version: str
     message: str
+
+
+class NewsletterCreate(BaseModel):
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    title: str | None = Field(default=None, max_length=255)
+    teacher_notes: str | None = Field(default=None, max_length=4000)
+    week_start_date: date | None = None
+    week_end_date: date | None = None
+
+
+class NewsletterUpdate(BaseModel):
+    title: str | None = Field(default=None, max_length=255)
+    status: NewsletterStatusLiteral | None = None
+    teacher_notes: str | None = Field(default=None, max_length=4000)
+    week_start_date: date | None = None
+    week_end_date: date | None = None
+
+
+class NewsletterVersionCreate(BaseModel):
+    content_json: dict[str, Any]
+    change_reason: str | None = Field(default=None, max_length=4000)
+
+
+class NewsletterAIDraftCreate(BaseModel):
+    provider_mode: Literal["mock", "real"] = "mock"
+    teacher_instructions: str | None = Field(default=None, max_length=4000)
+
+
+class NewsletterSectionRegenerateCreate(BaseModel):
+    section: NewsletterRegeneratableSectionLiteral
+    provider_mode: Literal["mock", "real"] = "mock"
+    teacher_instructions: str | None = Field(default=None, max_length=4000)
+
+
+class NewsletterExportCreate(BaseModel):
+    export_format: NewsletterExportFormatLiteral
+
+
+class NewsletterVersionOut(BaseModel):
+    id: uuid.UUID
+    newsletter_id: uuid.UUID
+    version_number: int
+    version_source: NewsletterVersionSourceLiteral
+    content_json: dict[str, Any]
+    prompt_context_json: dict[str, Any] | None = None
+    provider_name: str | None = None
+    provider_model: str | None = None
+    prompt_version: str | None = None
+    ai_usage_event_id: uuid.UUID | None = None
+    created_by_user_id: uuid.UUID
+    change_reason: str | None = None
+    created_at: datetime
+
+
+class NewsletterOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    owner_user_id: uuid.UUID
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    title: str
+    status: NewsletterStatusLiteral
+    week_start_date: date | None = None
+    week_end_date: date | None = None
+    teacher_notes: str | None = None
+    current_version_id: uuid.UUID | None = None
+    latest_ai_usage_event_id: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    subject_name: str | None = None
+    class_name: str | None = None
+
+
+class NewsletterAIDraftOut(BaseModel):
+    newsletter: NewsletterOut
+    version: NewsletterVersionOut
+    teacher_review_required: bool = True
+    provider_mode: str
+    prompt_version: str
+    message: str
+
+
+class NewsletterSectionRegenerateOut(BaseModel):
+    newsletter: NewsletterOut
+    version: NewsletterVersionOut
+    teacher_review_required: bool = True
+    provider_mode: str
+    prompt_version: str
+    section: str
+    message: str
+
+
+class NewsletterExportOut(BaseModel):
+    id: uuid.UUID
+    newsletter_id: uuid.UUID
+    newsletter_version_id: uuid.UUID | None = None
+    export_format: NewsletterExportFormatLiteral
+    file_size_bytes: int
+    created_at: datetime
+    download_filename: str
+
+
+class NewsletterExportDownloadOut(BaseModel):
+    export_id: uuid.UUID
+    newsletter_id: uuid.UUID
+    export_format: str
+    mime_type: str
+    download_filename: str
+    download_url: str
 
 
 class PlanningDraftCreate(BaseModel):

@@ -19,6 +19,7 @@ ACTIVITY_EVENT_CATEGORIES = (
     "packet",
     "review",
     "export",
+    "communication",
     "system",
 )
 
@@ -64,6 +65,11 @@ ACTIVITY_EVENT_TYPES = (
     "reteach_plan_created",
     "reteach_plan_ai_drafted",
     "reteach_plan_version_created",
+    "newsletter_created",
+    "newsletter_ai_drafted",
+    "newsletter_section_regenerated",
+    "newsletter_version_created",
+    "newsletter_export_created",
 )
 
 

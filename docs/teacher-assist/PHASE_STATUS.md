@@ -122,6 +122,10 @@ Teacher workflow UX polish + workflow cohesion: `/teacher-assist/today` landing 
 
 AI-assisted reteach plan drafting: persisted reteach plans + version history, mock AI draft generation from mastery gaps (`POST /reteach-plans/{id}/ai-draft`), standards-focused anonymous prompting (STUDENT # only), AI usage tracking, teacher edit versioning, and mastery dashboard integration (weak standard → create plan → generate draft) — draft-only, teacher-review-required, with no automatic publish, mastery mutation, gradebook, or parent communication side effects.
 
+## Phase 30
+
+Weekly newsletter generation: `/teacher-assist/newsletters` workspace with draft/review/approved/archived statuses, mock AI newsletter drafts from instructional activity (lesson plans, assignments, teacher notes, grading-period context), section regeneration, version history, HTML/PDF/DOCX export — teacher review required, no outbound email/SMS, no student names/grades/behavior/PII in AI context.
+
 ## Next Phase
 
-The next recommended phase is **Phase 30** (teacher publish workflow for reviewed reteach plans into daily teaching / planning surfaces, assignment effectiveness UI on Assignments screen, or real-provider reteach AI behind existing guardrails — still no automatic mastery updates, parent communication, or gradebook side effects).
+The next recommended phase is **Phase 31** (teacher-controlled send workflow handoff metadata, assignment effectiveness UI on Assignments, real-provider newsletter AI, or reteach plan publish into daily teaching — still no automatic outbound communication, mastery updates, or gradebook side effects).

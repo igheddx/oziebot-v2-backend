@@ -59,6 +59,12 @@ import type {
   MasteryDashboard,
   ReteachPlan,
   ReteachPlanAIDraft,
+  Newsletter,
+  NewsletterAIDraft,
+  NewsletterExport,
+  NewsletterExportDownload,
+  NewsletterSectionRegenerate,
+  NewsletterVersion,
   ReteachPlanVersion,
   MasteryMatrix,
   MasteryMatrixHeatmap,
@@ -776,6 +782,87 @@ export function generateReteachPlanAIDraft(
     `/v1/teacher-assist/reteach-plans/${id}/ai-draft`,
     "POST",
     body,
+  );
+}
+
+export function fetchNewsletters(filters: {
+  school_year_id?: string;
+  grading_period_id?: string;
+  class_id?: string;
+  subject_id?: string;
+  status?: string;
+} = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return readJson<Newsletter[]>(`/v1/teacher-assist/newsletters${query}`);
+}
+
+export function fetchNewsletter(id: string) {
+  return readJson<Newsletter>(`/v1/teacher-assist/newsletters/${id}`);
+}
+
+export function createNewsletter(body: {
+  school_year_id: string;
+  grading_period_id?: string;
+  class_id: string;
+  subject_id: string;
+  title?: string;
+  teacher_notes?: string;
+  week_start_date?: string;
+  week_end_date?: string;
+}) {
+  return writeJson<Newsletter>("/v1/teacher-assist/newsletters", "POST", body);
+}
+
+export function updateNewsletter(id: string, body: Record<string, unknown>) {
+  return writeJson<Newsletter>(`/v1/teacher-assist/newsletters/${id}`, "PUT", body);
+}
+
+export function fetchNewsletterVersions(id: string) {
+  return readJson<NewsletterVersion[]>(`/v1/teacher-assist/newsletters/${id}/versions`);
+}
+
+export function createNewsletterVersion(
+  id: string,
+  body: { content_json: Record<string, unknown>; change_reason?: string },
+) {
+  return writeJson<NewsletterVersion>(`/v1/teacher-assist/newsletters/${id}/versions`, "POST", body);
+}
+
+export function generateNewsletterAIDraft(
+  id: string,
+  body: { provider_mode?: "mock" | "real"; teacher_instructions?: string } = {},
+) {
+  return writeJson<NewsletterAIDraft>(`/v1/teacher-assist/newsletters/${id}/ai-draft`, "POST", body);
+}
+
+export function regenerateNewsletterSection(
+  id: string,
+  body: {
+    section: "overview" | "upcoming_learning" | "teacher_message" | "reminders";
+    provider_mode?: "mock" | "real";
+    teacher_instructions?: string;
+  },
+) {
+  return writeJson<NewsletterSectionRegenerate>(
+    `/v1/teacher-assist/newsletters/${id}/regenerate-section`,
+    "POST",
+    body,
+  );
+}
+
+export function createNewsletterExport(id: string, exportFormat: "html" | "pdf" | "docx") {
+  return writeJson<NewsletterExport>(`/v1/teacher-assist/newsletters/${id}/exports`, "POST", {
+    export_format: exportFormat,
+  });
+}
+
+export function fetchNewsletterExportDownload(newsletterId: string, exportId: string) {
+  return readJson<NewsletterExportDownload>(
+    `/v1/teacher-assist/newsletters/${newsletterId}/exports/${exportId}/download`,
   );
 }
 
