@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { TeacherAssistEmptyState } from "@/components/teacher-assist/teacher-assist-empty-state";
 import { fetchTeacherAssistHomeWorkspace } from "@/lib/teacher-assist-api";
@@ -31,14 +31,19 @@ export function TeacherAssistOnboardingScreen() {
   const [onboarding, setOnboarding] = useState<TeacherAssistOnboardingProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const payload = await fetchTeacherAssistHomeWorkspace();
-    setOnboarding(payload.onboarding);
-  }, []);
-
   useEffect(() => {
-    load().catch((err: Error) => setError(err.message));
-  }, [load]);
+    let active = true;
+    fetchTeacherAssistHomeWorkspace()
+      .then((data) => {
+        if (active) setOnboarding(data.onboarding);
+      })
+      .catch((err: Error) => {
+        if (active) setError(err.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   if (error) {
     return <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>;

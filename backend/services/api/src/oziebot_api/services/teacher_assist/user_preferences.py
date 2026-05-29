@@ -5,6 +5,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
@@ -41,12 +42,7 @@ def get_user_preferences_or_create(
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> TeacherAssistUserPreference:
-    row = db.scalars(
-        select(TeacherAssistUserPreference).where(
-            TeacherAssistUserPreference.tenant_id == tenant_id,
-            TeacherAssistUserPreference.user_id == user_id,
-        )
-    ).one_or_none()
+    row = _get_user_preferences(db, tenant_id=tenant_id, user_id=user_id)
     if row is not None:
         return row
     now = _now()
@@ -60,8 +56,29 @@ def get_user_preferences_or_create(
         updated_at=now,
     )
     db.add(row)
-    db.flush()
+    try:
+        with db.begin_nested():
+            db.flush()
+    except IntegrityError:
+        row = _get_user_preferences(db, tenant_id=tenant_id, user_id=user_id)
+        if row is None:
+            raise
+        return row
     return row
+
+
+def _get_user_preferences(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> TeacherAssistUserPreference | None:
+    return db.scalars(
+        select(TeacherAssistUserPreference).where(
+            TeacherAssistUserPreference.tenant_id == tenant_id,
+            TeacherAssistUserPreference.user_id == user_id,
+        )
+    ).one_or_none()
 
 
 def build_onboarding_progress(

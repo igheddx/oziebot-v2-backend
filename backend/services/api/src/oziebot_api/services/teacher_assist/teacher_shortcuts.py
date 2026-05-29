@@ -19,8 +19,9 @@ def build_teacher_shortcuts(
     *,
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
+    preferences: TeacherAssistUserPreference | None = None,
 ) -> dict[str, Any]:
-    preferences = get_user_preferences_or_create(db, tenant_id=tenant_id, user_id=user_id)
+    prefs = preferences or get_user_preferences_or_create(db, tenant_id=tenant_id, user_id=user_id)
 
     recent_assignments = db.scalars(
         select(TeacherAssistAssignment)
@@ -66,9 +67,9 @@ def build_teacher_shortcuts(
             return None
         return max(mapping.items(), key=lambda item: item[1])[0]
 
-    most_used_class_id = _most_used(class_usage) or preferences.last_class_id
-    most_used_subject_id = _most_used(subject_usage) or preferences.last_subject_id
-    most_used_grading_period_id = _most_used(grading_period_usage) or preferences.last_grading_period_id
+    most_used_class_id = _most_used(class_usage) or prefs.last_class_id
+    most_used_subject_id = _most_used(subject_usage) or prefs.last_subject_id
+    most_used_grading_period_id = _most_used(grading_period_usage) or prefs.last_grading_period_id
 
     class_name = None
     subject_name = None
@@ -122,5 +123,5 @@ def build_teacher_shortcuts(
             }
             for row in recent_reteach
         ],
-        "recently_viewed": preferences.recently_viewed_json or [],
+        "recently_viewed": prefs.recently_viewed_json or [],
     }

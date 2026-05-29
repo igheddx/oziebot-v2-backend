@@ -10,6 +10,10 @@ Optional environment variables:
   TEACHER_ASSIST_AWELE_FULL_NAME
   TEACHER_ASSIST_AWELE_TENANT_NAME
   TEACHER_ASSIST_AWELE_PASSWORD
+  TEACHER_ASSIST_OZIE_EMAIL
+  TEACHER_ASSIST_OZIE_FULL_NAME
+  TEACHER_ASSIST_OZIE_TENANT_NAME
+  TEACHER_ASSIST_OZIE_PASSWORD
 """
 
 from __future__ import annotations
@@ -29,6 +33,9 @@ DEFAULT_DOMINIC_EMAIL = "Dominic@oziebot.com"
 DEFAULT_AWELE_EMAIL = "aweleu@gmail.com"
 DEFAULT_AWELE_FULL_NAME = "Awele Ighedosa"
 DEFAULT_AWELE_TENANT_NAME = "Awele Ighedosa"
+DEFAULT_OZIE_EMAIL = "dvaten.1992@gmail.com"
+DEFAULT_OZIE_FULL_NAME = "Ozie Ighedosa"
+DEFAULT_OZIE_TENANT_NAME = "Ozie Ighedosa"
 
 
 def _env(name: str, default: str) -> str:
@@ -52,6 +59,10 @@ def run() -> None:
     awele_full_name = _env("TEACHER_ASSIST_AWELE_FULL_NAME", DEFAULT_AWELE_FULL_NAME)
     awele_tenant_name = _env("TEACHER_ASSIST_AWELE_TENANT_NAME", DEFAULT_AWELE_TENANT_NAME)
     awele_password = os.environ.get("TEACHER_ASSIST_AWELE_PASSWORD")
+    ozie_email = _env("TEACHER_ASSIST_OZIE_EMAIL", DEFAULT_OZIE_EMAIL)
+    ozie_full_name = _env("TEACHER_ASSIST_OZIE_FULL_NAME", DEFAULT_OZIE_FULL_NAME)
+    ozie_tenant_name = _env("TEACHER_ASSIST_OZIE_TENANT_NAME", DEFAULT_OZIE_TENANT_NAME)
+    ozie_password = os.environ.get("TEACHER_ASSIST_OZIE_PASSWORD")
 
     session: Session = factory()
     try:
@@ -63,8 +74,15 @@ def run() -> None:
             tenant_name=awele_tenant_name,
             password=awele_password,
         )
+        ozie = ensure_user_teacher_assist_access(
+            session,
+            email=ozie_email,
+            full_name=ozie_full_name,
+            tenant_name=ozie_tenant_name,
+            password=ozie_password,
+        )
         session.commit()
-        for result in (dominic, awele):
+        for result in (dominic, awele, ozie):
             print(
                 "Ensured TeacherAssist access:",
                 {

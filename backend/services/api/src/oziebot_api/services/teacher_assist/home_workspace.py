@@ -398,7 +398,12 @@ def get_teacher_assist_home_workspace(
             user_id=user_id,
         ),
         "quick_actions": build_home_quick_actions(),
-        "shortcuts": build_teacher_shortcuts(db, tenant_id=tenant_id, user_id=user_id),
+        "shortcuts": build_teacher_shortcuts(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            preferences=preferences,
+        ),
         "timeline": build_home_timeline(db, tenant_id=tenant_id, user_id=user_id),
         "recent_activity": today.get("recent_activity") or [],
         "onboarding": onboarding,

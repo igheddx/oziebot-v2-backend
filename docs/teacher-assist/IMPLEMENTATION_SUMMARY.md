@@ -36,10 +36,12 @@ See also: `docs/teacher-assist/PHASE_STATUS.md`, `docs/teacher-assist/KNOWN_LIMI
   - creates a minimal tenant + membership for Awele only if needed
   - grants TeacherAssist product access to Awele's tenant
   - sets Awele's default product to `teacher_assist`
+  - creates Ozie Ighedosa (`dvaten.1992@gmail.com`) with the same TeacherAssist-only bootstrap flow when missing
+  - sets Ozie's default product to `teacher_assist`
 - Existing trading access is preserved:
   - no trading product access is removed
   - no trading entitlements are removed
-- If Awele is created without an explicit password environment variable, the script stores a generated temporary password hash without printing a password value.
+- If Awele or Ozie is created without an explicit password environment variable, the script stores a generated temporary password hash without printing a password value.
 
 ### Validation coverage added
 
@@ -58,8 +60,12 @@ See also: `docs/teacher-assist/PHASE_STATUS.md`, `docs/teacher-assist/KNOWN_LIMI
   - `TEACHER_ASSIST_DOMINIC_EMAIL`
   - `TEACHER_ASSIST_AWELE_EMAIL`
   - `TEACHER_ASSIST_AWELE_FULL_NAME`
-- `TEACHER_ASSIST_AWELE_TENANT_NAME`
-- `TEACHER_ASSIST_AWELE_PASSWORD`
+  - `TEACHER_ASSIST_AWELE_TENANT_NAME`
+  - `TEACHER_ASSIST_AWELE_PASSWORD`
+  - `TEACHER_ASSIST_OZIE_EMAIL`
+  - `TEACHER_ASSIST_OZIE_FULL_NAME`
+  - `TEACHER_ASSIST_OZIE_TENANT_NAME`
+  - `TEACHER_ASSIST_OZIE_PASSWORD`
 
 ## Phase 9 - Dedicated TeacherAssist Worker + Guarded Real Provider Activation Foundation
 

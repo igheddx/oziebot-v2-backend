@@ -14,6 +14,7 @@ from oziebot_api.services.teacher_assist.access_seed import (
     ensure_existing_user_teacher_assist_access,
     ensure_user_teacher_assist_access,
 )
+from oziebot_api.services.teacher_assist.user_preferences import get_user_preferences_or_create
 
 
 def test_teacher_assist_access_seed_is_idempotent_and_preserves_trading_access(
@@ -47,6 +48,13 @@ def test_teacher_assist_access_seed_is_idempotent_and_preserves_trading_access(
         full_name="Awele Ighedosa",
         tenant_name="Awele Ighedosa",
         password="awele-password-123",
+    )
+    ozie_result = ensure_user_teacher_assist_access(
+        db_session,
+        email="dvaten.1992@gmail.com",
+        full_name="Ozie Ighedosa",
+        tenant_name="Ozie Ighedosa",
+        password="ozie-password-123",
     )
     db_session.commit()
 
@@ -85,6 +93,16 @@ def test_teacher_assist_access_seed_is_idempotent_and_preserves_trading_access(
     assert awele_result.created_user is True
     assert awele_result.created_tenant is True
 
+    ozie = db_session.scalar(select(User).where(func.lower(User.email) == "dvaten.1992@gmail.com"))
+    assert ozie is not None
+    assert ozie.full_name == "Ozie Ighedosa"
+    assert ozie.is_active is True
+    ozie_products, ozie_default = get_user_products(db_session, ozie)
+    assert {row.product_key for row in ozie_products} == {TEACHER_ASSIST_PRODUCT_KEY}
+    assert ozie_default == TEACHER_ASSIST_PRODUCT_KEY
+    assert ozie_result.created_user is True
+    assert ozie_result.created_tenant is True
+
     counts_before = {
         "users": db_session.scalar(select(func.count()).select_from(User)),
         "tenants": db_session.scalar(select(func.count()).select_from(Tenant)),
@@ -99,6 +117,12 @@ def test_teacher_assist_access_seed_is_idempotent_and_preserves_trading_access(
         email="aweleu@gmail.com",
         full_name="Awele Ighedosa",
         tenant_name="Awele Ighedosa",
+    )
+    second_ozie = ensure_user_teacher_assist_access(
+        db_session,
+        email="dvaten.1992@gmail.com",
+        full_name="Ozie Ighedosa",
+        tenant_name="Ozie Ighedosa",
     )
     db_session.commit()
 
@@ -115,6 +139,9 @@ def test_teacher_assist_access_seed_is_idempotent_and_preserves_trading_access(
     assert second_awele.created_user is False
     assert second_awele.created_tenant is False
     assert second_awele.temporary_password_generated is False
+    assert second_ozie.created_user is False
+    assert second_ozie.created_tenant is False
+    assert second_ozie.temporary_password_generated is False
 
 
 def test_teacher_assist_access_seed_requires_existing_dominic_membership(db_session: Session):
@@ -124,3 +151,36 @@ def test_teacher_assist_access_seed_requires_existing_dominic_membership(db_sess
         assert str(exc) == "User not found: missing-dominic@example.com"
     else:
         raise AssertionError("Expected LookupError for missing Dominic user")
+
+
+def test_user_preferences_or_create_is_idempotent(db_session: Session, client):
+    email = "teacher-preferences-idempotent@example.com"
+    token = client.post(
+        "/v1/auth/register",
+        json={
+            "email": email,
+            "full_name": "Preferences Idempotent",
+            "password": "password-123",
+            "tenant_name": "Preferences Tenant",
+        },
+    )
+    assert token.status_code == 201, token.text
+    user = db_session.scalar(select(User).where(func.lower(User.email) == email.lower()))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    first = get_user_preferences_or_create(
+        db_session,
+        tenant_id=membership.tenant_id,
+        user_id=user.id,
+    )
+    second = get_user_preferences_or_create(
+        db_session,
+        tenant_id=membership.tenant_id,
+        user_id=user.id,
+    )
+    db_session.commit()
+    assert first.id == second.id
