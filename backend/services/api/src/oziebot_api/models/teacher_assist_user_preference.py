@@ -44,6 +44,17 @@ class TeacherAssistUserPreference(Base):
         nullable=True,
         index=True,
     )
+    active_pacing_guide_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guides.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    manual_pacing_period_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guide_periods.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     preferred_landing: Mapped[str] = mapped_column(String(32), nullable=False, server_default="home")
     recently_viewed_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON(), nullable=False)
     onboarding_progress_json: Mapped[dict[str, Any]] = mapped_column(JSON(), nullable=False)

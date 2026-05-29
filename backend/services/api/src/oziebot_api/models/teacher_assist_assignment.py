@@ -64,6 +64,24 @@ class TeacherAssistAssignment(Base):
         index=True,
     )
     source_context_json: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)
+    pacing_guide_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guides.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    pacing_guide_period_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guide_periods.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    instructional_week_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("instructional_weeks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

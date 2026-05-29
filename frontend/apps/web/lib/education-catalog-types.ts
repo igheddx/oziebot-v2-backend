@@ -127,4 +127,5 @@ export type CatalogSection =
   | "subjects"
   | "objectives"
   | "curriculum"
-  | "assignments";
+  | "assignments"
+  | "pacing_guides";

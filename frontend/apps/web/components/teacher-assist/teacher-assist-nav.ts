@@ -12,11 +12,23 @@ export type TeacherAssistNavGroup = {
 
 export const TEACHER_ASSIST_PRIMARY_LINKS: TeacherAssistNavLink[] = [
   { href: "/teacher-assist/home", label: "Home" },
+  { href: "/teacher-assist/copilot", label: "Copilot" },
+  { href: "/teacher-assist/planning/pacing-guides/workspace", label: "Current Week" },
   { href: "/teacher-assist/work-queue", label: "Work Queue" },
   { href: "/teacher-assist/catalog", label: "Catalog" },
 ];
 
 export const TEACHER_ASSIST_NAV_GROUPS: TeacherAssistNavGroup[] = [
+  {
+    key: "planning",
+    label: "Planning",
+    links: [
+      { href: "/teacher-assist/planning/pacing-guides/workspace", label: "Pacing Workspace" },
+      { href: "/teacher-assist/planning/weeks", label: "Week Workspace" },
+      { href: "/teacher-assist/planning/templates", label: "Template Library" },
+      { href: "/teacher-assist/pacing-guides", label: "Pacing Guides" },
+    ],
+  },
   {
     key: "instruction",
     label: "Instruction",
@@ -40,7 +52,8 @@ export const TEACHER_ASSIST_NAV_GROUPS: TeacherAssistNavGroup[] = [
     label: "Insights",
     links: [
       { href: "/teacher-assist/mastery", label: "Mastery" },
-      { href: "/teacher-assist/reteach-plans", label: "Reteach" },
+      { href: "/teacher-assist/reteach", label: "Reteach Workspace" },
+      { href: "/teacher-assist/reteach-plans", label: "Reteach Plans" },
       { href: "/teacher-assist/reflections", label: "Reflections" },
     ],
   },

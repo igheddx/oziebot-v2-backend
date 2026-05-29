@@ -54,6 +54,24 @@ class TeacherAssistNewsletter(Base):
     week_start_date: Mapped[date | None] = mapped_column(Date(), nullable=True)
     week_end_date: Mapped[date | None] = mapped_column(Date(), nullable=True)
     teacher_notes: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    pacing_guide_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guides.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    pacing_guide_period_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guide_periods.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    instructional_week_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("instructional_weeks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     current_version_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("teacher_assist_newsletter_versions.id", ondelete="SET NULL"),

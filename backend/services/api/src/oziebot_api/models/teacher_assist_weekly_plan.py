@@ -71,6 +71,24 @@ class TeacherAssistWeeklyPlan(Base):
         nullable=True,
         index=True,
     )
+    pacing_guide_period_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guide_periods.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    pacing_guide_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guides.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    instructional_week_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("instructional_weeks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     content_json: Mapped[dict[str, Any]] = mapped_column(JSON(), nullable=False)

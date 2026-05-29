@@ -1239,6 +1239,7 @@ def create_planning_draft(
     subject_ids: list[uuid.UUID] | None,
     pacing_item_ids: list[uuid.UUID] | None,
     standard_ids: list[uuid.UUID] | None,
+    pacing_guide_period_id: uuid.UUID | None = None,
     title: str | None,
     module_title: str | None,
     start_date: date | None,
@@ -1265,6 +1266,7 @@ def create_planning_draft(
         instructional_days_count=instructional_days_count,
         notes=notes.strip() if notes else None,
         status=validate_planning_draft_status(status),
+        pacing_guide_period_id=pacing_guide_period_id,
         created_at=now,
         updated_at=now,
     )

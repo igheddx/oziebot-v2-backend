@@ -6,14 +6,225 @@ This document summarizes the current Oziebot repo findings and the proposed impl
 
 ## Current implemented baseline
 
-**Phases 1–31.5** are implemented. Latest completed work:
+**Phases 1–38** are implemented. Latest completed work:
 
-- **Phase 29** — AI-assisted reteach plan drafting (mock AI drafts, versioning, mastery integration)
-- **Phase 30** — Weekly newsletter generation (mock AI drafts, section regen, export, no auto-send)
-- **Phase 31** — Lesson effectiveness + teacher reflection (read-only scores, reflection workspace, mock AI suggestions, historical comparison, planning hints)
-- **Phase 31.5** — Teacher experience completion (onboarding, Home, Work Queue, class workspace, nav redesign, quick create, shortcuts, user preferences)
+- **Phase 37** — Week-centric instructional workspace (`instructional_weeks`, tabbed `/teacher-assist/week/[id]`, action center, snapshots, pacing integration)
+- **Phase 38** — Assignment → gradebook → mastery → reteach instructional loop (instructional evidence, objective performance, reteach workspace, week closure, health reporting)
+- **Phase 39** — Teacher Copilot (context engine, explainable analysis intents, sessions/messages audit trail, copilot UI, home integration)
 
-**Next recommended:** Phase 32 — real-provider reflection AI, assignment effectiveness UI on Assignments, or reteach plan publish into daily teaching (no automatic outbound communication, mastery, or gradebook side effects).
+**Next recommended:** Phase 40 — LMS/SIS import adapters, parent communication from week summaries, or district instructional analytics (no auto-grade or auto-mastery commits).
+
+## Phase 36 — Teacher Time Savings Engine
+
+### Schema changes / migration
+
+- Migration `063_teacher_assist_time_savings_foundation`:
+  - `pacing_guides`: `ownership_type`, `visibility_scope`, `planning_group_id`
+  - `teacher_assist_planning_groups`, `teacher_assist_planning_group_members`
+  - `teacher_assist_week_templates`
+  - `teacher_assist_reuse_events`
+
+### Services
+
+- `InstructionalAssetReuseService` + `ReuseScore` (subject/grade/objective/resource/week similarity → 0–100)
+- `week_duplication.duplicate_week`, `generate_next_week.generate_next_week_draft`
+- `week_templates` (save/list/apply), `rollover_v2.rollover_school_year_v2`
+- `recommendation_service.build_week_recommendations`
+- `teacher_efficiency` dashboard + home time-savings summary
+- `planning_groups` CRUD/join, `reuse_events.record_reuse_event`
+
+### APIs (`/v1/teacher-assist/*`)
+
+- `GET /reuse/search`, `POST /pacing-guide-periods/{id}/duplicate`, `POST /pacing-guide-periods/{id}/generate-next-week`
+- `GET /pacing-guide-periods/{id}/recommendations`
+- `GET|POST /week-templates`, `POST /pacing-guide-periods/{id}/templates`, `POST /week-templates/{id}/apply`
+- `POST /rollover/v2`, `GET|POST /planning-groups`, `POST /planning-groups/{id}/join`
+- `GET /efficiency-dashboard`
+- Home workspace extended with `continue_planning`, `recommended_reuse`, `time_savings`, `efficiency_summary`
+
+### UI
+
+- Home: Continue Planning, Generate Next Week, Recommended Reuse, Recent Templates, Time Saved This Year
+- Week workspace: duplicate week, generate next week, save template actions; Recommendations tab
+- Template library: `/teacher-assist/planning/templates` with filters, preview, apply
+- Nav: Template Library under Planning
+
+### Seed data
+
+- `python -m oziebot_api.scripts.seed_time_savings` — 2025–2026 / 2026–2027 school years, 5th Grade Math Team planning group, shared team pacing guide, sample templates, sample reuse events
+
+### Tests
+
+- `backend/services/api/tests/test_time_savings_foundation.py`
+
+### Limitations
+
+- No real AI generation for next-week drafts (rules-based suggestions only)
+- Rollover v2 API only; no dedicated teacher UI yet
+- Team pacing guide ownership fields exist but guide create/update UI not wired
+- Save-as-template currently week-scoped; assignment/quiz/rubric/newsletter template save deferred
+- No collaborative editing, marketplace, district analytics, or automatic publishing
+
+### Estimated teacher time-saving impact
+
+Initial assumptions (configurable constants): lesson reused 30 min, assignment 20 min, rubric 10 min, quiz 15 min, week duplicate 45 min, template apply 25 min. Reuse events accumulate into home/efficiency dashboards as estimated hours saved and reuse rate.
+
+### Recommended next phase
+
+Phase 37 — week-centric instructional workspace (completed).
+
+## Phase 37 — Week-Centric Instructional Workspace
+
+### Schema changes / migration
+
+- Migration `064_teacher_assist_instructional_week_foundation`:
+  - `instructional_weeks`, `instructional_week_objectives`, `instructional_week_snapshots`
+  - Nullable `instructional_week_id` on `weekly_plans`, `assignments`, `teacher_assist_newsletters`, `teacher_assist_generated_artifacts`
+
+### Services
+
+- `instructional_weeks` — create from pacing period, auto-create DRAFT on active guide selection, objectives CRUD, preview, artifact linking
+- `instructional_week_workspace` — tabbed workspace, health indicators, action center, timeline, structured mastery tab data
+- `instructional_week_snapshots` — freeze week workspace JSON
+- `instructional_week_reuse` — generate next instructional week, prior-year reuse
+- `generated_artifacts.register_generated_artifact` — auto-sets `instructional_week_id` when week exists
+- `pacing_guide_workspace` — exposes current/upcoming instructional week navigation
+- `home_workspace` — upcoming instructional week links, recently used resources from current week context
+
+### APIs
+
+- `GET/POST /instructional-weeks`, `GET /instructional-weeks/by-period/{period_id}`
+- `GET /instructional-weeks/{id}/workspace`
+- `GET /pacing-guide-periods/{id}/instructional-week-preview`
+- `POST /pacing-guide-periods/{id}/instructional-weeks`
+- `POST /instructional-weeks/{id}/generate-next-week`, `/reuse`, `/snapshots`
+
+### UI
+
+- Primary workspace: `/teacher-assist/week/[id]` with 9 tabs (Mastery tab shows coverage summary, objectives, assessments)
+- Home: instructional week routing, upcoming week link, recently used resources card
+- Pacing guide workspace: open/create instructional week for current and upcoming periods
+- Legacy pacing week tools remain at `/teacher-assist/planning/weeks`
+
+### Compatibility strategy
+
+- Existing APIs and workspaces unchanged; artifacts linked via nullable FK + pacing period fallback queries
+- Active pacing guide selection auto-creates a DRAFT instructional week for the resolved current period
+
+### Seed
+
+- `python3 -m oziebot_api.scripts.seed_instructional_weeks` — weeks 1–3 with linked generated artifacts
+
+### Tests
+
+- `backend/services/api/tests/test_instructional_week_foundation.py` — create/workspace/snapshot/next week, auto-create on active selection, artifact linking
+
+### Recommended next phase
+
+Phase 38 — assignment → gradebook → mastery → reteach loop (completed).
+
+## Phase 38 — Instructional Feedback Loop
+
+### Schema changes / migration
+
+- Migration `065_teacher_assist_instructional_loop_foundation`:
+  - `teacher_assist_instructional_evidence`
+  - `teacher_assist_student_support_groups`, `teacher_assist_student_support_group_members`
+  - `teacher_assist_instructional_reflections`
+  - `teacher_assist_instructional_week_closures`, `teacher_assist_instructional_week_summaries`
+  - `teacher_assist_reteach_effectiveness_records`
+  - Reteach plan v2 fields: `instructional_week_id`, `objective_id`, `reason`, `expected_outcome`
+
+### Services
+
+- `ObjectivePerformanceService` — transparent objective performance (students assessed, mastery %, trend)
+- `instructional_evidence` — teacher-confirmed evidence CRUD
+- `assignment_coverage` — assignment objective coverage view
+- `mastery_dashboard_v2` — objective health, support signals, strongest/weakest objectives
+- `student_support_groups` — teacher-reviewed reteach groupings
+- `reteach_workspace` — objectives, groups, plans, effectiveness history
+- `instructional_reflections`, `instructional_week_closure`, week summary generation
+- `recommendation_v2`, `instructional_health_report`, `gradebook_v2`, `reteach_effectiveness`
+
+### APIs (`/v1/teacher-assist/*`)
+
+- `GET /mastery-dashboard/v2`, `/objective-performance`, `/assignment-coverage`, `/gradebook/v2`
+- `GET|POST /instructional-evidence`, `POST /instructional-evidence/{id}/confirm`
+- `GET /reteach-workspace`, `GET|POST /support-groups`, `PATCH /support-groups/{id}/status`
+- `GET|PUT /instructional-reflections`
+- `GET|PATCH /instructional-weeks/{id}/closure`, `POST /instructional-weeks/{id}/summary`
+- `GET /instructional-loop/recommendations`, `/instructional-health-report`
+- `GET|POST /reteach-plans/{id}/effectiveness`
+
+### UI
+
+- `/teacher-assist/reteach` — reteach workspace
+- Home — instructional health, loop recommendations
+- Instructional week workspace — mastery results, reteach needs, closure checklist in tabs
+
+### Seed & tests
+
+- `python3 -m oziebot_api.scripts.seed_instructional_loop`
+- `backend/services/api/tests/test_instructional_loop_foundation.py`
+
+### Recommended next phase
+
+Phase 40 — LMS/SIS import adapters, parent communication from week summaries, district instructional analytics.
+
+## Phase 39 — Teacher Copilot
+
+### Schema changes / migration
+
+- Migration `066_teacher_assist_copilot_foundation`:
+  - `teacher_copilot_sessions` — tenant, teacher, title, timestamps
+  - `teacher_copilot_messages` — session, role (teacher/assistant/system), content, `context_snapshot` JSON audit payload, optional `ai_usage_event_id`
+
+### Services
+
+- `teacher_context_engine.py` — `TeacherContextEngine` builds context packets: current week, pacing guide, objectives, mastery, reteach, assessments, resources, reflections, recommendations, school year
+- `teacher_copilot_intents.py` — intent routing and explainable handlers (objective analysis, student support, small group builder, week/grading period summarizer, resource recommender, lesson gap analysis, reteach assistant, reflection assistant, admin copilot)
+- `teacher_copilot_service.py` — session/message CRUD, mock provider orchestration, daily cost limit check, audit in `context_snapshot`
+
+### APIs (`/v1/teacher-assist/copilot/*`)
+
+- `GET /suggested-questions`, `GET /context`
+- `GET|POST /sessions`, `GET|POST /sessions/{id}/messages`
+- `POST /admin/query` (root admin only)
+- Home workspace payload includes `copilot` card data (suggested questions, objectives/students needing attention, suggested actions)
+
+### Provider architecture
+
+- Default: mock/rule-based analysis from context packets (no LLM)
+- `provider_mode=real` is guarded and rejected unless real provider is explicitly enabled; circuit breaker and model allowlist respected when enabled in future phases
+- Usage tracked via `TeacherAssistAIUsageEvent` with `feature=teacher_copilot`
+
+### UI
+
+- `/teacher-assist/copilot` — conversation, suggested questions, context indicators, evidence/recommendations panel
+- Home — Ask Teacher Copilot card, suggested actions, weekly summary deep link
+- Primary nav — Copilot link
+
+### Audit design
+
+- Teacher message stores context packet keys used
+- Assistant message stores full `analysis`, context packets, and audit block (prompt, intent, provider, timestamp)
+- Linked AI usage events for cost/debug analytics
+
+### Seed & tests
+
+- `python3 -m oziebot_api.scripts.seed_teacher_copilot`
+- `backend/services/api/tests/test_teacher_copilot_foundation.py`
+
+### Limitations
+
+- Mock provider only for conversational responses; no rich LLM prose
+- Small group drafts are suggestions — teacher must confirm before creating support groups
+- Admin copilot uses catalog context snapshot; full district-wide scans require catalog admin APIs
+- No autonomous actions (grades, mastery commits, publishing, communications)
+
+### Recommended next phase
+
+Phase 40 — LMS/SIS import adapters, parent communication from week summaries, district instructional analytics.
 
 See also: `docs/teacher-assist/PHASE_STATUS.md`, `docs/teacher-assist/KNOWN_LIMITATIONS.md`.
 

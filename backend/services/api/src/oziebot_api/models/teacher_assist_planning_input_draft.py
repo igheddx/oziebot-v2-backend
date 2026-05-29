@@ -49,6 +49,12 @@ class TeacherAssistPlanningInputDraft(Base):
         nullable=True,
         index=True,
     )
+    pacing_guide_period_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guide_periods.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     planning_scope: Mapped[str] = mapped_column(String(32), nullable=False, server_default="weekly")
     module_title: Mapped[str | None] = mapped_column(String(160), nullable=True)
     start_date: Mapped[date | None] = mapped_column(Date(), nullable=True)

@@ -3,7 +3,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { fetchPeriodLaunchContext } from "@/lib/pacing-guide-api";
 
 import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
 import { TeacherAssistFieldError, fieldErrorInputClass } from "@/components/teacher-assist/teacher-assist-field-error";
@@ -321,6 +323,8 @@ function PacketPreviewCard({
 export function TeacherAssistAssignmentsScreen() {
   const searchParams = useSearchParams();
   const requestedAssignmentId = searchParams.get("assignment_id");
+  const pacingPeriodId = searchParams.get("pacing_period_id");
+  const pacingPrefillRef = useRef<string | null>(null);
   const [options, setOptions] = useState<TeacherAssistOptions | null>(null);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
@@ -585,6 +589,50 @@ export function TeacherAssistAssignmentsScreen() {
   useEffect(() => {
     void load(filters);
   }, [filters, load]);
+
+  useEffect(() => {
+    if (
+      !pacingPeriodId ||
+      loading ||
+      editingAssignmentId ||
+      pacingPrefillRef.current === pacingPeriodId
+    ) {
+      return;
+    }
+    pacingPrefillRef.current = pacingPeriodId;
+    void fetchPeriodLaunchContext(pacingPeriodId)
+      .then((context) => {
+        const assignment = (context.assignment ?? {}) as Record<string, unknown>;
+        setForm((current) => ({
+          ...current,
+          school_year_id: String(assignment.school_year_id ?? current.school_year_id),
+          grading_period_id: String(assignment.grading_period_id ?? current.grading_period_id),
+          subject_id: String(assignment.subject_id ?? current.subject_id),
+          title: String(assignment.title ?? current.title),
+          description: String(assignment.description ?? current.description),
+          standard_ids: Array.isArray(assignment.standard_ids)
+            ? assignment.standard_ids.map(String)
+            : current.standard_ids,
+        }));
+        setSectionAlert(
+          "assignmentForm",
+          sectionSuccess(
+            `Pre-filled from pacing week${context.period_title ? `: ${context.period_title}` : "."}`,
+            "Assignment pre-filled",
+          ),
+        );
+      })
+      .catch((nextError) => {
+        pacingPrefillRef.current = null;
+        setSectionAlert(
+          "assignmentForm",
+          sectionError(
+            nextError instanceof Error ? nextError.message : "Could not pre-fill assignment from pacing week.",
+            "Unable to pre-fill assignment",
+          ),
+        );
+      });
+  }, [editingAssignmentId, loading, pacingPeriodId, setSectionAlert]);
 
   useEffect(() => {
     if (!packetAssignmentId) {

@@ -18,6 +18,7 @@ from oziebot_api.services.teacher_assist.constants import TEACHER_ASSIST_QUICK_C
 from oziebot_api.services.teacher_assist.mastery_dashboard import build_mastery_dashboard
 from oziebot_api.services.teacher_assist.teacher_shortcuts import build_teacher_shortcuts
 from oziebot_api.services.teacher_assist.today_workspace import get_teacher_assist_today_workspace
+from oziebot_api.services.teacher_assist.current_week_resolver import build_current_week_payload
 from oziebot_api.services.teacher_assist.user_preferences import (
     build_onboarding_progress,
     get_user_preferences_or_create,
@@ -25,6 +26,20 @@ from oziebot_api.services.teacher_assist.user_preferences import (
 from oziebot_api.services.teacher_assist.work_queue import (
     PRIORITY_LEVEL_BY_SEVERITY,
     build_teacher_assist_work_queue,
+)
+from oziebot_api.services.teacher_assist.instructional_weeks import (
+    find_instructional_week_for_period,
+)
+from oziebot_api.services.teacher_assist.week_context_service import WeekContextService
+from oziebot_api.services.teacher_assist.recommendation_v2 import build_instructional_loop_recommendations
+from oziebot_api.services.teacher_assist.objective_performance import ObjectivePerformanceService
+from oziebot_api.services.teacher_assist.reteach_plans import list_reteach_plans
+from oziebot_api.services.teacher_assist.instructional_week_closure import get_or_create_week_closure, serialize_week_closure
+from oziebot_api.services.teacher_assist.teacher_copilot_service import get_suggested_questions
+from oziebot_api.services.teacher_assist.recommendation_service import build_week_recommendations
+from oziebot_api.services.teacher_assist.teacher_efficiency import (
+    build_home_time_savings_summary,
+    build_teacher_efficiency_dashboard,
 )
 from oziebot_api.services.teacher_assist.workspace_service import get_teacher_assist_workspace
 
@@ -308,14 +323,27 @@ def build_home_mastery_alerts(
     return alerts
 
 
-def build_home_quick_actions() -> list[dict[str, Any]]:
+def build_home_quick_actions(current_week: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    period_id = None
+    if current_week and current_week.get("has_active_guide"):
+        period_id = (current_week.get("current_week") or {}).get("id")
+    week_base = f"/teacher-assist/planning/weeks?period_id={period_id}" if period_id else "/teacher-assist/planning/pacing-guides/workspace"
     mapping = {
-        "lesson": ("Create lesson", "/teacher-assist/weekly-planning"),
-        "assignment": ("Create assignment", "/teacher-assist/assignments"),
-        "quiz": ("Create quiz", "/teacher-assist/exports"),
-        "reteach_plan": ("Create reteach plan", "/teacher-assist/reteach-plans"),
-        "newsletter": ("Create newsletter", "/teacher-assist/newsletters"),
+        "lesson": ("Generate Instructional Plan", f"{week_base}&action=instructional_plan" if period_id else "/teacher-assist/weekly-planning"),
+        "assignment": ("Generate Assignment", f"{week_base}&action=assignment" if period_id else "/teacher-assist/assignments"),
+        "quiz": ("Generate Quiz", f"{week_base}&action=quiz" if period_id else "/teacher-assist/exports"),
+        "reteach_plan": ("Generate Rubric", f"{week_base}&action=rubric" if period_id else "/teacher-assist/reteach-plans"),
+        "newsletter": ("Generate Newsletter", f"{week_base}&action=newsletter" if period_id else "/teacher-assist/newsletters"),
     }
+    extra = []
+    if period_id:
+        extra.append(
+            {
+                "action_key": "generate_next_week",
+                "label": "Generate Next Week",
+                "navigation_href": f"{week_base}&action=generate_next_week",
+            }
+        )
     return [
         {
             "action_key": key,
@@ -324,7 +352,7 @@ def build_home_quick_actions() -> list[dict[str, Any]]:
         }
         for key in TEACHER_ASSIST_QUICK_CREATE_ACTIONS
         if key in mapping
-    ]
+    ] + extra
 
 
 def build_home_this_week(
@@ -360,6 +388,115 @@ def build_home_this_week(
     }
 
 
+def _build_recently_used_resources(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    period_id: uuid.UUID | None,
+    instructional_week_id: str | None,
+) -> list[dict[str, Any]]:
+    if period_id is None:
+        return []
+    from oziebot_api.models.user import User
+
+    user = db.get(User, user_id)
+    if user is None:
+        return []
+    week_context = WeekContextService.serialize(
+        WeekContextService.build(db, tenant_id=tenant_id, user=user, period_id=period_id)
+    )
+    navigation_href = (
+        f"/teacher-assist/week/{instructional_week_id}?tab=resources"
+        if instructional_week_id
+        else f"/teacher-assist/planning/weeks?period_id={period_id}&tab=resources"
+    )
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in (week_context.get("resources") or []) + (week_context.get("teacher_resources") or []):
+        title = row.get("title")
+        if not title:
+            continue
+        key = f"{title}:{row.get('resource_type')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            {
+                "title": title,
+                "resource_type": row.get("resource_type"),
+                "navigation_href": navigation_href,
+            }
+        )
+    return rows[:6]
+
+
+def build_home_instructional_loop(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    instructional_week_id: str | None,
+) -> dict[str, Any]:
+    week_uuid = uuid.UUID(instructional_week_id) if instructional_week_id else None
+    performance = ObjectivePerformanceService.calculate_for_scope(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        instructional_week_id=week_uuid,
+    )
+    recommendations = build_instructional_loop_recommendations(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        instructional_week_id=week_uuid,
+    )
+    open_reteach = [
+        row
+        for row in list_reteach_plans(db, tenant_id=tenant_id, user_id=user_id)
+        if row.status in {"draft", "teacher_review", "active"}
+    ]
+    closure = None
+    if week_uuid is not None:
+        closure = serialize_week_closure(
+            get_or_create_week_closure(
+                db,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                instructional_week_id=week_uuid,
+            )
+        )
+    objectives_attention = [
+        row
+        for row in performance.get("objectives") or []
+        if (row.get("mastery_pct") or 0) < 50 and (row.get("students_assessed") or 0) > 0
+    ]
+    return {
+        "students_needing_support": performance.get("students_needing_support") or [],
+        "objectives_requiring_attention": objectives_attention[:5],
+        "open_reteach_plans": [
+            {"id": str(row.id), "title": row.title, "status": row.status, "navigation_href": "/teacher-assist/reteach-plans"}
+            for row in open_reteach[:5]
+        ],
+        "recent_mastery_changes": [
+            {
+                "objective_code": row.get("objective_code"),
+                "trend_direction": row.get("trend_direction"),
+                "mastery_pct": row.get("mastery_pct"),
+            }
+            for row in performance.get("objectives") or []
+            if row.get("trend_direction") in {"improving", "declining"}
+        ][:5],
+        "week_closure_status": closure,
+        "instructional_health": {
+            "objectives_assessed": len(performance.get("objectives") or []),
+            "students_needing_support_count": len(performance.get("students_needing_support") or []),
+            "open_reteach_plan_count": len(open_reteach),
+        },
+        "loop_recommendations": recommendations.get("recommended_actions") or [],
+    }
+
+
 def get_teacher_assist_home_workspace(
     db: Session,
     *,
@@ -386,18 +523,117 @@ def get_teacher_assist_home_workspace(
         tenant_id=tenant_id,
         user_id=user_id,
     )
+    current_week = build_current_week_payload(db, tenant_id=tenant_id, user_id=user_id)
+    period_id = (current_week.get("current_week") or {}).get("id") if current_week.get("has_active_guide") else None
+    upcoming_period_id = (current_week.get("upcoming_week") or {}).get("id") if current_week.get("has_active_guide") else None
+    instructional_week_id = None
+    upcoming_instructional_week_id = None
+    if period_id is not None:
+        instructional_week = find_instructional_week_for_period(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            pacing_guide_period_id=uuid.UUID(str(period_id)),
+        )
+        if instructional_week is not None:
+            instructional_week_id = str(instructional_week.id)
+    if upcoming_period_id is not None:
+        upcoming_instructional_week = find_instructional_week_for_period(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            pacing_guide_period_id=uuid.UUID(str(upcoming_period_id)),
+        )
+        if upcoming_instructional_week is not None:
+            upcoming_instructional_week_id = str(upcoming_instructional_week.id)
+    recommended_reuse = []
+    if period_id is not None:
+        from oziebot_api.models.user import User
+
+        user = db.get(User, user_id)
+        if user is not None:
+            recommended_reuse = build_week_recommendations(
+                db, tenant_id=tenant_id, user=user, period_id=period_id
+            ).get("recommended_for_this_week", {}).get("top_reusable", [])
+    efficiency = build_teacher_efficiency_dashboard(db, tenant_id=tenant_id, user_id=user_id)
+    time_savings = build_home_time_savings_summary(db, tenant_id=tenant_id, user_id=user_id)
+    instructional_loop = build_home_instructional_loop(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        instructional_week_id=instructional_week_id,
+    )
     return {
         "summary": today.get("summary") or {},
         "priorities": priorities,
         "classes": build_home_classes(db, settings=settings, tenant_id=tenant_id, user_id=user_id),
         "this_week": build_home_this_week(db, tenant_id=tenant_id, user_id=user_id),
+        "current_week": current_week,
         "mastery_alerts": build_home_mastery_alerts(
             db,
             settings=settings,
             tenant_id=tenant_id,
             user_id=user_id,
         ),
-        "quick_actions": build_home_quick_actions(),
+        "quick_actions": build_home_quick_actions(current_week),
+        "continue_planning": {
+            "current_week_href": (
+                f"/teacher-assist/week/{instructional_week_id}"
+                if instructional_week_id
+                else (f"/teacher-assist/planning/weeks?period_id={period_id}" if period_id else "/teacher-assist/planning/pacing-guides/workspace")
+            ),
+            "instructional_week_href": f"/teacher-assist/week/{instructional_week_id}" if instructional_week_id else None,
+            "create_instructional_week_href": (
+                f"/teacher-assist/planning/weeks?period_id={period_id}&action=create_instructional_week"
+                if period_id and not instructional_week_id
+                else None
+            ),
+            "generate_next_week_href": (
+                f"/teacher-assist/week/{instructional_week_id}?action=generate_next_week"
+                if instructional_week_id
+                else (f"/teacher-assist/planning/weeks?period_id={period_id}&action=generate_next_week" if period_id else None)
+            ),
+            "template_library_href": "/teacher-assist/planning/templates",
+            "upcoming_instructional_week_href": (
+                f"/teacher-assist/week/{upcoming_instructional_week_id}"
+                if upcoming_instructional_week_id
+                else (
+                    f"/teacher-assist/planning/weeks?period_id={upcoming_period_id}&action=create_instructional_week"
+                    if upcoming_period_id
+                    else None
+                )
+            ),
+        },
+        "instructional_week_id": instructional_week_id,
+        "upcoming_instructional_week_id": upcoming_instructional_week_id,
+        "recently_used_resources": _build_recently_used_resources(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            period_id=uuid.UUID(str(period_id)) if period_id else None,
+            instructional_week_id=instructional_week_id,
+        ),
+        "instructional_loop": instructional_loop,
+        "copilot": {
+            "href": "/teacher-assist/copilot",
+            "suggested_questions": get_suggested_questions(is_root_admin=False)[:6],
+            "weekly_summary_href": (
+                f"/teacher-assist/copilot?prompt=Summarize+this+week"
+                if instructional_week_id
+                else "/teacher-assist/copilot"
+            ),
+            "objectives_requiring_attention": instructional_loop.get("objectives_requiring_attention") or [],
+            "students_needing_support": (instructional_loop.get("students_needing_support") or [])[:5],
+            "suggested_actions": (instructional_loop.get("loop_recommendations") or [])[:4],
+            "instructional_health": instructional_loop.get("instructional_health") or {},
+        },
+        "recommended_reuse": recommended_reuse,
+        "time_savings": time_savings,
+        "efficiency_summary": {
+            "estimated_hours_saved": efficiency.get("estimated_hours_saved"),
+            "reuse_rate_percent": efficiency.get("reuse_rate_percent"),
+            "recent_templates": efficiency.get("recent_templates", []),
+        },
         "shortcuts": build_teacher_shortcuts(
             db,
             tenant_id=tenant_id,
@@ -412,6 +648,8 @@ def get_teacher_assist_home_workspace(
             "last_class_id": preferences.last_class_id,
             "last_subject_id": preferences.last_subject_id,
             "last_grading_period_id": preferences.last_grading_period_id,
+            "active_pacing_guide_id": preferences.active_pacing_guide_id,
+            "manual_pacing_period_id": preferences.manual_pacing_period_id,
         },
         "read_only": True,
     }

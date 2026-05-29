@@ -327,7 +327,7 @@ def _create_ready_planning_draft_context(
         },
     ).json()
     guide = client.post(
-        "/v1/teacher-assist/pacing-guides",
+        "/v1/teacher-assist/legacy/pacing-guides",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "school_year_id": school_year["id"],
@@ -489,7 +489,7 @@ def test_pacing_guide_and_item_round_trip(client, db_session: Session):
     ).json()
 
     pacing_guide = client.post(
-        "/v1/teacher-assist/pacing-guides",
+        "/v1/teacher-assist/legacy/pacing-guides",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "school_year_id": school_year["id"],
@@ -560,7 +560,7 @@ def test_pacing_guide_and_item_round_trip(client, db_session: Session):
     assert updated_item.json()["resource_ids"] == [resource["id"]]
 
     guides = client.get(
-        "/v1/teacher-assist/pacing-guides",
+        "/v1/teacher-assist/legacy/pacing-guides",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert guides.status_code == 200, guides.text
@@ -793,7 +793,7 @@ def test_planning_draft_context_preview_and_ready_status(client, db_session: Ses
         },
     ).json()
     guide = client.post(
-        "/v1/teacher-assist/pacing-guides",
+        "/v1/teacher-assist/legacy/pacing-guides",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "school_year_id": school_year["id"],
@@ -2373,7 +2373,7 @@ def test_phase3_tenant_isolation_for_resources_guides_and_drafts(client, db_sess
         },
     ).json()
     guide = client.post(
-        "/v1/teacher-assist/pacing-guides",
+        "/v1/teacher-assist/legacy/pacing-guides",
         headers={"Authorization": f"Bearer {first_token}"},
         json={
             "school_year_id": school_year["id"],
@@ -2396,7 +2396,7 @@ def test_phase3_tenant_isolation_for_resources_guides_and_drafts(client, db_sess
     assert second_resources.json() == []
 
     second_guides = client.get(
-        "/v1/teacher-assist/pacing-guides",
+        "/v1/teacher-assist/legacy/pacing-guides",
         headers={"Authorization": f"Bearer {second_token}"},
     )
     assert second_guides.status_code == 200, second_guides.text
@@ -2416,7 +2416,7 @@ def test_phase3_tenant_isolation_for_resources_guides_and_drafts(client, db_sess
     assert foreign_resource.status_code == 404
 
     foreign_update = client.put(
-        f"/v1/teacher-assist/pacing-guides/{guide['id']}",
+        f"/v1/teacher-assist/legacy/pacing-guides/{guide['id']}",
         headers={"Authorization": f"Bearer {second_token}"},
         json={
             "school_year_id": school_year["id"],

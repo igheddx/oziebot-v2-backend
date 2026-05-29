@@ -134,6 +134,38 @@ Lesson effectiveness + teacher reflection: read-only weekly-plan lesson effectiv
 
 Teacher experience completion: guided onboarding (`/teacher-assist/get-started`, 10-step 0–100% progress), Home workspace (`/teacher-assist/home`), Work Queue (`/teacher-assist/work-queue`), class operational workspace (`/teacher-assist/classes/{id}`), navigation redesign (Home, Work Queue, Instruction, Assessment, Insights, Content, Administration), global quick-create menu, smart shortcuts, user preferences persistence, priority engine, weekly timeline, and empty-state patterns — read-model only, no new AI capabilities, grading changes, mastery automation, parent communication, or LMS/SIS integration.
 
+## Phase 32.2A
+
+Catalog UI completion: root-admin scope filters, context banner, objective–resource mapping display, and legacy my-context notes.
+
+## Phase 33
+
+Pacing guide foundation and planning architecture pivot: catalog-aligned `PacingGuide` entities with periods, objective/resource mappings, optional instructional-plan linkage, CRUD/copy/rollover APIs, Texas seed data, root-admin catalog pacing management, and teacher browse/copy UI at `/teacher-assist/pacing-guides`. Legacy pacing item APIs preserved under `/legacy/pacing-guides`.
+
+## Phase 34
+
+Current week experience and pacing guide workspace: teacher active pacing guide preference (`active_pacing_guide_id`, `manual_pacing_period_id`), `CurrentWeekResolver` service, home dashboard centered on current/upcoming week and teaching progress, pacing guide workspace at `/teacher-assist/planning/pacing-guides/workspace` with timeline and objective coverage, period notes, launch-context prefill into instructional plans / assignments / newsletters, and extended Texas/Mason seed week schedules.
+
+## Phase 35
+
+Generate everything from the week: `WeekContextService` normalized week DTO, `teacher_assist_generated_artifacts` registry, week workspace at `/teacher-assist/planning/weeks`, generation history and artifact library tabs, week-scoped generate/duplicate APIs, instructional plan / assignment / quiz / rubric / newsletter / parent-communication foundations linked to pacing weeks, and home quick actions routed through the week workspace.
+
+## Phase 36
+
+Teacher time savings engine: `InstructionalAssetReuseService` with `ReuseScore` (0–100), duplicate week / generate next week / week template library / rollover v2 / planning groups / teacher efficiency dashboard APIs, reuse-event tracking with estimated minutes saved, home dashboard cards for continue planning / recommended reuse / recent templates / time saved this year, week workspace recommendations tab, template library UI at `/teacher-assist/planning/templates`, pacing guide ownership and visibility fields for team/school/district sharing foundations, and extended Texas seed data (`seed_time_savings.py`) for 2025–2026 / 2026–2027 school years, shared grade-level pacing guides, sample templates, and reuse events.
+
+## Phase 37
+
+Week-centric instructional workspace: `instructional_weeks` execution layer linked to pacing guide weeks, `instructional_week_objectives` with inherit/add/override/supplement semantics, week snapshots, instructional week workspace at `/teacher-assist/week/[id]` with Overview/Lessons/Assignments/Assessments/Resources/Newsletter/Mastery/Timeline/Action Center tabs, week health indicators, generate-next-week and annual reuse integration, backward-compatible FK attachment on plans/assignments/newsletters/generated artifacts, home routing to instructional week when present, legacy pacing week workspace preserved at `/teacher-assist/planning/weeks`, and Texas seed via `seed_instructional_weeks.py`.
+
+## Phase 38
+
+Assignment → gradebook → mastery → reteach instructional loop: `teacher_assist_instructional_evidence` for teacher-confirmed mastery evidence, `ObjectivePerformanceService` with transparent objective performance calculations, assignment coverage analysis, mastery dashboard v2, student support groups, reteach workspace at `/teacher-assist/reteach`, reteach plan v2 fields and effectiveness tracking, gradebook v2 objective alignment view, instructional reflections, week closure workflow and auto-generated week summaries, recommendation engine v2, home instructional health cards, instructional health report export, instructional week loop integration, and Texas seed via `seed_instructional_loop.py`.
+
+## Phase 39
+
+Teacher Copilot (context-aware instructional assistant): `teacher_copilot_sessions` and `teacher_copilot_messages` with audit snapshots, `TeacherContextEngine` context packets (week, pacing, objectives, mastery, reteach, assessments, resources, reflections), mock-first explainable intent handlers (objective analysis, student support, small groups, week/grading period summaries, resource recommender, lesson gaps, reteach assistant, reflection assistant, admin copilot), `/teacher-assist/copilot` workspace with suggested questions and evidence panels, home copilot cards (Ask Teacher Copilot, suggested actions, weekly summary link), guarded provider/cost controls, and Texas seed via `seed_teacher_copilot.py`. Recommendations only — no auto-grade, auto-mastery, publish, or communication side effects.
+
 ## Next Phase
 
-The next recommended phase is **Phase 32** (real-provider reflection AI, assignment effectiveness UI on Assignments, reteach plan publish into daily teaching, or teacher-controlled send handoff metadata — still no automatic outbound communication, mastery updates, or gradebook side effects).
+The next recommended phase is **Phase 40** (LMS/SIS import adapters, parent communication from week summaries, district instructional analytics, or predictive mastery signals — still without auto-grade or auto-mastery commits).

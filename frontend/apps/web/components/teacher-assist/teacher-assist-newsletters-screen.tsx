@@ -1,7 +1,9 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { fetchPeriodLaunchContext } from "@/lib/pacing-guide-api";
 
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
 import {
@@ -69,6 +71,8 @@ export function TeacherAssistNewslettersScreen() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedId = searchParams.get("id");
+  const pacingPeriodId = searchParams.get("pacing_period_id");
+  const pacingPrefillRef = useRef<string | null>(null);
   const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
 
   const [options, setOptions] = useState<TeacherAssistOptions | null>(null);
@@ -127,6 +131,40 @@ export function TeacherAssistNewslettersScreen() {
   useEffect(() => {
     loadLists().catch((error: Error) => setPageError(error.message));
   }, [loadLists]);
+
+  useEffect(() => {
+    if (!pacingPeriodId || pacingPrefillRef.current === pacingPeriodId) {
+      return;
+    }
+    pacingPrefillRef.current = pacingPeriodId;
+    void fetchPeriodLaunchContext(pacingPeriodId)
+      .then((context) => {
+        const newsletter = (context.newsletter ?? {}) as Record<string, unknown>;
+        setCreateForm((current) => ({
+          ...current,
+          school_year_id: String(newsletter.school_year_id ?? current.school_year_id),
+          subject_id: String(newsletter.subject_id ?? current.subject_id),
+          title: String(newsletter.title ?? current.title),
+        }));
+        if (typeof newsletter.notes === "string" && newsletter.notes.trim()) {
+          setTeacherNotes(newsletter.notes);
+        }
+        setSectionAlert(
+          "createDraft",
+          sectionSuccess(
+            `Pre-filled from pacing week${context.period_title ? `: ${context.period_title}` : "."}`,
+            "Newsletter pre-filled",
+          ),
+        );
+      })
+      .catch((error: Error) => {
+        pacingPrefillRef.current = null;
+        setSectionAlert(
+          "createDraft",
+          sectionError(error.message || "Could not pre-fill newsletter from pacing week.", "Unable to pre-fill newsletter"),
+        );
+      });
+  }, [pacingPeriodId, setSectionAlert]);
 
   useEffect(() => {
     if (requestedId) setSelectedId(requestedId);

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
@@ -199,6 +200,9 @@ function workflowStatusMessage(workflow: TeacherAssistWorkflow) {
 }
 
 export function TeacherAssistWeeklyPlanningScreen() {
+  const searchParams = useSearchParams();
+  const pacingPeriodId = searchParams.get("pacing_period_id");
+  const pacingPrefillRef = useRef<string | null>(null);
   const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -319,6 +323,40 @@ export function TeacherAssistWeeklyPlanningScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!pacingPeriodId || loading || activeDraftId || pacingPrefillRef.current === pacingPeriodId) {
+      return;
+    }
+    pacingPrefillRef.current = pacingPeriodId;
+    let active = true;
+    void createPlanningDraft({ pacing_guide_period_id: pacingPeriodId })
+      .then(async (savedDraft) => {
+        if (!active) return;
+        setActiveDraftId(savedDraft.id);
+        setDraftForm(draftFormFromDraft(savedDraft));
+        setMessage({
+          tone: "info",
+          text: `Pre-filled from pacing week${savedDraft.title ? `: ${savedDraft.title}` : "."}`,
+        });
+        await load(savedDraft.id);
+        await loadPreview(savedDraft.id);
+      })
+      .catch((nextError) => {
+        if (!active) return;
+        pacingPrefillRef.current = null;
+        setSectionAlert(
+          "draftWorkspace",
+          sectionError(
+            nextError instanceof Error ? nextError.message : "Could not pre-fill planning draft from pacing week.",
+            "Unable to pre-fill draft",
+          ),
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeDraftId, load, loadPreview, loading, pacingPeriodId, setSectionAlert]);
 
   useEffect(() => {
     if (!activeDraftId) {

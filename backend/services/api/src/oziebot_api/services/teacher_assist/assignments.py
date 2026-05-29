@@ -336,6 +336,8 @@ def create_assignment(
     source_context_json: dict[str, Any] | None,
     standard_ids: list[uuid.UUID] | None = None,
     resource_ids: list[uuid.UUID] | None = None,
+    pacing_guide_id: uuid.UUID | None = None,
+    pacing_guide_period_id: uuid.UUID | None = None,
 ) -> TeacherAssistAssignment:
     normalized_standard_ids = _normalize_uuid_list(standard_ids)
     normalized_resource_ids = _normalize_uuid_list(resource_ids)
@@ -379,6 +381,8 @@ def create_assignment(
         rubric_json=normalized_rubric_json,
         source_plan_id=source_plan_id,
         source_context_json=normalized_source_context_json,
+        pacing_guide_id=pacing_guide_id,
+        pacing_guide_period_id=pacing_guide_period_id,
         created_at=now,
         updated_at=now,
     )

@@ -14,6 +14,9 @@ from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsageEvent
 from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
+from oziebot_api.models.user import User
+from oziebot_api.models.teacher_assist_planning_input_draft import TeacherAssistPlanningInputDraft
+from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.models.teacher_assist_weekly_plan_version import TeacherAssistWeeklyPlanVersion
 from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
@@ -1769,6 +1772,12 @@ def _persist_teacher_assist_workflow_success(
     )
     now = datetime.now(UTC)
     draft_context = snapshot.get("draft", {})
+    draft_row = session.get(TeacherAssistPlanningInputDraft, workflow.planning_input_draft_id)
+    pacing_period_id = draft_row.pacing_guide_period_id if draft_row else None
+    pacing_guide_id = None
+    if pacing_period_id is not None:
+        period_row = session.get(TeacherAssistPacingGuidePeriod, pacing_period_id)
+        pacing_guide_id = period_row.pacing_guide_id if period_row else None
     plan_title = (
         draft_context.get("plan_title") or draft_context.get("title") or "TeacherAssist Instructional Plan"
     )
@@ -1792,6 +1801,8 @@ def _persist_teacher_assist_workflow_success(
         visibility_scope=validate_plan_visibility_scope("private"),
         reuse_status=validate_plan_reuse_status("active"),
         school_year_origin_id=_parse_snapshot_uuid(draft_context.get("school_year_id")),
+        pacing_guide_period_id=pacing_period_id,
+        pacing_guide_id=pacing_guide_id,
         status=validate_weekly_plan_status("in_progress"),
         content_json=content,
         source_context_json=snapshot,
@@ -1800,6 +1811,35 @@ def _persist_teacher_assist_workflow_success(
     )
     session.add(weekly_plan)
     session.flush()
+    if pacing_period_id is not None and pacing_guide_id is not None and draft_row is not None:
+        from oziebot_api.services.teacher_assist.generated_artifacts import (
+            link_lesson_plan_artifact,
+            register_generated_artifact,
+        )
+
+        linked = link_lesson_plan_artifact(
+            session,
+            tenant_id=workflow.tenant_id,
+            user_id=workflow.user_id,
+            planning_draft_id=draft_row.id,
+            instructional_plan_id=weekly_plan.id,
+        )
+        if linked is None:
+            owner = session.get(User, workflow.user_id)
+            if owner is not None:
+                register_generated_artifact(
+                    session,
+                    tenant_id=workflow.tenant_id,
+                    user=owner,
+                    pacing_guide_id=pacing_guide_id,
+                    pacing_guide_period_id=pacing_period_id,
+                    artifact_type="LESSON_PLAN",
+                    title=weekly_plan.title,
+                    status="completed",
+                    instructional_plan_id=weekly_plan.id,
+                    planning_draft_id=draft_row.id,
+                    metadata={"week_context": {"pacing_guide_period_id": str(pacing_period_id)}},
+                )
     _create_weekly_plan_version(
         session,
         weekly_plan=weekly_plan,

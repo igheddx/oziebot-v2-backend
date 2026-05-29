@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/components/providers/auth-provider";
+import { TeacherAssistPacingGuideAdminPanel } from "@/components/teacher-assist/teacher-assist-pacing-guide-admin-panel";
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
 import {
   TeacherAssistInlineAlert,
@@ -50,6 +51,7 @@ const SECTIONS: Array<{ key: CatalogSection; label: string }> = [
   { key: "objectives", label: "Objectives" },
   { key: "curriculum", label: "Curriculum" },
   { key: "assignments", label: "Teacher Assignments" },
+  { key: "pacing_guides", label: "Pacing Guides" },
 ];
 
 export function TeacherAssistEducationCatalogAdminScreen() {
@@ -589,7 +591,7 @@ export function TeacherAssistEducationCatalogAdminScreen() {
                 </div>
               ))}
             </div>
-          ) : (
+          ) : section === "assignments" ? (
             <div className="mt-5 space-y-5">
               <form
                 className="grid gap-3 md:grid-cols-2"
@@ -632,6 +634,10 @@ export function TeacherAssistEducationCatalogAdminScreen() {
                   User {row.user_id.slice(0, 8)}… · {schoolNameById.get(row.school_id) ?? row.school_id}
                 </div>
               ))}
+            </div>
+          ) : (
+            <div className="mt-5">
+              <TeacherAssistPacingGuideAdminPanel />
             </div>
           )}
         </section>

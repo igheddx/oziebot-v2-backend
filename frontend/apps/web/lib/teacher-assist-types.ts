@@ -2138,6 +2138,23 @@ export type TeacherAssistTeacherShortcuts = {
   recently_viewed: Array<Record<string, unknown>>;
 };
 
+export type TeacherAssistHomeReuseCandidate = {
+  entity_type?: string;
+  entity_id?: string;
+  title?: string;
+  artifact_type?: string;
+  source?: string;
+  reuse_score?: { score?: number };
+  navigation_href?: string;
+};
+
+export type TeacherAssistHomeTemplateSummary = {
+  id: string;
+  name: string;
+  artifact_type: string;
+  navigation_href: string;
+};
+
 export type TeacherAssistHomeWorkspace = {
   summary: Record<string, unknown>;
   priorities: TeacherAssistHomePriorities;
@@ -2147,8 +2164,60 @@ export type TeacherAssistHomeWorkspace = {
     completed_plans_count: number;
     week_end_date: string;
   };
+  current_week: Record<string, unknown>;
   mastery_alerts: TeacherAssistHomeMasteryAlert[];
   quick_actions: TeacherAssistHomeQuickAction[];
+    continue_planning?: {
+    current_week_href: string;
+    instructional_week_href?: string | null;
+    create_instructional_week_href?: string | null;
+    generate_next_week_href: string | null;
+    upcoming_instructional_week_href?: string | null;
+    template_library_href: string;
+  };
+  instructional_week_id?: string | null;
+  upcoming_instructional_week_id?: string | null;
+  recently_used_resources?: Array<{
+    title: string;
+    resource_type?: string | null;
+    navigation_href: string;
+  }>;
+  copilot?: {
+    href: string;
+    suggested_questions?: string[];
+    weekly_summary_href?: string;
+    objectives_requiring_attention?: Array<{ objective_code?: string; mastery_pct?: number }>;
+    students_needing_support?: Array<{ student_identifier?: string; objective_code?: string; mastery_pct?: number }>;
+    suggested_actions?: Array<{ title: string; description?: string; navigation_href?: string }>;
+    instructional_health?: {
+      objectives_assessed?: number;
+      students_needing_support_count?: number;
+      open_reteach_plan_count?: number;
+    };
+  };
+  instructional_loop?: {
+    students_needing_support?: Array<{ student_identifier?: string }>;
+    objectives_requiring_attention?: Array<{ objective_code?: string; mastery_pct?: number }>;
+    open_reteach_plans?: Array<{ id: string; title: string; status: string; navigation_href: string }>;
+    recent_mastery_changes?: Array<{ objective_code?: string; trend_direction?: string; mastery_pct?: number }>;
+    week_closure_status?: { status?: string; checklist?: Record<string, boolean> } | null;
+    instructional_health?: {
+      objectives_assessed?: number;
+      students_needing_support_count?: number;
+      open_reteach_plan_count?: number;
+    };
+    loop_recommendations?: Array<{ title: string; description?: string; navigation_href?: string }>;
+  };
+  recommended_reuse?: TeacherAssistHomeReuseCandidate[];
+  time_savings?: {
+    time_saved_this_year_hours?: number;
+    time_saved_this_year_minutes?: number;
+  };
+  efficiency_summary?: {
+    estimated_hours_saved?: number;
+    reuse_rate_percent?: number;
+    recent_templates?: TeacherAssistHomeTemplateSummary[];
+  };
   shortcuts: TeacherAssistTeacherShortcuts;
   timeline: TeacherAssistHomeTimelineEvent[];
   recent_activity: TeacherAssistActionWorkspaceActivity[];
@@ -2158,6 +2227,8 @@ export type TeacherAssistHomeWorkspace = {
     last_class_id: string | null;
     last_subject_id: string | null;
     last_grading_period_id: string | null;
+    active_pacing_guide_id?: string | null;
+    manual_pacing_period_id?: string | null;
   };
   read_only: boolean;
 };

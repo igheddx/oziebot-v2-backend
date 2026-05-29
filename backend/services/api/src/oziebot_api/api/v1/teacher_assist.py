@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 import uuid
 from typing import Any
 
@@ -306,6 +306,7 @@ from oziebot_api.services.teacher_assist.user_preferences import (
     get_user_preferences_or_create,
     serialize_user_preferences,
     update_user_preferences,
+    validate_preferred_landing,
 )
 from oziebot_api.services.teacher_assist.today_workspace import get_teacher_assist_today_workspace
 from oziebot_api.services.teacher_assist.assignments import (
@@ -1823,17 +1824,26 @@ def patch_teacher_assist_user_preferences(
 ) -> TeacherAssistUserPreferencesOut:
     tenant_id = _teacher_assist_tenant_id(db, user)
     try:
-        row = update_user_preferences(
-            db,
-            tenant_id=tenant_id,
-            user_id=user.id,
-            last_class_id=body.last_class_id,
-            last_grading_period_id=body.last_grading_period_id,
-            last_subject_id=body.last_subject_id,
-            preferred_landing=body.preferred_landing,
-            recently_viewed=body.recently_viewed,
-            mark_onboarding_complete=body.mark_onboarding_complete,
-        )
+        row = get_user_preferences_or_create(db, tenant_id=tenant_id, user_id=user.id)
+        if body.last_class_id is not None:
+            row.last_class_id = body.last_class_id
+        if body.last_grading_period_id is not None:
+            row.last_grading_period_id = body.last_grading_period_id
+        if body.last_subject_id is not None:
+            row.last_subject_id = body.last_subject_id
+        if "active_pacing_guide_id" in body.model_fields_set:
+            row.active_pacing_guide_id = body.active_pacing_guide_id
+        if "manual_pacing_period_id" in body.model_fields_set:
+            row.manual_pacing_period_id = body.manual_pacing_period_id
+        if body.preferred_landing is not None:
+            row.preferred_landing = validate_preferred_landing(body.preferred_landing)
+        if body.recently_viewed is not None:
+            row.recently_viewed_json = body.recently_viewed[:20]
+        if body.mark_onboarding_complete:
+            row.onboarding_completed_at = datetime.now(UTC)
+        row.updated_at = datetime.now(UTC)
+        db.flush()
+        db.refresh(row)
         onboarding = build_onboarding_progress(
             db,
             tenant_id=tenant_id,
@@ -2259,8 +2269,8 @@ def commit_teacher_standards_import(
     )
 
 
-@router.get("/pacing-guides", response_model=list[PacingGuideOut])
-def read_pacing_guides(user: CurrentUser, db: DbSession) -> list[PacingGuideOut]:
+@router.get("/legacy/pacing-guides", response_model=list[PacingGuideOut])
+def read_legacy_pacing_guides(user: CurrentUser, db: DbSession) -> list[PacingGuideOut]:
     tenant_id = _teacher_assist_tenant_id(db, user)
     guides = list_pacing_guides(db, tenant_id=tenant_id)
     item_counts = {
@@ -2270,8 +2280,8 @@ def read_pacing_guides(user: CurrentUser, db: DbSession) -> list[PacingGuideOut]
     return [_pacing_guide_out(row, item_count=item_counts.get(row.id, 0)) for row in guides]
 
 
-@router.post("/pacing-guides", response_model=PacingGuideOut, status_code=201)
-def create_teacher_pacing_guide(
+@router.post("/legacy/pacing-guides", response_model=PacingGuideOut, status_code=201)
+def create_legacy_pacing_guide(
     body: PacingGuideCreate,
     user: CurrentUser,
     db: DbSession,
@@ -2296,8 +2306,8 @@ def create_teacher_pacing_guide(
     return _pacing_guide_out(row, item_count=0)
 
 
-@router.put("/pacing-guides/{pacing_guide_id}", response_model=PacingGuideOut)
-def update_teacher_pacing_guide(
+@router.put("/legacy/pacing-guides/{pacing_guide_id}", response_model=PacingGuideOut)
+def update_legacy_pacing_guide(
     pacing_guide_id: uuid.UUID,
     body: PacingGuideCreate,
     user: CurrentUser,
@@ -5164,38 +5174,92 @@ def create_teacher_planning_draft(
     db: DbSession,
 ) -> PlanningDraftOut:
     tenant_id = _teacher_assist_tenant_id(db, user)
+    launch_context = None
+    if body.pacing_guide_period_id is not None:
+        from oziebot_api.services.teacher_assist.pacing_guide_workspace import build_period_launch_context
+
+        launch_context = build_period_launch_context(
+            db,
+            tenant_id=tenant_id,
+            user=user,
+            period_id=body.pacing_guide_period_id,
+        )
+    draft_payload = launch_context["planning_draft"] if launch_context else {}
+    school_year_id = body.school_year_id or (
+        uuid.UUID(draft_payload["school_year_id"]) if draft_payload.get("school_year_id") else None
+    )
+    grading_period_id = body.grading_period_id or (
+        uuid.UUID(draft_payload["grading_period_id"]) if draft_payload.get("grading_period_id") else None
+    )
+    subject_id = body.subject_id or (
+        uuid.UUID(draft_payload["subject_id"]) if draft_payload.get("subject_id") else None
+    )
+    standard_ids = body.standard_ids or [
+        uuid.UUID(value) for value in draft_payload.get("standard_ids", []) if value
+    ]
     try:
         row = create_planning_draft(
             db,
             tenant_id=tenant_id,
             user=user,
             planning_scope=body.planning_scope,
-            school_year_id=body.school_year_id,
-            grading_period_id=body.grading_period_id,
+            school_year_id=school_year_id,
+            grading_period_id=grading_period_id,
             class_id=body.class_id,
-            subject_id=body.subject_id,
-            subject_ids=body.subject_ids,
+            subject_id=subject_id,
+            subject_ids=body.subject_ids or ([subject_id] if subject_id is not None else []),
             pacing_item_ids=body.pacing_item_ids,
-            standard_ids=body.standard_ids,
-            title=body.plan_title or body.title,
-            module_title=body.module_title,
-            start_date=body.start_date,
-            end_date=body.end_date,
+            standard_ids=standard_ids,
+            pacing_guide_period_id=body.pacing_guide_period_id,
+            title=body.plan_title or body.title or draft_payload.get("title"),
+            module_title=body.module_title or draft_payload.get("module_title"),
+            start_date=body.start_date
+            or (date.fromisoformat(draft_payload["start_date"]) if draft_payload.get("start_date") else None),
+            end_date=body.end_date
+            or (date.fromisoformat(draft_payload["end_date"]) if draft_payload.get("end_date") else None),
             estimated_weeks=body.estimated_weeks,
             instructional_days_count=body.instructional_days_count,
-            notes=body.notes,
+            notes=body.notes or draft_payload.get("notes"),
             status=body.status,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    resource_ids: list[uuid.UUID] = []
+    if launch_context:
+        for resource_id in launch_context.get("resource_ids", []):
+            if resource_id:
+                attach = attach_planning_draft_resource(
+                    db,
+                    tenant_id=tenant_id,
+                    user_id=user.id,
+                    planning_draft_id=row.id,
+                    resource_library_item_id=uuid.UUID(resource_id),
+                )
+                resource_ids.append(attach.resource_library_item_id)
+    if body.pacing_guide_period_id is not None and launch_context:
+        from oziebot_api.services.teacher_assist.generated_artifacts import register_generated_artifact
+
+        register_generated_artifact(
+            db,
+            tenant_id=tenant_id,
+            user=user,
+            pacing_guide_id=uuid.UUID(launch_context["pacing_guide_id"]),
+            pacing_guide_period_id=body.pacing_guide_period_id,
+            artifact_type="LESSON_PLAN",
+            title=row.title or launch_context.get("period_title") or "Instructional Plan Draft",
+            status=row.status,
+            planning_draft_id=row.id,
+            resource_links=launch_context.get("resources"),
+            metadata={"week_context": launch_context.get("traceability") or launch_context},
+        )
     return _planning_draft_out(
         row,
         subject_ids=body.subject_ids or ([row.subject_id] if row.subject_id is not None else []),
         pacing_item_ids=body.pacing_item_ids,
-        standard_ids=body.standard_ids,
-        resource_ids=[],
+        standard_ids=standard_ids,
+        resource_ids=resource_ids,
     )
 
 

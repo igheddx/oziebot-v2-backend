@@ -253,15 +253,15 @@ export function commitStandardsImport(body: {
 }
 
 export function fetchPacingGuides() {
-  return readJson<PacingGuide[]>("/v1/teacher-assist/pacing-guides");
+  return readJson<PacingGuide[]>("/v1/teacher-assist/legacy/pacing-guides");
 }
 
 export function createPacingGuide(body: Record<string, unknown>) {
-  return writeJson<PacingGuide>("/v1/teacher-assist/pacing-guides", "POST", body);
+  return writeJson<PacingGuide>("/v1/teacher-assist/legacy/pacing-guides", "POST", body);
 }
 
 export function updatePacingGuide(id: string, body: Record<string, unknown>) {
-  return writeJson<PacingGuide>(`/v1/teacher-assist/pacing-guides/${id}`, "PUT", body);
+  return writeJson<PacingGuide>(`/v1/teacher-assist/legacy/pacing-guides/${id}`, "PUT", body);
 }
 
 export function fetchPacingGuideItems(id: string) {

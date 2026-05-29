@@ -294,6 +294,8 @@ def update_user_preferences(
     last_class_id: uuid.UUID | None = None,
     last_grading_period_id: uuid.UUID | None = None,
     last_subject_id: uuid.UUID | None = None,
+    active_pacing_guide_id: uuid.UUID | None = None,
+    manual_pacing_period_id: uuid.UUID | None = None,
     preferred_landing: str | None = None,
     recently_viewed: list[dict[str, Any]] | None = None,
     mark_onboarding_complete: bool = False,
@@ -305,6 +307,10 @@ def update_user_preferences(
         row.last_grading_period_id = last_grading_period_id
     if last_subject_id is not None:
         row.last_subject_id = last_subject_id
+    if active_pacing_guide_id is not None:
+        row.active_pacing_guide_id = active_pacing_guide_id
+    if manual_pacing_period_id is not None:
+        row.manual_pacing_period_id = manual_pacing_period_id
     if preferred_landing is not None:
         row.preferred_landing = validate_preferred_landing(preferred_landing)
     if recently_viewed is not None:
@@ -350,6 +356,8 @@ def serialize_user_preferences(row: TeacherAssistUserPreference) -> dict[str, An
         "last_class_id": row.last_class_id,
         "last_grading_period_id": row.last_grading_period_id,
         "last_subject_id": row.last_subject_id,
+        "active_pacing_guide_id": row.active_pacing_guide_id,
+        "manual_pacing_period_id": row.manual_pacing_period_id,
         "preferred_landing": row.preferred_landing,
         "recently_viewed": row.recently_viewed_json or [],
         "onboarding_completed_at": row.onboarding_completed_at,

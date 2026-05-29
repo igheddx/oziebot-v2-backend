@@ -37,6 +37,36 @@ class TeacherAssistPacingGuide(Base):
     is_shared: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    guide_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="TEACHER")
+    school_year_label: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    catalog_state_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("education_states.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    catalog_district_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("education_districts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    catalog_school_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("education_schools.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    catalog_grade_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("education_grades.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    catalog_subject_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("education_subjects.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    ownership_type: Mapped[str] = mapped_column(String(32), nullable=False, default="TEACHER", server_default="TEACHER")
+    visibility_scope: Mapped[str] = mapped_column(String(32), nullable=False, default="PRIVATE", server_default="PRIVATE")
+    planning_group_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("teacher_assist_planning_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -49,9 +79,18 @@ class TeacherAssistPacingGuide(Base):
     tenant: Mapped["Tenant"] = relationship("Tenant")
     school_year: Mapped["TeacherAssistSchoolYear"] = relationship("TeacherAssistSchoolYear")
     subject: Mapped["TeacherAssistSubject | None"] = relationship("TeacherAssistSubject")
-    created_by_user: Mapped["User"] = relationship("User")
+    created_by_user: Mapped["User"] = relationship(
+        "User",
+        foreign_keys=[created_by_user_id],
+        primaryjoin="TeacherAssistPacingGuide.created_by_user_id == User.id",
+    )
     items: Mapped[list["TeacherAssistPacingItem"]] = relationship(
         "TeacherAssistPacingItem",
+        back_populates="pacing_guide",
+        cascade="all, delete-orphan",
+    )
+    periods: Mapped[list["TeacherAssistPacingGuidePeriod"]] = relationship(
+        "TeacherAssistPacingGuidePeriod",
         back_populates="pacing_guide",
         cascade="all, delete-orphan",
     )
@@ -60,6 +99,7 @@ class TeacherAssistPacingGuide(Base):
 from typing import TYPE_CHECKING  # noqa: E402
 
 if TYPE_CHECKING:
+    from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
     from oziebot_api.models.teacher_assist_pacing_item import TeacherAssistPacingItem
     from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
     from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject

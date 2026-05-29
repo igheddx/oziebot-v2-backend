@@ -1669,6 +1669,8 @@ class TeacherAssistUserPreferencesOut(BaseModel):
     last_class_id: uuid.UUID | None = None
     last_grading_period_id: uuid.UUID | None = None
     last_subject_id: uuid.UUID | None = None
+    active_pacing_guide_id: uuid.UUID | None = None
+    manual_pacing_period_id: uuid.UUID | None = None
     preferred_landing: str
     recently_viewed: list[dict[str, Any]] = Field(default_factory=list)
     onboarding_completed_at: datetime | None = None
@@ -1681,6 +1683,8 @@ class TeacherAssistUserPreferencesUpdate(BaseModel):
     last_class_id: uuid.UUID | None = None
     last_grading_period_id: uuid.UUID | None = None
     last_subject_id: uuid.UUID | None = None
+    active_pacing_guide_id: uuid.UUID | None = None
+    manual_pacing_period_id: uuid.UUID | None = None
     preferred_landing: str | None = None
     recently_viewed: list[dict[str, Any]] | None = None
     mark_onboarding_complete: bool = False
@@ -1691,8 +1695,18 @@ class TeacherAssistHomeWorkspaceOut(BaseModel):
     priorities: dict[str, Any] = Field(default_factory=dict)
     classes: list[dict[str, Any]] = Field(default_factory=list)
     this_week: dict[str, Any] = Field(default_factory=dict)
+    current_week: dict[str, Any] = Field(default_factory=dict)
     mastery_alerts: list[dict[str, Any]] = Field(default_factory=list)
     quick_actions: list[dict[str, Any]] = Field(default_factory=list)
+    continue_planning: dict[str, Any] = Field(default_factory=dict)
+    instructional_week_id: str | None = None
+    upcoming_instructional_week_id: str | None = None
+    recently_used_resources: list[dict[str, Any]] = Field(default_factory=list)
+    instructional_loop: dict[str, Any] = Field(default_factory=dict)
+    copilot: dict[str, Any] = Field(default_factory=dict)
+    recommended_reuse: list[dict[str, Any]] = Field(default_factory=list)
+    time_savings: dict[str, Any] = Field(default_factory=dict)
+    efficiency_summary: dict[str, Any] = Field(default_factory=dict)
     shortcuts: dict[str, Any] = Field(default_factory=dict)
     timeline: list[dict[str, Any]] = Field(default_factory=list)
     recent_activity: list[dict[str, Any]] = Field(default_factory=list)
@@ -1738,6 +1752,7 @@ class PlanningDraftCreate(BaseModel):
     instructional_days_count: int | None = Field(default=None, ge=1)
     notes: str | None = Field(default=None, max_length=4000)
     status: PlanningDraftStatusLiteral = "draft"
+    pacing_guide_period_id: uuid.UUID | None = None
 
 
 class PlanningDraftOut(BaseModel):

@@ -114,8 +114,29 @@ ASSIGNMENT_EFFECTIVENESS_HEALTHY_THRESHOLD = 0.70
 ASSIGNMENT_EFFECTIVENESS_MIXED_THRESHOLD = 0.40
 MASTERY_ANALYTICS_RECENT_DAYS = 14
 MASTERY_TREND_RANK_DELTA = 0.5
-RETEACH_PLAN_STATUSES = ("draft", "ai_draft", "teacher_review", "archived")
+RETEACH_PLAN_STATUSES = ("draft", "ai_draft", "teacher_review", "active", "completed", "archived")
 RETEACH_PLAN_VERSION_SOURCES = ("initial", "ai_draft", "teacher_edit")
+INSTRUCTIONAL_EVIDENCE_SOURCE_TYPES = (
+    "ASSIGNMENT",
+    "QUIZ",
+    "ASSESSMENT",
+    "TEACHER_OBSERVATION",
+    "STUDENT_WORK_REVIEW",
+    "LMS_IMPORT",
+)
+STUDENT_SUPPORT_GROUP_STATUSES = ("draft", "active", "archived")
+INSTRUCTIONAL_REFLECTION_STATUSES = ("draft", "review", "archived")
+INSTRUCTIONAL_WEEK_CLOSURE_STATUSES = ("in_progress", "completed")
+COPILOT_MESSAGE_ROLES = ("teacher", "assistant", "system")
+COPILOT_FEATURE = "teacher_copilot"
+WEEK_CLOSURE_CHECKLIST_KEYS = (
+    "lessons_completed",
+    "assessments_reviewed",
+    "grades_confirmed",
+    "mastery_reviewed",
+    "reteach_identified",
+    "reflection_completed",
+)
 NEWSLETTER_STATUSES = ("draft", "review", "approved", "archived")
 NEWSLETTER_VERSION_SOURCES = ("initial", "ai_draft", "ai_section_regen", "teacher_edit")
 NEWSLETTER_REGENERATABLE_SECTIONS = ("overview", "upcoming_learning", "teacher_message", "reminders")
@@ -662,6 +683,34 @@ def validate_grade_level(value: str | None, *, required: bool = False) -> str | 
         return None
     if normalized not in SUPPORTED_GRADE_LEVELS:
         raise ValueError("Unsupported grade level")
+    return normalized
+
+
+def validate_instructional_evidence_source_type(value: str | None) -> str:
+    normalized = (value or "").strip().upper()
+    if normalized not in INSTRUCTIONAL_EVIDENCE_SOURCE_TYPES:
+        raise ValueError("Unsupported instructional evidence source type")
+    return normalized
+
+
+def validate_student_support_group_status(value: str | None) -> str:
+    normalized = (value or "draft").strip().lower()
+    if normalized not in STUDENT_SUPPORT_GROUP_STATUSES:
+        raise ValueError("Unsupported student support group status")
+    return normalized
+
+
+def validate_instructional_reflection_status(value: str | None) -> str:
+    normalized = (value or "draft").strip().lower()
+    if normalized not in INSTRUCTIONAL_REFLECTION_STATUSES:
+        raise ValueError("Unsupported instructional reflection status")
+    return normalized
+
+
+def validate_instructional_week_closure_status(value: str | None) -> str:
+    normalized = (value or "in_progress").strip().lower()
+    if normalized not in INSTRUCTIONAL_WEEK_CLOSURE_STATUSES:
+        raise ValueError("Unsupported instructional week closure status")
     return normalized
 
 

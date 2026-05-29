@@ -68,6 +68,30 @@ from oziebot_api.models.teacher_assist_assignment_grading_review_item import (
 )
 from oziebot_api.models.teacher_assist_extracted_text_record import TeacherAssistExtractedTextRecord
 from oziebot_api.models.teacher_assist_export_artifact import TeacherAssistExportArtifact
+from oziebot_api.models.teacher_assist_generated_artifact import TeacherAssistGeneratedArtifact
+from oziebot_api.models.teacher_assist_time_savings import (
+    TeacherAssistPlanningGroup,
+    TeacherAssistPlanningGroupMember,
+    TeacherAssistReuseEvent,
+    TeacherAssistWeekTemplate,
+)
+from oziebot_api.models.teacher_assist_instructional_week import (
+    TeacherAssistInstructionalWeek,
+    TeacherAssistInstructionalWeekObjective,
+    TeacherAssistInstructionalWeekSnapshot,
+)
+from oziebot_api.models.teacher_assist_instructional_evidence import TeacherAssistInstructionalEvidence
+from oziebot_api.models.teacher_assist_student_support_group import (
+    TeacherAssistStudentSupportGroup,
+    TeacherAssistStudentSupportGroupMember,
+)
+from oziebot_api.models.teacher_assist_instructional_reflection import TeacherAssistInstructionalReflection
+from oziebot_api.models.teacher_assist_instructional_week_closure import (
+    TeacherAssistInstructionalWeekClosure,
+    TeacherAssistInstructionalWeekSummary,
+)
+from oziebot_api.models.teacher_assist_reteach_effectiveness import TeacherAssistReteachEffectivenessRecord
+from oziebot_api.models.teacher_copilot_session import TeacherCopilotMessage, TeacherCopilotSession
 from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
 from oziebot_api.models.teacher_assist_assignment_gradebook_audit_event import (
     TeacherAssistAssignmentGradebookAuditEvent,
@@ -98,6 +122,10 @@ from oziebot_api.models.teacher_assist_class_subject import TeacherAssistClassSu
 from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsageEvent
 from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
+from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
+from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
+from oziebot_api.models.teacher_assist_pacing_guide_period_note import TeacherAssistPacingGuidePeriodNote
+from oziebot_api.models.teacher_assist_pacing_guide_resource import TeacherAssistPacingGuideResource
 from oziebot_api.models.teacher_assist_pacing_item import TeacherAssistPacingItem
 from oziebot_api.models.teacher_assist_pacing_item_resource import TeacherAssistPacingItemResource
 from oziebot_api.models.teacher_assist_pacing_item_standard import TeacherAssistPacingItemStandard
@@ -217,6 +245,23 @@ __all__ = [
     "TeacherAssistExtractedTextRecord",
     "TeacherAssistExtractionJob",
     "TeacherAssistExportArtifact",
+    "TeacherAssistGeneratedArtifact",
+    "TeacherAssistPlanningGroup",
+    "TeacherAssistPlanningGroupMember",
+    "TeacherAssistReuseEvent",
+    "TeacherAssistWeekTemplate",
+    "TeacherAssistInstructionalWeek",
+    "TeacherAssistInstructionalWeekObjective",
+    "TeacherAssistInstructionalWeekSnapshot",
+    "TeacherAssistInstructionalEvidence",
+    "TeacherAssistStudentSupportGroup",
+    "TeacherAssistStudentSupportGroupMember",
+    "TeacherAssistInstructionalReflection",
+    "TeacherAssistInstructionalWeekClosure",
+    "TeacherAssistInstructionalWeekSummary",
+    "TeacherAssistReteachEffectivenessRecord",
+    "TeacherCopilotSession",
+    "TeacherCopilotMessage",
     "TeacherAssistAssignmentGradeRecord",
     "TeacherAssistAssignmentGradebookCommit",
     "TeacherAssistAssignmentGradebookAuditEvent",
@@ -242,6 +287,10 @@ __all__ = [
     "TeacherAssistAIUsageEvent",
     "TeacherAssistGradingPeriod",
     "TeacherAssistPacingGuide",
+    "TeacherAssistPacingGuideObjective",
+    "TeacherAssistPacingGuidePeriod",
+    "TeacherAssistPacingGuidePeriodNote",
+    "TeacherAssistPacingGuideResource",
     "TeacherAssistPacingItem",
     "TeacherAssistPacingItemResource",
     "TeacherAssistPacingItemStandard",

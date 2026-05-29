@@ -153,6 +153,8 @@ def create_newsletter(
     teacher_notes: str | None = None,
     week_start_date: date | None = None,
     week_end_date: date | None = None,
+    pacing_guide_id: uuid.UUID | None = None,
+    pacing_guide_period_id: uuid.UUID | None = None,
 ) -> TeacherAssistNewsletter:
     _validate_newsletter_context(
         db,
@@ -177,6 +179,8 @@ def create_newsletter(
         week_start_date=week_start_date,
         week_end_date=week_end_date,
         teacher_notes=(teacher_notes or "").strip() or None,
+        pacing_guide_id=pacing_guide_id,
+        pacing_guide_period_id=pacing_guide_period_id,
         created_at=now,
         updated_at=now,
     )
