@@ -74,6 +74,9 @@ ACTIVITY_EVENT_TYPES = (
     "lesson_reflection_created",
     "lesson_reflection_ai_suggested",
     "lesson_reflection_version_created",
+    "catalog_access_failed",
+    "catalog_assignment_missing",
+    "catalog_multiple_assignments_detected",
 )
 
 

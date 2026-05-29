@@ -184,7 +184,14 @@ from oziebot_api.schemas.teacher_assist import (
     SchoolYearCreate,
     SchoolYearOut,
     StandardCreate,
+    StandardImportCommitIn,
+    StandardImportCommitOut,
+    StandardImportPreviewIn,
+    StandardImportPreviewOut,
+    StandardImportPreviewRowOut,
+    StandardImportRowErrorOut,
     StandardOut,
+    StandardUpdate,
     SubjectCreate,
     SubjectOut,
     TeacherAssistFileDownloadOut,
@@ -507,6 +514,7 @@ from oziebot_api.services.teacher_assist.workflow_service import (
 from oziebot_api.services.teacher_assist.workspace_service import get_teacher_assist_workspace
 from oziebot_api.services.teacher_assist.setup import (
     attach_class_subject,
+    commit_standards_import,
     create_class,
     create_grading_period,
     create_school_year,
@@ -519,10 +527,13 @@ from oziebot_api.services.teacher_assist.setup import (
     list_school_years,
     list_standards,
     list_subjects,
+    preview_standards_import,
+    StandardImportCommitRow,
     teacher_assist_context_for_user,
     update_class,
     update_grading_period,
     update_school_year,
+    update_standard,
     upsert_teacher_profile,
 )
 from oziebot_api.services.teacher_assist.storage import (
@@ -2146,6 +2157,106 @@ def create_teacher_standard(body: StandardCreate, user: CurrentUser, db: DbSessi
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _standard_out(row)
+
+
+@router.put("/standards/{standard_id}", response_model=StandardOut)
+def update_teacher_standard(
+    standard_id: uuid.UUID,
+    body: StandardUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> StandardOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = update_standard(
+            db,
+            tenant_id=tenant_id,
+            standard_id=standard_id,
+            subject_id=body.subject_id,
+            standard_type=body.standard_type,
+            code=body.code,
+            description=body.description,
+            grade_level=body.grade_level,
+            school_year_id=body.school_year_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _standard_out(row)
+
+
+@router.post("/standards/import/preview", response_model=StandardImportPreviewOut)
+def preview_teacher_standards_import(
+    body: StandardImportPreviewIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> StandardImportPreviewOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        preview = preview_standards_import(db, tenant_id=tenant_id, csv_content=body.csv_content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return StandardImportPreviewOut(
+        total_rows=preview.total_rows,
+        valid_count=preview.valid_count,
+        invalid_count=preview.invalid_count,
+        duplicate_count=preview.duplicate_count,
+        rows=[
+            StandardImportPreviewRowOut(
+                row_number=row.row_number,
+                code=row.code,
+                standard_type=row.standard_type,
+                subject_label=row.subject_label,
+                description=row.description,
+                subject_id=row.subject_id,
+                status=row.status,  # type: ignore[arg-type]
+            )
+            for row in preview.rows
+        ],
+        errors=[
+            StandardImportRowErrorOut(
+                row_number=error.row_number,
+                message=error.message,
+                field=error.field,
+            )
+            for error in preview.errors
+        ],
+    )
+
+
+@router.post("/standards/import/commit", response_model=StandardImportCommitOut)
+def commit_teacher_standards_import(
+    body: StandardImportCommitIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> StandardImportCommitOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    result = commit_standards_import(
+        db,
+        tenant_id=tenant_id,
+        rows=[
+            StandardImportCommitRow(
+                code=row.code,
+                standard_type=row.standard_type,
+                subject_id=row.subject_id,
+                description=row.description,
+            )
+            for row in body.rows
+        ],
+    )
+    return StandardImportCommitOut(
+        created_count=result.created_count,
+        skipped_duplicate_count=result.skipped_duplicate_count,
+        errors=[
+            StandardImportRowErrorOut(
+                row_number=error.row_number,
+                message=error.message,
+                field=error.field,
+            )
+            for error in result.errors
+        ],
+    )
 
 
 @router.get("/pacing-guides", response_model=list[PacingGuideOut])

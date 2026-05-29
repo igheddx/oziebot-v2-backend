@@ -33,6 +33,8 @@ import type {
   ResourceLibraryItem,
   SchoolYear,
   Standard,
+  StandardImportCommitResult,
+  StandardImportPreview,
   Subject,
   TeacherAssistWorkflow,
   TeacherAssistWorkflowDetail,
@@ -229,6 +231,25 @@ export function fetchStandards() {
 
 export function createStandard(body: Record<string, unknown>) {
   return writeJson<Standard>("/v1/teacher-assist/standards", "POST", body);
+}
+
+export function updateStandard(id: string, body: Record<string, unknown>) {
+  return writeJson<Standard>(`/v1/teacher-assist/standards/${id}`, "PUT", body);
+}
+
+export function previewStandardsImport(body: { csv_content: string }) {
+  return writeJson<StandardImportPreview>("/v1/teacher-assist/standards/import/preview", "POST", body);
+}
+
+export function commitStandardsImport(body: {
+  rows: Array<{
+    code: string;
+    standard_type: string;
+    subject_id: string;
+    description: string;
+  }>;
+}) {
+  return writeJson<StandardImportCommitResult>("/v1/teacher-assist/standards/import/commit", "POST", body);
 }
 
 export function fetchPacingGuides() {

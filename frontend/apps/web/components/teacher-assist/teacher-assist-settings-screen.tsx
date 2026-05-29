@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   attachClassSubject,
+  commitStandardsImport,
   createClass,
   createGradingPeriod,
   createSchoolYear,
@@ -16,11 +17,14 @@ import {
   fetchSubjects,
   fetchTeacherAssistOptions,
   fetchTeacherProfile,
+  previewStandardsImport,
   saveTeacherProfile,
   updateClass,
   updateGradingPeriod,
   updateSchoolYear,
+  updateStandard,
 } from "@/lib/teacher-assist-api";
+import { withPreservedScroll } from "@/lib/teacher-assist-scroll";
 import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
 import {
   TeacherAssistFieldError,
@@ -31,17 +35,33 @@ import {
   TeacherAssistInlineAlert,
   sectionError,
   sectionSuccess,
+  sectionWarning,
   useTeacherAssistSectionAlerts,
 } from "@/components/teacher-assist/teacher-assist-inline-alert";
 import type {
   GradingPeriod,
   SchoolYear,
   Standard,
+  StandardImportPreview,
   Subject,
   TeacherAssistOptions,
   TeacherClass,
   TeacherProfile,
 } from "@/lib/teacher-assist-types";
+
+const SECTION_ELEMENT_IDS: Record<string, string> = {
+  profile: "teacher-profile",
+  schoolYear: "school-years",
+  gradingPeriods: "grading-periods",
+  classes: "classes",
+  subjects: "subjects",
+  classSubjects: "subjects",
+  standards: "standards",
+};
+
+const STANDARD_CSV_FORMAT = `code,type,subject,description
+5.ELA.1,TEKS,ELA,"Students will identify the main idea and supporting details in informational and literary texts."
+5.MATH.1,TEKS,Math,"Students will add, subtract, multiply, and divide decimals to solve real-world problems."`;
 
 type SetupSnapshot = {
   options: TeacherAssistOptions;
@@ -143,6 +163,15 @@ function validateGradingPeriodForm(form: GradingPeriodForm): Partial<Record<keyo
   return errors;
 }
 
+function validateStandardForm(form: StandardForm): Partial<Record<keyof StandardForm, string>> {
+  const errors: Partial<Record<keyof StandardForm, string>> = {};
+  if (!form.subject_id) errors.subject_id = "Select a subject before saving this standard.";
+  if (!form.standard_type) errors.standard_type = "Select a standard type.";
+  if (!form.code.trim()) errors.code = "Enter a standard code.";
+  if (!form.description.trim()) errors.description = "Enter a description.";
+  return errors;
+}
+
 export function TeacherAssistSettingsScreen() {
   const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
   const [snapshot, setSnapshot] = useState<SetupSnapshot | null>(null);
@@ -171,56 +200,81 @@ export function TeacherAssistSettingsScreen() {
   const [subjectForm, setSubjectForm] = useState<SubjectForm>(emptySubjectForm());
   const [classSubjectForm, setClassSubjectForm] = useState({ class_id: "", subject_id: "" });
   const [standardForm, setStandardForm] = useState<StandardForm>(emptyStandardForm());
+  const [standardFieldErrors, setStandardFieldErrors] = useState<
+    Partial<Record<keyof StandardForm, string>>
+  >({});
+  const [editingStandardId, setEditingStandardId] = useState<string | null>(null);
+  const [keepSubjectForNext, setKeepSubjectForNext] = useState(false);
+  const [importPreview, setImportPreview] = useState<StandardImportPreview | null>(null);
+  const [importFileName, setImportFileName] = useState<string | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const standardFormRef = useRef<HTMLFormElement | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const fetchSnapshotData = useCallback(async (): Promise<SetupSnapshot> => {
+    const [options, profile, schoolYears, gradingPeriods, classes, subjects, standards] = await Promise.all([
+      fetchTeacherAssistOptions(),
+      fetchTeacherProfile(),
+      fetchSchoolYears(),
+      fetchGradingPeriods(),
+      fetchClasses(),
+      fetchSubjects(),
+      fetchStandards(),
+    ]);
+    return { options, profile, schoolYears, gradingPeriods, classes, subjects, standards };
+  }, []);
+
+  const initializeForms = useCallback((data: SetupSnapshot) => {
+    setProfileForm(data.profile);
+    setSchoolYearForm(emptySchoolYearForm());
+    setGradingPeriodForm({
+      ...emptyGradingPeriodForm(),
+      school_year_id: data.schoolYears.find((row) => row.is_active)?.id ?? data.schoolYears[0]?.id ?? "",
+      grading_period_type: data.options.grading_period_types[0] ?? "",
+    });
+    setClassForm({
+      ...emptyClassForm(),
+      school_year_id: data.schoolYears.find((row) => row.is_active)?.id ?? data.schoolYears[0]?.id ?? "",
+      grade_level: data.profile.preferred_grade_level ?? data.options.supported_grade_levels[0] ?? "",
+      student_count: data.profile.default_student_count?.toString() ?? "",
+    });
+    setSubjectForm(emptySubjectForm());
+    setClassSubjectForm({
+      class_id: data.classes[0]?.id ?? "",
+      subject_id: data.subjects[0]?.id ?? "",
+    });
+    setStandardForm({
+      ...emptyStandardForm(),
+      standard_type: data.options.standard_types[0] ?? "",
+      school_year_id: data.schoolYears.find((row) => row.is_active)?.id ?? data.schoolYears[0]?.id ?? "",
+      grade_level: data.profile.preferred_grade_level ?? "",
+    });
+    setStandardFieldErrors({});
+    setEditingStandardId(null);
+    setEditingSchoolYearId(null);
+    setEditingGradingPeriodId(null);
+    setEditingClassId(null);
+  }, []);
+
+  const refreshSnapshot = useCallback(async () => {
+    const data = await fetchSnapshotData();
+    setSnapshot(data);
+    return data;
+  }, [fetchSnapshotData]);
 
   const loadSnapshot = useCallback(async () => {
     setLoading(true);
     setPageError(null);
     try {
-      const [options, profile, schoolYears, gradingPeriods, classes, subjects, standards] =
-        await Promise.all([
-          fetchTeacherAssistOptions(),
-          fetchTeacherProfile(),
-          fetchSchoolYears(),
-          fetchGradingPeriods(),
-          fetchClasses(),
-          fetchSubjects(),
-          fetchStandards(),
-        ]);
-      setSnapshot({ options, profile, schoolYears, gradingPeriods, classes, subjects, standards });
-      setProfileForm(profile);
-      setSchoolYearForm(emptySchoolYearForm());
-      setGradingPeriodForm({
-        ...emptyGradingPeriodForm(),
-        school_year_id: schoolYears.find((row) => row.is_active)?.id ?? schoolYears[0]?.id ?? "",
-        grading_period_type: options.grading_period_types[0] ?? "",
-      });
-      setClassForm({
-        ...emptyClassForm(),
-        school_year_id: schoolYears.find((row) => row.is_active)?.id ?? schoolYears[0]?.id ?? "",
-        grade_level: profile.preferred_grade_level ?? options.supported_grade_levels[0] ?? "",
-        student_count: profile.default_student_count?.toString() ?? "",
-      });
-      setSubjectForm(emptySubjectForm());
-      setClassSubjectForm({
-        class_id: classes[0]?.id ?? "",
-        subject_id: subjects[0]?.id ?? "",
-      });
-      setStandardForm({
-        ...emptyStandardForm(),
-        standard_type: options.standard_types[0] ?? "",
-        subject_id: subjects[0]?.id ?? "",
-        school_year_id: schoolYears.find((row) => row.is_active)?.id ?? schoolYears[0]?.id ?? "",
-        grade_level: profile.preferred_grade_level ?? "",
-      });
-      setEditingSchoolYearId(null);
-      setEditingGradingPeriodId(null);
-      setEditingClassId(null);
+      const data = await fetchSnapshotData();
+      setSnapshot(data);
+      initializeForms(data);
     } catch (nextError) {
       setPageError(nextError instanceof Error ? nextError.message : "Could not load TeacherAssist setup.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchSnapshotData, initializeForms]);
 
   useEffect(() => {
     void loadSnapshot();
@@ -275,18 +329,68 @@ export function TeacherAssistSettingsScreen() {
     });
   };
 
+  const beginStandardEdit = (row: Standard) => {
+    setEditingStandardId(row.id);
+    setStandardFieldErrors({});
+    setStandardForm({
+      subject_id: row.subject_id ?? "",
+      standard_type: row.standard_type,
+      code: row.code,
+      description: row.description,
+      grade_level: row.grade_level ?? "",
+      school_year_id: row.school_year_id ?? "",
+    });
+    standardFormRef.current?.scrollIntoView({ block: "nearest" });
+  };
+
+  const cancelStandardEdit = () => {
+    setEditingStandardId(null);
+    setStandardFieldErrors({});
+    if (!snapshot) return;
+    setStandardForm({
+      ...emptyStandardForm(),
+      standard_type: snapshot.options.standard_types[0] ?? "",
+      subject_id: keepSubjectForNext ? standardForm.subject_id : "",
+      school_year_id:
+        snapshot.schoolYears.find((row) => row.is_active)?.id ?? snapshot.schoolYears[0]?.id ?? "",
+      grade_level: snapshot.profile.preferred_grade_level ?? "",
+    });
+  };
+
+  const resetStandardFormAfterSave = () => {
+    if (!snapshot) return;
+    const preservedSubjectId = keepSubjectForNext ? standardForm.subject_id : "";
+    setStandardForm({
+      ...emptyStandardForm(),
+      standard_type: snapshot.options.standard_types[0] ?? "",
+      subject_id: preservedSubjectId,
+      school_year_id:
+        snapshot.schoolYears.find((row) => row.is_active)?.id ?? snapshot.schoolYears[0]?.id ?? "",
+      grade_level: snapshot.profile.preferred_grade_level ?? "",
+    });
+    setStandardFieldErrors({});
+    setEditingStandardId(null);
+    requestAnimationFrame(() => {
+      standardFormRef.current?.querySelector<HTMLElement>("select, input, textarea")?.focus();
+    });
+  };
+
   const runSave = async (
     sectionKey: string,
     key: string,
     action: () => Promise<void>,
     successAlert: { title?: string; description: string },
+    options?: { onSuccess?: () => void },
   ) => {
     setSavingKey(key);
     clearSectionAlert(sectionKey);
     try {
-      await action();
+      await withPreservedScroll(SECTION_ELEMENT_IDS[sectionKey] ?? null, async () => {
+        await action();
+        await refreshSnapshot();
+        options?.onSuccess?.();
+      });
       setSectionAlert(sectionKey, sectionSuccess(successAlert.description, successAlert.title));
-      await loadSnapshot();
     } catch (nextError) {
       setSectionAlert(
         sectionKey,
@@ -486,6 +590,12 @@ export function TeacherAssistSettingsScreen() {
                           title: "School year created",
                           description: `${schoolYearForm.title || "School year"} was added successfully.`,
                         },
+                    {
+                      onSuccess: () => {
+                        setEditingSchoolYearId(null);
+                        setSchoolYearForm(emptySchoolYearForm());
+                      },
+                    },
                   );
                 }}
               >
@@ -628,6 +738,18 @@ export function TeacherAssistSettingsScreen() {
                         title: "Grading period added",
                         description: `${gradingPeriodForm.title || "Grading period"} was added successfully.`,
                       },
+                  {
+                    onSuccess: () => {
+                      setEditingGradingPeriodId(null);
+                      setGradingPeriodFieldErrors({});
+                      setGradingPeriodForm({
+                        ...emptyGradingPeriodForm(),
+                        school_year_id:
+                          activeSchoolYear?.id ?? snapshot.schoolYears[0]?.id ?? "",
+                        grading_period_type: snapshot.options.grading_period_types[0] ?? "",
+                      });
+                    },
+                  },
                 );
               }}
             >
@@ -821,6 +943,21 @@ export function TeacherAssistSettingsScreen() {
                         title: "Class added",
                         description: `${classForm.name || "Class"} was added successfully.`,
                       },
+                  {
+                    onSuccess: () => {
+                      setEditingClassId(null);
+                      setClassForm({
+                        ...emptyClassForm(),
+                        school_year_id:
+                          activeSchoolYear?.id ?? snapshot.schoolYears[0]?.id ?? "",
+                        grade_level:
+                          snapshot.profile.preferred_grade_level ??
+                          snapshot.options.supported_grade_levels[0] ??
+                          "",
+                        student_count: snapshot.profile.default_student_count?.toString() ?? "",
+                      });
+                    },
+                  },
                 );
               }}
             >
@@ -952,6 +1089,7 @@ export function TeacherAssistSettingsScreen() {
                     title: "Subject added",
                     description: `${subjectForm.name || "Subject"} was added successfully.`,
                   },
+                  { onSuccess: () => setSubjectForm(emptySubjectForm()) },
                 );
               }}
             >
@@ -1054,132 +1192,367 @@ export function TeacherAssistSettingsScreen() {
           <section id="standards" className="ta-panel p-6">
             <h2 className="text-xl font-semibold text-slate-900">Standards / TEKS</h2>
             <p className="mt-1 text-sm text-slate-600">
-              Enter standards manually for now. Pacing-guide import is intentionally deferred to a later phase.
+              Enter standards manually or import them from CSV. Subject must be selected explicitly for each new
+              standard.
             </p>
             <TeacherAssistInlineAlert
               alert={getSectionAlert("standards")}
               onDismiss={() => clearSectionAlert("standards")}
               className="mt-4"
             />
+            {!standardForm.subject_id && !editingStandardId ? (
+              <TeacherAssistInlineAlert
+                alert={sectionWarning(
+                  "Subject is required so standards are not accidentally saved under the wrong subject.",
+                )}
+                className="mt-4"
+              />
+            ) : null}
+            {keepSubjectForNext && standardForm.subject_id ? (
+              <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                Next standard will use{" "}
+                <span className="font-semibold">
+                  {subjectNameById.get(standardForm.subject_id) ?? "selected subject"}
+                </span>
+                .
+              </div>
+            ) : null}
             <form
+              ref={standardFormRef}
               className="mt-5 grid gap-3 xl:grid-cols-3"
               onSubmit={(event) => {
                 event.preventDefault();
+                const fieldErrors = validateStandardForm(standardForm);
+                if (Object.keys(fieldErrors).length > 0) {
+                  setStandardFieldErrors(fieldErrors);
+                  setSectionAlert("standards", {
+                    type: "error",
+                    title: "Unable to save standard",
+                    description: "Please correct the highlighted fields below.",
+                  });
+                  return;
+                }
+                setStandardFieldErrors({});
                 const standardCode = standardForm.code.trim();
                 void runSave(
                   "standards",
                   "standard",
                   async () => {
-                    await createStandard({
-                      subject_id: standardForm.subject_id || null,
+                    const payload = {
+                      subject_id: standardForm.subject_id,
                       standard_type: standardForm.standard_type,
-                      code: standardForm.code,
-                      description: standardForm.description,
+                      code: standardForm.code.trim(),
+                      description: standardForm.description.trim(),
                       grade_level: standardForm.grade_level || null,
                       school_year_id: standardForm.school_year_id || null,
-                    });
+                    };
+                    if (editingStandardId) {
+                      await updateStandard(editingStandardId, payload);
+                    } else {
+                      await createStandard(payload);
+                    }
                   },
-                  {
-                    title: "Standard added",
-                    description: standardCode
-                      ? `${standardCode} was added successfully.`
-                      : "The standard was added successfully.",
-                  },
+                  editingStandardId
+                    ? {
+                        title: "Standard updated",
+                        description: standardCode
+                          ? `${standardCode} was updated successfully.`
+                          : "The standard was updated successfully.",
+                      }
+                    : {
+                        title: "Standard added",
+                        description: standardCode
+                          ? `${standardCode} was added successfully.`
+                          : "The standard was added successfully.",
+                      },
+                  { onSuccess: resetStandardFormAfterSave },
                 );
               }}
             >
-              <select
-                value={standardForm.standard_type}
-                onChange={(event) =>
-                  setStandardForm((current) => ({ ...current, standard_type: event.target.value }))
-                }
-                className="ta-input"
-              >
-                <option value="">Select standard type</option>
-                {snapshot.options.standard_types.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={standardForm.subject_id}
-                onChange={(event) => setStandardForm((current) => ({ ...current, subject_id: event.target.value }))}
-                className="ta-input"
-              >
-                <option value="">Optional subject</option>
-                {snapshot.subjects.map((subject) => (
-                  <option key={subject.id} value={subject.id}>
-                    {subject.name}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={standardForm.school_year_id}
-                onChange={(event) =>
-                  setStandardForm((current) => ({ ...current, school_year_id: event.target.value }))
-                }
-                className="ta-input"
-              >
-                <option value="">Optional school year</option>
-                {snapshot.schoolYears.map((schoolYear) => (
-                  <option key={schoolYear.id} value={schoolYear.id}>
-                    {schoolYear.title}
-                  </option>
-                ))}
-              </select>
-              <input
-                value={standardForm.code}
-                onChange={(event) => setStandardForm((current) => ({ ...current, code: event.target.value }))}
-                className="ta-input"
-                placeholder="5.3H"
-              />
-              <select
-                value={standardForm.grade_level}
-                onChange={(event) =>
-                  setStandardForm((current) => ({ ...current, grade_level: event.target.value }))
-                }
-                className="ta-input"
-              >
-                <option value="">Optional grade level</option>
-                {snapshot.options.supported_grade_levels.map((gradeLevel) => (
-                  <option key={gradeLevel} value={gradeLevel}>
-                    {gradeLevel}
-                  </option>
-                ))}
-              </select>
-              <textarea
-                value={standardForm.description}
-                onChange={(event) =>
-                  setStandardForm((current) => ({ ...current, description: event.target.value }))
-                }
-                className="ta-input min-h-28 xl:col-span-3"
-                placeholder="Describe the standard or TEKS..."
-              />
-              <div className="xl:col-span-3">
+              <label className="space-y-1">
+                <span className="ta-label">Type</span>
+                <select
+                  value={standardForm.standard_type}
+                  onChange={(event) => {
+                    setStandardFieldErrors((current) => ({ ...current, standard_type: undefined }));
+                    setStandardForm((current) => ({ ...current, standard_type: event.target.value }));
+                  }}
+                  className={fieldErrorInputClass(Boolean(standardFieldErrors.standard_type))}
+                >
+                  <option value="">Select standard type</option>
+                  {snapshot.options.standard_types.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+                <TeacherAssistFieldError message={standardFieldErrors.standard_type} />
+              </label>
+              <label className="space-y-1">
+                <span className="ta-label">Subject</span>
+                <select
+                  value={standardForm.subject_id}
+                  onChange={(event) => {
+                    setStandardFieldErrors((current) => ({ ...current, subject_id: undefined }));
+                    setStandardForm((current) => ({ ...current, subject_id: event.target.value }));
+                  }}
+                  className={fieldErrorInputClass(Boolean(standardFieldErrors.subject_id))}
+                >
+                  <option value="">Select subject</option>
+                  {snapshot.subjects.map((subject) => (
+                    <option key={subject.id} value={subject.id}>
+                      {subject.name}
+                    </option>
+                  ))}
+                </select>
+                <TeacherAssistFieldError message={standardFieldErrors.subject_id} />
+              </label>
+              <label className="space-y-1">
+                <span className="ta-label">School year (optional)</span>
+                <select
+                  value={standardForm.school_year_id}
+                  onChange={(event) =>
+                    setStandardForm((current) => ({ ...current, school_year_id: event.target.value }))
+                  }
+                  className="ta-input"
+                >
+                  <option value="">Optional school year</option>
+                  {snapshot.schoolYears.map((schoolYear) => (
+                    <option key={schoolYear.id} value={schoolYear.id}>
+                      {schoolYear.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="ta-label">Code</span>
+                <input
+                  value={standardForm.code}
+                  onChange={(event) => {
+                    setStandardFieldErrors((current) => ({ ...current, code: undefined }));
+                    setStandardForm((current) => ({ ...current, code: event.target.value }));
+                  }}
+                  className={fieldErrorInputClass(Boolean(standardFieldErrors.code))}
+                  placeholder="5.3H"
+                />
+                <TeacherAssistFieldError message={standardFieldErrors.code} />
+              </label>
+              <label className="space-y-1">
+                <span className="ta-label">Grade level (optional)</span>
+                <select
+                  value={standardForm.grade_level}
+                  onChange={(event) =>
+                    setStandardForm((current) => ({ ...current, grade_level: event.target.value }))
+                  }
+                  className="ta-input"
+                >
+                  <option value="">Optional grade level</option>
+                  {snapshot.options.supported_grade_levels.map((gradeLevel) => (
+                    <option key={gradeLevel} value={gradeLevel}>
+                      {gradeLevel}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 xl:col-span-3">
+                <span className="ta-label">Description</span>
+                <textarea
+                  value={standardForm.description}
+                  onChange={(event) => {
+                    setStandardFieldErrors((current) => ({ ...current, description: undefined }));
+                    setStandardForm((current) => ({ ...current, description: event.target.value }));
+                  }}
+                  className={`${fieldErrorInputClass(Boolean(standardFieldErrors.description))} min-h-28`}
+                  placeholder="Describe the standard or TEKS..."
+                />
+                <TeacherAssistFieldError message={standardFieldErrors.description} />
+              </label>
+              {!editingStandardId ? (
+                <label className="flex items-center gap-2 text-sm text-slate-700 xl:col-span-3">
+                  <input
+                    type="checkbox"
+                    checked={keepSubjectForNext}
+                    onChange={(event) => setKeepSubjectForNext(event.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  Keep selected subject for next standard
+                </label>
+              ) : null}
+              <div className="flex flex-wrap items-center gap-3 xl:col-span-3">
                 <button type="submit" className="ta-button-primary" disabled={savingKey === "standard"}>
-                  {savingKey === "standard" ? "Saving..." : "Add standard"}
+                  {savingKey === "standard"
+                    ? "Saving..."
+                    : editingStandardId
+                      ? "Save standard"
+                      : "Add standard"}
                 </button>
+                {editingStandardId ? (
+                  <button type="button" className="ta-button-secondary" onClick={cancelStandardEdit}>
+                    Cancel edit
+                  </button>
+                ) : null}
               </div>
             </form>
 
+            <article className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h3 className="text-base font-semibold text-slate-900">Bulk CSV import</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Required columns: <code className="text-xs">code,type,subject,description</code>. Subject values must
+                match existing subjects by name or code.
+              </p>
+              <pre className="mt-3 overflow-x-auto rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-700">
+                {STANDARD_CSV_FORMAT}
+              </pre>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <input
+                  ref={importFileInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (!file) return;
+                    void (async () => {
+                      clearSectionAlert("standards");
+                      setImportBusy(true);
+                      setImportFileName(file.name);
+                      try {
+                        const csvContent = await file.text();
+                        const preview = await previewStandardsImport({ csv_content: csvContent });
+                        setImportPreview(preview);
+                        if (preview.invalid_count > 0) {
+                          setSectionAlert(
+                            "standards",
+                            sectionError(
+                              `${preview.invalid_count} row${preview.invalid_count === 1 ? "" : "s"} need attention before this file can be imported.`,
+                              "Import has errors",
+                            ),
+                          );
+                        }
+                      } catch (nextError) {
+                        setImportPreview(null);
+                        setSectionAlert(
+                          "standards",
+                          sectionError(
+                            nextError instanceof Error ? nextError.message : "Could not preview CSV import.",
+                            "Import failed",
+                          ),
+                        );
+                      } finally {
+                        setImportBusy(false);
+                      }
+                    })();
+                  }}
+                />
+                <button
+                  type="button"
+                  className="ta-button-secondary"
+                  disabled={importBusy}
+                  onClick={() => importFileInputRef.current?.click()}
+                >
+                  {importBusy ? "Validating..." : "Choose CSV file"}
+                </button>
+                {importFileName ? <span className="text-sm text-slate-600">{importFileName}</span> : null}
+              </div>
+              {importPreview ? (
+                <div className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="grid gap-2 text-sm text-slate-700 sm:grid-cols-2 xl:grid-cols-4">
+                    <p>Total rows: {importPreview.total_rows}</p>
+                    <p>Valid rows: {importPreview.valid_count}</p>
+                    <p>Invalid rows: {importPreview.invalid_count}</p>
+                    <p>Duplicate codes: {importPreview.duplicate_count}</p>
+                  </div>
+                  {importPreview.errors.length > 0 ? (
+                    <ul className="list-disc space-y-1 pl-5 text-sm text-rose-700">
+                      {importPreview.errors.map((error) => (
+                        <li key={`${error.row_number}-${error.field ?? "general"}-${error.message}`}>
+                          Row {error.row_number}: {error.message}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {importPreview.valid_count > 0 ? (
+                    <button
+                      type="button"
+                      className="ta-button-primary"
+                      disabled={importBusy}
+                      onClick={() => {
+                        if (!importPreview) return;
+                        void withPreservedScroll("standards", async () => {
+                          setImportBusy(true);
+                          clearSectionAlert("standards");
+                          try {
+                            const validRows = importPreview.rows.filter(
+                              (row) => row.status === "valid" && row.subject_id,
+                            );
+                            const result = await commitStandardsImport({
+                              rows: validRows.map((row) => ({
+                                code: row.code,
+                                standard_type: row.standard_type,
+                                subject_id: row.subject_id as string,
+                                description: row.description,
+                              })),
+                            });
+                            await refreshSnapshot();
+                            setImportPreview(null);
+                            setImportFileName(null);
+                            setSectionAlert(
+                              "standards",
+                              sectionSuccess(
+                                `${result.created_count} standard${result.created_count === 1 ? "" : "s"} imported.` +
+                                  (result.skipped_duplicate_count > 0
+                                    ? ` ${result.skipped_duplicate_count} duplicate${result.skipped_duplicate_count === 1 ? "" : "s"} skipped.`
+                                    : ""),
+                                "Import complete",
+                              ),
+                            );
+                          } catch (nextError) {
+                            setSectionAlert(
+                              "standards",
+                              sectionError(
+                                nextError instanceof Error ? nextError.message : "Could not import standards.",
+                                "Import failed",
+                              ),
+                            );
+                          } finally {
+                            setImportBusy(false);
+                          }
+                        });
+                      }}
+                    >
+                      Import {importPreview.valid_count} valid row{importPreview.valid_count === 1 ? "" : "s"}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </article>
+
             <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-              <div className="grid grid-cols-[120px_140px_140px_1fr] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              <div className="grid grid-cols-[120px_120px_140px_1fr_88px] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                 <span>Code</span>
                 <span>Type</span>
                 <span>Subject</span>
                 <span>Description</span>
+                <span>Actions</span>
               </div>
               {snapshot.standards.length > 0 ? (
                 snapshot.standards.map((standard) => (
                   <div
                     key={standard.id}
-                    className="grid grid-cols-[120px_140px_140px_1fr] gap-4 border-b border-slate-100 px-4 py-4 text-sm text-slate-700 last:border-b-0"
+                    className="grid grid-cols-[120px_120px_140px_1fr_88px] gap-4 border-b border-slate-100 px-4 py-4 text-sm text-slate-700 last:border-b-0"
                   >
                     <span className="font-semibold text-slate-900">{standard.code}</span>
                     <span>{standard.standard_type}</span>
                     <span>{standard.subject_id ? subjectNameById.get(standard.subject_id) ?? "Subject" : "—"}</span>
                     <span>{standard.description}</span>
+                    <button
+                      type="button"
+                      className="ta-button-secondary justify-self-start px-3 py-1.5 text-xs"
+                      onClick={() => beginStandardEdit(standard)}
+                    >
+                      Edit
+                    </button>
                   </div>
                 ))
               ) : (

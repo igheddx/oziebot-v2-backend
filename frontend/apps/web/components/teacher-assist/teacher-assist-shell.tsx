@@ -68,13 +68,16 @@ function QuickCreateMenu() {
 function ChildNavRow({
   group,
   pathname,
+  isRootAdmin,
 }: {
   group: TeacherAssistNavGroup;
   pathname: string;
+  isRootAdmin: boolean;
 }) {
+  const links = group.links.filter((item) => !item.rootAdminOnly || isRootAdmin);
   return (
     <div className="flex gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      {group.links.map((item) => (
+      {links.map((item) => (
         <Link key={item.href} href={item.href} className={pillClass(isActivePath(pathname, item.href), true)}>
           {item.label}
         </Link>
@@ -105,6 +108,7 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
 
   const selectedGroup =
     TEACHER_ASSIST_NAV_GROUPS.find((group) => group.key === selectedCategory) ?? TEACHER_ASSIST_NAV_GROUPS[0];
+  const isRootAdmin = Boolean(user?.is_root_admin);
 
   return (
     <div className="teacher-assist-theme min-h-dvh bg-background text-foreground">
@@ -175,7 +179,7 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
 
           {/* Row 3 – child navigation */}
           <div className={`mt-1.5 ${mobileNavOpen ? "block" : "hidden lg:block"}`}>
-            <ChildNavRow group={selectedGroup} pathname={pathname} />
+            <ChildNavRow group={selectedGroup} pathname={pathname} isRootAdmin={isRootAdmin} />
           </div>
         </header>
 

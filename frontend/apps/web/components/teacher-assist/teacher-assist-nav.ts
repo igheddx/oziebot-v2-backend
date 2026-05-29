@@ -1,6 +1,7 @@
 export type TeacherAssistNavLink = {
   href: string;
   label: string;
+  rootAdminOnly?: boolean;
 };
 
 export type TeacherAssistNavGroup = {
@@ -12,6 +13,7 @@ export type TeacherAssistNavGroup = {
 export const TEACHER_ASSIST_PRIMARY_LINKS: TeacherAssistNavLink[] = [
   { href: "/teacher-assist/home", label: "Home" },
   { href: "/teacher-assist/work-queue", label: "Work Queue" },
+  { href: "/teacher-assist/catalog", label: "Catalog" },
 ];
 
 export const TEACHER_ASSIST_NAV_GROUPS: TeacherAssistNavGroup[] = [
@@ -53,9 +55,16 @@ export const TEACHER_ASSIST_NAV_GROUPS: TeacherAssistNavGroup[] = [
   {
     key: "administration",
     label: "Administration",
-    links: [{ href: "/teacher-assist/settings", label: "Settings" }],
+    links: [
+      { href: "/teacher-assist/settings", label: "Settings" },
+      { href: "/teacher-assist/administration/education-catalog", label: "Catalog Admin", rootAdminOnly: true },
+    ],
   },
 ];
+
+export const TEACHER_ASSIST_ROOT_ADMIN_LINKS = TEACHER_ASSIST_NAV_GROUPS.find(
+  (group) => group.key === "administration",
+)?.links.filter((link) => link.rootAdminOnly) ?? [];
 
 export const TEACHER_ASSIST_QUICK_CREATE_LINKS: TeacherAssistNavLink[] = [
   { href: "/teacher-assist/weekly-planning", label: "Create lesson" },

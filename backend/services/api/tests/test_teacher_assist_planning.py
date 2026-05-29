@@ -302,18 +302,21 @@ def _create_ready_planning_draft_context(
         json={"class_id": teacher_class["id"], "subject_id": subject["id"]},
     )
     assert attach_subject.status_code == 201, attach_subject.text
+    subject_code_slug = subject_name.upper().replace(" ", "")[:12]
     standard = client.post(
         "/v1/teacher-assist/standards",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "subject_id": subject["id"],
             "standard_type": "TEKS",
-            "code": "5.1A",
+            "code": f"5.{subject_code_slug}.{uuid.uuid4().hex[:6].upper()}",
             "description": f"Use {subject_name} planning context.",
             "grade_level": "5",
             "school_year_id": school_year["id"],
         },
-    ).json()
+    )
+    assert standard.status_code == 201, standard.text
+    standard = standard.json()
     resource = client.post(
         "/v1/teacher-assist/resources/link",
         headers={"Authorization": f"Bearer {token}"},

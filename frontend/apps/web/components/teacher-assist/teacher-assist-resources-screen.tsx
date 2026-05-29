@@ -19,6 +19,7 @@ import {
   fetchResourceDownloadUrl,
   uploadResourceFile,
 } from "@/lib/teacher-assist-api";
+import { withPreservedScroll } from "@/lib/teacher-assist-scroll";
 import type { ResourceLibraryItem } from "@/lib/teacher-assist-types";
 
 type UploadEntry = {
@@ -82,17 +83,21 @@ export function TeacherAssistResourcesScreen() {
   const [startingExtractionId, setStartingExtractionId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const refreshResources = useCallback(async () => {
+    setResources(await fetchResources());
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setPageError(null);
     try {
-      setResources(await fetchResources());
+      await refreshResources();
     } catch (nextError) {
       setPageError(nextError instanceof Error ? nextError.message : "Could not load resources.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshResources]);
 
   useEffect(() => {
     void load();
@@ -125,7 +130,7 @@ export function TeacherAssistResourcesScreen() {
       setStartingExtractionId(resource.id);
       try {
         await createResourceExtractionJob(resource.id);
-        await load();
+        await withPreservedScroll(null, refreshResources);
         setSectionAlert(
           "resourceLibrary",
           sectionSuccess("Resource extraction queued.", "Extraction queued"),
@@ -142,7 +147,7 @@ export function TeacherAssistResourcesScreen() {
         setStartingExtractionId(null);
       }
     },
-    [clearSectionAlert, load, setSectionAlert],
+    [clearSectionAlert, refreshResources, setSectionAlert],
   );
 
   const totalLinkedCount = useMemo(
@@ -175,7 +180,7 @@ export function TeacherAssistResourcesScreen() {
             entry.id === entryId ? { ...entry, progress: 100, status: "done" } : entry,
           ),
         );
-        await load();
+        await withPreservedScroll(null, refreshResources);
         setSectionAlert(
           "upload",
           sectionSuccess(`${file.name} was uploaded successfully.`, "Upload complete"),
@@ -195,7 +200,7 @@ export function TeacherAssistResourcesScreen() {
         );
       }
     },
-    [load, setSectionAlert],
+    [clearSectionAlert, refreshResources, setSectionAlert],
   );
 
   const handleFiles = useCallback(
@@ -392,7 +397,7 @@ export function TeacherAssistResourcesScreen() {
                     "linkForm",
                     sectionSuccess("The link resource was saved successfully.", "Link saved"),
                   );
-                  await load();
+                  await withPreservedScroll(null, refreshResources);
                 })
                 .catch((nextError) => {
                   setSectionAlert(

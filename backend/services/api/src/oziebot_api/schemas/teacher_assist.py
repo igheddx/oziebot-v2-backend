@@ -424,12 +424,67 @@ class ClassSubjectOut(BaseModel):
 
 
 class StandardCreate(BaseModel):
-    subject_id: uuid.UUID | None = None
+    subject_id: uuid.UUID
     standard_type: StandardTypeLiteral
     code: str = Field(min_length=1, max_length=64)
     description: str = Field(min_length=1, max_length=4000)
     grade_level: GradeLevelLiteral | None = None
     school_year_id: uuid.UUID | None = None
+
+
+class StandardUpdate(BaseModel):
+    subject_id: uuid.UUID
+    standard_type: StandardTypeLiteral
+    code: str = Field(min_length=1, max_length=64)
+    description: str = Field(min_length=1, max_length=4000)
+    grade_level: GradeLevelLiteral | None = None
+    school_year_id: uuid.UUID | None = None
+
+
+class StandardImportPreviewIn(BaseModel):
+    csv_content: str = Field(min_length=1)
+
+
+class StandardImportPreviewRowOut(BaseModel):
+    row_number: int
+    code: str
+    standard_type: str
+    subject_label: str
+    description: str
+    subject_id: uuid.UUID | None = None
+    status: Literal["valid", "invalid", "duplicate"]
+
+
+class StandardImportRowErrorOut(BaseModel):
+    row_number: int
+    message: str
+    field: str | None = None
+
+
+class StandardImportPreviewOut(BaseModel):
+    total_rows: int
+    valid_count: int
+    invalid_count: int
+    duplicate_count: int
+    rows: list[StandardImportPreviewRowOut] = Field(default_factory=list)
+    errors: list[StandardImportRowErrorOut] = Field(default_factory=list)
+
+
+class StandardImportCommitRowIn(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    standard_type: StandardTypeLiteral
+    subject_id: uuid.UUID
+    description: str = Field(min_length=1, max_length=4000)
+
+
+class StandardImportCommitIn(BaseModel):
+    rows: list[StandardImportCommitRowIn] = Field(min_length=1)
+
+
+class StandardImportCommitOut(BaseModel):
+    created_count: int
+    skipped_duplicate_count: int
+    errors: list[StandardImportRowErrorOut] = Field(default_factory=list)
 
 
 class StandardOut(BaseModel):

@@ -110,6 +110,37 @@ export type Standard = {
   updated_at: string;
 };
 
+export type StandardImportPreviewRow = {
+  row_number: number;
+  code: string;
+  standard_type: string;
+  subject_label: string;
+  description: string;
+  subject_id: string | null;
+  status: "valid" | "invalid" | "duplicate";
+};
+
+export type StandardImportRowError = {
+  row_number: number;
+  message: string;
+  field?: string | null;
+};
+
+export type StandardImportPreview = {
+  total_rows: number;
+  valid_count: number;
+  invalid_count: number;
+  duplicate_count: number;
+  rows: StandardImportPreviewRow[];
+  errors: StandardImportRowError[];
+};
+
+export type StandardImportCommitResult = {
+  created_count: number;
+  skipped_duplicate_count: number;
+  errors: StandardImportRowError[];
+};
+
 export type PacingGuide = {
   id: string;
   tenant_id: string;

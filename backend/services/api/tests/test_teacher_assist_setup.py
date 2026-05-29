@@ -301,3 +301,144 @@ def test_teacher_assist_tenant_isolation_for_school_years_and_standards(client, 
     )
     assert second_standards.status_code == 200, second_standards.text
     assert second_standards.json() == []
+
+
+def test_standard_requires_subject_and_supports_update_and_import(client, db_session: Session):
+    email = "standards-ux@example.com"
+    token = _register_user(client, email=email, tenant_name="Standards UX Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+
+    school_year = client.post(
+        "/v1/teacher-assist/school-years",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "title": "2026-2027",
+            "start_date": "2026-08-10",
+            "end_date": "2027-05-28",
+            "is_active": True,
+        },
+    ).json()
+
+    math_subject = client.post(
+        "/v1/teacher-assist/subjects",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"code": "MATH", "name": "Math"},
+    ).json()
+    ela_subject = client.post(
+        "/v1/teacher-assist/subjects",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"code": "ELA", "name": "ELA"},
+    ).json()
+
+    missing_subject = client.post(
+        "/v1/teacher-assist/standards",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "standard_type": "TEKS",
+            "code": "5.MATH.1",
+            "description": "Add decimals.",
+        },
+    )
+    assert missing_subject.status_code == 422, missing_subject.text
+
+    created = client.post(
+        "/v1/teacher-assist/standards",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "subject_id": math_subject["id"],
+            "standard_type": "TEKS",
+            "code": "5.MATH.1",
+            "description": "Add decimals.",
+            "grade_level": "5",
+            "school_year_id": school_year["id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    standard_payload = created.json()
+
+    duplicate = client.post(
+        "/v1/teacher-assist/standards",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "subject_id": math_subject["id"],
+            "standard_type": "TEKS",
+            "code": "5.MATH.1",
+            "description": "Duplicate code.",
+        },
+    )
+    assert duplicate.status_code == 400
+    assert "already exists" in duplicate.json()["detail"].lower()
+
+    updated = client.put(
+        f"/v1/teacher-assist/standards/{standard_payload['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "subject_id": ela_subject["id"],
+            "standard_type": "TEKS",
+            "code": "5.ELA.1",
+            "description": "Updated description.",
+            "grade_level": "5",
+            "school_year_id": school_year["id"],
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["code"] == "5.ELA.1"
+    assert updated.json()["subject_id"] == ela_subject["id"]
+
+    other_token = _register_user(client, email="standards-other@example.com", tenant_name="Other Standards Tenant")
+    _grant_teacher_assist_access(db_session, email="standards-other@example.com")
+    forbidden = client.put(
+        f"/v1/teacher-assist/standards/{standard_payload['id']}",
+        headers={"Authorization": f"Bearer {other_token}"},
+        json={
+            "subject_id": ela_subject["id"],
+            "standard_type": "TEKS",
+            "code": "5.ELA.1",
+            "description": "Cross tenant update.",
+        },
+    )
+    assert forbidden.status_code == 404
+
+    csv_content = "\n".join(
+        [
+            "code,type,subject,description",
+            '5.MATH.2,TEKS,Math,"Multiply decimals."',
+            '5.MISSING.1,TEKS,Science,"Unknown subject row."',
+            '5.ELA.1,TEKS,ELA,"Duplicate row."',
+        ]
+    )
+    preview = client.post(
+        "/v1/teacher-assist/standards/import/preview",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"csv_content": csv_content},
+    )
+    assert preview.status_code == 200, preview.text
+    preview_payload = preview.json()
+    assert preview_payload["total_rows"] == 3
+    assert preview_payload["valid_count"] == 1
+    assert preview_payload["invalid_count"] == 1
+    assert preview_payload["duplicate_count"] == 1
+    assert any("Science" in error["message"] for error in preview_payload["errors"])
+
+    commit = client.post(
+        "/v1/teacher-assist/standards/import/commit",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "rows": [
+                {
+                    "code": "5.MATH.2",
+                    "standard_type": "TEKS",
+                    "subject_id": math_subject["id"],
+                    "description": "Multiply decimals.",
+                }
+            ]
+        },
+    )
+    assert commit.status_code == 200, commit.text
+    assert commit.json()["created_count"] == 1
+
+    standards = client.get("/v1/teacher-assist/standards", headers={"Authorization": f"Bearer {token}"})
+    assert standards.status_code == 200, standards.text
+    codes = {row["code"] for row in standards.json()}
+    assert "5.MATH.2" in codes
+    assert "5.ELA.1" in codes

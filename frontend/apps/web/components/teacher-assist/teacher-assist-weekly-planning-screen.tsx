@@ -211,9 +211,12 @@ export function TeacherAssistWeeklyPlanningScreen() {
   const [previewLoading, setPreviewLoading] = useState(false);
 
   const load = useCallback(
-    async (preferredDraftId?: string | null) => {
-      setLoading(true);
-      setPageError(null);
+    async (preferredDraftId?: string | null, options?: { silent?: boolean }) => {
+      const silent = options?.silent ?? false;
+      if (!silent) {
+        setLoading(true);
+        setPageError(null);
+      }
       try {
         const [
           schoolYears,
@@ -254,50 +257,64 @@ export function TeacherAssistWeeklyPlanningScreen() {
           workflows,
           weeklyPlans,
         });
-        if (preferredDraftId) {
-          const matchingDraft = drafts.find((draft) => draft.id === preferredDraftId);
-          if (matchingDraft) {
-            setActiveDraftId(matchingDraft.id);
-            setDraftForm(draftFormFromDraft(matchingDraft));
+        if (!silent) {
+          if (preferredDraftId) {
+            const matchingDraft = drafts.find((draft) => draft.id === preferredDraftId);
+            if (matchingDraft) {
+              setActiveDraftId(matchingDraft.id);
+              setDraftForm(draftFormFromDraft(matchingDraft));
+            }
+          } else if (!activeDraftId && drafts.length === 0) {
+            setDraftForm((current) => ({
+              ...current,
+              school_year_id:
+                current.school_year_id ||
+                schoolYears.find((schoolYear) => schoolYear.is_active)?.id ||
+                schoolYears[0]?.id ||
+                "",
+              grading_period_id: current.grading_period_id || gradingPeriods[0]?.id || "",
+              class_id: current.class_id || classes[0]?.id || "",
+            }));
           }
-        } else if (!activeDraftId && drafts.length === 0) {
-          setDraftForm((current) => ({
-            ...current,
-            school_year_id:
-              current.school_year_id ||
-              schoolYears.find((schoolYear) => schoolYear.is_active)?.id ||
-              schoolYears[0]?.id ||
-              "",
-            grading_period_id: current.grading_period_id || gradingPeriods[0]?.id || "",
-            class_id: current.class_id || classes[0]?.id || "",
-          }));
         }
       } catch (nextError) {
+        if (silent) {
+          throw nextError;
+        }
         setPageError(nextError instanceof Error ? nextError.message : "Could not load planning workspace.");
       } finally {
-        setLoading(false);
+        if (!silent) {
+          setLoading(false);
+        }
       }
     },
     [activeDraftId],
   );
 
-  const loadPreview = useCallback(async (draftId: string) => {
-    setPreviewLoading(true);
+  const loadPreview = useCallback(async (draftId: string, options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setPreviewLoading(true);
+    }
     try {
       const preview = await fetchPlanningDraftContextPreview(draftId);
       setContextPreview(preview);
     } catch (nextError) {
-      setSectionAlert(
-        "draftWorkspace",
-        sectionError(
-          nextError instanceof Error ? nextError.message : "Could not load draft context preview.",
-          "Unable to load context preview",
-        ),
-      );
+      if (!silent) {
+        setSectionAlert(
+          "draftWorkspace",
+          sectionError(
+            nextError instanceof Error ? nextError.message : "Could not load draft context preview.",
+            "Unable to load context preview",
+          ),
+        );
+      }
     } finally {
-      setPreviewLoading(false);
+      if (!silent) {
+        setPreviewLoading(false);
+      }
     }
-  }, []);
+  }, [setSectionAlert]);
 
   useEffect(() => {
     void load();
@@ -316,9 +333,9 @@ export function TeacherAssistWeeklyPlanningScreen() {
       return;
     }
     const interval = window.setInterval(() => {
-      void load(activeDraftId);
+      void load(null, { silent: true });
       if (activeDraftId) {
-        void loadPreview(activeDraftId);
+        void loadPreview(activeDraftId, { silent: true });
       }
     }, 3000);
     return () => window.clearInterval(interval);
@@ -546,8 +563,8 @@ export function TeacherAssistWeeklyPlanningScreen() {
         tone: "info",
         text: "Instructional-plan workflow queued. Mock generation output will appear in the workflows panel.",
       });
-      await load(activeDraftId);
-      await loadPreview(activeDraftId);
+      await load(activeDraftId, { silent: true });
+      await loadPreview(activeDraftId, { silent: true });
     } catch (nextError) {
       setSectionAlert(
         "draftWorkspace",
@@ -1044,6 +1061,21 @@ export function TeacherAssistWeeklyPlanningScreen() {
               Copying, branching, and manual editing remain software-only. Real-provider execution, if
               enabled, is still subject to teacher review before use.
             </p>
+
+            {activeDraftWorkflow &&
+            (activeDraftWorkflow.status === "queued" || activeDraftWorkflow.status === "running") ? (
+              <TeacherAssistAlert
+                variant="info"
+                title="Plan generation in progress"
+                description={
+                  <>
+                    {workflowStatusMessage(activeDraftWorkflow)} This page refreshes workflow status
+                    automatically every few seconds. You can keep working while generation runs.
+                  </>
+                }
+                className="mt-4"
+              />
+            ) : null}
 
             {previewLoading ? (
               <p className="mt-5 text-sm text-slate-600">Loading preview...</p>

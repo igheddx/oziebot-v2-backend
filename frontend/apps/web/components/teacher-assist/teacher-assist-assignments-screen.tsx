@@ -15,6 +15,7 @@ import {
   useTeacherAssistSectionAlerts,
 } from "@/components/teacher-assist/teacher-assist-inline-alert";
 import { buildApiUrl } from "@/lib/auth-service";
+import { withPreservedScroll } from "@/lib/teacher-assist-scroll";
 import {
   cancelExtractionJob,
   commitGradingReviewToGradebook,
@@ -389,9 +390,11 @@ export function TeacherAssistAssignmentsScreen() {
   const [studentWorkFileError, setStudentWorkFileError] = useState<string | null>(null);
   const [studentWorkUploadError, setStudentWorkUploadError] = useState<string | null>(null);
 
-  const load = useCallback(async (currentFilters: Filters) => {
-    setLoading(true);
-    setPageError(null);
+  const load = useCallback(async (currentFilters: Filters, options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setLoading(true);
+      setPageError(null);
+    }
     try {
       const [
         nextOptions,
@@ -440,9 +443,15 @@ export function TeacherAssistAssignmentsScreen() {
         setGradingReviewForm(emptyGradingReviewForm());
       }
     } catch (nextError) {
-      setPageError(nextError instanceof Error ? nextError.message : "Could not load assignments.");
+      if (!options?.silent) {
+        setPageError(nextError instanceof Error ? nextError.message : "Could not load assignments.");
+      } else {
+        throw nextError;
+      }
     } finally {
-      setLoading(false);
+      if (!options?.silent) {
+        setLoading(false);
+      }
     }
   }, [packetAssignmentId]);
 
@@ -790,7 +799,7 @@ export function TeacherAssistAssignmentsScreen() {
       const saved = editingAssignmentId
         ? await updateAssignment(editingAssignmentId, payload)
         : await createAssignment(payload);
-      await load(filters);
+      await withPreservedScroll(null, () => load(filters, { silent: true }));
       setEditingAssignmentId(saved.id);
       setForm(formFromAssignment(saved));
       setSectionAlert(
@@ -821,7 +830,7 @@ export function TeacherAssistAssignmentsScreen() {
       clearSectionAlert("assignmentList");
       try {
         await updateAssignmentStatus(assignmentId, nextStatus);
-        await load(filters);
+        await withPreservedScroll(null, () => load(filters, { silent: true }));
         setSectionAlert(
           "assignmentList",
           sectionSuccess("Assignment status updated.", "Status updated"),

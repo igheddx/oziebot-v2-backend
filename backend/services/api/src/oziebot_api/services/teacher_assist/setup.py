@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+import io
 import uuid
 
 from sqlalchemy import select
@@ -462,6 +464,50 @@ def attach_class_subject(
     return row
 
 
+def get_standard_or_404(
+    db: Session, *, tenant_id: uuid.UUID, standard_id: uuid.UUID
+) -> TeacherAssistStandard:
+    row = db.scalars(
+        select(TeacherAssistStandard).where(
+            TeacherAssistStandard.id == standard_id,
+            TeacherAssistStandard.tenant_id == tenant_id,
+        )
+    ).one_or_none()
+    if row is None:
+        raise LookupError("Standard not found")
+    return row
+
+
+def _standard_code_exists(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    code: str,
+    exclude_standard_id: uuid.UUID | None = None,
+) -> bool:
+    normalized_code = code.strip().lower()
+    for row in list_standards(db, tenant_id=tenant_id):
+        if exclude_standard_id is not None and row.id == exclude_standard_id:
+            continue
+        if row.code.strip().lower() == normalized_code:
+            return True
+    return False
+
+
+def _resolve_subject_label(
+    db: Session, *, tenant_id: uuid.UUID, subject_label: str
+) -> TeacherAssistSubject | None:
+    normalized_label = subject_label.strip().lower()
+    if not normalized_label:
+        return None
+    for subject in list_subjects(db, tenant_id=tenant_id):
+        if subject.name.strip().lower() == normalized_label:
+            return subject
+        if subject.code is not None and subject.code.strip().lower() == normalized_label:
+            return subject
+    return None
+
+
 def create_standard(
     db: Session,
     *,
@@ -473,19 +519,28 @@ def create_standard(
     grade_level: str | None,
     school_year_id: uuid.UUID | None,
 ) -> TeacherAssistStandard:
+    if subject_id is None:
+        raise ValueError("Subject is required")
+    normalized_code = code.strip()
+    normalized_description = description.strip()
+    if not normalized_code:
+        raise ValueError("Standard code is required")
+    if not normalized_description:
+        raise ValueError("Standard description is required")
     normalized_grade_level = validate_grade_level(grade_level)
     normalized_standard_type = validate_standard_type(standard_type)
-    if subject_id is not None:
-        get_subject_or_404(db, tenant_id=tenant_id, subject_id=subject_id)
+    get_subject_or_404(db, tenant_id=tenant_id, subject_id=subject_id)
     if school_year_id is not None:
         get_school_year_or_404(db, tenant_id=tenant_id, school_year_id=school_year_id)
+    if _standard_code_exists(db, tenant_id=tenant_id, code=normalized_code):
+        raise ValueError("A standard with this code already exists")
     now = datetime.now(UTC)
     row = TeacherAssistStandard(
         tenant_id=tenant_id,
         subject_id=subject_id,
         standard_type=normalized_standard_type,
-        code=code.strip(),
-        description=description.strip(),
+        code=normalized_code,
+        description=normalized_description,
         grade_level=normalized_grade_level,
         school_year_id=school_year_id,
         created_at=now,
@@ -494,3 +549,251 @@ def create_standard(
     db.add(row)
     db.flush()
     return row
+
+
+def update_standard(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    standard_id: uuid.UUID,
+    subject_id: uuid.UUID | None,
+    standard_type: str,
+    code: str,
+    description: str,
+    grade_level: str | None,
+    school_year_id: uuid.UUID | None,
+) -> TeacherAssistStandard:
+    if subject_id is None:
+        raise ValueError("Subject is required")
+    normalized_code = code.strip()
+    normalized_description = description.strip()
+    if not normalized_code:
+        raise ValueError("Standard code is required")
+    if not normalized_description:
+        raise ValueError("Standard description is required")
+    row = get_standard_or_404(db, tenant_id=tenant_id, standard_id=standard_id)
+    normalized_grade_level = validate_grade_level(grade_level)
+    normalized_standard_type = validate_standard_type(standard_type)
+    get_subject_or_404(db, tenant_id=tenant_id, subject_id=subject_id)
+    if school_year_id is not None:
+        get_school_year_or_404(db, tenant_id=tenant_id, school_year_id=school_year_id)
+    if _standard_code_exists(
+        db,
+        tenant_id=tenant_id,
+        code=normalized_code,
+        exclude_standard_id=row.id,
+    ):
+        raise ValueError("A standard with this code already exists")
+    row.subject_id = subject_id
+    row.standard_type = normalized_standard_type
+    row.code = normalized_code
+    row.description = normalized_description
+    row.grade_level = normalized_grade_level
+    row.school_year_id = school_year_id
+    row.updated_at = datetime.now(UTC)
+    db.flush()
+    return row
+
+
+@dataclass(frozen=True)
+class StandardImportPreviewRow:
+    row_number: int
+    code: str
+    standard_type: str
+    subject_label: str
+    description: str
+    subject_id: uuid.UUID | None
+    status: str
+
+
+@dataclass(frozen=True)
+class StandardImportRowError:
+    row_number: int
+    message: str
+    field: str | None = None
+
+
+@dataclass(frozen=True)
+class StandardImportPreviewResult:
+    total_rows: int
+    valid_count: int
+    invalid_count: int
+    duplicate_count: int
+    rows: list[StandardImportPreviewRow]
+    errors: list[StandardImportRowError]
+
+
+@dataclass(frozen=True)
+class StandardImportCommitRow:
+    code: str
+    standard_type: str
+    subject_id: uuid.UUID
+    description: str
+
+
+@dataclass(frozen=True)
+class StandardImportCommitResult:
+    created_count: int
+    skipped_duplicate_count: int
+    errors: list[StandardImportRowError]
+
+
+STANDARD_IMPORT_REQUIRED_HEADERS = ("code", "type", "subject", "description")
+
+
+def _parse_standards_csv_rows(csv_content: str) -> tuple[list[dict[str, str]], list[StandardImportRowError]]:
+    reader = csv.DictReader(io.StringIO(csv_content.strip()))
+    if reader.fieldnames is None:
+        raise ValueError("CSV file is empty or missing a header row")
+    normalized_headers = {header.strip().lower(): header for header in reader.fieldnames if header}
+    missing_headers = [
+        header for header in STANDARD_IMPORT_REQUIRED_HEADERS if header not in normalized_headers
+    ]
+    if missing_headers:
+        raise ValueError(
+            "CSV headers must include code, type, subject, and description. "
+            f"Missing: {', '.join(missing_headers)}"
+        )
+    parsed_rows: list[dict[str, str]] = []
+    errors: list[StandardImportRowError] = []
+    for row_number, row in enumerate(reader, start=2):
+        parsed_rows.append(
+            {
+                "row_number": str(row_number),
+                "code": (row.get(normalized_headers["code"]) or "").strip(),
+                "standard_type": (row.get(normalized_headers["type"]) or "").strip(),
+                "subject_label": (row.get(normalized_headers["subject"]) or "").strip(),
+                "description": (row.get(normalized_headers["description"]) or "").strip(),
+            }
+        )
+    if not parsed_rows:
+        raise ValueError("CSV file does not contain any data rows")
+    return parsed_rows, errors
+
+
+def preview_standards_import(
+    db: Session, *, tenant_id: uuid.UUID, csv_content: str
+) -> StandardImportPreviewResult:
+    parsed_rows, _ = _parse_standards_csv_rows(csv_content)
+    preview_rows: list[StandardImportPreviewRow] = []
+    errors: list[StandardImportRowError] = []
+    valid_count = 0
+    invalid_count = 0
+    duplicate_count = 0
+    for raw_row in parsed_rows:
+        row_number = int(raw_row["row_number"])
+        code = raw_row["code"]
+        standard_type = raw_row["standard_type"]
+        subject_label = raw_row["subject_label"]
+        description = raw_row["description"]
+        row_errors: list[StandardImportRowError] = []
+        if not code:
+            row_errors.append(
+                StandardImportRowError(row_number=row_number, field="code", message="Code is required.")
+            )
+        if not standard_type:
+            row_errors.append(
+                StandardImportRowError(row_number=row_number, field="type", message="Type is required.")
+            )
+        else:
+            try:
+                validate_standard_type(standard_type)
+            except ValueError as exc:
+                row_errors.append(
+                    StandardImportRowError(row_number=row_number, field="type", message=str(exc))
+                )
+        if not subject_label:
+            row_errors.append(
+                StandardImportRowError(
+                    row_number=row_number,
+                    field="subject",
+                    message="Subject is required.",
+                )
+            )
+        if not description:
+            row_errors.append(
+                StandardImportRowError(
+                    row_number=row_number,
+                    field="description",
+                    message="Description is required.",
+                )
+            )
+        subject = (
+            _resolve_subject_label(db, tenant_id=tenant_id, subject_label=subject_label)
+            if subject_label
+            else None
+        )
+        if subject_label and subject is None:
+            row_errors.append(
+                StandardImportRowError(
+                    row_number=row_number,
+                    field="subject",
+                    message=(
+                        f"Subject '{subject_label}' was not found. Create the subject first, "
+                        "then re-import this row."
+                    ),
+                )
+            )
+        status = "valid"
+        if row_errors:
+            status = "invalid"
+            invalid_count += 1
+            errors.extend(row_errors)
+        elif _standard_code_exists(db, tenant_id=tenant_id, code=code):
+            status = "duplicate"
+            duplicate_count += 1
+        else:
+            valid_count += 1
+        preview_rows.append(
+            StandardImportPreviewRow(
+                row_number=row_number,
+                code=code,
+                standard_type=standard_type,
+                subject_label=subject_label,
+                description=description,
+                subject_id=subject.id if subject is not None else None,
+                status=status,
+            )
+        )
+    return StandardImportPreviewResult(
+        total_rows=len(preview_rows),
+        valid_count=valid_count,
+        invalid_count=invalid_count,
+        duplicate_count=duplicate_count,
+        rows=preview_rows,
+        errors=errors,
+    )
+
+
+def commit_standards_import(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    rows: list[StandardImportCommitRow],
+) -> StandardImportCommitResult:
+    created_count = 0
+    skipped_duplicate_count = 0
+    errors: list[StandardImportRowError] = []
+    for index, row in enumerate(rows, start=1):
+        try:
+            if _standard_code_exists(db, tenant_id=tenant_id, code=row.code):
+                skipped_duplicate_count += 1
+                continue
+            create_standard(
+                db,
+                tenant_id=tenant_id,
+                subject_id=row.subject_id,
+                standard_type=row.standard_type,
+                code=row.code,
+                description=row.description,
+                grade_level=None,
+                school_year_id=None,
+            )
+            created_count += 1
+        except (LookupError, ValueError) as exc:
+            errors.append(StandardImportRowError(row_number=index, message=str(exc)))
+    return StandardImportCommitResult(
+        created_count=created_count,
+        skipped_duplicate_count=skipped_duplicate_count,
+        errors=errors,
+    )

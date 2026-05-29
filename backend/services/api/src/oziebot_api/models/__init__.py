@@ -116,6 +116,18 @@ from oziebot_api.models.teacher_assist_planning_input_draft_subject import (
 )
 from oziebot_api.models.teacher_assist_profile import TeacherAssistProfile
 from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
+from oziebot_api.models.education_catalog import (
+    EducationCurriculumResource,
+    EducationDistrict,
+    EducationGrade,
+    EducationObjective,
+    EducationObjectiveResourceMapping,
+    EducationResourceLink,
+    EducationSchool,
+    EducationState,
+    EducationSubject,
+    TeacherSchoolAssignment,
+)
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
 from oziebot_api.models.teacher_assist_standard import TeacherAssistStandard
 from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
@@ -240,6 +252,16 @@ __all__ = [
     "TeacherAssistPlanningInputDraftSubject",
     "TeacherAssistProfile",
     "TeacherAssistResourceLibraryItem",
+    "EducationCurriculumResource",
+    "EducationDistrict",
+    "EducationGrade",
+    "EducationObjective",
+    "EducationObjectiveResourceMapping",
+    "EducationResourceLink",
+    "EducationSchool",
+    "EducationState",
+    "EducationSubject",
+    "TeacherSchoolAssignment",
     "TeacherAssistSchoolYear",
     "TeacherAssistStandard",
     "TeacherAssistSubject",
