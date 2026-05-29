@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
 import { TeacherAssistEmptyState } from "@/components/teacher-assist/teacher-assist-empty-state";
 import { fetchTeacherAssistHomeWorkspace } from "@/lib/teacher-assist-api";
 import type { TeacherAssistOnboardingProgress } from "@/lib/teacher-assist-types";
@@ -46,7 +47,15 @@ export function TeacherAssistOnboardingScreen() {
   }, []);
 
   if (error) {
-    return <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>;
+    return (
+      <TeacherAssistAlert
+        variant="error"
+        title="Unable to load onboarding"
+        description={error}
+        actionLabel="Retry"
+        onAction={() => window.location.reload()}
+      />
+    );
   }
   if (!onboarding) {
     return <p className="text-sm text-slate-600">Loading onboarding...</p>;

@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
+import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
+import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
 import {
   commitMasteryEvaluation,
   createMasteryEvaluation,
@@ -488,13 +491,13 @@ export function TeacherAssistMasteryScreen() {
         </div>
       </section>
 
-      <section className="ta-alert ta-alert-info">
-        Mastery updates require explicit teacher commit. Grading confirmation and gradebook commits do not
-        auto-update mastery in this phase.
-      </section>
+      <TeacherAssistAlert
+        variant="info"
+        description="Mastery updates require explicit teacher commit. Grading confirmation and gradebook commits do not auto-update mastery in this phase."
+      />
 
-      {error ? <section className="ta-alert ta-alert-error">{error}</section> : null}
-      {notice ? <section className="ta-alert ta-alert-success">{notice}</section> : null}
+      <TeacherAssistFormErrorSummary message={error} />
+      <TeacherAssistInlineStatus message={notice} onDismiss={() => setNotice(null)} />
 
       <section className="ta-panel p-6">
         <div className="flex flex-wrap items-end justify-between gap-4">

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { AppSwitcher } from "@/components/platform/app-switcher";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -10,6 +10,7 @@ import {
   TEACHER_ASSIST_NAV_GROUPS,
   TEACHER_ASSIST_PRIMARY_LINKS,
   TEACHER_ASSIST_QUICK_CREATE_LINKS,
+  type TeacherAssistNavGroup,
   type TeacherAssistNavLink,
 } from "@/components/teacher-assist/teacher-assist-nav";
 
@@ -20,20 +21,17 @@ function isActivePath(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function NavLink({ item, pathname }: { item: TeacherAssistNavLink; pathname: string }) {
-  const active = isActivePath(pathname, item.href);
-  return (
-    <Link
-      href={item.href}
-      className={`inline-flex min-h-10 items-center rounded-2xl border px-3 py-2 text-sm font-semibold transition ${
-        active
-          ? "border-sky-300 bg-sky-50 text-sky-900"
-          : "border-slate-200 bg-white/80 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-      }`}
-    >
-      {item.label}
-    </Link>
-  );
+function isPrimaryActive(pathname: string) {
+  return TEACHER_ASSIST_PRIMARY_LINKS.some((link) => isActivePath(pathname, link.href));
+}
+
+function pillClass(active: boolean, compact = false) {
+  const base = compact
+    ? "inline-flex h-8 shrink-0 items-center rounded-full border px-3 text-xs font-semibold transition"
+    : "inline-flex h-9 shrink-0 items-center rounded-full border px-3.5 text-sm font-semibold transition";
+  return active
+    ? `${base} border-sky-300 bg-sky-50 text-sky-900`
+    : `${base} border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900`;
 }
 
 function QuickCreateMenu() {
@@ -44,18 +42,18 @@ function QuickCreateMenu() {
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="ta-button-primary inline-flex h-10 items-center gap-2 px-4 text-sm"
+        className="inline-flex h-8 items-center gap-1 rounded-full border border-sky-300 bg-sky-500 px-3 text-xs font-semibold text-slate-950 hover:bg-sky-400"
       >
         Quick create
-        <span className="text-xs">{open ? "▲" : "▼"}</span>
+        <span className="text-[10px]">{open ? "▲" : "▼"}</span>
       </button>
       {open ? (
-        <div className="absolute right-0 z-40 mt-2 min-w-52 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
+        <div className="absolute right-0 z-40 mt-1 min-w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
           {TEACHER_ASSIST_QUICK_CREATE_LINKS.map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className="block rounded-xl px-3 py-2 text-sm font-medium text-slate-700 hover:bg-sky-50 hover:text-sky-900"
+              className="block rounded-lg px-2.5 py-2 text-xs font-medium text-slate-700 hover:bg-sky-50 hover:text-sky-900"
               onClick={() => setOpen(false)}
             >
               {item.label}
@@ -63,6 +61,24 @@ function QuickCreateMenu() {
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ChildNavRow({
+  group,
+  pathname,
+}: {
+  group: TeacherAssistNavGroup;
+  pathname: string;
+}) {
+  return (
+    <div className="flex gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {group.links.map((item) => (
+        <Link key={item.href} href={item.href} className={pillClass(isActivePath(pathname, item.href), true)}>
+          {item.label}
+        </Link>
+      ))}
     </div>
   );
 }
@@ -78,87 +94,92 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
         return group.key;
       }
     }
-    return TEACHER_ASSIST_NAV_GROUPS[0]?.key ?? "instruction";
+    return "instruction";
   }, [pathname]);
 
-  const [expandedGroup, setExpandedGroup] = useState<string>(activeGroupKey);
+  const [selectedCategory, setSelectedCategory] = useState(activeGroupKey);
+
+  useEffect(() => {
+    setSelectedCategory(activeGroupKey);
+  }, [activeGroupKey]);
+
+  const selectedGroup =
+    TEACHER_ASSIST_NAV_GROUPS.find((group) => group.key === selectedCategory) ?? TEACHER_ASSIST_NAV_GROUPS[0];
 
   return (
     <div className="teacher-assist-theme min-h-dvh bg-background text-foreground">
-      <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
-        <header className="ta-panel sticky top-3 z-30 px-4 py-4 sm:top-4 sm:px-6 sm:py-5">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="max-w-2xl">
-              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">
-                TeacherAssist AI
-              </p>
-              <h1 className="mt-2 text-xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
-                Educator-focused workspace
-              </h1>
-              <p className="mt-2 text-sm leading-6 text-slate-600 sm:text-[15px]">
-                Start on Home, use Work Queue for operational tasks, and manage each class from one place.
-              </p>
-            </div>
-            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-end">
+      <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-3 py-3 sm:px-5 sm:py-4">
+        <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-[color-mix(in_srgb,var(--background)_92%,white)] pb-2 pt-1 backdrop-blur-sm">
+          {/* Row 1 – compact app header */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <Link href="/teacher-assist/home" className="text-xs font-bold uppercase tracking-[0.18em] text-sky-700">
+              TeacherAssist AI
+            </Link>
+            <div className="hidden h-4 w-px bg-slate-200 sm:block" />
+            <div className="flex flex-wrap items-center gap-1.5">
+              {TEACHER_ASSIST_PRIMARY_LINKS.map((item: TeacherAssistNavLink) => (
+                <Link key={item.href} href={item.href} className={pillClass(isActivePath(pathname, item.href), true)}>
+                  {item.label}
+                </Link>
+              ))}
               <QuickCreateMenu />
+            </div>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
               <AppSwitcher />
-              <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3">
-                <p className="text-sm font-semibold text-slate-900">{user?.full_name ?? "Teacher"}</p>
-                <p className="text-xs text-slate-500">{user?.email ?? "Signed in"}</p>
+              <div className="hidden text-right sm:block">
+                <p className="max-w-[160px] truncate text-xs font-semibold text-slate-900">
+                  {user?.full_name ?? "Teacher"}
+                </p>
+                <p className="max-w-[160px] truncate text-[11px] text-slate-500">{user?.email ?? ""}</p>
               </div>
               <button
                 type="button"
                 onClick={() => {
                   void logoutUser();
                 }}
-                className="inline-flex h-11 items-center rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                className="inline-flex h-8 items-center rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50"
               >
                 Logout
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 lg:hidden"
+                onClick={() => setMobileNavOpen((current) => !current)}
+              >
+                {mobileNavOpen ? "Close" : "Menu"}
               </button>
             </div>
           </div>
 
-          <div className="mt-5 flex flex-wrap items-center gap-2">
-            {TEACHER_ASSIST_PRIMARY_LINKS.map((item) => (
-              <NavLink key={item.href} item={item} pathname={pathname} />
-            ))}
-            <button
-              type="button"
-              className="inline-flex h-10 items-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 lg:hidden"
-              onClick={() => setMobileNavOpen((current) => !current)}
-            >
-              {mobileNavOpen ? "Hide menu" : "Browse areas"}
-            </button>
-          </div>
-
-          <nav className={`mt-4 ${mobileNavOpen ? "block" : "hidden lg:block"}`}>
-            <div className="grid gap-3 lg:grid-cols-3 xl:grid-cols-5">
-              {TEACHER_ASSIST_NAV_GROUPS.map((group) => {
-                const isExpanded = expandedGroup === group.key || mobileNavOpen;
-                return (
-                  <section key={group.key} className="rounded-2xl border border-slate-200 bg-white/70 p-3">
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-between text-left"
-                      onClick={() => setExpandedGroup((current) => (current === group.key ? "" : group.key))}
-                    >
-                      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {group.label}
-                      </span>
-                      <span className="text-xs text-slate-400 lg:hidden">{isExpanded ? "−" : "+"}</span>
-                    </button>
-                    <div className={`mt-2 flex flex-wrap gap-2 ${isExpanded ? "flex" : "hidden lg:flex"}`}>
-                      {group.links.map((item) => (
-                        <NavLink key={item.href} item={item} pathname={pathname} />
-                      ))}
-                    </div>
-                  </section>
-                );
-              })}
-            </div>
+          {/* Row 2 – category pills */}
+          <nav
+            className={`mt-2 flex gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${mobileNavOpen ? "flex" : "hidden lg:flex"}`}
+            aria-label="TeacherAssist categories"
+          >
+            {TEACHER_ASSIST_NAV_GROUPS.map((group) => {
+              const categoryActive =
+                selectedCategory === group.key ||
+                (!isPrimaryActive(pathname) && activeGroupKey === group.key);
+              return (
+                <button
+                  key={group.key}
+                  type="button"
+                  onClick={() => setSelectedCategory(group.key)}
+                  className={pillClass(categoryActive, true)}
+                >
+                  {group.label}
+                </button>
+              );
+            })}
           </nav>
+
+          {/* Row 3 – child navigation */}
+          <div className={`mt-1.5 ${mobileNavOpen ? "block" : "hidden lg:block"}`}>
+            <ChildNavRow group={selectedGroup} pathname={pathname} />
+          </div>
         </header>
-        <main className="flex-1 py-4 sm:py-6">{children}</main>
+
+        <main className="flex-1 py-4 sm:py-5">{children}</main>
       </div>
     </div>
   );

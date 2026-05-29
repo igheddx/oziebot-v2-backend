@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
+import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
 import {
   attachPlanningDraftResource,
   createPlanningDraft,
@@ -568,26 +570,14 @@ export function TeacherAssistWeeklyPlanningScreen() {
         </div>
       </section>
 
-      <section className="ta-alert ta-alert-info">
-        TeacherAssist workflows here are persisted and worker-driven. Mock remains the safe default,
-        and any real-provider execution stays explicitly gated by backend config.
-      </section>
+      <TeacherAssistAlert
+        variant="info"
+        description="TeacherAssist workflows here are persisted and worker-driven. Mock remains the safe default, and any real-provider execution stays explicitly gated by backend config."
+      />
 
-      {error ? <section className="ta-alert ta-alert-error">{error}</section> : null}
+      <TeacherAssistFormErrorSummary message={error} />
       {primaryAlert ? (
-        <section
-          className={
-            primaryAlert.tone === "success"
-              ? "ta-alert ta-alert-success"
-              : primaryAlert.tone === "error"
-                ? "ta-alert ta-alert-error"
-                : primaryAlert.tone === "warning"
-                  ? "ta-alert border-orange-200 bg-orange-50 text-orange-900"
-                  : "ta-alert ta-alert-info"
-          }
-        >
-          {primaryAlert.text}
-        </section>
+        <TeacherAssistAlert variant={primaryAlert.tone} description={primaryAlert.text} />
       ) : null}
 
       <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">

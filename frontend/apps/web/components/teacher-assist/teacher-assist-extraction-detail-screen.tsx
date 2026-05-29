@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
+import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
+import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
 import {
   cancelExtractionJob,
   fetchExtractedTextDetail,
@@ -308,29 +311,32 @@ function ExtractionDetail({
       </section>
 
       {realOcrOutput ? (
-        <section className="ta-alert ta-alert-info">
-          Real OCR output still requires teacher review. Approved text remains the only safe downstream input; grading,
-          mastery updates, and parent communication are not triggered automatically.
-        </section>
+        <TeacherAssistAlert
+          variant="info"
+          description="Real OCR output still requires teacher review. Approved text remains the only safe downstream input; grading, mastery updates, and parent communication are not triggered automatically."
+        />
       ) : null}
 
       {lowConfidence ? (
-        <section className="ta-alert ta-alert-error">
-          Provider confidence is low. Review the extracted text carefully before approving it for downstream use.
-        </section>
+        <TeacherAssistAlert
+          variant="error"
+          description="Provider confidence is low. Review the extracted text carefully before approving it for downstream use."
+        />
       ) : null}
-      {notice ? <section className="ta-alert ta-alert-info">{notice}</section> : null}
-      {error ? <section className="ta-alert ta-alert-error">{error}</section> : null}
+      <TeacherAssistInlineStatus variant="info" message={notice} onDismiss={() => setNotice(null)} />
+      <TeacherAssistFormErrorSummary message={error} />
 
-      <section className="ta-alert ta-alert-info">
-        AI grading, mastery updates, and gradebook commits remain disabled. Extraction review is teacher-controlled
-        and does not trigger AI usage.
-      </section>
+      <TeacherAssistAlert
+        variant="info"
+        description="AI grading, mastery updates, and gradebook commits remain disabled. Extraction review is teacher-controlled and does not trigger AI usage."
+      />
 
       {detail.record.teacher_issue_reason ? (
-        <section className="ta-alert ta-alert-error">
-          Teacher issue flagged: {detail.record.teacher_issue_reason}
-        </section>
+        <TeacherAssistAlert
+          variant="error"
+          title="Teacher issue flagged"
+          description={detail.record.teacher_issue_reason}
+        />
       ) : null}
 
       <ProviderMetadataPanel job={detail.job} />
@@ -674,7 +680,7 @@ export function TeacherAssistExtractionDetailScreen() {
   }
 
   if (error) {
-    return <section className="ta-alert ta-alert-error">{error}</section>;
+    return <TeacherAssistFormErrorSummary message={error} />;
   }
 
   if (extractedTextId && detail) {
@@ -704,14 +710,16 @@ export function TeacherAssistExtractionDetailScreen() {
           </div>
         </section>
         {jobDetail.job.provider_mode === "real" ? (
-          <section className="ta-alert ta-alert-info">
-            Real OCR output still requires teacher review before any downstream use.
-          </section>
+          <TeacherAssistAlert
+            variant="info"
+            description="Real OCR output still requires teacher review before any downstream use."
+          />
         ) : null}
         <ProviderMetadataPanel job={jobDetail.job} />
-        <section className="ta-alert ta-alert-info">
-          AI grading remains disabled. This drill-down shows extraction job status only.
-        </section>
+        <TeacherAssistAlert
+          variant="info"
+          description="AI grading remains disabled. This drill-down shows extraction job status only."
+        />
         {jobDetail.extracted_text ? (
           <section className="ta-panel p-5">
             <p className="text-sm text-slate-600">Extracted text is available for teacher review.</p>

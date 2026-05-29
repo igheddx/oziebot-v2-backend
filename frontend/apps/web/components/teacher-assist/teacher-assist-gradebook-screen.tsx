@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
+import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
 import {
   createGradebookRecordCorrection,
   createGradebookRecordReversal,
@@ -246,14 +248,8 @@ export function TeacherAssistGradebookScreen() {
         </div>
       </section>
 
-      {error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</div>
-      ) : null}
-      {notice ? (
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          {notice}
-        </div>
-      ) : null}
+      <TeacherAssistFormErrorSummary message={error} />
+      <TeacherAssistInlineStatus message={notice} onDismiss={() => setNotice(null)} />
 
       <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
         <article className="ta-panel p-5">

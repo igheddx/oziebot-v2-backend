@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
+import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
 import {
   fetchExportArtifactDetail,
   fetchExportArtifactDownload,
@@ -155,8 +157,8 @@ export function TeacherAssistExportsScreen() {
         </div>
       </section>
 
-      {error ? <section className="ta-alert ta-alert-error">{error}</section> : null}
-      {notice ? <section className="ta-alert ta-alert-success">{notice}</section> : null}
+      <TeacherAssistFormErrorSummary message={error} />
+      <TeacherAssistInlineStatus message={notice} onDismiss={() => setNotice(null)} />
 
       <section className="grid gap-4 md:grid-cols-4">
         {summaryCards.map((card) => (

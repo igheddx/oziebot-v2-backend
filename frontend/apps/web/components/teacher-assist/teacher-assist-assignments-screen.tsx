@@ -5,6 +5,10 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
+import { TeacherAssistFieldError, fieldErrorInputClass } from "@/components/teacher-assist/teacher-assist-field-error";
+import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
+import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
 import { buildApiUrl } from "@/lib/auth-service";
 import {
   cancelExtractionJob,
@@ -377,6 +381,8 @@ export function TeacherAssistAssignmentsScreen() {
   const [statusDrafts, setStatusDrafts] = useState<Record<string, Assignment["status"]>>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [studentWorkFileError, setStudentWorkFileError] = useState<string | null>(null);
+  const [studentWorkUploadError, setStudentWorkUploadError] = useState<string | null>(null);
 
   const load = useCallback(async (currentFilters: Filters) => {
     setLoading(true);
@@ -799,12 +805,13 @@ export function TeacherAssistAssignmentsScreen() {
 
   const handleUploadStudentWork = useCallback(async () => {
     if (!packetAssignmentId || !selectedSubmissionFile) {
-      setError("Choose a file before uploading student work.");
+      setStudentWorkFileError("Choose a file before uploading student work.");
       return;
     }
     setUploadingStudentWork(true);
     setStudentWorkUploadProgress(0);
-    setError(null);
+    setStudentWorkFileError(null);
+    setStudentWorkUploadError(null);
     setNotice(null);
     try {
       const created = await uploadAssignmentStudentWork(
@@ -825,7 +832,9 @@ export function TeacherAssistAssignmentsScreen() {
       }));
       setNotice("Student work uploaded.");
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not upload student work.");
+      setStudentWorkUploadError(
+        nextError instanceof Error ? nextError.message : "Could not upload student work.",
+      );
     } finally {
       setUploadingStudentWork(false);
       setStudentWorkUploadProgress(0);
@@ -1086,14 +1095,13 @@ export function TeacherAssistAssignmentsScreen() {
         </div>
       </section>
 
-      <section className="ta-alert ta-alert-info">
-        Assignment packets, student-work intake, and grading review are software-only in this phase.
-        No provider call, OCR, grading automation, mastery update, gradebook commit, or trading
-        behavior is involved here.
-      </section>
+      <TeacherAssistAlert
+        variant="info"
+        description="Assignment packets, student-work intake, and grading review are software-only in this phase. No provider call, OCR, grading automation, mastery update, gradebook commit, or trading behavior is involved here."
+      />
 
-      {error ? <section className="ta-alert ta-alert-error">{error}</section> : null}
-      {notice ? <section className="ta-alert ta-alert-success">{notice}</section> : null}
+      <TeacherAssistFormErrorSummary message={error} />
+      <TeacherAssistInlineStatus message={notice} onDismiss={() => setNotice(null)} />
 
       <section className="grid gap-4 lg:grid-cols-3">
         <article className="ta-panel p-5">
@@ -1885,11 +1893,32 @@ export function TeacherAssistAssignmentsScreen() {
               <label className="flex flex-col gap-2">
                 <span className="ta-label">Upload file</span>
                 <input
-                  className="ta-input"
+                  className={fieldErrorInputClass(Boolean(studentWorkFileError))}
                   type="file"
-                  onChange={(event) => setSelectedSubmissionFile(event.target.files?.[0] ?? null)}
+                  onChange={(event) => {
+                    setSelectedSubmissionFile(event.target.files?.[0] ?? null);
+                    setStudentWorkFileError(null);
+                    setStudentWorkUploadError(null);
+                  }}
                 />
+                <TeacherAssistFieldError message={studentWorkFileError} />
               </label>
+
+              {studentWorkUploadError ? (
+                <TeacherAssistAlert
+                  variant="error"
+                  title="Upload failed"
+                  description={
+                    selectedSubmissionFile
+                      ? `${selectedSubmissionFile.name}: ${studentWorkUploadError}`
+                      : studentWorkUploadError
+                  }
+                  actionLabel="Retry upload"
+                  onAction={() => {
+                    void handleUploadStudentWork();
+                  }}
+                />
+              ) : null}
 
               <div className="flex flex-wrap items-center gap-3">
                 <button

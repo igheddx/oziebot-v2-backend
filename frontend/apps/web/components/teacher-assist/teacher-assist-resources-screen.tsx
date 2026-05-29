@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
+import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
+import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
 import { buildApiUrl } from "@/lib/auth-service";
 import {
   createResourceExtractionJob,
@@ -16,6 +19,7 @@ import type { ResourceLibraryItem } from "@/lib/teacher-assist-types";
 type UploadEntry = {
   id: string;
   name: string;
+  file: File;
   progress: number;
   status: "uploading" | "done" | "error";
   message?: string;
@@ -133,48 +137,59 @@ export function TeacherAssistResourcesScreen() {
     [resources],
   );
 
+  const uploadFile = useCallback(
+    async (file: File, entryId: string) => {
+      setUploads((current) =>
+        current.map((entry) =>
+          entry.id === entryId ? { ...entry, progress: 0, status: "uploading", message: undefined } : entry,
+        ),
+      );
+      try {
+        await uploadResourceFile(file, {}, (progress) => {
+          setUploads((current) =>
+            current.map((entry) =>
+              entry.id === entryId ? { ...entry, progress, status: "uploading" } : entry,
+            ),
+          );
+        });
+        setUploads((current) =>
+          current.map((entry) =>
+            entry.id === entryId ? { ...entry, progress: 100, status: "done" } : entry,
+          ),
+        );
+        await load();
+        setNotice(`Uploaded ${file.name}.`);
+      } catch (nextError) {
+        const failureMessage = nextError instanceof Error ? nextError.message : "Upload failed.";
+        setUploads((current) =>
+          current.map((entry) =>
+            entry.id === entryId
+              ? {
+                  ...entry,
+                  status: "error",
+                  message: failureMessage,
+                }
+              : entry,
+          ),
+        );
+      }
+    },
+    [load],
+  );
+
   const handleFiles = useCallback(
     async (files: File[]) => {
-      setError(null);
       setNotice(null);
       for (const file of files) {
         const entryId = `${file.name}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
         setUploads((current) => [
-          { id: entryId, name: file.name, progress: 0, status: "uploading" },
+          { id: entryId, name: file.name, file, progress: 0, status: "uploading" },
           ...current,
         ]);
-        try {
-          await uploadResourceFile(file, {}, (progress) => {
-            setUploads((current) =>
-              current.map((entry) =>
-                entry.id === entryId ? { ...entry, progress, status: "uploading" } : entry,
-              ),
-            );
-          });
-          setUploads((current) =>
-            current.map((entry) =>
-              entry.id === entryId ? { ...entry, progress: 100, status: "done" } : entry,
-            ),
-          );
-          await load();
-          setNotice(`Uploaded ${file.name}.`);
-        } catch (nextError) {
-          setUploads((current) =>
-            current.map((entry) =>
-              entry.id === entryId
-                ? {
-                    ...entry,
-                    status: "error",
-                    message: nextError instanceof Error ? nextError.message : "Upload failed.",
-                  }
-                : entry,
-            ),
-          );
-          setError(nextError instanceof Error ? nextError.message : "Upload failed.");
-        }
+        await uploadFile(file, entryId);
       }
     },
-    [load],
+    [uploadFile],
   );
 
   return (
@@ -194,8 +209,8 @@ export function TeacherAssistResourcesScreen() {
         </div>
       </section>
 
-      {error ? <section className="ta-alert ta-alert-error">{error}</section> : null}
-      {notice ? <section className="ta-alert ta-alert-success">{notice}</section> : null}
+      <TeacherAssistFormErrorSummary message={error} />
+      <TeacherAssistInlineStatus message={notice} onDismiss={() => setNotice(null)} />
 
       <section className="grid gap-4 lg:grid-cols-3">
         <article className="ta-panel p-5">
@@ -313,6 +328,16 @@ export function TeacherAssistResourcesScreen() {
                       style={{ width: `${upload.status === "error" ? 100 : upload.progress}%` }}
                     />
                   </div>
+                  {upload.status === "error" ? (
+                    <TeacherAssistAlert
+                      variant="error"
+                      title={`Upload failed: ${upload.name}`}
+                      description={upload.message ?? "The file could not be uploaded."}
+                      actionLabel="Retry upload"
+                      onAction={() => void uploadFile(upload.file, upload.id)}
+                      className="mt-3"
+                    />
+                  ) : null}
                 </div>
               ))}
             </div>

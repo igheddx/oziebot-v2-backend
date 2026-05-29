@@ -1,54 +1,57 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
 import { TeacherAssistEmptyState } from "@/components/teacher-assist/teacher-assist-empty-state";
 import { fetchTeacherAssistWorkQueue } from "@/lib/teacher-assist-api";
-import type {
-  TeacherAssistActionWorkspaceItem,
-  TeacherAssistWorkQueue,
-  TeacherAssistWorkQueueSection,
-} from "@/lib/teacher-assist-types";
+import type { TeacherAssistActionWorkspaceItem, TeacherAssistWorkQueue } from "@/lib/teacher-assist-types";
+
+const PRIORITY_ORDER = ["critical", "high", "medium", "informational"] as const;
+
+const PRIORITY_LABELS: Record<string, string> = {
+  critical: "Critical",
+  high: "High",
+  medium: "Medium",
+  informational: "Informational",
+};
+
+const PRIORITY_STYLES: Record<string, string> = {
+  critical: "border-rose-200 bg-rose-50/80",
+  high: "border-amber-200 bg-amber-50/80",
+  medium: "border-sky-200 bg-sky-50/50",
+  informational: "border-slate-200 bg-slate-50/80",
+};
 
 function labelize(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-function QueueItemCard({ item }: { item: TeacherAssistActionWorkspaceItem }) {
-  return (
-    <article className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            {labelize(item.action_type)}
-          </p>
-          <h3 className="mt-1 text-base font-semibold text-slate-900">{item.title}</h3>
-          <p className="mt-1 text-sm text-slate-600">{item.description}</p>
-        </div>
-        <Link href={item.navigation.href} className="ta-button-secondary shrink-0 text-sm">
-          {item.navigation.label}
-        </Link>
-      </div>
-    </article>
-  );
+function formatTimestamp(value: string | null | undefined) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-function QueueSection({ section }: { section: TeacherAssistWorkQueueSection }) {
+function QueueItemCard({ item }: { item: TeacherAssistActionWorkspaceItem & { priority_level?: string } }) {
+  const updated = formatTimestamp(item.updated_at ?? item.created_at);
+
   return (
-    <article className="ta-panel p-5">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-slate-900">{section.title}</h2>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-          {section.count}
-        </span>
-      </div>
-      <div className="mt-4 space-y-3">
-        {section.items.length === 0 ? (
-          <p className="text-sm text-slate-500">No actionable items in this section.</p>
-        ) : (
-          section.items.map((item) => <QueueItemCard key={item.action_key} item={item} />)
-        )}
+    <article className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            {labelize(item.action_type)}
+          </p>
+          <h3 className="mt-0.5 text-sm font-semibold text-slate-900">{item.title}</h3>
+          <p className="mt-0.5 text-sm text-slate-600">{item.description}</p>
+          {updated ? <p className="mt-1 text-xs text-slate-400">Updated {updated}</p> : null}
+        </div>
+        <Link href={item.navigation.href} className="ta-button-secondary shrink-0 text-xs">
+          {item.navigation.label}
+        </Link>
       </div>
     </article>
   );
@@ -66,56 +69,72 @@ export function TeacherAssistWorkQueueScreen() {
     load().catch((err: Error) => setError(err.message));
   }, [load]);
 
+  const priorityGroups = useMemo(() => {
+    if (!payload) return [];
+    const grouped = new Map<string, TeacherAssistActionWorkspaceItem[]>();
+    for (const item of payload.items) {
+      const level = (item as TeacherAssistActionWorkspaceItem & { priority_level?: string }).priority_level ?? "medium";
+      const bucket = grouped.get(level) ?? [];
+      bucket.push(item);
+      grouped.set(level, bucket);
+    }
+    return PRIORITY_ORDER.map((level) => ({
+      level,
+      label: PRIORITY_LABELS[level],
+      items: grouped.get(level) ?? [],
+    })).filter((group) => group.items.length > 0);
+  }, [payload]);
+
   if (error) {
-    return <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>;
+    return (
+      <TeacherAssistAlert
+        variant="error"
+        title="Unable to load work queue"
+        description={error}
+        actionLabel="Retry"
+        onAction={() => {
+          void load().catch((err: Error) => setError(err.message));
+        }}
+      />
+    );
   }
   if (!payload) {
     return <p className="text-sm text-slate-600">Loading work queue...</p>;
   }
 
-  const actionableSections = payload.sections.filter((section) => section.count > 0);
-
   return (
-    <div className="space-y-6">
-      <header className="ta-panel p-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">Work Queue</p>
-        <h1 className="mt-2 text-2xl font-semibold text-slate-900">Operational action center</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Every item here is actionable — reviews, grades, commits, mastery, reteach, newsletters, and failures.
+    <div className="space-y-5">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Work queue</h1>
+        <p className="mt-1 text-sm text-slate-600">
+          {payload.summary.total_actionable} actionable item
+          {payload.summary.total_actionable === 1 ? "" : "s"} — reviews, grades, commits, and failures.
         </p>
       </header>
-
-      <section className="grid gap-4 md:grid-cols-4">
-        <article className="ta-panel p-4">
-          <p className="text-sm text-slate-500">Total actionable</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{payload.summary.total_actionable}</p>
-        </article>
-        <article className="ta-panel p-4">
-          <p className="text-sm text-slate-500">Critical</p>
-          <p className="mt-2 text-3xl font-semibold text-rose-700">{payload.summary.critical_count}</p>
-        </article>
-        <article className="ta-panel p-4">
-          <p className="text-sm text-slate-500">High</p>
-          <p className="mt-2 text-3xl font-semibold text-amber-700">{payload.summary.high_count}</p>
-        </article>
-        <article className="ta-panel p-4">
-          <p className="text-sm text-slate-500">Medium</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{payload.summary.medium_count}</p>
-        </article>
-      </section>
 
       {payload.summary.total_actionable === 0 ? (
         <TeacherAssistEmptyState
           title="Work queue is clear"
           description="No reviews, grades, commits, or workflow failures need attention right now."
-          whyItMatters="The work queue keeps operational tasks in one place so nothing slips through."
           actionLabel="Return to Home"
           actionHref="/teacher-assist/home"
         />
       ) : (
-        <div className="space-y-6">
-          {actionableSections.map((section) => (
-            <QueueSection key={section.section_key} section={section} />
+        <div className="space-y-4">
+          {priorityGroups.map((group) => (
+            <section key={group.level} className={`ta-panel p-4 ${PRIORITY_STYLES[group.level] ?? ""}`}>
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-base font-semibold text-slate-900">{group.label}</h2>
+                <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                  {group.items.length}
+                </span>
+              </div>
+              <div className="mt-3 space-y-2">
+                {group.items.map((item) => (
+                  <QueueItemCard key={item.action_key} item={item} />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       )}

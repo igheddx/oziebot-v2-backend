@@ -21,6 +21,13 @@ import {
   updateGradingPeriod,
   updateSchoolYear,
 } from "@/lib/teacher-assist-api";
+import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
+import {
+  TeacherAssistFieldError,
+  fieldErrorInputClass,
+} from "@/components/teacher-assist/teacher-assist-field-error";
+import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
+import { TeacherAssistInlineStatus } from "@/components/teacher-assist/teacher-assist-inline-status";
 import type {
   GradingPeriod,
   SchoolYear,
@@ -118,6 +125,19 @@ function emptyStandardForm(): StandardForm {
   };
 }
 
+function validateGradingPeriodForm(form: GradingPeriodForm): Partial<Record<keyof GradingPeriodForm, string>> {
+  const errors: Partial<Record<keyof GradingPeriodForm, string>> = {};
+  if (!form.school_year_id) errors.school_year_id = "Select a school year.";
+  if (!form.title.trim()) errors.title = "Enter a title (for example, 9 Weeks 1).";
+  if (!form.grading_period_type) errors.grading_period_type = "Select a grading period type.";
+  if (!form.start_date) errors.start_date = "Enter a start date.";
+  if (!form.end_date) errors.end_date = "Enter an end date.";
+  if (form.start_date && form.end_date && form.end_date < form.start_date) {
+    errors.end_date = "End date must be on or after the start date.";
+  }
+  return errors;
+}
+
 export function TeacherAssistSettingsScreen() {
   const [snapshot, setSnapshot] = useState<SetupSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -137,6 +157,9 @@ export function TeacherAssistSettingsScreen() {
   const [schoolYearForm, setSchoolYearForm] = useState<SchoolYearForm>(emptySchoolYearForm());
   const [editingSchoolYearId, setEditingSchoolYearId] = useState<string | null>(null);
   const [gradingPeriodForm, setGradingPeriodForm] = useState<GradingPeriodForm>(emptyGradingPeriodForm());
+  const [gradingPeriodFieldErrors, setGradingPeriodFieldErrors] = useState<
+    Partial<Record<keyof GradingPeriodForm, string>>
+  >({});
   const [editingGradingPeriodId, setEditingGradingPeriodId] = useState<string | null>(null);
   const [classForm, setClassForm] = useState<ClassForm>(emptyClassForm());
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
@@ -264,33 +287,29 @@ export function TeacherAssistSettingsScreen() {
 
   return (
     <div className="space-y-6">
-      <section className="ta-panel p-6 sm:p-8">
+      <section className="ta-panel p-5 sm:p-6">
         <div className="max-w-3xl">
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">
-            TeacherAssist Settings
-          </p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
-            Teacher foundation + school-year setup
-          </h1>
-          <p className="mt-3 text-base leading-7 text-slate-600">
-            This phase establishes the academic setup model TeacherAssist will depend on later:
-            teacher profile, school years, grading periods, classes, anonymous STUDENT # ranges,
-            subjects, and standards.
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Settings</h1>
+          <p className="mt-1 text-sm text-slate-600">
+            School years, grading periods, classes, subjects, and standards.
           </p>
         </div>
       </section>
 
-      {error ? <section className="ta-alert ta-alert-error">{error}</section> : null}
-      {notice ? <section className="ta-alert ta-alert-success">{notice}</section> : null}
+      <TeacherAssistFormErrorSummary message={error} />
+      <TeacherAssistInlineStatus message={notice} onDismiss={() => setNotice(null)} />
       {setupIssues.length > 0 ? (
-        <section className="ta-alert ta-alert-info">
-          <p className="font-semibold">Complete your school-year setup before creating lesson plans.</p>
-          <ul className="mt-2 list-disc space-y-1 pl-5">
-            {setupIssues.map((issue) => (
-              <li key={issue}>{issue}</li>
-            ))}
-          </ul>
-        </section>
+        <TeacherAssistAlert
+          variant="warning"
+          title="Setup incomplete"
+          description={
+            <ul className="list-disc space-y-1 pl-5">
+              {setupIssues.map((issue) => (
+                <li key={issue}>{issue}</li>
+              ))}
+            </ul>
+          }
+        />
       ) : null}
 
       {loading || !snapshot ? (
@@ -526,12 +545,20 @@ export function TeacherAssistSettingsScreen() {
               className="mt-5 grid gap-3 xl:grid-cols-6"
               onSubmit={(event) => {
                 event.preventDefault();
+                const fieldErrors = validateGradingPeriodForm(gradingPeriodForm);
+                if (Object.keys(fieldErrors).length > 0) {
+                  setGradingPeriodFieldErrors(fieldErrors);
+                  setError("Please correct the highlighted grading period fields below.");
+                  setNotice(null);
+                  return;
+                }
+                setGradingPeriodFieldErrors({});
                 void runSave(
                   "grading-period",
                   async () => {
                     const payload = {
                       school_year_id: gradingPeriodForm.school_year_id,
-                      title: gradingPeriodForm.title,
+                      title: gradingPeriodForm.title.trim(),
                       grading_period_type: gradingPeriodForm.grading_period_type,
                       start_date: gradingPeriodForm.start_date,
                       end_date: gradingPeriodForm.end_date,
@@ -547,68 +574,102 @@ export function TeacherAssistSettingsScreen() {
                 );
               }}
             >
-              <select
-                value={gradingPeriodForm.school_year_id}
-                onChange={(event) =>
-                  setGradingPeriodForm((current) => ({ ...current, school_year_id: event.target.value }))
-                }
-                className="ta-input"
-              >
-                <option value="">Select school year</option>
-                {snapshot.schoolYears.map((schoolYear) => (
-                  <option key={schoolYear.id} value={schoolYear.id}>
-                    {schoolYear.title}
-                  </option>
-                ))}
-              </select>
-              <input
-                value={gradingPeriodForm.title}
-                onChange={(event) =>
-                  setGradingPeriodForm((current) => ({ ...current, title: event.target.value }))
-                }
-                className="ta-input"
-                placeholder="9 Weeks 1"
-              />
-              <select
-                value={gradingPeriodForm.grading_period_type}
-                onChange={(event) =>
-                  setGradingPeriodForm((current) => ({ ...current, grading_period_type: event.target.value }))
-                }
-                className="ta-input"
-              >
-                <option value="">Select type</option>
-                {snapshot.options.grading_period_types.map((value) => (
-                  <option key={value} value={value}>
-                    {value.replaceAll("_", " ")}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="date"
-                value={gradingPeriodForm.start_date}
-                onChange={(event) =>
-                  setGradingPeriodForm((current) => ({ ...current, start_date: event.target.value }))
-                }
-                className="ta-input"
-              />
-              <input
-                type="date"
-                value={gradingPeriodForm.end_date}
-                onChange={(event) =>
-                  setGradingPeriodForm((current) => ({ ...current, end_date: event.target.value }))
-                }
-                className="ta-input"
-              />
-              <input
-                type="number"
-                min={0}
-                value={gradingPeriodForm.sort_order}
-                onChange={(event) =>
-                  setGradingPeriodForm((current) => ({ ...current, sort_order: event.target.value }))
-                }
-                className="ta-input"
-                placeholder="Sort order"
-              />
+              <label className="space-y-1">
+                <span className="ta-label">School year</span>
+                <select
+                  value={gradingPeriodForm.school_year_id}
+                  onChange={(event) => {
+                    setGradingPeriodFieldErrors((current) => ({ ...current, school_year_id: undefined }));
+                    setGradingPeriodForm((current) => ({ ...current, school_year_id: event.target.value }));
+                  }}
+                  className={fieldErrorInputClass(Boolean(gradingPeriodFieldErrors.school_year_id))}
+                  required
+                >
+                  <option value="">Select school year</option>
+                  {snapshot.schoolYears.map((schoolYear) => (
+                    <option key={schoolYear.id} value={schoolYear.id}>
+                      {schoolYear.title}
+                    </option>
+                  ))}
+                </select>
+                <TeacherAssistFieldError message={gradingPeriodFieldErrors.school_year_id} />
+              </label>
+              <label className="space-y-1">
+                <span className="ta-label">Title</span>
+                <input
+                  value={gradingPeriodForm.title}
+                  onChange={(event) => {
+                    setGradingPeriodFieldErrors((current) => ({ ...current, title: undefined }));
+                    setGradingPeriodForm((current) => ({ ...current, title: event.target.value }));
+                  }}
+                  className={fieldErrorInputClass(Boolean(gradingPeriodFieldErrors.title))}
+                  placeholder="9 Weeks 1"
+                  required
+                />
+                <TeacherAssistFieldError message={gradingPeriodFieldErrors.title} />
+              </label>
+              <label className="space-y-1">
+                <span className="ta-label">Type</span>
+                <select
+                  value={gradingPeriodForm.grading_period_type}
+                  onChange={(event) => {
+                    setGradingPeriodFieldErrors((current) => ({ ...current, grading_period_type: undefined }));
+                    setGradingPeriodForm((current) => ({ ...current, grading_period_type: event.target.value }));
+                  }}
+                  className={fieldErrorInputClass(Boolean(gradingPeriodFieldErrors.grading_period_type))}
+                  required
+                >
+                  <option value="">Select type</option>
+                  {snapshot.options.grading_period_types.map((value) => (
+                    <option key={value} value={value}>
+                      {value.replaceAll("_", " ")}
+                    </option>
+                  ))}
+                </select>
+                <TeacherAssistFieldError message={gradingPeriodFieldErrors.grading_period_type} />
+              </label>
+              <label className="space-y-1">
+                <span className="ta-label">Start date</span>
+                <input
+                  type="date"
+                  value={gradingPeriodForm.start_date}
+                  onChange={(event) => {
+                    setGradingPeriodFieldErrors((current) => ({ ...current, start_date: undefined }));
+                    setGradingPeriodForm((current) => ({ ...current, start_date: event.target.value }));
+                  }}
+                  className={fieldErrorInputClass(Boolean(gradingPeriodFieldErrors.start_date))}
+                  required
+                />
+                <TeacherAssistFieldError message={gradingPeriodFieldErrors.start_date} />
+              </label>
+              <label className="space-y-1">
+                <span className="ta-label">End date</span>
+                <input
+                  type="date"
+                  value={gradingPeriodForm.end_date}
+                  onChange={(event) => {
+                    setGradingPeriodFieldErrors((current) => ({ ...current, end_date: undefined }));
+                    setGradingPeriodForm((current) => ({ ...current, end_date: event.target.value }));
+                  }}
+                  className={fieldErrorInputClass(Boolean(gradingPeriodFieldErrors.end_date))}
+                  required
+                />
+                <TeacherAssistFieldError message={gradingPeriodFieldErrors.end_date} />
+              </label>
+              <label className="space-y-1">
+                <span className="ta-label">Period order</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={gradingPeriodForm.sort_order}
+                  onChange={(event) =>
+                    setGradingPeriodForm((current) => ({ ...current, sort_order: event.target.value }))
+                  }
+                  className="ta-input"
+                  placeholder="1"
+                />
+                <p className="text-xs text-slate-500">Display order (1st, 2nd, 3rd…). Does not create multiple periods.</p>
+              </label>
               <div className="xl:col-span-6 flex flex-wrap gap-2">
                 <button type="submit" className="ta-button-primary" disabled={savingKey === "grading-period"}>
                   {savingKey === "grading-period"
