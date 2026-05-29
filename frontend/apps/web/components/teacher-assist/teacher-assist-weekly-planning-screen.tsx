@@ -1173,6 +1173,22 @@ export function TeacherAssistWeeklyPlanningScreen() {
                   </p>
                 </div>
 
+                {contextPreview.reflection_hints ? (
+                  <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                    <p className="text-sm font-semibold text-violet-950">Planning reflection hints</p>
+                    <p className="mt-1 text-xs text-violet-800">
+                      Read-only notes from prior reflections and lesson effectiveness.
+                    </p>
+                    {contextPreview.reflection_hints.last_year_notes.length > 0 ? (
+                      <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-violet-950">
+                        {contextPreview.reflection_hints.last_year_notes.map((note) => (
+                          <li key={note}>{note}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {contextPreview.readiness.warnings.length > 0 ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <p className="text-sm font-semibold text-slate-900">Readiness warnings</p>

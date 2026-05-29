@@ -68,6 +68,11 @@ import type {
   ReteachPlanVersion,
   MasteryMatrix,
   MasteryMatrixHeatmap,
+  LessonEffectiveness,
+  LessonEffectivenessHistoricalComparison,
+  LessonReflection,
+  LessonReflectionAISuggestions,
+  LessonReflectionVersion,
   MasteryMatrixReteachInsights,
   MasteryMatrixReteachSummary,
   MasteryMatrixStandardsSummary,
@@ -863,6 +868,94 @@ export function createNewsletterExport(id: string, exportFormat: "html" | "pdf" 
 export function fetchNewsletterExportDownload(newsletterId: string, exportId: string) {
   return readJson<NewsletterExportDownload>(
     `/v1/teacher-assist/newsletters/${newsletterId}/exports/${exportId}/download`,
+  );
+}
+
+export function fetchLessonEffectiveness(filters: {
+  school_year_id?: string;
+  grading_period_id?: string;
+  class_id?: string;
+  subject_id?: string;
+  classification?: string;
+} = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return readJson<LessonEffectiveness[]>(`/v1/teacher-assist/lesson-effectiveness${query}`);
+}
+
+export function fetchLessonEffectivenessHistoricalComparison(filters: {
+  school_year_id: string;
+  class_id: string;
+  subject_id: string;
+  grading_period_id?: string;
+}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  return readJson<LessonEffectivenessHistoricalComparison>(
+    `/v1/teacher-assist/lesson-effectiveness/historical-comparison?${params.toString()}`,
+  );
+}
+
+export function fetchLessonReflections(filters: {
+  school_year_id?: string;
+  grading_period_id?: string;
+  class_id?: string;
+  subject_id?: string;
+  weekly_plan_id?: string;
+  status?: string;
+} = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return readJson<LessonReflection[]>(`/v1/teacher-assist/reflections${query}`);
+}
+
+export function fetchLessonReflection(id: string) {
+  return readJson<LessonReflection>(`/v1/teacher-assist/reflections/${id}`);
+}
+
+export function createLessonReflection(body: {
+  school_year_id: string;
+  grading_period_id?: string;
+  class_id: string;
+  subject_id: string;
+  weekly_plan_id?: string;
+  title?: string;
+  lesson_date?: string;
+}) {
+  return writeJson<LessonReflection>("/v1/teacher-assist/reflections", "POST", body);
+}
+
+export function updateLessonReflection(id: string, body: Record<string, unknown>) {
+  return writeJson<LessonReflection>(`/v1/teacher-assist/reflections/${id}`, "PUT", body);
+}
+
+export function fetchLessonReflectionVersions(id: string) {
+  return readJson<LessonReflectionVersion[]>(`/v1/teacher-assist/reflections/${id}/versions`);
+}
+
+export function createLessonReflectionVersion(
+  id: string,
+  body: { content_json: Record<string, unknown>; change_reason?: string },
+) {
+  return writeJson<LessonReflectionVersion>(`/v1/teacher-assist/reflections/${id}/versions`, "POST", body);
+}
+
+export function generateLessonReflectionAISuggestions(
+  id: string,
+  body: { provider_mode?: string; teacher_instructions?: string } = {},
+) {
+  return writeJson<LessonReflectionAISuggestions>(
+    `/v1/teacher-assist/reflections/${id}/ai-suggestions`,
+    "POST",
+    body,
   );
 }
 

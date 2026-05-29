@@ -126,6 +126,10 @@ AI-assisted reteach plan drafting: persisted reteach plans + version history, mo
 
 Weekly newsletter generation: `/teacher-assist/newsletters` workspace with draft/review/approved/archived statuses, mock AI newsletter drafts from instructional activity (lesson plans, assignments, teacher notes, grading-period context), section regeneration, version history, HTML/PDF/DOCX export — teacher review required, no outbound email/SMS, no student names/grades/behavior/PII in AI context.
 
+## Phase 31
+
+Lesson effectiveness + teacher reflection: read-only weekly-plan lesson effectiveness scores (Highly Effective / Effective / Needs Adjustment / Ineffective), `/teacher-assist/reflections` workspace with versioned teacher notes, mock AI reflection suggestions (strengths/weaknesses/improvements), historical comparison across grading periods and prior school years, and planning context preview integration surfacing last-year notes and prior effectiveness — no grading changes, mastery modifications, or parent communication.
+
 ## Next Phase
 
-The next recommended phase is **Phase 31** (teacher-controlled send workflow handoff metadata, assignment effectiveness UI on Assignments, real-provider newsletter AI, or reteach plan publish into daily teaching — still no automatic outbound communication, mastery updates, or gradebook side effects).
+The next recommended phase is **Phase 32** (real-provider reflection AI, assignment effectiveness UI on Assignments, reteach plan publish into daily teaching, or teacher-controlled send handoff metadata — still no automatic outbound communication, mastery updates, or gradebook side effects).

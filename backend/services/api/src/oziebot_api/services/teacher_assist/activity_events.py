@@ -20,6 +20,7 @@ ACTIVITY_EVENT_CATEGORIES = (
     "review",
     "export",
     "communication",
+    "insights",
     "system",
 )
 
@@ -70,6 +71,9 @@ ACTIVITY_EVENT_TYPES = (
     "newsletter_section_regenerated",
     "newsletter_version_created",
     "newsletter_export_created",
+    "lesson_reflection_created",
+    "lesson_reflection_ai_suggested",
+    "lesson_reflection_version_created",
 )
 
 

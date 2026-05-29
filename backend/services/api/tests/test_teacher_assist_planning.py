@@ -6572,3 +6572,118 @@ def test_newsletter_tenant_isolation(client, db_session: Session):
     )
     assert foreign.status_code == 404, foreign.text
 
+
+def test_lesson_reflection_create_ai_suggestions_and_teacher_version(client, db_session: Session):
+    email = "teacher-reflection@example.com"
+    token = _register_user(client, email=email, tenant_name="Reflection Tenant")
+    _grant_teacher_assist_access(db_session, email=email)
+    context = _create_ready_planning_draft_context(client, token=token, subject_name="Reflection Science")
+
+    before_usage = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+
+    created = client.post(
+        "/v1/teacher-assist/reflections",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "grading_period_id": context["grading_period"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+            "title": "Week 1 reflection",
+        },
+    )
+    assert created.status_code == 201, created.text
+    reflection = created.json()
+    assert reflection["status"] == "draft"
+
+    suggested = client.post(
+        f"/v1/teacher-assist/reflections/{reflection['id']}/ai-suggestions",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"provider_mode": "mock", "teacher_instructions": "Focus on pacing and engagement."},
+    )
+    assert suggested.status_code == 200, suggested.text
+    suggestion_payload = suggested.json()
+    assert suggestion_payload["teacher_review_required"] is True
+    assert suggestion_payload["prompt_version"] == "lesson-reflection-ai-v1"
+    assert suggestion_payload["lesson_reflection"]["status"] == "review"
+    content = suggestion_payload["version"]["content_json"]
+    assert content["strengths"]
+    assert content["weaknesses"]
+    assert content["improvements"]
+    assert content["teacher_review_required"] is True
+    prompt_context = suggestion_payload["version"]["prompt_context_json"]
+    assert prompt_context["pii_policy"] == "NO_STUDENT_NAMES_GRADES_BEHAVIOR"
+    assert "student_summaries" not in prompt_context
+
+    teacher_saved = client.post(
+        f"/v1/teacher-assist/reflections/{reflection['id']}/versions",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "content_json": {
+                **content,
+                "what_worked": ["Partner practice worked well."],
+                "notes_for_next_year": ["Add a shorter warm-up next year."],
+            },
+            "change_reason": "Teacher reviewed reflection draft.",
+        },
+    )
+    assert teacher_saved.status_code == 201, teacher_saved.text
+    assert teacher_saved.json()["version_source"] == "teacher_edit"
+
+    effectiveness = client.get(
+        "/v1/teacher-assist/lesson-effectiveness",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert effectiveness.status_code == 200, effectiveness.text
+
+    hints = client.get(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/reflection-hints",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert hints.status_code == 200, hints.text
+    assert hints.json()["read_only"] is True
+
+    preview = client.get(
+        f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/context-preview",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["reflection_hints"] is not None
+
+    after_usage = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    assert after_usage == before_usage + 1
+
+    activity = db_session.scalar(
+        select(TeacherAssistActivityEvent)
+        .where(TeacherAssistActivityEvent.event_type == "lesson_reflection_ai_suggested")
+        .order_by(TeacherAssistActivityEvent.created_at.desc())
+    )
+    assert activity is not None
+
+
+def test_lesson_reflection_tenant_isolation(client, db_session: Session):
+    first_email = "teacher-reflection-a@example.com"
+    second_email = "teacher-reflection-b@example.com"
+    first_token = _register_user(client, email=first_email, tenant_name="Reflection Tenant A")
+    second_token = _register_user(client, email=second_email, tenant_name="Reflection Tenant B")
+    _grant_teacher_assist_access(db_session, email=first_email)
+    _grant_teacher_assist_access(db_session, email=second_email)
+    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Reflection A")
+    created = client.post(
+        "/v1/teacher-assist/reflections",
+        headers={"Authorization": f"Bearer {first_token}"},
+        json={
+            "school_year_id": context["school_year"]["id"],
+            "class_id": context["teacher_class"]["id"],
+            "subject_id": context["subject"]["id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    reflection_id = created.json()["id"]
+
+    foreign = client.get(
+        f"/v1/teacher-assist/reflections/{reflection_id}",
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert foreign.status_code == 404, foreign.text
+

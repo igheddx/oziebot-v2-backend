@@ -38,6 +38,9 @@ export type TeacherAssistOptions = {
   newsletter_version_sources?: string[];
   newsletter_regeneratable_sections?: string[];
   newsletter_export_formats?: string[];
+  lesson_reflection_statuses?: string[];
+  lesson_reflection_version_sources?: string[];
+  lesson_effectiveness_classifications?: string[];
   extraction_review_statuses?: string[];
   extraction_confidence_levels?: string[];
   export_artifact_types?: string[];
@@ -759,6 +762,7 @@ export type PlanningDraftContextPreview = {
     summary: string;
   };
   readiness: PlanningDraftReadiness;
+  reflection_hints?: PlanningReflectionHints | null;
 };
 
 export type TeacherAssistWorkflowStep = {
@@ -1596,6 +1600,109 @@ export type NewsletterExportDownload = {
   mime_type: string;
   download_filename: string;
   download_url: string;
+};
+
+export type LessonEffectivenessClassification =
+  | "highly_effective"
+  | "effective"
+  | "needs_adjustment"
+  | "ineffective"
+  | "insufficient_data";
+
+export type LessonEffectiveness = {
+  weekly_plan_id: string;
+  weekly_plan_title: string;
+  planning_scope: string;
+  school_year_id: string | null;
+  grading_period_id: string | null;
+  class_id: string | null;
+  subject_id: string | null;
+  classification: LessonEffectivenessClassification;
+  aggregate_mastery_percentage: number;
+  total_committed_evaluations: number;
+  assignment_count: number;
+  grading_review_count: number;
+  gradebook_commit_count: number;
+  reteach_plan_count: number;
+  mixed_or_reteach_assignments: number;
+  assignment_summaries: Array<Record<string, unknown>>;
+  read_only: boolean;
+};
+
+export type LessonEffectivenessHistoricalComparison = {
+  class_id: string;
+  subject_id: string;
+  current_grading_period: Record<string, unknown>;
+  prior_grading_period: Record<string, unknown> | null;
+  prior_school_year: Record<string, unknown> | null;
+  read_only: boolean;
+};
+
+export type LessonReflectionStatus = "draft" | "review" | "archived";
+export type LessonReflectionVersionSource = "initial" | "ai_draft" | "teacher_edit";
+
+export type LessonReflectionContent = {
+  what_worked: string[];
+  what_failed: string[];
+  notes_for_next_year: string[];
+  strengths: string[];
+  weaknesses: string[];
+  improvements: string[];
+  teacher_review_required: boolean;
+  is_ai_draft?: boolean;
+};
+
+export type LessonReflection = {
+  id: string;
+  tenant_id: string;
+  owner_user_id: string;
+  school_year_id: string;
+  grading_period_id: string | null;
+  class_id: string;
+  subject_id: string;
+  weekly_plan_id: string | null;
+  title: string;
+  status: LessonReflectionStatus;
+  lesson_date: string | null;
+  current_version_id: string | null;
+  latest_ai_usage_event_id: string | null;
+  created_at: string;
+  updated_at: string;
+  subject_name: string | null;
+  class_name: string | null;
+  weekly_plan_title: string | null;
+};
+
+export type LessonReflectionVersion = {
+  id: string;
+  lesson_reflection_id: string;
+  version_number: number;
+  version_source: LessonReflectionVersionSource;
+  content_json: LessonReflectionContent;
+  prompt_context_json: Record<string, unknown> | null;
+  provider_name: string | null;
+  provider_model: string | null;
+  prompt_version: string | null;
+  ai_usage_event_id: string | null;
+  created_by_user_id: string;
+  change_reason: string | null;
+  created_at: string;
+};
+
+export type LessonReflectionAISuggestions = {
+  lesson_reflection: LessonReflection;
+  version: LessonReflectionVersion;
+  provider_mode: string;
+  teacher_review_required: boolean;
+  prompt_version: string;
+};
+
+export type PlanningReflectionHints = {
+  planning_draft_id: string;
+  last_year_notes: string[];
+  reflection_notes: string[];
+  prior_effectiveness: Array<Record<string, unknown>>;
+  read_only: boolean;
 };
 
 export type StudentMasterySummary = {

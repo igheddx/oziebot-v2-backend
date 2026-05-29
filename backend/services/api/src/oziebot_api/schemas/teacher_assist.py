@@ -96,6 +96,15 @@ NewsletterStatusLiteral = Literal["draft", "review", "approved", "archived"]
 NewsletterVersionSourceLiteral = Literal["initial", "ai_draft", "ai_section_regen", "teacher_edit"]
 NewsletterRegeneratableSectionLiteral = Literal["overview", "upcoming_learning", "teacher_message", "reminders"]
 NewsletterExportFormatLiteral = Literal["html", "pdf", "docx"]
+LessonReflectionStatusLiteral = Literal["draft", "review", "archived"]
+LessonReflectionVersionSourceLiteral = Literal["initial", "ai_draft", "teacher_edit"]
+LessonEffectivenessClassificationLiteral = Literal[
+    "highly_effective",
+    "effective",
+    "needs_adjustment",
+    "ineffective",
+    "insufficient_data",
+]
 TeacherAssistExtractionArtifactTypeLiteral = Literal["resource", "student_work"]
 TeacherAssistExtractionJobStatusLiteral = Literal[
     "queued",
@@ -299,6 +308,9 @@ class TeacherAssistOptionsOut(BaseModel):
     newsletter_version_sources: list[str] = Field(default_factory=list)
     newsletter_regeneratable_sections: list[str] = Field(default_factory=list)
     newsletter_export_formats: list[str] = Field(default_factory=list)
+    lesson_reflection_statuses: list[str] = Field(default_factory=list)
+    lesson_reflection_version_sources: list[str] = Field(default_factory=list)
+    lesson_effectiveness_classifications: list[str] = Field(default_factory=list)
     planning_draft_statuses: list[str]
     planning_scopes: list[str]
     supported_grade_levels: list[str]
@@ -1428,6 +1440,151 @@ class NewsletterExportDownloadOut(BaseModel):
     download_url: str
 
 
+class LessonEffectivenessAssignmentSummaryOut(BaseModel):
+    assignment_id: uuid.UUID
+    assignment_title: str
+    effectiveness_status: str
+    mastery_percentage: float
+    grading_review_count: int
+    gradebook_commit_count: int
+
+
+class LessonEffectivenessOut(BaseModel):
+    weekly_plan_id: uuid.UUID
+    weekly_plan_title: str
+    planning_scope: str
+    school_year_id: uuid.UUID | None = None
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID | None = None
+    subject_id: uuid.UUID | None = None
+    classification: LessonEffectivenessClassificationLiteral
+    aggregate_mastery_percentage: float
+    total_committed_evaluations: int
+    assignment_count: int
+    grading_review_count: int
+    gradebook_commit_count: int
+    reteach_plan_count: int
+    mixed_or_reteach_assignments: int
+    assignment_summaries: list[LessonEffectivenessAssignmentSummaryOut] = Field(default_factory=list)
+    read_only: bool = True
+
+
+class LessonEffectivenessSummaryOut(BaseModel):
+    lesson_count: int
+    classification_counts: dict[str, int] = Field(default_factory=dict)
+    average_mastery_percentage: float
+    total_assignments: int
+    total_reteach_plans: int
+
+
+class LessonEffectivenessHistoricalScopeOut(BaseModel):
+    school_year_id: uuid.UUID | None = None
+    grading_period_id: uuid.UUID | None = None
+    school_year_title: str | None = None
+    grading_period_title: str | None = None
+    summary: LessonEffectivenessSummaryOut
+    lessons: list[LessonEffectivenessOut] = Field(default_factory=list)
+
+
+class LessonEffectivenessHistoricalComparisonOut(BaseModel):
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    current_grading_period: LessonEffectivenessHistoricalScopeOut
+    prior_grading_period: LessonEffectivenessHistoricalScopeOut | None = None
+    prior_school_year: LessonEffectivenessHistoricalScopeOut | None = None
+    read_only: bool = True
+
+
+class LessonReflectionCreate(BaseModel):
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    weekly_plan_id: uuid.UUID | None = None
+    title: str | None = Field(default=None, max_length=255)
+    lesson_date: date | None = None
+
+
+class LessonReflectionUpdate(BaseModel):
+    title: str | None = Field(default=None, max_length=255)
+    status: LessonReflectionStatusLiteral | None = None
+    lesson_date: date | None = None
+
+
+class LessonReflectionVersionCreate(BaseModel):
+    content_json: dict[str, Any]
+    change_reason: str | None = Field(default=None, max_length=2000)
+
+
+class LessonReflectionAISuggestionsCreate(BaseModel):
+    provider_mode: str = "mock"
+    teacher_instructions: str | None = Field(default=None, max_length=4000)
+
+
+class LessonReflectionContentOut(BaseModel):
+    what_worked: list[str] = Field(default_factory=list)
+    what_failed: list[str] = Field(default_factory=list)
+    notes_for_next_year: list[str] = Field(default_factory=list)
+    strengths: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    improvements: list[str] = Field(default_factory=list)
+    teacher_review_required: bool = True
+    is_ai_draft: bool = False
+
+
+class LessonReflectionVersionOut(BaseModel):
+    id: uuid.UUID
+    lesson_reflection_id: uuid.UUID
+    version_number: int
+    version_source: LessonReflectionVersionSourceLiteral
+    content_json: dict[str, Any]
+    prompt_context_json: dict[str, Any] | None = None
+    provider_name: str | None = None
+    provider_model: str | None = None
+    prompt_version: str | None = None
+    ai_usage_event_id: uuid.UUID | None = None
+    created_by_user_id: uuid.UUID
+    change_reason: str | None = None
+    created_at: datetime
+
+
+class LessonReflectionOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    owner_user_id: uuid.UUID
+    school_year_id: uuid.UUID
+    grading_period_id: uuid.UUID | None = None
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    weekly_plan_id: uuid.UUID | None = None
+    title: str
+    status: LessonReflectionStatusLiteral
+    lesson_date: date | None = None
+    current_version_id: uuid.UUID | None = None
+    latest_ai_usage_event_id: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    subject_name: str | None = None
+    class_name: str | None = None
+    weekly_plan_title: str | None = None
+
+
+class LessonReflectionAISuggestionsOut(BaseModel):
+    lesson_reflection: LessonReflectionOut
+    version: LessonReflectionVersionOut
+    provider_mode: str
+    teacher_review_required: bool
+    prompt_version: str
+
+
+class PlanningReflectionHintsOut(BaseModel):
+    planning_draft_id: uuid.UUID
+    last_year_notes: list[str] = Field(default_factory=list)
+    reflection_notes: list[str] = Field(default_factory=list)
+    prior_effectiveness: list[dict[str, Any]] = Field(default_factory=list)
+    read_only: bool = True
+
+
 class PlanningDraftCreate(BaseModel):
     planning_scope: PlanningScopeLiteral = "weekly"
     school_year_id: uuid.UUID | None = None
@@ -1515,6 +1672,7 @@ class PlanningDraftContextPreviewOut(BaseModel):
     teacher_notes: str | None = None
     duration_summary: PlanningDurationSummaryOut
     readiness: PlanningDraftReadinessOut
+    reflection_hints: PlanningReflectionHintsOut | None = None
 
     model_config = {"populate_by_name": True}
 

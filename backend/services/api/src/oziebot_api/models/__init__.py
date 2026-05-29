@@ -85,6 +85,8 @@ from oziebot_api.models.teacher_assist_reteach_plan_version import TeacherAssist
 from oziebot_api.models.teacher_assist_newsletter import TeacherAssistNewsletter
 from oziebot_api.models.teacher_assist_newsletter_export import TeacherAssistNewsletterExport
 from oziebot_api.models.teacher_assist_newsletter_version import TeacherAssistNewsletterVersion
+from oziebot_api.models.teacher_assist_lesson_reflection import TeacherAssistLessonReflection
+from oziebot_api.models.teacher_assist_lesson_reflection_version import TeacherAssistLessonReflectionVersion
 from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtractionJob
 from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAssistAssignmentPrintPacket
 from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
@@ -215,6 +217,8 @@ __all__ = [
     "TeacherAssistNewsletter",
     "TeacherAssistNewsletterVersion",
     "TeacherAssistNewsletterExport",
+    "TeacherAssistLessonReflection",
+    "TeacherAssistLessonReflectionVersion",
     "TeacherAssistAssignmentPrintPacket",
     "TeacherAssistAssignmentPrintPage",
     "TeacherAssistAssignmentResource",

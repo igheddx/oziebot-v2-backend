@@ -45,6 +45,8 @@ from oziebot_api.models.teacher_assist_profile import TeacherAssistProfile
 from oziebot_api.models.teacher_assist_newsletter import TeacherAssistNewsletter
 from oziebot_api.models.teacher_assist_newsletter_export import TeacherAssistNewsletterExport
 from oziebot_api.models.teacher_assist_newsletter_version import TeacherAssistNewsletterVersion
+from oziebot_api.models.teacher_assist_lesson_reflection import TeacherAssistLessonReflection
+from oziebot_api.models.teacher_assist_lesson_reflection_version import TeacherAssistLessonReflectionVersion
 from oziebot_api.models.teacher_assist_reteach_plan import TeacherAssistReteachPlan
 from oziebot_api.models.teacher_assist_reteach_plan_version import TeacherAssistReteachPlanVersion
 from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
@@ -127,6 +129,16 @@ from oziebot_api.schemas.teacher_assist import (
     MasteryMatrixSummaryOut,
     MasteryMatrixUpdate,
     StudentMasterySummaryOut,
+    LessonEffectivenessHistoricalComparisonOut,
+    LessonEffectivenessOut,
+    LessonReflectionAISuggestionsCreate,
+    LessonReflectionAISuggestionsOut,
+    LessonReflectionCreate,
+    LessonReflectionOut,
+    LessonReflectionUpdate,
+    LessonReflectionVersionCreate,
+    LessonReflectionVersionOut,
+    PlanningReflectionHintsOut,
     InstructionalPlanLibraryItemOut,
     PacingGuideCreate,
     PacingGuideOut,
@@ -245,6 +257,9 @@ from oziebot_api.services.teacher_assist.constants import (
     MASTERY_EVIDENCE_SOURCE_TYPES,
     MASTERY_LEVELS,
     MASTERY_MATRIX_STATUSES,
+    LESSON_EFFECTIVENESS_CLASSIFICATIONS,
+    LESSON_REFLECTION_STATUSES,
+    LESSON_REFLECTION_VERSION_SOURCES,
     NEWSLETTER_EXPORT_FORMATS,
     NEWSLETTER_REGENERATABLE_SECTIONS,
     NEWSLETTER_STATUSES,
@@ -312,6 +327,25 @@ from oziebot_api.services.teacher_assist.mastery_heatmaps import (
     build_mastery_matrix_heatmap,
     build_student_mastery_summary,
 )
+from oziebot_api.services.teacher_assist.lesson_effectiveness import (
+    build_weekly_plan_lesson_effectiveness_by_id,
+    list_lesson_effectiveness,
+)
+from oziebot_api.services.teacher_assist.lesson_effectiveness_history import (
+    build_lesson_effectiveness_historical_comparison,
+)
+from oziebot_api.services.teacher_assist.lesson_reflections import (
+    create_lesson_reflection,
+    create_teacher_lesson_reflection_version as save_teacher_lesson_reflection_version,
+    get_lesson_reflection_or_404,
+    list_lesson_reflection_versions,
+    list_lesson_reflections,
+    serialize_lesson_reflection,
+    serialize_lesson_reflection_version,
+    update_lesson_reflection,
+)
+from oziebot_api.services.teacher_assist.planning_reflection_hints import build_planning_reflection_hints
+from oziebot_api.services.teacher_assist.reflection_ai_assist import generate_lesson_reflection_ai_suggestions
 from oziebot_api.services.teacher_assist.newsletter_ai_assist import (
     generate_newsletter_ai_draft,
     regenerate_newsletter_section,
@@ -1511,6 +1545,9 @@ def read_teacher_assist_options(user: CurrentUser, db: DbSession) -> TeacherAssi
         newsletter_version_sources=list(NEWSLETTER_VERSION_SOURCES),
         newsletter_regeneratable_sections=list(NEWSLETTER_REGENERATABLE_SECTIONS),
         newsletter_export_formats=list(NEWSLETTER_EXPORT_FORMATS),
+        lesson_reflection_statuses=list(LESSON_REFLECTION_STATUSES),
+        lesson_reflection_version_sources=list(LESSON_REFLECTION_VERSION_SOURCES),
+        lesson_effectiveness_classifications=list(LESSON_EFFECTIVENESS_CLASSIFICATIONS),
         extraction_artifact_types=list(TEACHER_ASSIST_EXTRACTION_ARTIFACT_TYPES),
         extraction_job_statuses=list(TEACHER_ASSIST_EXTRACTION_JOB_STATUSES),
         extraction_review_statuses=list(EXTRACTION_REVIEW_STATUSES),
@@ -4508,6 +4545,290 @@ def read_teacher_newsletter_export_download(
     return NewsletterExportDownloadOut(**payload)
 
 
+def _lesson_reflection_out(row: TeacherAssistLessonReflection) -> LessonReflectionOut:
+    return LessonReflectionOut(**serialize_lesson_reflection(row))
+
+
+def _lesson_reflection_version_out(row: TeacherAssistLessonReflectionVersion) -> LessonReflectionVersionOut:
+    return LessonReflectionVersionOut(**serialize_lesson_reflection_version(row))
+
+
+@router.get("/lesson-effectiveness", response_model=list[LessonEffectivenessOut])
+def read_teacher_lesson_effectiveness(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+    school_year_id: uuid.UUID | None = Query(default=None),
+    grading_period_id: uuid.UUID | None = Query(default=None),
+    class_id: uuid.UUID | None = Query(default=None),
+    subject_id: uuid.UUID | None = Query(default=None),
+    classification: str | None = Query(default=None),
+) -> list[LessonEffectivenessOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    rows = list_lesson_effectiveness(
+        db,
+        tenant_id=tenant_id,
+        user_id=user.id,
+        school_year_id=school_year_id,
+        grading_period_id=grading_period_id,
+        class_id=class_id,
+        subject_id=subject_id,
+        classification=classification,
+        settings=settings,
+    )
+    return [LessonEffectivenessOut(**row) for row in rows]
+
+
+@router.get("/weekly-plans/{weekly_plan_id}/lesson-effectiveness", response_model=LessonEffectivenessOut)
+def read_teacher_weekly_plan_lesson_effectiveness(
+    weekly_plan_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> LessonEffectivenessOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = build_weekly_plan_lesson_effectiveness_by_id(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            weekly_plan_id=weekly_plan_id,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return LessonEffectivenessOut(**payload)
+
+
+@router.get(
+    "/lesson-effectiveness/historical-comparison",
+    response_model=LessonEffectivenessHistoricalComparisonOut,
+)
+def read_teacher_lesson_effectiveness_historical_comparison(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+    school_year_id: uuid.UUID = Query(...),
+    class_id: uuid.UUID = Query(...),
+    subject_id: uuid.UUID = Query(...),
+    grading_period_id: uuid.UUID | None = Query(default=None),
+) -> LessonEffectivenessHistoricalComparisonOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = build_lesson_effectiveness_historical_comparison(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            school_year_id=school_year_id,
+            grading_period_id=grading_period_id,
+            class_id=class_id,
+            subject_id=subject_id,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return LessonEffectivenessHistoricalComparisonOut(**payload)
+
+
+@router.get("/reflections", response_model=list[LessonReflectionOut])
+def read_teacher_lesson_reflections(
+    user: CurrentUser,
+    db: DbSession,
+    school_year_id: uuid.UUID | None = Query(default=None),
+    grading_period_id: uuid.UUID | None = Query(default=None),
+    class_id: uuid.UUID | None = Query(default=None),
+    subject_id: uuid.UUID | None = Query(default=None),
+    weekly_plan_id: uuid.UUID | None = Query(default=None),
+    status: str | None = Query(default=None),
+) -> list[LessonReflectionOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    rows = list_lesson_reflections(
+        db,
+        tenant_id=tenant_id,
+        user_id=user.id,
+        school_year_id=school_year_id,
+        grading_period_id=grading_period_id,
+        class_id=class_id,
+        subject_id=subject_id,
+        weekly_plan_id=weekly_plan_id,
+        status=status,
+    )
+    return [_lesson_reflection_out(row) for row in rows]
+
+
+@router.post("/reflections", response_model=LessonReflectionOut, status_code=201)
+def create_teacher_lesson_reflection(
+    body: LessonReflectionCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> LessonReflectionOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = create_lesson_reflection(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            school_year_id=body.school_year_id,
+            grading_period_id=body.grading_period_id,
+            class_id=body.class_id,
+            subject_id=body.subject_id,
+            weekly_plan_id=body.weekly_plan_id,
+            title=body.title,
+            lesson_date=body.lesson_date,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    row = get_lesson_reflection_or_404(db, tenant_id=tenant_id, user_id=user.id, lesson_reflection_id=row.id)
+    return _lesson_reflection_out(row)
+
+
+@router.get("/reflections/{lesson_reflection_id}", response_model=LessonReflectionOut)
+def read_teacher_lesson_reflection(
+    lesson_reflection_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> LessonReflectionOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = get_lesson_reflection_or_404(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            lesson_reflection_id=lesson_reflection_id,
+            load_versions=True,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _lesson_reflection_out(row)
+
+
+@router.put("/reflections/{lesson_reflection_id}", response_model=LessonReflectionOut)
+def update_teacher_lesson_reflection(
+    lesson_reflection_id: uuid.UUID,
+    body: LessonReflectionUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> LessonReflectionOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = update_lesson_reflection(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            lesson_reflection_id=lesson_reflection_id,
+            title=body.title,
+            status=body.status,
+            lesson_date=body.lesson_date,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    row = get_lesson_reflection_or_404(db, tenant_id=tenant_id, user_id=user.id, lesson_reflection_id=row.id)
+    return _lesson_reflection_out(row)
+
+
+@router.get("/reflections/{lesson_reflection_id}/versions", response_model=list[LessonReflectionVersionOut])
+def read_teacher_lesson_reflection_versions(
+    lesson_reflection_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> list[LessonReflectionVersionOut]:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        rows = list_lesson_reflection_versions(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            lesson_reflection_id=lesson_reflection_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [_lesson_reflection_version_out(row) for row in rows]
+
+
+@router.post(
+    "/reflections/{lesson_reflection_id}/versions",
+    response_model=LessonReflectionVersionOut,
+    status_code=201,
+)
+def create_teacher_lesson_reflection_version(
+    lesson_reflection_id: uuid.UUID,
+    body: LessonReflectionVersionCreate,
+    user: CurrentUser,
+    db: DbSession,
+) -> LessonReflectionVersionOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        row = save_teacher_lesson_reflection_version(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            lesson_reflection_id=lesson_reflection_id,
+            content_json=body.content_json,
+            change_reason=body.change_reason,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _lesson_reflection_version_out(row)
+
+
+@router.post(
+    "/reflections/{lesson_reflection_id}/ai-suggestions",
+    response_model=LessonReflectionAISuggestionsOut,
+)
+def create_teacher_lesson_reflection_ai_suggestions(
+    lesson_reflection_id: uuid.UUID,
+    body: LessonReflectionAISuggestionsCreate,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> LessonReflectionAISuggestionsOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        reflection, version, response_meta = generate_lesson_reflection_ai_suggestions(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            lesson_reflection_id=lesson_reflection_id,
+            provider_mode=body.provider_mode,
+            teacher_instructions=body.teacher_instructions,
+            settings=settings,
+        )
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    reflection = get_lesson_reflection_or_404(
+        db, tenant_id=tenant_id, user_id=user.id, lesson_reflection_id=reflection.id
+    )
+    return LessonReflectionAISuggestionsOut(
+        lesson_reflection=_lesson_reflection_out(reflection),
+        version=_lesson_reflection_version_out(version),
+        provider_mode=response_meta["provider_mode"],
+        teacher_review_required=response_meta["teacher_review_required"],
+        prompt_version=response_meta["prompt_version"],
+    )
+
+
 @router.get("/planning-drafts", response_model=list[PlanningDraftOut])
 def read_planning_drafts(user: CurrentUser, db: DbSession) -> list[PlanningDraftOut]:
     tenant_id = _teacher_assist_tenant_id(db, user)
@@ -4664,6 +4985,7 @@ def read_planning_draft_context_preview(
     planning_draft_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
+    settings: Settings = Depends(settings_dep),
 ) -> PlanningDraftContextPreviewOut:
     tenant_id = _teacher_assist_tenant_id(db, user)
     try:
@@ -4672,6 +4994,13 @@ def read_planning_draft_context_preview(
             tenant_id=tenant_id,
             user_id=user.id,
             planning_draft_id=planning_draft_id,
+        )
+        reflection_hints_payload = build_planning_reflection_hints(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            planning_draft_id=planning_draft_id,
+            settings=settings,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -4754,7 +5083,32 @@ def read_planning_draft_context_preview(
             missing_items=preview.readiness.missing_items,
             warnings=preview.readiness.warnings,
         ),
+        reflection_hints=PlanningReflectionHintsOut(**reflection_hints_payload),
     )
+
+
+@router.get(
+    "/planning-drafts/{planning_draft_id}/reflection-hints",
+    response_model=PlanningReflectionHintsOut,
+)
+def read_planning_draft_reflection_hints(
+    planning_draft_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> PlanningReflectionHintsOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = build_planning_reflection_hints(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            planning_draft_id=planning_draft_id,
+            settings=settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return PlanningReflectionHintsOut(**payload)
 
 
 @router.patch("/planning-drafts/{planning_draft_id}/status", response_model=PlanningDraftOut)

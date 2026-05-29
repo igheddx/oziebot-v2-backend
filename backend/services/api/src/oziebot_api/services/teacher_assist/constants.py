@@ -120,6 +120,18 @@ NEWSLETTER_STATUSES = ("draft", "review", "approved", "archived")
 NEWSLETTER_VERSION_SOURCES = ("initial", "ai_draft", "ai_section_regen", "teacher_edit")
 NEWSLETTER_REGENERATABLE_SECTIONS = ("overview", "upcoming_learning", "teacher_message", "reminders")
 NEWSLETTER_EXPORT_FORMATS = ("html", "pdf", "docx")
+LESSON_REFLECTION_STATUSES = ("draft", "review", "archived")
+LESSON_REFLECTION_VERSION_SOURCES = ("initial", "ai_draft", "teacher_edit")
+LESSON_EFFECTIVENESS_CLASSIFICATIONS = (
+    "highly_effective",
+    "effective",
+    "needs_adjustment",
+    "ineffective",
+    "insufficient_data",
+)
+LESSON_EFFECTIVENESS_HIGHLY_THRESHOLD = 0.85
+LESSON_EFFECTIVENESS_EFFECTIVE_THRESHOLD = 0.70
+LESSON_EFFECTIVENESS_ADJUSTMENT_THRESHOLD = 0.40
 TEACHER_ASSIST_EXTRACTION_ARTIFACT_TYPES = ("resource", "student_work")
 TEACHER_ASSIST_EXTRACTION_JOB_STATUSES = (
     "queued",
@@ -438,6 +450,27 @@ def validate_newsletter_export_format(value: str | None) -> str:
     normalized = (value or "").strip().lower()
     if normalized not in NEWSLETTER_EXPORT_FORMATS:
         raise ValueError("Unsupported newsletter export format")
+    return normalized
+
+
+def validate_lesson_reflection_status(value: str | None) -> str:
+    normalized = (value or "draft").strip().lower()
+    if normalized not in LESSON_REFLECTION_STATUSES:
+        raise ValueError("Unsupported lesson reflection status")
+    return normalized
+
+
+def validate_lesson_reflection_version_source(value: str | None) -> str:
+    normalized = (value or "initial").strip().lower()
+    if normalized not in LESSON_REFLECTION_VERSION_SOURCES:
+        raise ValueError("Unsupported lesson reflection version source")
+    return normalized
+
+
+def validate_lesson_effectiveness_classification(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized not in LESSON_EFFECTIVENESS_CLASSIFICATIONS:
+        raise ValueError("Unsupported lesson effectiveness classification")
     return normalized
 
 

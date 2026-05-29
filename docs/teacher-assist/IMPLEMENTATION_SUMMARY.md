@@ -6,13 +6,13 @@ This document summarizes the current Oziebot repo findings and the proposed impl
 
 ## Current implemented baseline
 
-**Phases 1–30** are implemented. Latest completed work:
+**Phases 1–31** are implemented. Latest completed work:
 
-- **Phase 28.5** — Teacher workflow UX polish + workflow cohesion (Today landing, nav groups, progress cards)
 - **Phase 29** — AI-assisted reteach plan drafting (mock AI drafts, versioning, mastery integration)
 - **Phase 30** — Weekly newsletter generation (mock AI drafts, section regen, export, no auto-send)
+- **Phase 31** — Lesson effectiveness + teacher reflection (read-only scores, reflection workspace, mock AI suggestions, historical comparison, planning hints)
 
-**Next recommended:** Phase 31 — teacher-controlled send handoff metadata, assignment effectiveness UI, or real-provider newsletter AI (no automatic outbound communication, mastery, or gradebook side effects).
+**Next recommended:** Phase 32 — real-provider reflection AI, assignment effectiveness UI on Assignments, or reteach plan publish into daily teaching (no automatic outbound communication, mastery, or gradebook side effects).
 
 See also: `docs/teacher-assist/PHASE_STATUS.md`, `docs/teacher-assist/KNOWN_LIMITATIONS.md`.
 
