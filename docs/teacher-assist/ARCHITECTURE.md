@@ -299,3 +299,15 @@ Because the frontend is static-export only and the Lightsail backend host is res
 3. Is TeacherAssist expected to use the existing frontend repo and S3/CloudFront deployment, or move behind the Lightsail host later?
 4. Should file uploads go through backend multipart endpoints first, or directly to object storage with presigned URLs?
 5. Is Google Drive/Slides integration explicitly post-MVP, or needed in phase 1.5?
+
+## Pilot readiness (Phase 41)
+
+TeacherAssist pilot operations add:
+
+- **Product completion review** — `GET /v1/teacher-assist/pilot/completion-review` mirrors `FEATURE_INVENTORY.md`
+- **Pilot feedback** — teachers submit issues at `/teacher-assist/feedback`; stored in `teacher_assist_pilot_feedback`
+- **Usage metrics foundation** — `teacher_assist_usage_metrics` daily rollups; login recorded on home load
+- **System health** — root admin dashboard at `/teacher-assist/administration/system-health`
+- **Seed validation** — Texas / LISD / Mason Elementary checks for demo readiness
+
+Deployment and production checklists: `DEPLOYMENT_GUIDE.md`, `PRODUCTION_CHECKLIST.md`, `PILOT_READINESS.md`.

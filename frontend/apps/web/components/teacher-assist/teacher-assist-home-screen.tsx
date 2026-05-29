@@ -7,6 +7,7 @@ import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-a
 import { TeacherAssistEmptyState } from "@/components/teacher-assist/teacher-assist-empty-state";
 import { useAuth } from "@/components/providers/auth-provider";
 import { fetchTeacherAssistHomeWorkspace } from "@/lib/teacher-assist-api";
+import { recordPilotLoginMetric } from "@/lib/pilot-api";
 import type {
   TeacherAssistHomePriorityItem,
   TeacherAssistHomeWorkspace,
@@ -44,6 +45,7 @@ export function TeacherAssistHomeScreen() {
 
   useEffect(() => {
     let active = true;
+    void recordPilotLoginMetric().catch(() => undefined);
     fetchTeacherAssistHomeWorkspace()
       .then((data) => {
         if (active) setPayload(data);

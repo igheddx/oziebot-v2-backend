@@ -166,6 +166,10 @@ Assignment → gradebook → mastery → reteach instructional loop: `teacher_as
 
 Teacher Copilot (context-aware instructional assistant): `teacher_copilot_sessions` and `teacher_copilot_messages` with audit snapshots, `TeacherContextEngine` context packets (week, pacing, objectives, mastery, reteach, assessments, resources, reflections), mock-first explainable intent handlers (objective analysis, student support, small groups, week/grading period summaries, resource recommender, lesson gaps, reteach assistant, reflection assistant, admin copilot), `/teacher-assist/copilot` workspace with suggested questions and evidence panels, home copilot cards (Ask Teacher Copilot, suggested actions, weekly summary link), guarded provider/cost controls, and Texas seed via `seed_teacher_copilot.py`. Recommendations only — no auto-grade, auto-mastery, publish, or communication side effects.
 
+## Phase 41
+
+Pilot readiness and production hardening: `ProductCompletionReview` feature inventory (`FEATURE_INVENTORY.md`), navigation audit (teacher workflow primary nav), pilot feedback workspace (`teacher_assist_pilot_feedback`), usage metrics foundation (`teacher_assist_usage_metrics`), system health dashboard (root admin), seed validation API, deployment/production/pilot checklists (`DEPLOYMENT_GUIDE.md`, `PRODUCTION_CHECKLIST.md`, `PILOT_READINESS.md`), dashboard header consistency component, and pilot foundation tests — no new instructional domains; focus on teacher-ready quality and ops visibility.
+
 ## Next Phase
 
-The next recommended phase is **Phase 40** (LMS/SIS import adapters, parent communication from week summaries, district instructional analytics, or predictive mastery signals — still without auto-grade or auto-mastery commits).
+The next recommended phase is **Phase 42** (mastery v2 / gradebook v2 UI completion, parent communication send integration, or LMS/SIS import adapters — still without auto-grade or auto-mastery commits).

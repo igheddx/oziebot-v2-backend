@@ -725,3 +725,50 @@ def validate_timezone(value: str | None) -> str | None:
     except Exception as exc:  # pragma: no cover - ZoneInfo exceptions vary by runtime
         raise ValueError("Unsupported timezone") from exc
     return normalized
+
+
+PILOT_FEEDBACK_CATEGORIES = (
+    "bug",
+    "usability",
+    "feature_request",
+    "performance",
+    "data",
+    "documentation",
+    "other",
+)
+PILOT_FEEDBACK_SEVERITIES = ("low", "medium", "high", "critical")
+PILOT_FEEDBACK_STATUSES = ("open", "reviewing", "planned", "resolved", "wont_fix")
+
+USAGE_METRIC_KEYS = (
+    "login_activity",
+    "feature_usage",
+    "instructional_weeks_created",
+    "assignments_created",
+    "assessments_created",
+    "newsletters_generated",
+    "copilot_usage",
+    "template_usage",
+    "reuse_usage",
+    "exports_generated",
+)
+
+
+def validate_pilot_feedback_category(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in PILOT_FEEDBACK_CATEGORIES:
+        raise ValueError("Unsupported pilot feedback category")
+    return normalized
+
+
+def validate_pilot_feedback_severity(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in PILOT_FEEDBACK_SEVERITIES:
+        raise ValueError("Unsupported pilot feedback severity")
+    return normalized
+
+
+def validate_pilot_feedback_status(value: str | None) -> str:
+    normalized = (value or "open").strip().lower()
+    if normalized not in PILOT_FEEDBACK_STATUSES:
+        raise ValueError("Unsupported pilot feedback status")
+    return normalized

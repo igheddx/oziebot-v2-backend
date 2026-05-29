@@ -97,7 +97,7 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
         return group.key;
       }
     }
-    return "instruction";
+    return "operations";
   }, [pathname]);
 
   const [selectedCategory, setSelectedCategory] = useState(activeGroupKey);

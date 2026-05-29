@@ -21,6 +21,7 @@ from oziebot_api.api.v1 import (
     teacher_assist_instructional_weeks,
     teacher_assist_instructional_loop,
     teacher_assist_copilot,
+    teacher_assist_pilot,
     teacher_assist_catalog,
     teacher_assist_education_catalog,
     strategic_aggressive_allocation,
@@ -41,6 +42,7 @@ api_router.include_router(teacher_assist_time_savings.router)
 api_router.include_router(teacher_assist_instructional_weeks.router)
 api_router.include_router(teacher_assist_instructional_loop.router)
 api_router.include_router(teacher_assist_copilot.router)
+api_router.include_router(teacher_assist_pilot.router)
 api_router.include_router(teacher_assist_catalog.router)
 api_router.include_router(teacher_assist_education_catalog.router)
 api_router.include_router(strategic_aggressive_allocation.router)

@@ -11,8 +11,9 @@ This document summarizes the current Oziebot repo findings and the proposed impl
 - **Phase 37** — Week-centric instructional workspace (`instructional_weeks`, tabbed `/teacher-assist/week/[id]`, action center, snapshots, pacing integration)
 - **Phase 38** — Assignment → gradebook → mastery → reteach instructional loop (instructional evidence, objective performance, reteach workspace, week closure, health reporting)
 - **Phase 39** — Teacher Copilot (context engine, explainable analysis intents, sessions/messages audit trail, copilot UI, home integration)
+- **Phase 41** — Pilot readiness (feature inventory, feedback workspace, usage metrics, system health, deployment checklists, nav audit)
 
-**Next recommended:** Phase 40 — LMS/SIS import adapters, parent communication from week summaries, or district instructional analytics (no auto-grade or auto-mastery commits).
+**Next recommended:** Phase 42 — Mastery v2 / gradebook v2 UI completion, parent communication send, or LMS/SIS import (no auto-grade or auto-mastery commits).
 
 ## Phase 36 — Teacher Time Savings Engine
 
@@ -224,7 +225,44 @@ Phase 40 — LMS/SIS import adapters, parent communication from week summaries, 
 
 ### Recommended next phase
 
-Phase 40 — LMS/SIS import adapters, parent communication from week summaries, district instructional analytics.
+Phase 42 — Mastery v2 / gradebook v2 UI, parent communication send, or LMS/SIS import.
+
+## Phase 41 — Pilot Readiness & Production Hardening
+
+### Schema / migration
+
+- Migration `067_teacher_assist_pilot_readiness_foundation`:
+  - `teacher_assist_pilot_feedback` — category, severity, feature_area, description, requested_improvement, status
+  - `teacher_assist_usage_metrics` — daily metric_key aggregates per tenant/user
+
+### Services
+
+- `product_completion_review.py` — structured feature inventory (implemented/partial/deferred)
+- `pilot_feedback.py` — teacher feedback CRUD
+- `usage_metrics.py` — daily counters + snapshot from DB counts
+- `system_health_dashboard.py` — root admin ops summary
+- `pilot_seed_validation.py` — Texas/LISD/Mason seed checks
+
+### APIs (`/v1/teacher-assist/pilot/*`)
+
+- `GET /completion-review`, `GET /seed-validation`, `GET /usage-metrics`, `POST /usage-metrics/login`
+- `GET|POST /feedback`, `PATCH /feedback/{id}`
+- `GET /system-health` (root admin)
+
+### UI
+
+- `/teacher-assist/feedback` — pilot feedback workspace
+- `/teacher-assist/administration/system-health` — root admin health dashboard
+- Navigation audit — teacher workflow primary links
+- `TeacherAssistDashboardHeader` — shared dashboard chrome
+
+### Documentation
+
+- `FEATURE_INVENTORY.md`, `DEPLOYMENT_GUIDE.md`, `PRODUCTION_CHECKLIST.md`, `PILOT_READINESS.md`
+
+### Tests
+
+- `backend/services/api/tests/test_teacher_assist_pilot_foundation.py`
 
 See also: `docs/teacher-assist/PHASE_STATUS.md`, `docs/teacher-assist/KNOWN_LIMITATIONS.md`.
 

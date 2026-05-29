@@ -92,6 +92,8 @@ from oziebot_api.models.teacher_assist_instructional_week_closure import (
 )
 from oziebot_api.models.teacher_assist_reteach_effectiveness import TeacherAssistReteachEffectivenessRecord
 from oziebot_api.models.teacher_copilot_session import TeacherCopilotMessage, TeacherCopilotSession
+from oziebot_api.models.teacher_assist_pilot_feedback import TeacherAssistPilotFeedback
+from oziebot_api.models.teacher_assist_usage_metric import TeacherAssistUsageMetric
 from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
 from oziebot_api.models.teacher_assist_assignment_gradebook_audit_event import (
     TeacherAssistAssignmentGradebookAuditEvent,
@@ -262,6 +264,8 @@ __all__ = [
     "TeacherAssistReteachEffectivenessRecord",
     "TeacherCopilotSession",
     "TeacherCopilotMessage",
+    "TeacherAssistPilotFeedback",
+    "TeacherAssistUsageMetric",
     "TeacherAssistAssignmentGradeRecord",
     "TeacherAssistAssignmentGradebookCommit",
     "TeacherAssistAssignmentGradebookAuditEvent",

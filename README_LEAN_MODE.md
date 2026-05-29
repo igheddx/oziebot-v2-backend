@@ -282,6 +282,15 @@ export LEAN_REPO_PATH=/home/ubuntu/oziebot
 # ensure .env.lean is on server (scp once; do not rsync if excluded)
 ```
 
+## TeacherAssist AI (pilot)
+
+TeacherAssist runs on the same API and Postgres stack. See **`docs/teacher-assist/README.md`** for:
+
+- Feature inventory and pilot readiness checklists
+- Deployment env vars (`TEACHER_ASSIST_*` storage and worker settings)
+- Seed commands for Texas / LISD / Mason Elementary demo data
+- Migration through `067_teacher_assist_pilot_readiness_foundation`
+
 ---
 
 *This is infrastructure guidance, not financial advice. Validate backups before any destructive step.*
