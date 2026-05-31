@@ -34,6 +34,9 @@ from oziebot_api.schemas.teacher_assist_v2 import (
     V2PlanningGenerateIn,
     V2PlanningSupplementalLinkCreate,
     V2PlanningSupplementalNoteCreate,
+    V2GradeReviewModifyIn,
+    V2GradeReviewRejectIn,
+    V2GradeReviewSaveIn,
     V2StudentSubmissionManualMatchIn,
     V2StudentSubmissionStatusIn,
     V2PackageCloseOutIn,
@@ -133,9 +136,21 @@ from oziebot_api.services.teacher_assist_v2.grading_drafts import (
     generate_all_grading_drafts,
     get_latest_grading_draft,
 )
+from oziebot_api.services.teacher_assist_v2.grade_reviews import (
+    accept_all_viewed_drafts,
+    accept_grading_draft,
+    get_assignment_grade_for_submission,
+    get_grade_audit_history,
+    list_assignment_grade_reviews,
+    modify_grading_draft,
+    record_submission_review_view,
+    reject_grading_draft,
+    save_grade_review_draft,
+)
 from oziebot_api.services.teacher_assist_v2.submission_intake import (
     create_assignment_submission_batch,
     get_student_submission_detail,
+    get_student_submission_or_404,
     list_assignment_student_submissions,
     list_assignment_submission_batches,
     manually_match_student_submission,
@@ -1401,14 +1416,18 @@ def read_student_submission(
 ) -> dict:
     _require_teacher(db, user)
     _ensure_teacher_route_allowed(db, user, "/assignments")
-    return _handle(
-        lambda: get_student_submission_detail(
+
+    def _payload() -> dict:
+        row = get_student_submission_or_404(db, user=user, submission_id=submission_id)
+        record_submission_review_view(db, user=user, submission=row)
+        return get_student_submission_detail(
             db,
             user=user,
             submission_id=submission_id,
             settings=settings,
         )
-    )
+
+    return _handle(_payload)
 
 
 @router.post("/teacher/submissions/{submission_id}/manual-match")
@@ -1519,6 +1538,135 @@ def read_submission_grading_draft(
     if draft is None:
         raise HTTPException(status_code=404, detail="Grading draft not found")
     return draft
+
+
+@router.get("/teacher/assignments/{assignment_id}/grade-reviews")
+def read_assignment_grade_reviews(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> list[dict]:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    return _handle(lambda: list_assignment_grade_reviews(db, user=user, assignment_id=assignment_id))
+
+
+@router.get("/teacher/submissions/{submission_id}/assignment-grade")
+def read_submission_assignment_grade(
+    submission_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    grade = _handle(
+        lambda: get_assignment_grade_for_submission(db, user=user, submission_id=submission_id)
+    )
+    if grade is None:
+        raise HTTPException(status_code=404, detail="Assignment grade not found")
+    return grade
+
+
+@router.get("/teacher/submissions/{submission_id}/grade-audit-history")
+def read_submission_grade_audit_history(
+    submission_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> list[dict]:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    return _handle(lambda: get_grade_audit_history(db, user=user, submission_id=submission_id))
+
+
+@router.post("/teacher/submissions/{submission_id}/grade-review/accept", status_code=201)
+def accept_submission_grade_review(
+    submission_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    return _handle(lambda: accept_grading_draft(db, user=user, submission_id=submission_id))
+
+
+@router.post("/teacher/submissions/{submission_id}/grade-review/modify", status_code=201)
+def modify_submission_grade_review(
+    submission_id: uuid.UUID,
+    body: V2GradeReviewModifyIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    return _handle(
+        lambda: modify_grading_draft(
+            db,
+            user=user,
+            submission_id=submission_id,
+            score=body.score,
+            max_score=body.max_score,
+            teacher_comment=body.teacher_comment,
+            rubric_json=body.rubric_json,
+            teacher_override_reason=body.teacher_override_reason,
+        )
+    )
+
+
+@router.post("/teacher/submissions/{submission_id}/grade-review/reject", status_code=201)
+def reject_submission_grade_review(
+    submission_id: uuid.UUID,
+    body: V2GradeReviewRejectIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    return _handle(
+        lambda: reject_grading_draft(
+            db,
+            user=user,
+            submission_id=submission_id,
+            score=body.score,
+            max_score=body.max_score,
+            teacher_comment=body.teacher_comment,
+            rubric_json=body.rubric_json,
+            teacher_override_reason=body.teacher_override_reason,
+        )
+    )
+
+
+@router.post("/teacher/submissions/{submission_id}/grade-review/save", status_code=201)
+def save_submission_grade_review(
+    submission_id: uuid.UUID,
+    body: V2GradeReviewSaveIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    return _handle(
+        lambda: save_grade_review_draft(
+            db,
+            user=user,
+            submission_id=submission_id,
+            score=body.score,
+            max_score=body.max_score,
+            teacher_comment=body.teacher_comment,
+            rubric_json=body.rubric_json,
+            teacher_override_reason=body.teacher_override_reason,
+        )
+    )
+
+
+@router.post("/teacher/assignments/{assignment_id}/grade-review/accept-all-viewed")
+def accept_all_viewed_submission_grades(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    return _handle(lambda: accept_all_viewed_drafts(db, user=user, assignment_id=assignment_id))
 
 
 @router.get("/admin/teachers")

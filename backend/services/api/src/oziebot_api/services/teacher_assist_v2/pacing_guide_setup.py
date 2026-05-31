@@ -334,4 +334,11 @@ def build_teacher_home_summary(db: Session, *, user: User) -> dict[str, Any]:
         "subjects": [{"id": str(row.id), "display_name": row.display_name} for row in subjects],
         "active_pacing_guides": active_guides,
         "ready_to_plan": True,
+        "assignments_requiring_review_count": _count_assignments_requiring_review(db, user=user),
     }
+
+
+def _count_assignments_requiring_review(db: Session, *, user: User) -> int:
+    from oziebot_api.services.teacher_assist_v2.grade_reviews import count_assignments_requiring_review
+
+    return count_assignments_requiring_review(db, user=user)

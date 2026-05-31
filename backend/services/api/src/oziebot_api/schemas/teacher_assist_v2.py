@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, UTC
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -184,3 +185,27 @@ class V2StudentSubmissionManualMatchIn(BaseModel):
 
 class V2StudentSubmissionStatusIn(BaseModel):
     status: str = Field(min_length=1, max_length=32)
+
+
+class V2GradeReviewModifyIn(BaseModel):
+    score: float = Field(ge=0)
+    max_score: float = Field(gt=0)
+    teacher_comment: str = Field(min_length=1)
+    rubric_json: dict[str, Any] = Field(default_factory=dict)
+    teacher_override_reason: str = Field(min_length=1)
+
+
+class V2GradeReviewRejectIn(BaseModel):
+    score: float = Field(ge=0)
+    max_score: float = Field(gt=0)
+    teacher_comment: str = Field(min_length=1)
+    rubric_json: dict[str, Any] = Field(default_factory=dict)
+    teacher_override_reason: str | None = None
+
+
+class V2GradeReviewSaveIn(BaseModel):
+    score: float = Field(ge=0)
+    max_score: float = Field(gt=0)
+    teacher_comment: str = Field(min_length=1)
+    rubric_json: dict[str, Any] = Field(default_factory=dict)
+    teacher_override_reason: str | None = None

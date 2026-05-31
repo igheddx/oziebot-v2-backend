@@ -222,7 +222,31 @@ def serialize_student_submission_detail(
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
         "grading_draft": _serialize_latest_grading_draft(db, user=user, submission_id=row.id),
+        "assignment_grade": _serialize_assignment_grade(db, user=user, submission_id=row.id)
+        if user is not None
+        else None,
+        "teacher_viewed_for_review": _has_teacher_review_view(db, user=user, submission_id=row.id)
+        if user is not None
+        else False,
     }
+
+
+def _serialize_assignment_grade(db: Session, *, user: User, submission_id: uuid.UUID) -> dict[str, Any] | None:
+    from oziebot_api.services.teacher_assist_v2.grade_reviews import get_assignment_grade_for_submission
+
+    return get_assignment_grade_for_submission(db, user=user, submission_id=submission_id)
+
+
+def _has_teacher_review_view(db: Session, *, user: User, submission_id: uuid.UUID) -> bool:
+    from oziebot_api.models.teacher_assist_v2_submission_review_view import TeacherAssistV2SubmissionReviewView
+
+    row = db.scalars(
+        select(TeacherAssistV2SubmissionReviewView).where(
+            TeacherAssistV2SubmissionReviewView.teacher_user_id == user.id,
+            TeacherAssistV2SubmissionReviewView.student_submission_id == submission_id,
+        )
+    ).first()
+    return row is not None
 
 
 def _serialize_latest_grading_draft(

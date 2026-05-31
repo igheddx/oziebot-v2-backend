@@ -25,6 +25,10 @@ from oziebot_api.services.teacher_assist_v2.assignment_constants import (
 )
 from oziebot_api.services.teacher_assist_v2.package_export import artifact_download_url
 from oziebot_api.services.teacher_assist_v2.submission_intake import get_assignment_submission_summary
+from oziebot_api.services.teacher_assist_v2.grade_reviews import (
+    build_assignment_completion_summary,
+    list_assignment_grade_reviews,
+)
 from oziebot_api.services.teacher_assist_v2.planning_workflow import _require_planning_ready
 
 
@@ -267,6 +271,15 @@ def get_teacher_assignment_detail(
             }
         )
 
+    submission_summary = get_assignment_submission_summary(db, assignment_id=row.id)
+    completion_summary = build_assignment_completion_summary(
+        db,
+        user=user,
+        assignment_id=row.id,
+        submission_summary=submission_summary,
+    )
+    submission_summary["teacher_reviewed_count"] = completion_summary["grades_confirmed_count"]
+
     return {
         "id": str(row.id),
         "title": row.title,
@@ -294,7 +307,9 @@ def get_teacher_assignment_detail(
             for objective in objectives
         ],
         "artifacts": artifacts,
-        "submission_summary": get_assignment_submission_summary(db, assignment_id=row.id),
+        "submission_summary": submission_summary,
+        "completion_summary": completion_summary,
+        "grade_reviews": list_assignment_grade_reviews(db, user=user, assignment_id=row.id),
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
     }
