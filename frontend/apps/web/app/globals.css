@@ -61,6 +61,13 @@ body {
   --negative: #dc2626;
 }
 
+.oz-login-shell {
+  background:
+    radial-gradient(900px 420px at 10% -5%, rgba(56, 189, 248, 0.18), transparent 55%),
+    radial-gradient(800px 380px at 95% 0%, rgba(251, 191, 36, 0.12), transparent 58%),
+    var(--background);
+}
+
 .ta-panel {
   @apply rounded-3xl border border-border bg-card/95 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur;
 }
@@ -111,4 +118,25 @@ body {
 
 .ta-input-error {
   @apply border-rose-300 ring-1 ring-rose-200;
+}
+
+.ta-presentation-shell {
+  color: #fff;
+}
+
+.ta-presentation-slide {
+  @apply rounded-[2rem] border border-white/10 bg-white/5 shadow-[0_30px_80px_rgba(15,23,42,0.35)] backdrop-blur;
+}
+
+.ta-presentation-button,
+.ta-presentation-nav {
+  @apply inline-flex min-h-11 min-w-[7rem] items-center justify-center rounded-2xl bg-sky-400 px-5 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.ta-presentation-button-secondary {
+  @apply inline-flex min-h-10 items-center justify-center rounded-2xl border border-white/20 bg-white/10 px-4 text-sm font-semibold text-white transition hover:bg-white/15;
+}
+
+.ta-presentation-nav {
+  @apply min-w-[8rem];
 }

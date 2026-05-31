@@ -133,6 +133,13 @@ def test_v2_teacher_planning_form_and_generate(client, db_session):
     package_payload = package.json()
     assert package_payload["artifact_groups"]["daily_teaching_plans"]
     assert package_payload["artifact_groups"]["subject_slide_decks"]
+    assert package_payload["teaching_mode_available"] is True
+    assert package_payload["teaching_presentations"]["daily_plans"]
+    assert package_payload["teaching_presentations"]["subject_decks"]
+    daily_plan = package_payload["artifact_groups"]["daily_teaching_plans"][0]
+    assert daily_plan["content_json"]["subjects"]
+    slide_deck = package_payload["artifact_groups"]["subject_slide_decks"][0]
+    assert slide_deck["content_json"]["slides"]
 
     row = db_session.scalar(
         select(TeacherAssistV2InstructionalPackage).where(

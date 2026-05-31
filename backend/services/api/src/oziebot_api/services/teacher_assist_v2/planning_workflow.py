@@ -536,24 +536,36 @@ def get_instructional_package_detail(
     if row is None:
         raise LookupError("Instructional package not found")
 
+    from oziebot_api.models.education_catalog import EducationSubject
     from oziebot_api.services.teacher_assist_v2.package_export import artifact_download_url, group_artifacts
+
+    subject_ids = {artifact.subject_id for artifact in row.artifacts if artifact.subject_id}
+    subject_names = {
+        item.id: item.display_name
+        for item in db.scalars(select(EducationSubject).where(EducationSubject.id.in_(subject_ids))).all()
+    } if subject_ids else {}
 
     artifacts = []
     for artifact in sorted(row.artifacts, key=lambda item: (item.sequence_number, item.title)):
-        artifacts.append(
-            {
-                "id": str(artifact.id),
-                "artifact_type": artifact.artifact_type,
-                "subject_id": str(artifact.subject_id) if artifact.subject_id else None,
-                "title": artifact.title,
-                "day_label": artifact.day_label,
-                "status": artifact.status,
-                "preview_html": artifact.preview_html,
-                "export_format": artifact.export_format,
-                "download_url": artifact_download_url(artifact, settings=settings),
-                "export_available": bool(artifact.storage_key),
-            }
-        )
+        entry = {
+            "id": str(artifact.id),
+            "artifact_type": artifact.artifact_type,
+            "subject_id": str(artifact.subject_id) if artifact.subject_id else None,
+            "subject_name": subject_names.get(artifact.subject_id) if artifact.subject_id else None,
+            "title": artifact.title,
+            "day_label": artifact.day_label,
+            "status": artifact.status,
+            "preview_html": artifact.preview_html,
+            "export_format": artifact.export_format,
+            "download_url": artifact_download_url(artifact, settings=settings),
+            "export_available": bool(artifact.storage_key),
+        }
+        if artifact.artifact_type in {"daily_lesson_plan", "subject_slide_deck"}:
+            entry["content_json"] = artifact.content_json if isinstance(artifact.content_json, dict) else {}
+        artifacts.append(entry)
+
+    daily_plans = [item for item in artifacts if item["artifact_type"] == "daily_lesson_plan"]
+    subject_decks = [item for item in artifacts if item["artifact_type"] == "subject_slide_deck"]
 
     return {
         "id": str(row.id),
@@ -566,4 +578,24 @@ def get_instructional_package_detail(
         "created_at": row.created_at.isoformat(),
         "artifact_groups": group_artifacts(artifacts),
         "artifacts": artifacts,
+        "teaching_mode_available": bool(daily_plans or subject_decks),
+        "teaching_presentations": {
+            "daily_plans": [
+                {
+                    "artifact_id": item["id"],
+                    "day_label": item["day_label"],
+                    "title": item["title"],
+                }
+                for item in daily_plans
+            ],
+            "subject_decks": [
+                {
+                    "artifact_id": item["id"],
+                    "subject_id": item["subject_id"],
+                    "subject_name": item["subject_name"],
+                    "title": item["title"],
+                }
+                for item in subject_decks
+            ],
+        },
     }

@@ -298,6 +298,7 @@ def build_v2_context(db: Session, *, user: User) -> dict[str, Any]:
             allowed_routes.append("/teacher-assist-v2/home")
             allowed_routes.append("/teacher-assist-v2/planning")
             allowed_routes.append("/teacher-assist-v2/packages")
+            allowed_routes.append("/teacher-assist-v2/teach")
             allowed_routes.append("/teacher-assist-v2/assignments")
 
     feature_locked = requires_password_change or not onboarding_complete or not pacing_guide_setup_complete
