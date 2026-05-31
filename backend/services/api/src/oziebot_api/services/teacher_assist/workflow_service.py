@@ -1307,12 +1307,9 @@ def _teacher_assist_daily_cost_cents(db: Session) -> int:
 
 
 def _enforce_teacher_assist_cost_limit(db: Session, settings: Settings) -> None:
-    limit = max(0, settings.teacher_assist_ai_daily_cost_limit_cents)
-    if limit <= 0:
-        return
-    current_total = _teacher_assist_daily_cost_cents(db)
-    if current_total >= limit:
-        raise RuntimeError("TeacherAssist AI daily cost limit reached")
+    from oziebot_api.services.teacher_assist.ai_usage import assert_teacher_assist_ai_cost_available
+
+    assert_teacher_assist_ai_cost_available(db, settings)
 
 
 def _enforce_teacher_assist_model_allowlist(

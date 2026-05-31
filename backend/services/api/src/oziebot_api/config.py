@@ -152,7 +152,11 @@ class Settings(BaseSettings):
     )
     teacher_assist_real_provider_model: str | None = Field(
         default=None,
-        description="Configured model name for a future real TeacherAssist provider.",
+        description="Configured model name for TeacherAssist OpenAI provider execution.",
+    )
+    teacher_assist_openai_default_model: str | None = Field(
+        default=None,
+        description="Default OpenAI model alias (TEACHER_ASSIST_OPENAI_DEFAULT_MODEL).",
     )
     teacher_assist_openai_api_key: str | None = Field(
         default=None,

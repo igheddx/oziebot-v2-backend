@@ -106,6 +106,10 @@ from oziebot_api.services.teacher_assist.ai_admin_config import (
     get_teacher_assist_ai_admin_config,
     update_teacher_assist_ai_admin_config,
 )
+from oziebot_api.services.teacher_assist.ai_mode import (
+    get_teacher_assist_ai_mode_status,
+    test_teacher_assist_openai_connection,
+)
 from oziebot_api.services.teacher_assist_v2.assignments import (
     get_teacher_assignment_detail,
     list_recent_assignments,
@@ -270,8 +274,29 @@ def update_admin_ai_provider_config(
             ai_provider=body.ai_provider,
             real_provider_enabled=body.real_provider_enabled,
             real_provider_model=body.real_provider_model,
+            daily_cost_limit_cents=body.daily_cost_limit_cents,
         )
     )
+
+
+@router.post("/admin/ai-provider-config/test-connection")
+def test_admin_ai_provider_connection(
+    user: RootAdminUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_root_admin(db, user)
+    return test_teacher_assist_openai_connection(db, env_settings=settings)
+
+
+@router.get("/teacher/ai-generation-status")
+def read_teacher_ai_generation_status(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_v2_access(db, user)
+    return get_teacher_assist_ai_mode_status(db, settings)
 
 
 @router.get("/catalog/states", response_model=list[EducationStateOut])

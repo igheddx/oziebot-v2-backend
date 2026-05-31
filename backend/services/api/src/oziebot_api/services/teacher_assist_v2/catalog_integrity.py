@@ -17,6 +17,8 @@ from oziebot_api.models.education_catalog import (
 )
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
 from oziebot_api.models.user import User
+from oziebot_api.config import get_settings
+from oziebot_api.services.teacher_assist.ai_mode import get_teacher_assist_ai_mode_status
 from oziebot_api.services.teacher_assist.education_catalog import (
     get_district_or_404,
     get_grade_or_404,
@@ -271,6 +273,7 @@ def build_v2_context(db: Session, *, user: User) -> dict[str, Any]:
             "feature_locked": False,
             "feature_lock_message": None,
             "allowed_routes": [],
+            "ai_generation": get_teacher_assist_ai_mode_status(db, get_settings()),
         }
 
     onboarding = get_v2_onboarding(db, user_id=user.id)
@@ -332,6 +335,7 @@ def build_v2_context(db: Session, *, user: User) -> dict[str, Any]:
         "feature_locked": feature_locked,
         "feature_lock_message": feature_lock_message,
         "allowed_routes": allowed_routes,
+        "ai_generation": get_teacher_assist_ai_mode_status(db, get_settings()),
     }
 
 

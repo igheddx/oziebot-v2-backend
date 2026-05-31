@@ -18,7 +18,7 @@ from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssis
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.constants import validate_teacher_assist_ai_provider
 from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher_assist_settings
-from oziebot_api.services.teacher_assist.prompt_contracts import GRADING_ASSIST_FEATURE
+from oziebot_api.services.teacher_assist.prompt_contracts import GRADING_DRAFT_GENERATION_FEATURE
 from oziebot_api.services.teacher_assist_v2.grading_ai import generate_grading_draft_ai_result
 from oziebot_api.services.teacher_assist_v2.grading_constants import GRADING_JOB_STATUSES
 from oziebot_api.services.teacher_assist_v2.grading_context import build_grading_context
@@ -198,7 +198,7 @@ def create_grading_job_for_submission(
             workflow_id=None,
             provider=ai_result.provider,
             model=ai_result.model,
-            feature=GRADING_ASSIST_FEATURE,
+            feature=GRADING_DRAFT_GENERATION_FEATURE,
             input_tokens=ai_result.input_tokens,
             output_tokens=ai_result.output_tokens,
             estimated_cost_cents=ai_result.estimated_cost_cents,

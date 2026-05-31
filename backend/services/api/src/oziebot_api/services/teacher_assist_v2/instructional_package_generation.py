@@ -16,7 +16,8 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2PlanningSupplementalMaterial,
 )
 from oziebot_api.models.user import User
-from oziebot_api.services.teacher_assist.provider_config import get_teacher_assist_ai_provider
+from oziebot_api.services.teacher_assist.ai_mode import is_teacher_assist_real_ai_active
+from oziebot_api.services.teacher_assist_v2.instructional_package_ai import generate_v2_instructional_artifact
 from oziebot_api.services.teacher_assist_v2.package_export import render_artifact_preview_html, save_artifact_export
 from oziebot_api.services.teacher_assist_v2.planning_constants import (
     OPTIONAL_PACKAGE_OUTPUTS,
@@ -104,6 +105,38 @@ def _generic_sections(*, title: str, subject_name: str, week_label: str) -> dict
     }
 
 
+def _resolve_artifact_content(
+    db: Session,
+    *,
+    settings: Settings,
+    user: User,
+    package: TeacherAssistV2InstructionalPackage,
+    context: dict[str, Any],
+    artifact_type: str,
+    mock_content: dict[str, Any],
+    week: dict[str, Any],
+    subject_meta: dict[str, Any] | None = None,
+    week_subject: dict[str, Any] | None = None,
+    day_label: str | None = None,
+    title_hint: str | None = None,
+) -> dict[str, Any]:
+    ai_content = generate_v2_instructional_artifact(
+        db,
+        settings=settings,
+        user=user,
+        tenant_id=package.tenant_id,
+        package_id=package.id,
+        artifact_type=artifact_type,
+        generation_context=context,
+        week=week,
+        subject_meta=subject_meta,
+        week_subject=week_subject,
+        day_label=day_label,
+        title_hint=title_hint,
+    )
+    return ai_content if ai_content is not None else mock_content
+
+
 def generate_instructional_package(
     db: Session,
     *,
@@ -137,8 +170,7 @@ def generate_instructional_package(
     )
     base = _assignment_context(db, user=user)
     onboarding = base["onboarding"]
-    provider = get_teacher_assist_ai_provider(settings, db=db)
-    provider_name = provider.provider_name
+    provider_name = "openai" if is_teacher_assist_real_ai_active(db, settings) else "mock"
     subject_names = [row["subject_name"] for row in context["subjects"]]
     primary_guide_id = (
         uuid.UUID(context["pacing_guide_ids"][0]) if context["pacing_guide_ids"] else None
@@ -220,11 +252,22 @@ def generate_instructional_package(
                             daily_topic=week_subject.get("daily_topic") if week_subject else None,
                         )
                     )
-                content = {
-                    "title": f"{day_label} Daily Plan — {week_label}",
-                    "summary": f"[MOCK OUTPUT] Daily plan covering {', '.join(row['subject_name'] for row in context['subjects'])}.",
-                    "subjects": subject_blocks,
-                }
+                content = _resolve_artifact_content(
+                    db,
+                    settings=settings,
+                    user=user,
+                    package=package,
+                    context=context,
+                    artifact_type="daily_lesson_plan",
+                    mock_content={
+                        "title": f"{day_label} Daily Plan — {week_label}",
+                        "summary": f"[MOCK OUTPUT] Daily plan covering {', '.join(row['subject_name'] for row in context['subjects'])}.",
+                        "subjects": subject_blocks,
+                    },
+                    week=week,
+                    day_label=day_label,
+                    title_hint=f"{day_label} Daily Plan — {week_label}",
+                )
                 sequence += 1
                 artifact = TeacherAssistV2InstructionalPackageArtifact(
                     id=uuid.uuid4(),
@@ -262,14 +305,26 @@ def generate_instructional_package(
                     row.get("objective_code") or row.get("description")
                     for row in (week_subject or {}).get("objectives", [])
                 ]
-                content = {
-                    "title": f"{subject_meta['subject_name']} {week_label} Slides",
-                    "slides": _mock_slides(
-                        subject_name=subject_meta["subject_name"],
-                        week_label=week_label,
-                        objectives=[str(item) for item in objectives if item],
-                    ),
-                }
+                content = _resolve_artifact_content(
+                    db,
+                    settings=settings,
+                    user=user,
+                    package=package,
+                    context=context,
+                    artifact_type="subject_slide_deck",
+                    mock_content={
+                        "title": f"{subject_meta['subject_name']} {week_label} Slides",
+                        "slides": _mock_slides(
+                            subject_name=subject_meta["subject_name"],
+                            week_label=week_label,
+                            objectives=[str(item) for item in objectives if item],
+                        ),
+                    },
+                    week=week,
+                    subject_meta=subject_meta,
+                    week_subject=week_subject,
+                    title_hint=f"{subject_meta['subject_name']} {week_label} Slides",
+                )
                 sequence += 1
                 artifact = TeacherAssistV2InstructionalPackageArtifact(
                     id=uuid.uuid4(),
@@ -316,10 +371,23 @@ def generate_instructional_package(
                 week_subject = week_subjects.get(subject_id)
                 subject_meta = subject_lookup[subject_id]
                 label = optional_map[output_type]
-                content = _generic_sections(
-                    title=f"{subject_meta['subject_name']} {week_label} {label}",
-                    subject_name=subject_meta["subject_name"],
-                    week_label=week_label,
+                mock_title = f"{subject_meta['subject_name']} {week_label} {label}"
+                content = _resolve_artifact_content(
+                    db,
+                    settings=settings,
+                    user=user,
+                    package=package,
+                    context=context,
+                    artifact_type=output_type,
+                    mock_content=_generic_sections(
+                        title=mock_title,
+                        subject_name=subject_meta["subject_name"],
+                        week_label=week_label,
+                    ),
+                    week=week,
+                    subject_meta=subject_meta,
+                    week_subject=week_subject,
+                    title_hint=mock_title,
                 )
                 sequence += 1
                 artifact = TeacherAssistV2InstructionalPackageArtifact(

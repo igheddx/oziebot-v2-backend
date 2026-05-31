@@ -17,20 +17,7 @@ from oziebot_api.services.teacher_assist.instructional_plan_prompt_builder impor
     instructional_plan_section_output_schema,
 )
 
-MODEL_PRICING_PER_MILLION_TOKENS: dict[str, tuple[float, float]] = {
-    "gpt-4.1-mini": (0.40, 1.60),
-    "gpt-4.1": (2.00, 8.00),
-    "gpt-4o-mini": (0.15, 0.60),
-}
-
-
-def _estimate_cost_cents(model_name: str, *, input_tokens: int, output_tokens: int) -> int:
-    pricing = MODEL_PRICING_PER_MILLION_TOKENS.get(model_name)
-    if pricing is None:
-        return 0
-    input_cost_usd = (input_tokens / 1_000_000) * pricing[0]
-    output_cost_usd = (output_tokens / 1_000_000) * pricing[1]
-    return max(0, round((input_cost_usd + output_cost_usd) * 100))
+from oziebot_api.services.teacher_assist.openai_pricing import estimate_openai_cost_cents
 
 
 class OpenAITeacherAssistAIProvider(TeacherAssistAIProvider):
@@ -103,7 +90,7 @@ class OpenAITeacherAssistAIProvider(TeacherAssistAIProvider):
         usage = payload.get("usage") or {}
         input_tokens = int(usage.get("prompt_tokens") or 0)
         output_tokens = int(usage.get("completion_tokens") or 0)
-        estimated_cost_cents = _estimate_cost_cents(
+        estimated_cost_cents = estimate_openai_cost_cents(
             self._model_name,
             input_tokens=input_tokens,
             output_tokens=output_tokens,

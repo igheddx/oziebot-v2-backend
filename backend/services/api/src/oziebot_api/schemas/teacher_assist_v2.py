@@ -183,6 +183,7 @@ class V2TeacherAssistAiProviderConfigIn(BaseModel):
     ai_provider: str = Field(pattern="^(mock|openai)$")
     real_provider_enabled: bool = False
     real_provider_model: str | None = Field(default=None, max_length=128)
+    daily_cost_limit_cents: int | None = Field(default=None, ge=0)
 
 
 class V2StudentSubmissionManualMatchIn(BaseModel):

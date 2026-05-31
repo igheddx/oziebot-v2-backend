@@ -19,7 +19,10 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.services.teacher_assist.prompt_contracts import (
     GRADING_ASSIST_FEATURE,
+    GRADING_DRAFT_GENERATION_FEATURE,
     INSTRUCTIONAL_PLAN_GENERATION_FEATURE,
+    V2_INSTRUCTIONAL_PACKAGE_GENERATION_FEATURE,
+    V2_LESSON_PLAN_GENERATION_FEATURE,
 )
 from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher_assist_settings
 
@@ -27,6 +30,9 @@ REAL_AI_WORKFLOWS = frozenset(
     {
         INSTRUCTIONAL_PLAN_GENERATION_FEATURE,
         GRADING_ASSIST_FEATURE,
+        GRADING_DRAFT_GENERATION_FEATURE,
+        V2_INSTRUCTIONAL_PACKAGE_GENERATION_FEATURE,
+        V2_LESSON_PLAN_GENERATION_FEATURE,
     }
 )
 
@@ -95,6 +101,8 @@ def get_teacher_assist_provider_model(settings: Settings, *, provider_name: str)
     if provider_name == "mock":
         return "mock"
     model_name = (settings.teacher_assist_real_provider_model or "").strip()
+    if not model_name:
+        model_name = (settings.teacher_assist_openai_default_model or "").strip()
     if not model_name:
         raise RuntimeError("TeacherAssist real provider model is not configured")
     if model_name not in get_teacher_assist_allowed_models(settings):

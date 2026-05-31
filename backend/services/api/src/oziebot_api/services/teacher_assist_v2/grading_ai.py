@@ -143,17 +143,8 @@ def generate_mock_grading_draft(*, context: dict[str, Any]) -> GradingDraftAIRes
     )
 
 
-def _estimate_cost_cents(model_name: str, *, input_tokens: int, output_tokens: int) -> int:
-    pricing = {
-        "gpt-4.1-mini": (0.40, 1.60),
-        "gpt-4.1": (2.00, 8.00),
-        "gpt-4o-mini": (0.15, 0.60),
-    }.get(model_name)
-    if pricing is None:
-        return 0
-    input_cost = (input_tokens / 1_000_000) * pricing[0]
-    output_cost = (output_tokens / 1_000_000) * pricing[1]
-    return max(0, round((input_cost + output_cost) * 100))
+from oziebot_api.services.teacher_assist.ai_usage import assert_teacher_assist_ai_cost_available
+from oziebot_api.services.teacher_assist.openai_pricing import estimate_openai_cost_cents
 
 
 def generate_openai_grading_draft(
@@ -166,6 +157,7 @@ def generate_openai_grading_draft(
     TeacherAssistProviderCircuitBreaker().assert_can_execute(effective_settings, provider_name)
     if not effective_settings.teacher_assist_openai_api_key:
         raise RuntimeError("TeacherAssist OpenAI API key is not configured")
+    assert_teacher_assist_ai_cost_available(db, effective_settings)
     model_name = get_teacher_assist_provider_model(effective_settings, provider_name=provider_name)
 
     request_body = {
@@ -241,7 +233,7 @@ def generate_openai_grading_draft(
         model=model_name,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        estimated_cost_cents=_estimate_cost_cents(model_name, input_tokens=input_tokens, output_tokens=output_tokens),
+        estimated_cost_cents=estimate_openai_cost_cents(model_name, input_tokens=input_tokens, output_tokens=output_tokens),
     )
 
 
