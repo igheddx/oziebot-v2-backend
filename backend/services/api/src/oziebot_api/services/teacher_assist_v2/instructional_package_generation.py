@@ -137,7 +137,7 @@ def generate_instructional_package(
     )
     base = _assignment_context(db, user=user)
     onboarding = base["onboarding"]
-    provider = get_teacher_assist_ai_provider(settings)
+    provider = get_teacher_assist_ai_provider(settings, db=db)
     provider_name = provider.provider_name
     subject_names = [row["subject_name"] for row in context["subjects"]]
     primary_guide_id = (

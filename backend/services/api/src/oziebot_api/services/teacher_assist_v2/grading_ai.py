@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
 from oziebot_api.services.teacher_assist.constants import validate_teacher_assist_ai_provider
@@ -19,6 +20,7 @@ from oziebot_api.services.teacher_assist.provider_config import (
     TeacherAssistProviderCircuitBreaker,
     get_teacher_assist_provider_model,
 )
+from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher_assist_settings
 from oziebot_api.services.teacher_assist_v2.grading_constants import (
     DEFAULT_RUBRIC_SECTIONS,
     GRADING_DRAFT_MAX_SCORE,
@@ -154,14 +156,17 @@ def _estimate_cost_cents(model_name: str, *, input_tokens: int, output_tokens: i
     return max(0, round((input_cost + output_cost) * 100))
 
 
-def generate_openai_grading_draft(*, settings: Settings, context: dict[str, Any]) -> GradingDraftAIResult:
-    provider_name = validate_teacher_assist_ai_provider(settings.teacher_assist_ai_provider)
+def generate_openai_grading_draft(
+    *, settings: Settings, context: dict[str, Any], db: Session | None = None
+) -> GradingDraftAIResult:
+    effective_settings = resolve_teacher_assist_settings(db, settings)
+    provider_name = validate_teacher_assist_ai_provider(effective_settings.teacher_assist_ai_provider)
     if provider_name != "openai":
         raise RuntimeError("OpenAI grading requires teacher_assist_ai_provider=openai")
-    TeacherAssistProviderCircuitBreaker().assert_can_execute(settings, provider_name)
-    if not settings.teacher_assist_openai_api_key:
+    TeacherAssistProviderCircuitBreaker().assert_can_execute(effective_settings, provider_name)
+    if not effective_settings.teacher_assist_openai_api_key:
         raise RuntimeError("TeacherAssist OpenAI API key is not configured")
-    model_name = get_teacher_assist_provider_model(settings, provider_name=provider_name)
+    model_name = get_teacher_assist_provider_model(effective_settings, provider_name=provider_name)
 
     request_body = {
         "model": model_name,
@@ -193,12 +198,12 @@ def generate_openai_grading_draft(*, settings: Settings, context: dict[str, Any]
         "temperature": 0.2,
     }
     headers = {
-        "Authorization": f"Bearer {settings.teacher_assist_openai_api_key}",
+        "Authorization": f"Bearer {effective_settings.teacher_assist_openai_api_key}",
         "Content-Type": "application/json",
     }
     with httpx.Client(timeout=90.0) as client:
         response = client.post(
-            f"{settings.teacher_assist_openai_base_url.rstrip('/')}/chat/completions",
+            f"{effective_settings.teacher_assist_openai_base_url.rstrip('/')}/chat/completions",
             headers=headers,
             json=request_body,
         )
@@ -240,11 +245,14 @@ def generate_openai_grading_draft(*, settings: Settings, context: dict[str, Any]
     )
 
 
-def generate_grading_draft_ai_result(*, settings: Settings, context: dict[str, Any]) -> GradingDraftAIResult:
-    provider_name = validate_teacher_assist_ai_provider(settings.teacher_assist_ai_provider)
-    TeacherAssistProviderCircuitBreaker().assert_can_execute(settings, provider_name)
+def generate_grading_draft_ai_result(
+    *, settings: Settings, context: dict[str, Any], db: Session | None = None
+) -> GradingDraftAIResult:
+    effective_settings = resolve_teacher_assist_settings(db, settings)
+    provider_name = validate_teacher_assist_ai_provider(effective_settings.teacher_assist_ai_provider)
+    TeacherAssistProviderCircuitBreaker().assert_can_execute(effective_settings, provider_name)
     if provider_name == "mock":
         return generate_mock_grading_draft(context=context)
     if provider_name == "openai":
-        return generate_openai_grading_draft(settings=settings, context=context)
+        return generate_openai_grading_draft(settings=settings, context=context, db=db)
     raise NotImplementedError(f"Grading AI provider '{provider_name}' is not implemented")

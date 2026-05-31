@@ -25,6 +25,8 @@ from oziebot_api.services.teacher_assist_v2.assignment_constants import (
 )
 from oziebot_api.services.teacher_assist_v2.package_export import artifact_download_url
 from oziebot_api.services.teacher_assist_v2.submission_intake import get_assignment_submission_summary
+from oziebot_api.services.teacher_assist_v2.gradebook_workspace import build_assignment_gradebook_summary
+from oziebot_api.services.teacher_assist_v2.objective_performance import ObjectivePerformanceService
 from oziebot_api.services.teacher_assist_v2.grade_reviews import (
     build_assignment_completion_summary,
     list_assignment_grade_reviews,
@@ -310,6 +312,10 @@ def get_teacher_assignment_detail(
         "submission_summary": submission_summary,
         "completion_summary": completion_summary,
         "grade_reviews": list_assignment_grade_reviews(db, user=user, assignment_id=row.id),
+        "gradebook_summary": build_assignment_gradebook_summary(db, user=user, assignment_id=row.id),
+        "objective_performance": ObjectivePerformanceService.summarize_assignment_objectives(
+            db, user=user, assignment_id=row.id
+        ),
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
     }

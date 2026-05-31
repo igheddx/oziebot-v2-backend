@@ -43,6 +43,7 @@ from oziebot_api.services.teacher_assist.provider_config import (
     TeacherAssistProviderCircuitBreaker,
     get_teacher_assist_allowed_models,
 )
+from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher_assist_settings
 from oziebot_api.services.teacher_assist.planning import (
     get_planning_draft_or_404,
     validate_planning_draft_readiness,
@@ -611,7 +612,7 @@ def regenerate_weekly_plan_section(
         section_path=section_path,
     )
     effective_settings = _settings_with_provider_mode(settings, provider_mode)
-    provider = get_teacher_assist_ai_provider(effective_settings, workflow_type=WEEKLY_PLAN_WORKFLOW_TYPE)
+    provider = get_teacher_assist_ai_provider(effective_settings, db=db, workflow_type=WEEKLY_PLAN_WORKFLOW_TYPE)
     _enforce_teacher_assist_model_allowlist(effective_settings, model_name=getattr(provider, "_model_name", "mock"))
     _enforce_teacher_assist_cost_limit(db, effective_settings)
     circuit_state = TeacherAssistProviderCircuitBreaker().state_for_provider(
@@ -1683,9 +1684,10 @@ def _persist_teacher_assist_workflow_success(
         progress_percent=35,
     )
     _enforce_teacher_assist_cost_limit(session, settings)
-    provider = get_teacher_assist_ai_provider(settings, workflow_type=workflow.workflow_type)
+    provider = get_teacher_assist_ai_provider(settings, db=session, workflow_type=workflow.workflow_type)
+    effective_settings = resolve_teacher_assist_settings(session, settings)
     circuit_state = TeacherAssistProviderCircuitBreaker().state_for_provider(
-        settings, provider.provider_name
+        effective_settings, provider.provider_name
     )
     provider_result = provider.generate_instructional_plan(snapshot)
     _enforce_teacher_assist_model_allowlist(settings, model_name=provider_result.model)

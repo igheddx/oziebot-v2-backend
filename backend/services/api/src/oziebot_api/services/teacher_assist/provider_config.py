@@ -15,10 +15,13 @@ from oziebot_api.services.teacher_assist.constants import (
 from oziebot_api.services.teacher_assist.fixture_store import TeacherAssistAIFixtureStore
 from oziebot_api.services.teacher_assist.mock_ai_provider import MockTeacherAssistAIProvider
 from oziebot_api.services.teacher_assist.openai_ai_provider import OpenAITeacherAssistAIProvider
+from sqlalchemy.orm import Session
+
 from oziebot_api.services.teacher_assist.prompt_contracts import (
     GRADING_ASSIST_FEATURE,
     INSTRUCTIONAL_PLAN_GENERATION_FEATURE,
 )
+from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher_assist_settings
 
 REAL_AI_WORKFLOWS = frozenset(
     {
@@ -100,22 +103,26 @@ def get_teacher_assist_provider_model(settings: Settings, *, provider_name: str)
 
 
 def get_teacher_assist_ai_provider(
-    settings: Settings, *, workflow_type: str = INSTRUCTIONAL_PLAN_GENERATION_FEATURE
+    settings: Settings,
+    *,
+    db: Session | None = None,
+    workflow_type: str = INSTRUCTIONAL_PLAN_GENERATION_FEATURE,
 ) -> TeacherAssistAIProvider:
-    provider_name = validate_teacher_assist_ai_provider(settings.teacher_assist_ai_provider)
-    fixture_mode = validate_teacher_assist_ai_fixture_mode(settings.teacher_assist_ai_fixture_mode)
-    TeacherAssistProviderCircuitBreaker().assert_can_execute(settings, provider_name)
+    effective_settings = resolve_teacher_assist_settings(db, settings)
+    provider_name = validate_teacher_assist_ai_provider(effective_settings.teacher_assist_ai_provider)
+    fixture_mode = validate_teacher_assist_ai_fixture_mode(effective_settings.teacher_assist_ai_fixture_mode)
+    TeacherAssistProviderCircuitBreaker().assert_can_execute(effective_settings, provider_name)
     if provider_name != "mock" and workflow_type not in REAL_AI_WORKFLOWS:
         raise RuntimeError("TeacherAssist real provider execution is limited to supported workflows")
 
     if provider_name == "mock":
         provider: TeacherAssistAIProvider = MockTeacherAssistAIProvider()
     elif provider_name == "openai":
-        if not settings.teacher_assist_openai_api_key:
+        if not effective_settings.teacher_assist_openai_api_key:
             raise RuntimeError("TeacherAssist OpenAI API key is not configured")
         provider = OpenAITeacherAssistAIProvider(
-            settings,
-            model_name=get_teacher_assist_provider_model(settings, provider_name=provider_name),
+            effective_settings,
+            model_name=get_teacher_assist_provider_model(effective_settings, provider_name=provider_name),
         )
     else:
         raise NotImplementedError(f"TeacherAssist AI provider '{provider_name}' is not implemented")
@@ -124,6 +131,6 @@ def get_teacher_assist_ai_provider(
         return provider
     return FixtureAwareTeacherAssistAIProvider(
         inner=provider,
-        fixture_store=TeacherAssistAIFixtureStore(settings.teacher_assist_ai_fixtures_root),
+        fixture_store=TeacherAssistAIFixtureStore(effective_settings.teacher_assist_ai_fixtures_root),
         fixture_mode=fixture_mode,
     )

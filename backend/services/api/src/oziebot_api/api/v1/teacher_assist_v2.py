@@ -37,6 +37,7 @@ from oziebot_api.schemas.teacher_assist_v2 import (
     V2GradeReviewModifyIn,
     V2GradeReviewRejectIn,
     V2GradeReviewSaveIn,
+    V2TeacherAssistAiProviderConfigIn,
     V2StudentSubmissionManualMatchIn,
     V2StudentSubmissionStatusIn,
     V2PackageCloseOutIn,
@@ -101,6 +102,10 @@ from oziebot_api.services.teacher_assist.teacher_assignment_provisioning import 
     list_teacher_assignment_rows,
     provision_teacher_school_assignment,
 )
+from oziebot_api.services.teacher_assist.ai_admin_config import (
+    get_teacher_assist_ai_admin_config,
+    update_teacher_assist_ai_admin_config,
+)
 from oziebot_api.services.teacher_assist_v2.assignments import (
     get_teacher_assignment_detail,
     list_recent_assignments,
@@ -136,6 +141,11 @@ from oziebot_api.services.teacher_assist_v2.grading_drafts import (
     generate_all_grading_drafts,
     get_latest_grading_draft,
 )
+from oziebot_api.services.teacher_assist_v2.gradebook_workspace import (
+    list_gradebook_records,
+    list_mastery_evidence,
+)
+from oziebot_api.services.teacher_assist_v2.objective_performance import ObjectivePerformanceService
 from oziebot_api.services.teacher_assist_v2.grade_reviews import (
     accept_all_viewed_drafts,
     accept_grading_draft,
@@ -232,6 +242,36 @@ def read_hierarchy_explorer(user: RootAdminUser, db: DbSession, active_only: boo
 def read_admin_dashboard(user: RootAdminUser, db: DbSession) -> dict:
     _require_root_admin(db, user)
     return build_admin_dashboard(db)
+
+
+@router.get("/admin/ai-provider-config")
+def read_admin_ai_provider_config(
+    user: RootAdminUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_root_admin(db, user)
+    return get_teacher_assist_ai_admin_config(db, env_settings=settings)
+
+
+@router.put("/admin/ai-provider-config")
+def update_admin_ai_provider_config(
+    body: V2TeacherAssistAiProviderConfigIn,
+    user: RootAdminUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_root_admin(db, user)
+    return _handle(
+        lambda: update_teacher_assist_ai_admin_config(
+            db,
+            user=user,
+            env_settings=settings,
+            ai_provider=body.ai_provider,
+            real_provider_enabled=body.real_provider_enabled,
+            real_provider_model=body.real_provider_model,
+        )
+    )
 
 
 @router.get("/catalog/states", response_model=list[EducationStateOut])
@@ -1539,6 +1579,63 @@ def read_submission_grading_draft(
         raise HTTPException(status_code=404, detail="Grading draft not found")
     return draft
 
+
+
+
+@router.get("/teacher/gradebook")
+def read_teacher_gradebook(
+    user: CurrentUser,
+    db: DbSession,
+    school_year_id: uuid.UUID | None = None,
+    subject_id: uuid.UUID | None = None,
+    assignment_id: uuid.UUID | None = None,
+    objective_id: uuid.UUID | None = None,
+) -> list[dict]:
+    _require_v2_access(db, user)
+    return list_gradebook_records(
+        db,
+        user=user,
+        school_year_id=school_year_id,
+        subject_id=subject_id,
+        assignment_id=assignment_id,
+        objective_id=objective_id,
+    )
+
+
+@router.get("/teacher/mastery")
+def read_teacher_mastery(
+    user: CurrentUser,
+    db: DbSession,
+    objective_id: uuid.UUID | None = None,
+    student_number: int | None = None,
+    assignment_id: uuid.UUID | None = None,
+) -> list[dict]:
+    _require_v2_access(db, user)
+    return list_mastery_evidence(
+        db,
+        user=user,
+        objective_id=objective_id,
+        student_number=student_number,
+        assignment_id=assignment_id,
+    )
+
+
+@router.get("/teacher/objectives/{objective_id}/performance")
+def read_objective_performance(
+    objective_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    assignment_id: uuid.UUID | None = None,
+) -> dict:
+    _require_v2_access(db, user)
+    return _handle(
+        lambda: ObjectivePerformanceService.summarize_objective(
+            db,
+            user=user,
+            objective_id=objective_id,
+            assignment_id=assignment_id,
+        )
+    )
 
 @router.get("/teacher/assignments/{assignment_id}/grade-reviews")
 def read_assignment_grade_reviews(

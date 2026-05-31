@@ -335,6 +335,9 @@ def build_teacher_home_summary(db: Session, *, user: User) -> dict[str, Any]:
         "active_pacing_guides": active_guides,
         "ready_to_plan": True,
         "assignments_requiring_review_count": _count_assignments_requiring_review(db, user=user),
+        "recent_grades_confirmed_count": _count_recent_confirmed_grades(db, user=user),
+        "objectives_assessed_count": _count_objectives_assessed(db, user=user),
+        "mastery_alerts_count": _count_mastery_alerts(db, user=user),
     }
 
 
@@ -342,3 +345,21 @@ def _count_assignments_requiring_review(db: Session, *, user: User) -> int:
     from oziebot_api.services.teacher_assist_v2.grade_reviews import count_assignments_requiring_review
 
     return count_assignments_requiring_review(db, user=user)
+
+
+def _count_recent_confirmed_grades(db: Session, *, user: User) -> int:
+    from oziebot_api.services.teacher_assist_v2.gradebook_workspace import count_recent_confirmed_grades
+
+    return count_recent_confirmed_grades(db, user=user)
+
+
+def _count_objectives_assessed(db: Session, *, user: User) -> int:
+    from oziebot_api.services.teacher_assist_v2.objective_performance import count_objectives_assessed
+
+    return count_objectives_assessed(db, user=user)
+
+
+def _count_mastery_alerts(db: Session, *, user: User) -> int:
+    from oziebot_api.services.teacher_assist_v2.objective_performance import count_mastery_alerts
+
+    return count_mastery_alerts(db, user=user)

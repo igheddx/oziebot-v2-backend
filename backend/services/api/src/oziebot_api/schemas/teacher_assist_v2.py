@@ -179,6 +179,12 @@ class V2PlanningSupplementalNoteCreate(BaseModel):
     title: str | None = Field(default=None, max_length=256)
 
 
+class V2TeacherAssistAiProviderConfigIn(BaseModel):
+    ai_provider: str = Field(pattern="^(mock|openai)$")
+    real_provider_enabled: bool = False
+    real_provider_model: str | None = Field(default=None, max_length=128)
+
+
 class V2StudentSubmissionManualMatchIn(BaseModel):
     student_number: int = Field(ge=1, le=100)
 

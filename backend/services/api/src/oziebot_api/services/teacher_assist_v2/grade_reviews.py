@@ -22,6 +22,7 @@ from oziebot_api.services.teacher_assist_v2.grade_review_constants import (
     GRADE_REVIEW_ACTIONS,
     OFFICIAL_ASSIGNMENT_GRADE_STATUSES,
 )
+from oziebot_api.services.teacher_assist_v2.gradebook_sync import sync_confirmed_grade_to_gradebook_and_mastery
 from oziebot_api.services.teacher_assist_v2.submission_intake import (
     _get_assignment_or_404,
     get_student_submission_or_404,
@@ -291,6 +292,13 @@ def _persist_grade(
     db.add(grade)
     db.flush()
     _create_audit_event(db, grade=grade, draft=draft, reviewer=user)
+    if normalized_status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES:
+        sync_confirmed_grade_to_gradebook_and_mastery(
+            db,
+            user=user,
+            grade=grade,
+            submission=submission,
+        )
     return grade
 
 

@@ -17,6 +17,7 @@ from oziebot_api.models.teacher_assist_v2_grading_job import TeacherAssistV2Grad
 from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssistV2StudentSubmission
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.constants import validate_teacher_assist_ai_provider
+from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher_assist_settings
 from oziebot_api.services.teacher_assist.prompt_contracts import GRADING_ASSIST_FEATURE
 from oziebot_api.services.teacher_assist_v2.grading_ai import generate_grading_draft_ai_result
 from oziebot_api.services.teacher_assist_v2.grading_constants import GRADING_JOB_STATUSES
@@ -137,7 +138,8 @@ def create_grading_job_for_submission(
     assignment = _get_assignment_or_404(db, user=user, assignment_id=submission.assignment_id)
     _require_ready_submission(submission)
 
-    provider_name = validate_teacher_assist_ai_provider(settings.teacher_assist_ai_provider)
+    effective_settings = resolve_teacher_assist_settings(db, settings)
+    provider_name = validate_teacher_assist_ai_provider(effective_settings.teacher_assist_ai_provider)
     now = _now()
     job = TeacherAssistV2GradingJob(
         id=uuid.uuid4(),
@@ -164,7 +166,7 @@ def create_grading_job_for_submission(
 
     try:
         context = build_grading_context(db, assignment=assignment, submission=submission)
-        ai_result = generate_grading_draft_ai_result(settings=settings, context=context)
+        ai_result = generate_grading_draft_ai_result(settings=settings, context=context, db=db)
         job.provider = ai_result.provider
         job.model = ai_result.model
 
