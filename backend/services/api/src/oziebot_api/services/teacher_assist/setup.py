@@ -41,12 +41,24 @@ def teacher_assist_context_for_user(db: Session, user: User) -> TeacherAssistCon
     return TeacherAssistContext(tenant_id=tenant_id)
 
 
-def list_school_years(db: Session, *, tenant_id: uuid.UUID) -> list[TeacherAssistSchoolYear]:
-    return db.scalars(
+def list_school_years(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    include_templates: bool = True,
+) -> list[TeacherAssistSchoolYear]:
+    stmt = (
         select(TeacherAssistSchoolYear)
         .where(TeacherAssistSchoolYear.tenant_id == tenant_id)
         .order_by(TeacherAssistSchoolYear.start_date.desc(), TeacherAssistSchoolYear.created_at.desc())
-    ).all()
+    )
+    if not include_templates:
+        stmt = stmt.where(TeacherAssistSchoolYear.is_template.is_(False))
+    return db.scalars(stmt).all()
+
+
+def list_teacher_school_years(db: Session, *, tenant_id: uuid.UUID) -> list[TeacherAssistSchoolYear]:
+    return list_school_years(db, tenant_id=tenant_id, include_templates=False)
 
 
 def list_grading_periods(
@@ -156,6 +168,9 @@ def _enforce_active_school_year(db: Session, *, tenant_id: uuid.UUID, school_yea
     for row in db.scalars(
         select(TeacherAssistSchoolYear).where(TeacherAssistSchoolYear.tenant_id == tenant_id)
     ).all():
+        if row.is_template:
+            row.is_active = False
+            continue
         row.is_active = row.id == school_year_id
         row.updated_at = datetime.now(UTC)
 
@@ -168,6 +183,7 @@ def create_school_year(
     start_date: date,
     end_date: date,
     is_active: bool,
+    is_template: bool = False,
 ) -> TeacherAssistSchoolYear:
     _validate_date_window(start_date, end_date, label="School year")
     now = datetime.now(UTC)
@@ -176,7 +192,8 @@ def create_school_year(
         title=title.strip(),
         start_date=start_date,
         end_date=end_date,
-        is_active=is_active,
+        is_active=is_active and not is_template,
+        is_template=is_template,
         created_at=now,
         updated_at=now,
     )
@@ -213,6 +230,8 @@ def update_school_year(
 ) -> TeacherAssistSchoolYear:
     _validate_date_window(start_date, end_date, label="School year")
     row = get_school_year_or_404(db, tenant_id=tenant_id, school_year_id=school_year_id)
+    if row.is_template:
+        raise ValueError("Template school years cannot be modified")
     row.title = title.strip()
     row.start_date = start_date
     row.end_date = end_date

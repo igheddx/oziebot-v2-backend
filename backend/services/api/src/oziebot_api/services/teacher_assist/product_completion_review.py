@@ -78,7 +78,7 @@ FEATURE_AREAS: list[dict[str, Any]] = [
         key="instructional_weeks",
         name="Instructional Weeks",
         status="implemented",
-        routes=["/teacher-assist/week/[id]", "/teacher-assist/planning/weeks"],
+        routes=["/teacher-assist/week/", "/teacher-assist/planning/weeks"],
         api_prefix="/v1/teacher-assist/instructional-weeks",
         pilot_ready=True,
     ),

@@ -47,6 +47,14 @@ const TAB_LABELS: Record<TabKey, string> = {
   actions: "Action Center",
 };
 
+function readString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
 function ItemList({ items, emptyLabel }: { items: ItemRow[]; emptyLabel: string }) {
   if (items.length === 0) {
     return <p className="text-sm text-slate-500">{emptyLabel}</p>;
@@ -183,9 +191,10 @@ function MasteryTab({ mastery }: { mastery: MasteryTabPayload }) {
   );
 }
 
-export function TeacherAssistInstructionalWeekScreen({ weekId }: { weekId: string }) {
+export function TeacherAssistInstructionalWeekScreen({ weekId: weekIdProp }: { weekId?: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const weekId = weekIdProp ?? searchParams.get("id") ?? "";
   const requestedTab = (searchParams.get("tab") as TabKey | null) ?? "overview";
   const requestedAction = searchParams.get("action");
   const actionRef = useRef<string | null>(null);
@@ -220,10 +229,10 @@ export function TeacherAssistInstructionalWeekScreen({ weekId }: { weekId: strin
     if (requestedTab) setTab(requestedTab);
   }, [requestedTab]);
 
-  const week = (workspace?.instructional_week ?? {}) as Record<string, any>;
-  const tabs = (workspace?.tabs ?? {}) as Record<string, any>;
-  const overview = (tabs.overview ?? {}) as Record<string, any>;
-  const health = (workspace?.health_indicators ?? {}) as Record<string, any>;
+  const week = readRecord(workspace?.instructional_week);
+  const tabs = readRecord(workspace?.tabs);
+  const overview = readRecord(tabs.overview);
+  const health = readRecord(workspace?.health_indicators);
   const actionCenter = (workspace?.action_center ?? []) as Array<{ action_key: string; label: string; navigation_href: string }>;
   const legacyHref = workspace?.legacy_pacing_workspace_href as string | undefined;
 
@@ -264,18 +273,23 @@ export function TeacherAssistInstructionalWeekScreen({ weekId }: { weekId: strin
           <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
             <article className="ta-panel space-y-3 p-4">
               <h2 className="text-base font-semibold text-slate-900">Week overview</h2>
-              <p className="text-sm text-slate-600">{overview.description ?? week.description ?? "No description yet."}</p>
+              <p className="text-sm text-slate-600">
+                {readString(overview.description, readString(week.description, "No description yet."))}
+              </p>
               <div className="flex flex-wrap gap-1.5">
-                {(overview.objectives ?? []).map((row: { objective_code?: string; id?: string }, index: number) => (
-                  <span key={`${row.objective_code ?? row.id}-${index}`} className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                    {row.objective_code ?? "Objective"}
+                {(Array.isArray(overview.objectives) ? overview.objectives : []).map((row, index: number) => {
+                  const objective = readRecord(row);
+                  return (
+                  <span key={`${readString(objective.objective_code, readString(objective.id, String(index)))}-${index}`} className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                    {readString(objective.objective_code, "Objective")}
                   </span>
-                ))}
+                  );
+                })}
               </div>
-              {overview.notes ? (
+              {readString(overview.notes) ? (
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Notes</p>
-                  <p className="mt-1 text-sm text-slate-600">{overview.notes}</p>
+                  <p className="mt-1 text-sm text-slate-600">{readString(overview.notes)}</p>
                 </div>
               ) : null}
             </article>
@@ -297,44 +311,44 @@ export function TeacherAssistInstructionalWeekScreen({ weekId }: { weekId: strin
         return (
           <article className="ta-panel p-4">
             <h2 className="text-base font-semibold text-slate-900">Lessons</h2>
-            <ItemList items={(tabs.lessons?.items ?? []) as ItemRow[]} emptyLabel="No lessons linked to this week yet." />
+            <ItemList items={(readRecord(tabs.lessons).items as ItemRow[] | undefined) ?? []} emptyLabel="No lessons linked to this week yet." />
           </article>
         );
       case "assignments":
         return (
           <article className="ta-panel p-4">
             <h2 className="text-base font-semibold text-slate-900">Assignments</h2>
-            <ItemList items={(tabs.assignments?.items ?? []) as ItemRow[]} emptyLabel="No assignments for this week yet." />
+            <ItemList items={(readRecord(tabs.assignments).items as ItemRow[] | undefined) ?? []} emptyLabel="No assignments for this week yet." />
           </article>
         );
       case "assessments":
         return (
           <article className="ta-panel p-4">
             <h2 className="text-base font-semibold text-slate-900">Assessments</h2>
-            <ItemList items={(tabs.assessments?.items ?? []) as ItemRow[]} emptyLabel="No assessments for this week yet." />
+            <ItemList items={(readRecord(tabs.assessments).items as ItemRow[] | undefined) ?? []} emptyLabel="No assessments for this week yet." />
           </article>
         );
       case "resources":
         return (
           <article className="ta-panel space-y-3 p-4">
             <h2 className="text-base font-semibold text-slate-900">Resources</h2>
-            <ItemList items={(tabs.resources?.items ?? []) as ItemRow[]} emptyLabel="No resources attached yet." />
+            <ItemList items={(readRecord(tabs.resources).items as ItemRow[] | undefined) ?? []} emptyLabel="No resources attached yet." />
           </article>
         );
       case "newsletter":
         return (
           <article className="ta-panel p-4">
             <h2 className="text-base font-semibold text-slate-900">Newsletter</h2>
-            <ItemList items={(tabs.newsletter?.items ?? []) as ItemRow[]} emptyLabel="No newsletter drafts for this week yet." />
+            <ItemList items={(readRecord(tabs.newsletter).items as ItemRow[] | undefined) ?? []} emptyLabel="No newsletter drafts for this week yet." />
           </article>
         );
       case "mastery":
-        return <MasteryTab mastery={(tabs.mastery ?? {}) as MasteryTabPayload} />;
+        return <MasteryTab mastery={readRecord(tabs.mastery) as MasteryTabPayload} />;
       case "timeline":
         return (
           <article className="ta-panel p-4">
             <h2 className="text-base font-semibold text-slate-900">Timeline</h2>
-            <ItemList items={(tabs.timeline?.items ?? []) as ItemRow[]} emptyLabel="No week activity yet." />
+            <ItemList items={(readRecord(tabs.timeline).items as ItemRow[] | undefined) ?? []} emptyLabel="No week activity yet." />
           </article>
         );
       case "actions":
@@ -353,7 +367,7 @@ export function TeacherAssistInstructionalWeekScreen({ weekId }: { weekId: strin
                 disabled={busyAction === "snapshot"}
                 onClick={() => {
                   setBusyAction("snapshot");
-                  void createInstructionalWeekSnapshot(weekId, `${week.title ?? "Week"} Snapshot`)
+                  void createInstructionalWeekSnapshot(weekId, `${readString(week.title, "Week")} Snapshot`)
                     .then(() => {
                       setSectionAlert("instructionalWeek", sectionSuccess("Week snapshot saved.", "Snapshot saved"));
                     })
@@ -383,12 +397,19 @@ export function TeacherAssistInstructionalWeekScreen({ weekId }: { weekId: strin
 
   return (
     <div className="space-y-4">
+      {!weekId ? (
+        <div className="ta-panel p-6 text-sm text-slate-600">
+          Missing instructional week id. Open a week from Home or the pacing workspace.
+        </div>
+      ) : (
+        <>
       <header className="ta-panel p-4">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">Instructional Week</p>
-        <h1 className="mt-1 text-2xl font-semibold text-slate-900">{week.title ?? "Week workspace"}</h1>
+        <h1 className="mt-1 text-2xl font-semibold text-slate-900">{readString(week.title, "Week workspace")}</h1>
         <p className="mt-1 text-sm text-slate-600">
-          {overview.subject ?? "Subject"} · Grade {overview.grade ?? "—"} · {overview.dates?.start_date ?? "—"} to{" "}
-          {overview.dates?.end_date ?? "—"} · {week.status ?? "DRAFT"}
+          {readString(overview.subject, "Subject")} · Grade {readString(overview.grade, "—")} ·{" "}
+          {readString(readRecord(overview.dates).start_date, "—")} to {readString(readRecord(overview.dates).end_date, "—")} ·{" "}
+          {readString(week.status, "DRAFT")}
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <Link href="/teacher-assist/home" className="ta-button-secondary text-xs">
@@ -422,6 +443,8 @@ export function TeacherAssistInstructionalWeekScreen({ weekId }: { weekId: strin
       </section>
 
       {loading || !workspace ? <p className="text-sm text-slate-600">Loading instructional week workspace...</p> : tabContent}
+        </>
+      )}
     </div>
   );
 }

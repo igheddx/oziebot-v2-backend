@@ -9,6 +9,7 @@ import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teach
 import {
   TeacherAssistInlineAlert,
   sectionError,
+  sectionSuccess,
   useTeacherAssistSectionAlerts,
 } from "@/components/teacher-assist/teacher-assist-inline-alert";
 import {
@@ -29,6 +30,7 @@ import {
   startWeeklyPlanWorkflow,
   updatePlanningDraft,
   updatePlanningDraftStatus,
+  uploadResourceFile,
 } from "@/lib/teacher-assist-api";
 import type {
   GradingPeriod,
@@ -201,8 +203,11 @@ function workflowStatusMessage(workflow: TeacherAssistWorkflow) {
 
 export function TeacherAssistWeeklyPlanningScreen() {
   const searchParams = useSearchParams();
-  const pacingPeriodId = searchParams.get("pacing_period_id");
+  const pacingPeriodId = searchParams.get("pacing_period_id") ?? searchParams.get("period_id");
+  const focusResources = searchParams.get("focus") === "resources";
   const pacingPrefillRef = useRef<string | null>(null);
+  const resourcesSectionRef = useRef<HTMLElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -213,6 +218,8 @@ export function TeacherAssistWeeklyPlanningScreen() {
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [contextPreview, setContextPreview] = useState<PlanningDraftContextPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [uploadingResources, setUploadingResources] = useState(false);
 
   const load = useCallback(
     async (preferredDraftId?: string | null, options?: { silent?: boolean }) => {
@@ -323,6 +330,49 @@ export function TeacherAssistWeeklyPlanningScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!focusResources || loading) return;
+    resourcesSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [focusResources, loading]);
+
+  const handleResourceUpload = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0) return;
+      setUploadingResources(true);
+      clearSectionAlert("resourceUpload");
+      try {
+        const uploadedIds: string[] = [];
+        for (const file of files) {
+          const resource = await uploadResourceFile(file);
+          uploadedIds.push(resource.id);
+        }
+        await load(activeDraftId, { silent: true });
+        setDraftForm((current) => ({
+          ...current,
+          resource_ids: [...new Set([...current.resource_ids, ...uploadedIds])],
+        }));
+        setSectionAlert(
+          "resourceUpload",
+          sectionSuccess(
+            `${files.length} file${files.length === 1 ? "" : "s"} uploaded. Select them below or save your draft.`,
+            "Upload complete",
+          ),
+        );
+      } catch (nextError) {
+        setSectionAlert(
+          "resourceUpload",
+          sectionError(
+            nextError instanceof Error ? nextError.message : "Could not upload curriculum files.",
+            "Upload failed",
+          ),
+        );
+      } finally {
+        setUploadingResources(false);
+      }
+    },
+    [activeDraftId, clearSectionAlert, load, setSectionAlert],
+  );
 
   useEffect(() => {
     if (!pacingPeriodId || loading || activeDraftId || pacingPrefillRef.current === pacingPeriodId) {
@@ -632,24 +682,23 @@ export function TeacherAssistWeeklyPlanningScreen() {
     <div className="space-y-6">
       <section className="ta-panel p-6 sm:p-8">
         <div className="max-w-4xl">
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">
-            TeacherAssist Instructional Planning
-          </p>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">Weekly Planning</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
-            Build instructional planning context, then run guarded plan generation
+            {pacingPeriodId
+              ? "Upload resources, then generate this week’s plan"
+              : "Plan instruction week by week"}
           </h1>
           <p className="mt-3 text-base leading-7 text-slate-600">
-            Save a complete planning draft, review the scope-aware context preview, mark it ready,
-            and then run the instructional-plan workflow. The route stays in weekly planning,
-            but the workspace now supports weekly, multi-week, module, unit, and grading-period
-            planning.
+            Drag curriculum files into your draft, add reference links from the Resource Library, save
+            the draft, mark it ready, then click Generate Plan to produce lesson plans, Google Slides,
+            quizzes, and assignments.
           </p>
         </div>
       </section>
 
       <TeacherAssistAlert
         variant="info"
-        description="TeacherAssist workflows here are persisted and worker-driven. Mock remains the safe default, and any real-provider execution stays explicitly gated by backend config."
+        description="Newsletters and parent communication come later — this screen focuses on instructional artifacts for the selected pacing week."
       />
 
       <TeacherAssistFormErrorSummary title="Unable to load planning workspace" message={pageError} />
@@ -984,12 +1033,71 @@ export function TeacherAssistWeeklyPlanningScreen() {
               </div>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-3" ref={resourcesSectionRef}>
               <div>
-                <p className="ta-label">Resources</p>
+                <p className="ta-label">Curriculum resources</p>
                 <p className="mt-1 text-sm text-slate-500">
-                  Attach reusable curriculum resources for mock weekly-plan generation.
+                  Drag files here or browse to upload. Uploaded files attach to this planning draft.
                 </p>
+              </div>
+              <TeacherAssistInlineAlert
+                alert={getSectionAlert("resourceUpload")}
+                onDismiss={() => clearSectionAlert("resourceUpload")}
+              />
+              <button
+                type="button"
+                disabled={uploadingResources}
+                onClick={() => fileInputRef.current?.click()}
+                onDragEnter={(event) => {
+                  event.preventDefault();
+                  setDragActive(true);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDragActive(true);
+                }}
+                onDragLeave={(event) => {
+                  event.preventDefault();
+                  setDragActive(false);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragActive(false);
+                  const files = Array.from(event.dataTransfer.files);
+                  if (files.length > 0) {
+                    void handleResourceUpload(files);
+                  }
+                }}
+                className={`flex min-h-36 w-full flex-col items-center justify-center rounded-2xl border border-dashed px-6 py-8 text-center transition ${
+                  dragActive
+                    ? "border-sky-400 bg-sky-50"
+                    : "border-slate-300 bg-slate-50 hover:border-sky-300 hover:bg-sky-50/50"
+                }`}
+              >
+                <span className="text-sm font-semibold text-slate-900">
+                  {uploadingResources ? "Uploading..." : "Drag and drop curriculum files here"}
+                </span>
+                <span className="mt-2 text-xs leading-5 text-slate-600">
+                  PDFs, slides, docs, images, and other supporting materials
+                </span>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(event) => {
+                  const files = event.target.files ? Array.from(event.target.files) : [];
+                  if (files.length > 0) {
+                    void handleResourceUpload(files);
+                  }
+                  event.target.value = "";
+                }}
+              />
+              <div className="flex flex-wrap gap-2">
+                <Link href="/teacher-assist/resources" className="ta-button-secondary text-xs">
+                  Add reference links
+                </Link>
               </div>
               <div className="grid gap-2 md:grid-cols-2">
                 {(snapshot?.resources ?? []).length > 0 ? (
@@ -1092,7 +1200,7 @@ export function TeacherAssistWeeklyPlanningScreen() {
                   void handleGenerate();
                 }}
               >
-                {savingKey === "generate" ? "Starting..." : "Generate Instructional Plan"}
+                {savingKey === "generate" ? "Generating..." : "Generate Plan"}
               </button>
             </div>
             <p className="mt-2 text-sm text-slate-500">

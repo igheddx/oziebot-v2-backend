@@ -10,36 +10,44 @@ export type TeacherAssistNavGroup = {
   links: TeacherAssistNavLink[];
 };
 
-/** Primary teacher workflow — ordered for pilot clarity. */
+/** Primary teacher workflow — pacing guide first, then weekly planning. */
 export const TEACHER_ASSIST_PRIMARY_LINKS: TeacherAssistNavLink[] = [
   { href: "/teacher-assist/home", label: "Home" },
-  { href: "/teacher-assist/planning/weeks", label: "Instructional Weeks" },
+  { href: "/teacher-assist/get-started", label: "Setup" },
   { href: "/teacher-assist/pacing-guides", label: "Pacing Guides" },
-  { href: "/teacher-assist/assignments", label: "Assignments" },
-  { href: "/teacher-assist/mastery", label: "Mastery" },
+  { href: "/teacher-assist/planning/pacing-guides/workspace", label: "Pacing Workspace" },
+  { href: "/teacher-assist/planning/weeks", label: "Weekly Planning" },
   { href: "/teacher-assist/resources", label: "Resources" },
-  { href: "/teacher-assist/newsletters", label: "Communication" },
-  { href: "/teacher-assist/copilot", label: "Copilot" },
 ];
 
 export const TEACHER_ASSIST_NAV_GROUPS: TeacherAssistNavGroup[] = [
+  {
+    key: "instruction",
+    label: "Instruction",
+    links: [
+      { href: "/teacher-assist/assignments", label: "Assignments" },
+      { href: "/teacher-assist/mastery", label: "Mastery" },
+      { href: "/teacher-assist/plans", label: "Plan Library" },
+      { href: "/teacher-assist/weekly-planning", label: "Legacy Planning" },
+    ],
+  },
   {
     key: "operations",
     label: "Operations",
     links: [
       { href: "/teacher-assist/work-queue", label: "Work Queue" },
-      { href: "/teacher-assist/planning/pacing-guides/workspace", label: "Current Week" },
       { href: "/teacher-assist/planning/templates", label: "Template Library" },
       { href: "/teacher-assist/catalog", label: "Catalog Browse" },
+      { href: "/teacher-assist/extractions", label: "Student Work" },
+      { href: "/teacher-assist/gradebook", label: "Gradebook" },
     ],
   },
   {
-    key: "instruction",
-    label: "Instruction",
+    key: "communication",
+    label: "Communication",
     links: [
-      { href: "/teacher-assist/plans", label: "Plans" },
-      { href: "/teacher-assist/extractions", label: "Student Work" },
-      { href: "/teacher-assist/gradebook", label: "Gradebook" },
+      { href: "/teacher-assist/newsletters", label: "Newsletters" },
+      { href: "/teacher-assist/communication", label: "Communication Hub" },
     ],
   },
   {
@@ -49,16 +57,13 @@ export const TEACHER_ASSIST_NAV_GROUPS: TeacherAssistNavGroup[] = [
       { href: "/teacher-assist/reteach", label: "Reteach Workspace" },
       { href: "/teacher-assist/reteach-plans", label: "Reteach Plans" },
       { href: "/teacher-assist/reflections", label: "Reflections" },
-      { href: "/teacher-assist/actions", label: "Reviews" },
+      { href: "/teacher-assist/copilot", label: "Copilot" },
     ],
   },
   {
     key: "content",
     label: "Content",
-    links: [
-      { href: "/teacher-assist/exports", label: "Exports" },
-      { href: "/teacher-assist/communication", label: "Communication Hub" },
-    ],
+    links: [{ href: "/teacher-assist/exports", label: "Exports" }],
   },
   {
     key: "administration",
@@ -76,12 +81,11 @@ export const TEACHER_ASSIST_ROOT_ADMIN_LINKS = TEACHER_ASSIST_NAV_GROUPS.find(
   (group) => group.key === "administration",
 )?.links.filter((link) => link.rootAdminOnly) ?? [];
 
+/** Workflow-aligned shortcuts — no standalone generate actions. */
 export const TEACHER_ASSIST_QUICK_CREATE_LINKS: TeacherAssistNavLink[] = [
-  { href: "/teacher-assist/planning/weeks", label: "Open instructional week" },
-  { href: "/teacher-assist/weekly-planning", label: "Create lesson" },
-  { href: "/teacher-assist/assignments", label: "Create assignment" },
-  { href: "/teacher-assist/reteach-plans", label: "Create reteach plan" },
-  { href: "/teacher-assist/newsletters", label: "Create newsletter" },
+  { href: "/teacher-assist/pacing-guides", label: "Browse pacing guides" },
+  { href: "/teacher-assist/planning/pacing-guides/workspace", label: "Open pacing workspace" },
+  { href: "/teacher-assist/planning/weeks", label: "Weekly planning" },
 ];
 
 export const TEACHER_ASSIST_NAV_LINKS: TeacherAssistNavLink[] = [

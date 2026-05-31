@@ -13,6 +13,7 @@ import {
   logout,
   updateDefaultProduct,
 } from "@/lib/auth-service";
+import { fetchTeacherAssistV2Context } from "@/lib/teacher-assist-v2-api";
 import { productKeyForPathname, routeForProductKey } from "@/lib/products";
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
@@ -135,6 +136,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         bootstrap.user.products.find((product) => product.is_default)?.product_key ??
         bootstrap.user.products[0]?.product_key ??
         null;
+      if (defaultProduct === "teacher_assist") {
+        try {
+          const context = await fetchTeacherAssistV2Context();
+          router.replace(context.landing_route);
+          return;
+        } catch {
+          /* fall through to product route */
+        }
+      }
       router.replace(routeForProductKey(defaultProduct));
     },
     [hydrateSession, router],

@@ -23,6 +23,7 @@ from oziebot_api.services.teacher_assist.action_workspace import (
     get_teacher_assist_action_workspace,
 )
 from oziebot_api.services.teacher_assist.mastery_dashboard import build_mastery_dashboard
+from oziebot_api.services.teacher_assist.education_catalog import get_active_teacher_assignment
 from oziebot_api.services.teacher_assist.setup import get_teacher_profile
 from oziebot_api.services.teacher_assist.workspace_service import get_teacher_assist_workspace
 
@@ -215,14 +216,12 @@ def _build_onboarding_checklist(
     user_id: uuid.UUID,
 ) -> dict[str, Any]:
     profile = get_teacher_profile(db, user_id=user_id)
+    school_assignment = get_active_teacher_assignment(db, user_id=user_id)
     school_year_count = db.scalar(
         select(func.count()).select_from(TeacherAssistSchoolYear).where(TeacherAssistSchoolYear.tenant_id == tenant_id)
     )
     class_count = db.scalar(
         select(func.count()).select_from(TeacherAssistClass).where(TeacherAssistClass.tenant_id == tenant_id)
-    )
-    standard_count = db.scalar(
-        select(func.count()).select_from(TeacherAssistStandard).where(TeacherAssistStandard.tenant_id == tenant_id)
     )
     plan_count = db.scalar(
         select(func.count())
@@ -251,61 +250,30 @@ def _build_onboarding_checklist(
 
     items = [
         {
-            "key": "profile",
-            "title": "Teacher profile",
-            "complete": profile is not None
-            and any(
-                [
-                    profile.preferred_grade_level,
-                    profile.default_student_count,
-                    profile.preferred_grading_period_type,
-                    profile.timezone,
-                ]
-            ),
-            "navigation_href": "/teacher-assist/settings",
-            "navigation_label": "Open settings",
+            "key": "school_placement",
+            "title": "School & district",
+            "complete": school_assignment is not None
+            and profile is not None
+            and bool(profile.preferred_grade_level),
+            "navigation_href": "/teacher-assist/settings#school-setup",
+            "navigation_label": "Set school placement",
         },
         {
             "key": "school_year",
             "title": "School year",
             "complete": int(school_year_count or 0) > 0,
-            "navigation_href": "/teacher-assist/settings",
+            "navigation_href": "/teacher-assist/settings#school-year",
             "navigation_label": "Configure school year",
         },
         {
-            "key": "classes",
-            "title": "Classes",
-            "complete": int(class_count or 0) > 0,
-            "navigation_href": "/teacher-assist/settings",
-            "navigation_label": "Add classes",
-        },
-        {
-            "key": "standards",
-            "title": "Standards",
-            "complete": int(standard_count or 0) > 0,
-            "navigation_href": "/teacher-assist/settings",
-            "navigation_label": "Add standards",
-        },
-        {
-            "key": "first_plan",
-            "title": "First instructional plan",
-            "complete": int(plan_count or 0) > 0,
-            "navigation_href": "/teacher-assist/weekly-planning",
-            "navigation_label": "Create plan",
-        },
-        {
-            "key": "first_assignment",
-            "title": "First assignment",
-            "complete": int(assignment_count or 0) > 0,
-            "navigation_href": "/teacher-assist/assignments",
-            "navigation_label": "Create assignment",
-        },
-        {
-            "key": "first_mastery_matrix",
-            "title": "First mastery matrix",
-            "complete": int(mastery_matrix_count or 0) > 0,
-            "navigation_href": "/teacher-assist/mastery",
-            "navigation_label": "Create matrix",
+            "key": "classroom",
+            "title": "My classroom",
+            "complete": int(class_count or 0) > 0
+            and profile is not None
+            and profile.default_student_count is not None
+            and profile.default_student_count > 0,
+            "navigation_href": "/teacher-assist/settings#my-classroom",
+            "navigation_label": "Configure classroom",
         },
     ]
     completed_count = sum(1 for item in items if item["complete"])

@@ -59,6 +59,7 @@ from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPla
 from oziebot_api.models.teacher_assist_weekly_plan_version import TeacherAssistWeeklyPlanVersion
 from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
 from oziebot_api.models.teacher_assist_workflow_step import TeacherAssistWorkflowStep
+from oziebot_api.schemas.education_catalog import TeacherMyClassroomOut, TeacherMyClassroomUpdate
 from oziebot_api.schemas.teacher_assist import (
     AssignmentCreate,
     TeacherAssistActionWorkspaceActivityOut,
@@ -304,6 +305,7 @@ from oziebot_api.services.teacher_assist.work_queue import build_teacher_assist_
 from oziebot_api.services.teacher_assist.user_preferences import (
     build_onboarding_progress,
     get_user_preferences_or_create,
+    mark_onboarding_step_complete,
     serialize_user_preferences,
     update_user_preferences,
     validate_preferred_landing,
@@ -513,6 +515,8 @@ from oziebot_api.services.teacher_assist.workflow_service import (
     _plan_source_metadata,
 )
 from oziebot_api.services.teacher_assist.workspace_service import get_teacher_assist_workspace
+from oziebot_api.services.teacher_assist.teacher_classroom import build_my_classroom, upsert_my_classroom
+from oziebot_api.services.teacher_assist.education_catalog import get_active_teacher_assignment
 from oziebot_api.services.teacher_assist.setup import (
     attach_class_subject,
     commit_standards_import,
@@ -525,7 +529,7 @@ from oziebot_api.services.teacher_assist.setup import (
     list_class_subjects,
     list_classes,
     list_grading_periods,
-    list_school_years,
+    list_teacher_school_years,
     list_standards,
     list_subjects,
     preview_standards_import,
@@ -1919,11 +1923,16 @@ def save_teacher_profile(
     db: DbSession,
 ) -> TeacherProfileOut:
     _teacher_assist_tenant_id(db, user)
+    existing = get_teacher_profile(db, user_id=user.id)
+    assignment = get_active_teacher_assignment(db, user_id=user.id)
+    grade_level = body.preferred_grade_level
+    if assignment is not None and existing is not None and existing.preferred_grade_level:
+        grade_level = existing.preferred_grade_level
     try:
         row = upsert_teacher_profile(
             db,
             user=user,
-            preferred_grade_level=body.preferred_grade_level,
+            preferred_grade_level=grade_level,
             default_student_count=body.default_student_count,
             preferred_grading_period_type=body.preferred_grading_period_type,
             timezone=body.timezone,
@@ -1933,10 +1942,37 @@ def save_teacher_profile(
     return _profile_out(row)
 
 
+@router.get("/my-classroom", response_model=TeacherMyClassroomOut)
+def read_my_classroom(user: CurrentUser, db: DbSession) -> TeacherMyClassroomOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    return TeacherMyClassroomOut(**build_my_classroom(db, tenant_id=tenant_id, user_id=user.id))
+
+
+@router.put("/my-classroom", response_model=TeacherMyClassroomOut)
+def save_my_classroom(
+    body: TeacherMyClassroomUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> TeacherMyClassroomOut:
+    tenant_id = _teacher_assist_tenant_id(db, user)
+    try:
+        payload = upsert_my_classroom(
+            db,
+            tenant_id=tenant_id,
+            user=user,
+            homeroom_name=body.homeroom_name,
+            student_count=body.student_count,
+            timezone=body.timezone,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return TeacherMyClassroomOut(**payload)
+
+
 @router.get("/school-years", response_model=list[SchoolYearOut])
 def read_school_years(user: CurrentUser, db: DbSession) -> list[SchoolYearOut]:
     tenant_id = _teacher_assist_tenant_id(db, user)
-    return [_school_year_out(row) for row in list_school_years(db, tenant_id=tenant_id)]
+    return [_school_year_out(row) for row in list_teacher_school_years(db, tenant_id=tenant_id)]
 
 
 @router.post("/school-years", response_model=SchoolYearOut, status_code=201)
@@ -1955,6 +1991,7 @@ def create_teacher_school_year(
             end_date=body.end_date,
             is_active=body.is_active,
         )
+        mark_onboarding_step_complete(db, tenant_id=tenant_id, user_id=user.id, step_key="school_year")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _school_year_out(row)
@@ -1978,6 +2015,7 @@ def update_teacher_school_year(
             end_date=body.end_date,
             is_active=body.is_active,
         )
+        mark_onboarding_step_complete(db, tenant_id=tenant_id, user_id=user.id, step_key="school_year")
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

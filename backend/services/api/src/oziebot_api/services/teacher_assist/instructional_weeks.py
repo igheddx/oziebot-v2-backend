@@ -20,6 +20,7 @@ from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistP
 from oziebot_api.models.teacher_assist_pacing_guide_period_note import TeacherAssistPacingGuidePeriodNote
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.models.user import User
+from oziebot_api.services.teacher_assist.constants import instructional_week_href
 from oziebot_api.services.teacher_assist.current_week_resolver import CurrentWeekResolver
 from oziebot_api.services.teacher_assist.instructional_week_constants import (
     INSTRUCTIONAL_WEEK_STATUSES,
@@ -51,7 +52,7 @@ def serialize_instructional_week(row: TeacherAssistInstructionalWeek) -> dict[st
         "updated_by_user_id": str(row.updated_by_user_id),
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
-        "navigation_href": f"/teacher-assist/week/{row.id}",
+        "navigation_href": instructional_week_href(str(row.id)),
     }
 
 

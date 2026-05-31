@@ -10,11 +10,8 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
 from oziebot_api.models.teacher_assist_class import TeacherAssistClass
-from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
 from oziebot_api.models.teacher_assist_mastery_matrix import TeacherAssistMasteryMatrix
 from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
-from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
-from oziebot_api.models.teacher_assist_standard import TeacherAssistStandard
 from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
 from oziebot_api.models.teacher_assist_user_preference import TeacherAssistUserPreference
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
@@ -22,6 +19,7 @@ from oziebot_api.services.teacher_assist.constants import (
     TEACHER_ASSIST_ONBOARDING_STEP_KEYS,
     TEACHER_ASSIST_PREFERRED_LANDINGS,
 )
+from oziebot_api.services.teacher_assist.education_catalog import get_active_teacher_assignment
 from oziebot_api.services.teacher_assist.setup import get_teacher_profile
 
 
@@ -60,10 +58,11 @@ def get_user_preferences_or_create(
         with db.begin_nested():
             db.flush()
     except IntegrityError:
-        row = _get_user_preferences(db, tenant_id=tenant_id, user_id=user_id)
-        if row is None:
+        db.expunge(row)
+        existing = _get_user_preferences(db, tenant_id=tenant_id, user_id=user_id)
+        if existing is None:
             raise
-        return row
+        return existing
     return row
 
 
@@ -81,6 +80,34 @@ def _get_user_preferences(
     ).one_or_none()
 
 
+def mark_onboarding_step_complete(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    step_key: str,
+) -> TeacherAssistUserPreference:
+    prefs = get_user_preferences_or_create(db, tenant_id=tenant_id, user_id=user_id)
+    progress = dict(prefs.onboarding_progress_json or {})
+    steps_completed = dict(progress.get("steps_completed") or {})
+    steps_completed[step_key] = True
+    progress["steps_completed"] = steps_completed
+    prefs.onboarding_progress_json = progress
+    prefs.updated_at = _now()
+    db.flush()
+    return prefs
+
+
+def _onboarding_step_complete(
+    preferences: TeacherAssistUserPreference | None,
+    step_key: str,
+) -> bool:
+    if preferences is None:
+        return False
+    steps_completed = (preferences.onboarding_progress_json or {}).get("steps_completed") or {}
+    return bool(steps_completed.get(step_key))
+
+
 def build_onboarding_progress(
     db: Session,
     *,
@@ -88,27 +115,10 @@ def build_onboarding_progress(
     user_id: uuid.UUID,
     preferences: TeacherAssistUserPreference | None = None,
 ) -> dict[str, Any]:
+    if preferences is None:
+        preferences = _get_user_preferences(db, tenant_id=tenant_id, user_id=user_id)
     profile = get_teacher_profile(db, user_id=user_id)
-    school_year_count = int(
-        db.scalar(
-            select(func.count()).select_from(TeacherAssistSchoolYear).where(
-                TeacherAssistSchoolYear.tenant_id == tenant_id
-            )
-        )
-        or 0
-    )
-    grading_period_count = int(
-        db.scalar(
-            select(func.count())
-            .select_from(TeacherAssistGradingPeriod)
-            .join(
-                TeacherAssistSchoolYear,
-                TeacherAssistGradingPeriod.school_year_id == TeacherAssistSchoolYear.id,
-            )
-            .where(TeacherAssistSchoolYear.tenant_id == tenant_id)
-        )
-        or 0
-    )
+    school_assignment = get_active_teacher_assignment(db, user_id=user_id)
     class_count = int(
         db.scalar(
             select(func.count()).select_from(TeacherAssistClass).where(
@@ -121,14 +131,6 @@ def build_onboarding_progress(
         db.scalar(
             select(func.count()).select_from(TeacherAssistSubject).where(
                 TeacherAssistSubject.tenant_id == tenant_id
-            )
-        )
-        or 0
-    )
-    standard_count = int(
-        db.scalar(
-            select(func.count()).select_from(TeacherAssistStandard).where(
-                TeacherAssistStandard.tenant_id == tenant_id
             )
         )
         or 0
@@ -177,93 +179,38 @@ def build_onboarding_progress(
 
     step_definitions: list[dict[str, Any]] = [
         {
-            "key": "profile",
-            "title": "Teacher profile",
-            "description": "Set grade level, student count, and timezone.",
-            "complete": profile is not None
-            and any(
-                [
-                    profile.preferred_grade_level,
-                    profile.default_student_count,
-                    profile.preferred_grading_period_type,
-                    profile.timezone,
-                ]
-            ),
-            "navigation_href": "/teacher-assist/settings",
-            "navigation_label": "Open settings",
+            "key": "school_placement",
+            "title": "School & district",
+            "description": "Associate with your state, district, school, grade, and teaching subjects.",
+            "complete": school_assignment is not None
+            and subject_count > 0
+            and profile is not None
+            and bool(profile.preferred_grade_level),
+            "navigation_href": "/teacher-assist/settings#school-setup",
+            "navigation_label": "Open school setup",
         },
         {
             "key": "school_year",
             "title": "School year",
-            "description": "Define the active instructional year.",
-            "complete": school_year_count > 0,
-            "navigation_href": "/teacher-assist/settings",
+            "description": "Define the active instructional year for your homeroom.",
+            "complete": _onboarding_step_complete(preferences, "school_year"),
+            "navigation_href": "/teacher-assist/settings#school-year",
             "navigation_label": "Add school year",
         },
         {
-            "key": "grading_periods",
-            "title": "Grading periods",
-            "description": "Configure reporting periods for pacing and gradebook.",
-            "complete": grading_period_count > 0,
-            "navigation_href": "/teacher-assist/settings",
-            "navigation_label": "Add grading period",
+            "key": "classroom",
+            "title": "My classroom",
+            "description": "Set your homeroom name and student count.",
+            "complete": class_count > 0
+            and profile is not None
+            and profile.default_student_count is not None
+            and profile.default_student_count > 0,
+            "navigation_href": "/teacher-assist/settings#my-classroom",
+            "navigation_label": "Configure classroom",
         },
-        {
-            "key": "classes",
-            "title": "Classes",
-            "description": "Create the classes you teach.",
-            "complete": class_count > 0,
-            "navigation_href": "/teacher-assist/settings",
-            "navigation_label": "Add class",
-        },
-        {
-            "key": "subjects",
-            "title": "Subjects",
-            "description": "Add subjects linked to your classes.",
-            "complete": subject_count > 0,
-            "navigation_href": "/teacher-assist/settings",
-            "navigation_label": "Add subject",
-        },
-        {
-            "key": "standards",
-            "title": "Standards / TEKS",
-            "description": "Import or create standards for mastery tracking.",
-            "complete": standard_count > 0,
-            "navigation_href": "/teacher-assist/settings",
-            "navigation_label": "Add standards",
-        },
-        {
-            "key": "resources",
-            "title": "Resources",
-            "description": "Upload worksheets, links, and reference materials.",
-            "complete": resource_count > 0,
-            "navigation_href": "/teacher-assist/resources",
-            "navigation_label": "Add resources",
-        },
-        {
-            "key": "first_lesson_plan",
-            "title": "First lesson plan",
-            "description": "Generate or create your first instructional plan.",
-            "complete": plan_count > 0,
-            "navigation_href": "/teacher-assist/weekly-planning",
-            "navigation_label": "Create plan",
-        },
-        {
-            "key": "first_assignment",
-            "title": "First assignment",
-            "description": "Create an assignment from a plan or scratch.",
-            "complete": assignment_count > 0,
-            "navigation_href": "/teacher-assist/assignments",
-            "navigation_label": "Create assignment",
-        },
-        {
-            "key": "first_mastery_matrix",
-            "title": "First mastery matrix",
-            "description": "Start standards-based mastery tracking.",
-            "complete": mastery_matrix_count > 0,
-            "navigation_href": "/teacher-assist/mastery",
-            "navigation_label": "Create matrix",
-        },
+    ]
+    step_definitions = [
+        step for step in step_definitions if step["key"] in TEACHER_ASSIST_ONBOARDING_STEP_KEYS
     ]
     completed_count = sum(1 for step in step_definitions if step["complete"])
     progress_percent = round((completed_count / len(step_definitions)) * 100) if step_definitions else 0

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { TeacherAssistAlert } from "@/components/teacher-assist/teacher-assist-alert";
 import { TeacherAssistEmptyState } from "@/components/teacher-assist/teacher-assist-empty-state";
+import { useTeacherAssistOnboarding } from "@/components/teacher-assist/teacher-assist-onboarding-context";
 import { useAuth } from "@/components/providers/auth-provider";
 import { fetchTeacherAssistHomeWorkspace } from "@/lib/teacher-assist-api";
 import { recordPilotLoginMetric } from "@/lib/pilot-api";
@@ -22,7 +23,7 @@ function greetingName(fullName: string | null | undefined) {
   return fullName.trim().split(/\s+/)[0];
 }
 
-function PriorityCard({ item }: { item: TeacherAssistHomePriorityItem }) {
+function PriorityCard({ item, disabled }: { item: TeacherAssistHomePriorityItem; disabled?: boolean }) {
   return (
     <article className="rounded-xl border border-slate-200 bg-white px-3 py-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -30,9 +31,13 @@ function PriorityCard({ item }: { item: TeacherAssistHomePriorityItem }) {
           <p className="text-sm font-semibold text-slate-900">{item.title}</p>
           <p className="mt-0.5 text-sm text-slate-600">{item.description}</p>
         </div>
-        <Link href={item.navigation.href} className="ta-button-secondary shrink-0 text-xs">
-          {item.navigation.label}
-        </Link>
+        {disabled ? (
+          <span className="ta-button-secondary shrink-0 cursor-not-allowed text-xs opacity-45">Complete setup first</span>
+        ) : (
+          <Link href={item.navigation.href} className="ta-button-secondary shrink-0 text-xs">
+            {item.navigation.label}
+          </Link>
+        )}
       </div>
     </article>
   );
@@ -40,6 +45,7 @@ function PriorityCard({ item }: { item: TeacherAssistHomePriorityItem }) {
 
 export function TeacherAssistHomeScreen() {
   const { user } = useAuth();
+  const { isComplete: onboardingComplete } = useTeacherAssistOnboarding();
   const [payload, setPayload] = useState<TeacherAssistHomeWorkspace | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,6 +65,7 @@ export function TeacherAssistHomeScreen() {
   }, []);
 
   const priorities = payload?.priorities.items ?? [];
+  const hasActiveGuide = Boolean(payload?.current_week?.has_active_guide);
   const priorityCounts = useMemo(() => {
     const grouped = payload?.priorities.grouped ?? {};
     return {
@@ -90,25 +97,25 @@ export function TeacherAssistHomeScreen() {
           Good {new Date().getHours() < 12 ? "morning" : "afternoon"}, {greetingName(user?.full_name)}
         </h1>
         <p className="text-sm text-slate-600">
-          {payload.current_week?.has_active_guide
-            ? "Start with what you are teaching this week, then handle operational priorities."
-            : priorities.length > 0
-              ? `${priorities.length} item${priorities.length === 1 ? "" : "s"} need attention today.`
-              : "Select a pacing guide to anchor your weekly planning."}
+          {!payload.onboarding.is_complete
+            ? "Complete setup first, then browse pacing guides to begin weekly planning."
+            : payload.current_week?.has_active_guide
+              ? "Upload curriculum for this week, then generate your lesson plan, slides, and assignments."
+              : "Browse district pacing guides for your grade, copy one, then start weekly planning by subject."}
         </p>
         {!payload.onboarding.is_complete ? (
           <TeacherAssistAlert
             variant="warning"
             title={`Setup ${payload.onboarding.progress_percent}% complete`}
-            description="Finish school-year setup to unlock the full workflow."
-            actionLabel="Continue onboarding"
+            description="Finish school placement, school year, and homeroom on the Setup page."
+            actionLabel="Continue setup"
             actionHref="/teacher-assist/get-started"
             className="py-2"
           />
         ) : null}
       </header>
 
-      {payload.current_week?.has_active_guide ? (
+      {onboardingComplete && payload.current_week?.has_active_guide ? (
         <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
           <article className="ta-panel p-4">
             <div className="flex flex-wrap items-start justify-between gap-2">
@@ -123,20 +130,21 @@ export function TeacherAssistHomeScreen() {
                 </p>
               </div>
               <Link
-                href={payload.continue_planning?.current_week_href ?? "/teacher-assist/planning/pacing-guides/workspace"}
+                href={payload.continue_planning?.current_week_href ?? "/teacher-assist/planning/weeks"}
                 className="ta-button-primary text-xs"
               >
-                {payload.continue_planning?.instructional_week_href ? "Open instructional week" : "Open current week"}
+                Open weekly planning
               </Link>
             </div>
-            {payload.continue_planning?.create_instructional_week_href ? (
-              <Link href={payload.continue_planning.create_instructional_week_href} className="mt-3 inline-flex ta-button-secondary text-xs">
-                Create instructional week
-              </Link>
-            ) : null}
+            <Link
+              href="/teacher-assist/resources"
+              className="mt-3 inline-flex ta-button-secondary text-xs"
+            >
+              Upload curriculum files
+            </Link>
             <p className="mt-3 text-sm text-slate-600">
               {(payload.current_week.current_week as { description?: string } | null)?.description ??
-                "Review objectives and resources for this week in the pacing workspace."}
+                "Attach pacing-week resources, then use Generate Plan to produce lesson artifacts."}
             </p>
             <div className="mt-3 flex flex-wrap gap-1.5">
               {(
@@ -170,14 +178,17 @@ export function TeacherAssistHomeScreen() {
                 <p className="mt-1 text-sm font-medium text-slate-900">
                   {(payload.current_week.upcoming_week as { title?: string } | null)?.title ?? "No upcoming week yet"}
                 </p>
-                {payload.continue_planning?.upcoming_instructional_week_href ? (
-                  <Link href={payload.continue_planning.upcoming_instructional_week_href} className="mt-2 inline-flex ta-button-secondary text-xs">
-                    Open upcoming instructional week
-                  </Link>
-                ) : null}
-                {payload.continue_planning?.generate_next_week_href ? (
-                  <Link href={payload.continue_planning.generate_next_week_href} className="mt-2 inline-flex ta-button-primary text-xs">
-                    Generate next week
+                {(payload.continue_planning?.upcoming_instructional_week_href ??
+                  payload.continue_planning?.generate_next_week_href) ? (
+                  <Link
+                    href={
+                      payload.continue_planning.upcoming_instructional_week_href ??
+                      payload.continue_planning.generate_next_week_href ??
+                      "/teacher-assist/planning/weeks"
+                    }
+                    className="mt-2 inline-flex ta-button-secondary text-xs"
+                  >
+                    Plan upcoming week
                   </Link>
                 ) : null}
               </div>
@@ -196,39 +207,70 @@ export function TeacherAssistHomeScreen() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              {payload.quick_actions.map((action) => (
-                <Link key={action.action_key} href={action.navigation_href} className="ta-button-secondary text-xs">
-                  {action.label}
-                </Link>
-              ))}
-              {payload.continue_planning?.template_library_href ? (
-                <Link href={payload.continue_planning.template_library_href} className="ta-button-secondary text-xs">
-                  Template library
-                </Link>
-              ) : null}
+              <Link href={payload.continue_planning?.current_week_href ?? "/teacher-assist/planning/weeks"} className="ta-button-primary text-xs">
+                Plan this week
+              </Link>
+            <Link
+              href={
+                payload.continue_planning?.current_week_href
+                  ? `${payload.continue_planning.current_week_href}${payload.continue_planning.current_week_href.includes("?") ? "&" : "?"}focus=resources`
+                  : "/teacher-assist/resources"
+              }
+              className="ta-button-secondary text-xs"
+            >
+              Upload materials
+            </Link>
             </div>
           </article>
+        </section>
+      ) : onboardingComplete ? (
+        <section className="ta-panel p-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Start planning</p>
+          <h2 className="mt-1 text-lg font-semibold text-slate-900">Pacing guide workflow</h2>
+          <ol className="mt-4 space-y-3 text-sm text-slate-600">
+            <li className="rounded-xl border border-slate-200 px-4 py-3">
+              <span className="font-semibold text-slate-900">1. Browse pacing guides</span>
+              <p className="mt-1">Find the district guide for your grade level and subject.</p>
+              <Link href="/teacher-assist/pacing-guides" className="mt-2 inline-flex ta-button-secondary text-xs">
+                Browse pacing guides
+              </Link>
+            </li>
+            <li className="rounded-xl border border-slate-200 px-4 py-3">
+              <span className="font-semibold text-slate-900">2. Copy to your library</span>
+              <p className="mt-1">Copy the district guide, then set it active in pacing workspace.</p>
+              <Link href="/teacher-assist/planning/pacing-guides/workspace" className="mt-2 inline-flex ta-button-secondary text-xs">
+                Open pacing workspace
+              </Link>
+            </li>
+            <li className="rounded-xl border border-slate-200 px-4 py-3">
+              <span className="font-semibold text-slate-900">3. Weekly planning by subject</span>
+              <p className="mt-1">Upload curriculum and reference links, then click Generate Plan in weekly planning.</p>
+              <Link href="/teacher-assist/planning/weeks" className="mt-2 inline-flex ta-button-primary text-xs">
+                Start weekly planning
+              </Link>
+            </li>
+          </ol>
         </section>
       ) : (
         <section className="ta-panel p-4">
           <p className="text-sm text-slate-600">
-            No active pacing guide yet. Browse district guides and set your active guide to anchor the home dashboard.
+            Complete setup on the Setup page before browsing pacing guides or planning weekly instruction.
           </p>
-          <Link href="/teacher-assist/pacing-guides" className="ta-button-primary mt-3 inline-flex text-xs">
-            Browse pacing guides
+          <Link href="/teacher-assist/get-started" className="ta-button-primary mt-3 inline-flex text-xs">
+            Continue setup
           </Link>
         </section>
       )}
 
-      {payload.current_week?.has_active_guide ? (
+      {onboardingComplete && hasActiveGuide ? (
         <section className="ta-panel p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-semibold text-slate-900">Recently used resources</h2>
             <Link
               href={
-                payload.continue_planning?.instructional_week_href
-                  ? `${payload.continue_planning.instructional_week_href}?tab=resources`
-                  : payload.continue_planning?.current_week_href ?? "/teacher-assist/planning/weeks"
+                payload.continue_planning?.current_week_href
+                  ? `${payload.continue_planning.current_week_href}${payload.continue_planning.current_week_href.includes("?") ? "&" : "?"}focus=resources`
+                  : "/teacher-assist/resources"
               }
               className="text-xs font-semibold text-sky-700"
             >
@@ -255,7 +297,7 @@ export function TeacherAssistHomeScreen() {
         </section>
       ) : null}
 
-      {payload.current_week?.has_active_guide && payload.copilot ? (
+      {onboardingComplete && payload.current_week?.has_active_guide && payload.copilot ? (
         <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
           <article className="ta-panel p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -311,7 +353,7 @@ export function TeacherAssistHomeScreen() {
         </section>
       ) : null}
 
-      {payload.current_week?.has_active_guide && payload.instructional_loop ? (
+      {onboardingComplete && payload.current_week?.has_active_guide && payload.instructional_loop ? (
         <section className="grid gap-4 lg:grid-cols-2">
           <article className="ta-panel p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -379,7 +421,7 @@ export function TeacherAssistHomeScreen() {
         </section>
       ) : null}
 
-      {payload.current_week?.has_active_guide ? (
+      {onboardingComplete && payload.current_week?.has_active_guide ? (
         <section className="grid gap-4 lg:grid-cols-2">
           <article className="ta-panel p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -447,7 +489,7 @@ export function TeacherAssistHomeScreen() {
         </section>
       ) : null}
 
-      {priorities.length > 0 ? (
+      {onboardingComplete && hasActiveGuide && priorities.length > 0 ? (
         <section className="ta-panel p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-semibold text-slate-900">Today&apos;s priorities</h2>
@@ -474,106 +516,100 @@ export function TeacherAssistHomeScreen() {
           </div>
           <div className="mt-3 space-y-2">
             {priorities.slice(0, 6).map((item) => (
-              <PriorityCard key={item.action_key} item={item} />
+              <PriorityCard key={item.action_key} item={item} disabled={!onboardingComplete} />
             ))}
           </div>
         </section>
       ) : null}
 
-      {!payload.current_week?.has_active_guide ? (
-        <section className="flex flex-wrap gap-2">
-          {payload.quick_actions.map((action) => (
-            <Link key={action.action_key} href={action.navigation_href} className="ta-button-secondary text-xs">
-              {action.label}
-            </Link>
-          ))}
-        </section>
-      ) : null}
-
-      <section className="grid gap-4 lg:grid-cols-2">
-        <article className="ta-panel p-4">
-          <h2 className="text-base font-semibold text-slate-900">My classes</h2>
-          <div className="mt-3 space-y-2">
-            {payload.classes.length === 0 ? (
-              <TeacherAssistEmptyState
-                title="No classes yet"
-                description="Add classes in settings to start tracking work by class."
-                actionLabel="Open settings"
-                actionHref="/teacher-assist/settings"
-              />
-            ) : (
-              payload.classes.map((row) => (
-                <div key={row.class_id} className="rounded-xl border border-slate-200 px-3 py-2.5">
-                  <p className="font-semibold text-slate-900">{row.class_name}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    {row.student_count ?? 0} students · {row.open_action_count ?? 0} open actions
-                  </p>
-                  <Link href={row.navigation_href} className="mt-1 inline-block text-xs font-semibold text-sky-700">
-                    Open class
-                  </Link>
-                </div>
-              ))
-            )}
-          </div>
-        </article>
-
-        <article className="ta-panel p-4">
-          <h2 className="text-base font-semibold text-slate-900">Operational timeline</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            {payload.this_week.assignments_due_count ?? 0} assignments due ·{" "}
-            {payload.this_week.completed_plans_count ?? 0} completed plans
-          </p>
-          <div className="mt-3 space-y-1.5">
-            {payload.timeline.slice(0, 6).map((event, index) => (
-              <div key={`${event.event_type}-${index}`} className="flex items-center justify-between gap-2 text-sm">
-                <span className="shrink-0 text-xs text-slate-500">{event.event_date}</span>
-                <Link href={event.navigation_href} className="truncate font-medium text-slate-900 hover:text-sky-700">
-                  {labelize(event.event_type)} · {event.title}
-                </Link>
+      {onboardingComplete && hasActiveGuide ? (
+        <>
+          <section className="grid gap-4 lg:grid-cols-2">
+            <article className="ta-panel p-4">
+              <h2 className="text-base font-semibold text-slate-900">My classes</h2>
+              <div className="mt-3 space-y-2">
+                {payload.classes.length === 0 ? (
+                  <TeacherAssistEmptyState
+                    title="No classes yet"
+                    description="Add classes in settings to start tracking work by class."
+                    actionLabel="Open settings"
+                    actionHref="/teacher-assist/settings"
+                  />
+                ) : (
+                  payload.classes.map((row) => (
+                    <div key={row.class_id} className="rounded-xl border border-slate-200 px-3 py-2.5">
+                      <p className="font-semibold text-slate-900">{row.class_name}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {row.student_count ?? 0} students · {row.open_action_count ?? 0} open actions
+                      </p>
+                      <Link href={row.navigation_href} className="mt-1 inline-block text-xs font-semibold text-sky-700">
+                        Open class
+                      </Link>
+                    </div>
+                  ))
+                )}
               </div>
-            ))}
-            {payload.timeline.length === 0 ? (
-              <p className="text-sm text-slate-500">No upcoming items this week.</p>
-            ) : null}
-          </div>
-        </article>
-      </section>
+            </article>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <article className="ta-panel p-4">
-          <h2 className="text-base font-semibold text-slate-900">Mastery alerts</h2>
-          <div className="mt-3 space-y-2">
-            {payload.mastery_alerts.length === 0 ? (
-              <p className="text-sm text-slate-500">No mastery alerts right now.</p>
-            ) : (
-              payload.mastery_alerts.slice(0, 5).map((alert, index) => (
-                <div key={`${alert.alert_type}-${index}`} className="rounded-xl border border-slate-200 px-3 py-2.5">
-                  <p className="text-sm font-semibold text-slate-900">{alert.title}</p>
-                  {alert.description ? <p className="mt-0.5 text-xs text-slate-600">{alert.description}</p> : null}
-                  <Link href={alert.navigation_href} className="mt-1 inline-block text-xs font-semibold text-sky-700">
-                    Review
-                  </Link>
-                </div>
-              ))
-            )}
-          </div>
-        </article>
+            <article className="ta-panel p-4">
+              <h2 className="text-base font-semibold text-slate-900">Operational timeline</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                {payload.this_week.assignments_due_count ?? 0} assignments due ·{" "}
+                {payload.this_week.completed_plans_count ?? 0} completed plans
+              </p>
+              <div className="mt-3 space-y-1.5">
+                {payload.timeline.slice(0, 6).map((event, index) => (
+                  <div key={`${event.event_type}-${index}`} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="shrink-0 text-xs text-slate-500">{event.event_date}</span>
+                    <Link href={event.navigation_href} className="truncate font-medium text-slate-900 hover:text-sky-700">
+                      {labelize(event.event_type)} · {event.title}
+                    </Link>
+                  </div>
+                ))}
+                {payload.timeline.length === 0 ? (
+                  <p className="text-sm text-slate-500">No upcoming items this week.</p>
+                ) : null}
+              </div>
+            </article>
+          </section>
 
-        <article className="ta-panel p-4">
-          <h2 className="text-base font-semibold text-slate-900">Recent activity</h2>
-          <ul className="mt-3 space-y-1.5 text-sm text-slate-700">
-            {payload.recent_activity.length === 0 ? (
-              <li className="text-slate-500">No recent activity.</li>
-            ) : (
-              payload.recent_activity.slice(0, 8).map((event) => (
-                <li key={event.id} className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs">
-                  {event.summary_text}
-                </li>
-              ))
-            )}
-          </ul>
-        </article>
-      </section>
+          <section className="grid gap-4 lg:grid-cols-2">
+            <article className="ta-panel p-4">
+              <h2 className="text-base font-semibold text-slate-900">Mastery alerts</h2>
+              <div className="mt-3 space-y-2">
+                {payload.mastery_alerts.length === 0 ? (
+                  <p className="text-sm text-slate-500">No mastery alerts right now.</p>
+                ) : (
+                  payload.mastery_alerts.slice(0, 5).map((alert, index) => (
+                    <div key={`${alert.alert_type}-${index}`} className="rounded-xl border border-slate-200 px-3 py-2.5">
+                      <p className="text-sm font-semibold text-slate-900">{alert.title}</p>
+                      {alert.description ? <p className="mt-0.5 text-xs text-slate-600">{alert.description}</p> : null}
+                      <Link href={alert.navigation_href} className="mt-1 inline-block text-xs font-semibold text-sky-700">
+                        Review
+                      </Link>
+                    </div>
+                  ))
+                )}
+              </div>
+            </article>
+
+            <article className="ta-panel p-4">
+              <h2 className="text-base font-semibold text-slate-900">Recent activity</h2>
+              <ul className="mt-3 space-y-1.5 text-sm text-slate-700">
+                {payload.recent_activity.length === 0 ? (
+                  <li className="text-slate-500">No recent activity.</li>
+                ) : (
+                  payload.recent_activity.slice(0, 8).map((event) => (
+                    <li key={event.id} className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs">
+                      {event.summary_text}
+                    </li>
+                  ))
+                )}
+              </ul>
+            </article>
+          </section>
+        </>
+      ) : null}
     </div>
   );
 }

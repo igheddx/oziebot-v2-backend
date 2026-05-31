@@ -73,6 +73,10 @@ body {
   @apply w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-300 focus:ring-2 focus:ring-sky-100;
 }
 
+.ta-input.h-9 {
+  @apply h-9 px-3 py-0 leading-9;
+}
+
 .ta-button-primary {
   @apply inline-flex h-11 items-center justify-center rounded-2xl bg-sky-500 px-4 text-sm font-semibold text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60;
 }

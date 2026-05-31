@@ -35,6 +35,7 @@ class EducationDistrictOut(BaseModel):
     id: uuid.UUID
     state_id: uuid.UUID
     name: str
+    district_code: str | None = None
     active: bool
     created_at: datetime
     updated_at: datetime
@@ -43,6 +44,7 @@ class EducationDistrictOut(BaseModel):
 class EducationDistrictCreate(BaseModel):
     state_id: uuid.UUID
     name: str = Field(min_length=1, max_length=256)
+    district_code: str | None = Field(default=None, max_length=32)
     active: bool = True
 
 
@@ -195,6 +197,80 @@ class TeacherSchoolAssignmentCreate(BaseModel):
     district_id: uuid.UUID
     school_id: uuid.UUID
     active: bool = True
+
+
+class AvailableTeacherOut(BaseModel):
+    user_id: uuid.UUID
+    email: str
+    full_name: str | None = None
+
+
+class TeacherSchoolAssignmentListOut(TeacherSchoolAssignmentOut):
+    user_email: str | None = None
+    user_full_name: str | None = None
+    state_name: str | None = None
+    district_name: str | None = None
+    school_name: str | None = None
+
+
+class TeacherSchoolAssignmentProvision(BaseModel):
+    state_id: uuid.UUID
+    district_id: uuid.UUID
+    school_id: uuid.UUID
+    active: bool = True
+    user_id: uuid.UUID | None = None
+    email: str | None = Field(default=None, max_length=320)
+    full_name: str | None = Field(default=None, max_length=255)
+    tenant_name: str | None = Field(default=None, max_length=255)
+    catalog_grade_id: uuid.UUID | None = None
+
+
+class TeacherSchoolAssignmentProvisionOut(BaseModel):
+    assignment: TeacherSchoolAssignmentOut
+    user_id: uuid.UUID
+    email: str
+    full_name: str | None = None
+    created_user: bool
+    temporary_password: str | None = None
+    grade_setup_applied: bool = False
+
+
+class TeacherMySchoolSetupOut(BaseModel):
+    assignment: dict | None = None
+    catalog_grade_id: str | None = None
+    catalog_grade_code: str | None = None
+    selected_catalog_subject_ids: list[str] = Field(default_factory=list)
+    synced_subjects: list[dict[str, str]] = Field(default_factory=list)
+
+
+class TeacherMySchoolSetupUpdate(BaseModel):
+    state_id: uuid.UUID
+    district_id: uuid.UUID
+    school_id: uuid.UUID
+    catalog_grade_id: uuid.UUID
+    catalog_subject_ids: list[uuid.UUID] = Field(min_length=1)
+
+
+class TeacherMyClassroomOut(BaseModel):
+    grade_level: str | None = None
+    grade_display_name: str | None = None
+    homeroom_name: str
+    student_count: int | None = None
+    timezone: str | None = None
+    class_id: str | None = None
+    synced_subjects: list[dict[str, str]] = Field(default_factory=list)
+    has_active_school_year: bool = False
+    requires_school_setup: bool = True
+    active_school_year_id: str | None = None
+    active_school_year_title: str | None = None
+    active_school_year_start_date: str | None = None
+    active_school_year_end_date: str | None = None
+
+
+class TeacherMyClassroomUpdate(BaseModel):
+    homeroom_name: str = Field(min_length=1, max_length=128)
+    student_count: int = Field(ge=1)
+    timezone: str | None = Field(default=None, max_length=128)
 
 
 class CatalogImportPreviewIn(BaseModel):

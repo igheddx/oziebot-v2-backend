@@ -32,7 +32,13 @@ from oziebot_api.schemas.education_catalog import (
     EducationSubjectOut,
     TeacherCatalogContextOut,
     TeacherSchoolAssignmentCreate,
+    TeacherSchoolAssignmentListOut,
     TeacherSchoolAssignmentOut,
+    TeacherSchoolAssignmentProvision,
+    TeacherSchoolAssignmentProvisionOut,
+    AvailableTeacherOut,
+    TeacherMySchoolSetupOut,
+    TeacherMySchoolSetupUpdate,
 )
 from oziebot_api.services.teacher_assist.education_catalog import (
     build_teacher_catalog_context,
@@ -66,9 +72,23 @@ from oziebot_api.services.teacher_assist.education_catalog import (
     update_subject,
     update_teacher_assignment,
 )
+from oziebot_api.services.teacher_assist.teacher_assignment_provisioning import (
+    list_teacher_assignment_rows,
+    provision_teacher_school_assignment,
+    search_available_teachers_for_school,
+)
+from oziebot_api.services.teacher_assist.teacher_school_setup import (
+    build_my_school_setup,
+    sync_my_teaching_subjects,
+    upsert_my_school_assignment,
+)
 from oziebot_api.services.teacher_assist.setup import teacher_assist_context_for_user
 
 router = APIRouter(prefix="/teacher-assist/education-catalog", tags=["teacher_assist_education_catalog"])
+
+
+def _tenant_id(db: DbSession, user: CurrentUser) -> uuid.UUID:
+    return teacher_assist_context_for_user(db, user).tenant_id
 
 
 def _require_teacher_assist(db: DbSession, user: CurrentUser) -> None:
@@ -97,6 +117,43 @@ def read_my_catalog_context(user: CurrentUser, db: DbSession) -> TeacherCatalogC
     """
     _require_teacher_assist(db, user)
     return TeacherCatalogContextOut(**build_teacher_catalog_context(db, user_id=user.id))
+
+
+@router.get("/my-school-setup", response_model=TeacherMySchoolSetupOut)
+def read_my_school_setup(user: CurrentUser, db: DbSession) -> TeacherMySchoolSetupOut:
+    _require_teacher_assist(db, user)
+    tenant_id = _tenant_id(db, user)
+    return TeacherMySchoolSetupOut(**build_my_school_setup(db, tenant_id=tenant_id, user_id=user.id))
+
+
+@router.put("/my-school-setup", response_model=TeacherMySchoolSetupOut)
+def update_my_school_setup(
+    body: TeacherMySchoolSetupUpdate,
+    user: CurrentUser,
+    db: DbSession,
+) -> TeacherMySchoolSetupOut:
+    _require_teacher_assist(db, user)
+    tenant_id = _tenant_id(db, user)
+
+    def action() -> dict:
+        upsert_my_school_assignment(
+            db,
+            user_id=user.id,
+            state_id=body.state_id,
+            district_id=body.district_id,
+            school_id=body.school_id,
+        )
+        sync_my_teaching_subjects(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            catalog_grade_id=body.catalog_grade_id,
+            catalog_subject_ids=body.catalog_subject_ids,
+        )
+        db.flush()
+        return build_my_school_setup(db, tenant_id=tenant_id, user_id=user.id)
+
+    return TeacherMySchoolSetupOut(**_handle_value_errors(action))
 
 
 @router.get("/states", response_model=list[EducationStateOut])
@@ -153,7 +210,13 @@ def read_districts(
 def create_catalog_district(body: EducationDistrictCreate, user: RootAdminUser, db: DbSession) -> EducationDistrictOut:
     _require_teacher_assist(db, user)
     row = _handle_value_errors(
-        lambda: create_district(db, state_id=body.state_id, name=body.name, active=body.active)
+        lambda: create_district(
+            db,
+            state_id=body.state_id,
+            name=body.name,
+            district_code=body.district_code,
+            active=body.active,
+        )
     )
     return EducationDistrictOut.model_validate(row)
 
@@ -169,6 +232,7 @@ def update_catalog_district(
             district_id=district_id,
             state_id=body.state_id,
             name=body.name,
+            district_code=body.district_code,
             active=body.active,
         )
     )
@@ -532,19 +596,86 @@ def update_catalog_resource_link(
     return EducationResourceLinkOut.model_validate(row)
 
 
-@router.get("/teacher-assignments", response_model=list[TeacherSchoolAssignmentOut])
+@router.get("/teacher-assignments", response_model=list[TeacherSchoolAssignmentListOut])
 def read_teacher_assignments(
     user: CurrentUser,
     db: DbSession,
     user_id: uuid.UUID | None = None,
+    state_id: uuid.UUID | None = None,
+    district_id: uuid.UUID | None = None,
     school_id: uuid.UUID | None = None,
     active_only: bool = False,
-) -> list[TeacherSchoolAssignmentOut]:
+) -> list[TeacherSchoolAssignmentListOut]:
     _require_teacher_assist(db, user)
     return [
-        TeacherSchoolAssignmentOut.model_validate(row)
-        for row in list_teacher_assignments(db, user_id=user_id, school_id=school_id, active_only=active_only)
+        TeacherSchoolAssignmentListOut(
+            **TeacherSchoolAssignmentOut.model_validate(row.assignment).model_dump(),
+            user_email=row.user_email,
+            user_full_name=row.user_full_name,
+            state_name=row.state_name,
+            district_name=row.district_name,
+            school_name=row.school_name,
+        )
+        for row in list_teacher_assignment_rows(
+            db,
+            user_id=user_id,
+            state_id=state_id,
+            district_id=district_id,
+            school_id=school_id,
+            active_only=active_only,
+        )
     ]
+
+
+@router.get("/teacher-assignments/available-teachers", response_model=list[AvailableTeacherOut])
+def read_available_teachers_for_school(
+    user: RootAdminUser,
+    db: DbSession,
+    school_id: uuid.UUID = Query(...),
+    q: str | None = Query(default=None, max_length=120),
+    limit: int = Query(default=25, ge=1, le=50),
+) -> list[AvailableTeacherOut]:
+    _require_teacher_assist(db, user)
+    return [
+        AvailableTeacherOut(user_id=row.user_id, email=row.email, full_name=row.full_name)
+        for row in search_available_teachers_for_school(db, school_id=school_id, q=q, limit=limit)
+    ]
+
+
+@router.post(
+    "/teacher-assignments/provision",
+    response_model=TeacherSchoolAssignmentProvisionOut,
+    status_code=201,
+)
+def provision_catalog_teacher_assignment(
+    body: TeacherSchoolAssignmentProvision, user: RootAdminUser, db: DbSession
+) -> TeacherSchoolAssignmentProvisionOut:
+    _require_teacher_assist(db, user)
+    if body.user_id is None and not body.email:
+        raise HTTPException(status_code=422, detail="Provide user_id or email for teacher assignment")
+    row = _handle_value_errors(
+        lambda: provision_teacher_school_assignment(
+            db,
+            state_id=body.state_id,
+            district_id=body.district_id,
+            school_id=body.school_id,
+            active=body.active,
+            user_id=body.user_id,
+            email=body.email,
+            full_name=body.full_name,
+            tenant_name=body.tenant_name,
+            catalog_grade_id=body.catalog_grade_id,
+        )
+    )
+    return TeacherSchoolAssignmentProvisionOut(
+        assignment=TeacherSchoolAssignmentOut.model_validate(row.assignment),
+        user_id=row.user_id,
+        email=row.email,
+        full_name=row.full_name,
+        created_user=row.created_user,
+        temporary_password=row.temporary_password,
+        grade_setup_applied=row.grade_setup_applied,
+    )
 
 
 @router.post("/teacher-assignments", response_model=TeacherSchoolAssignmentOut, status_code=201)

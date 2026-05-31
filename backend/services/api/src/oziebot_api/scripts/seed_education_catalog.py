@@ -32,6 +32,11 @@ from oziebot_api.services.teacher_assist.education_catalog import (
     create_teacher_assignment,
 )
 
+GOLDEN_PATH_ELA_OBJECTIVE_ID = "5.6E"
+GOLDEN_PATH_ELA_OBJECTIVE_DESCRIPTION = (
+    "Students will make inferences from informational text and support their conclusions with textual evidence."
+)
+
 
 def _user_by_email(db: Session, email: str) -> User | None:
     return db.scalars(select(User).where(func.lower(User.email) == email.strip().lower())).one_or_none()
@@ -63,8 +68,15 @@ def seed_education_catalog(db: Session) -> dict[str, int]:
         )
     ).one_or_none()
     if district is None:
-        district = create_district(db, state_id=state.id, name="Leander Independent School District")
+        district = create_district(
+            db,
+            state_id=state.id,
+            name="Leander Independent School District",
+            district_code="LISD",
+        )
         counts["districts"] += 1
+    elif district.district_code is None:
+        district.district_code = "LISD"
 
     school = db.scalars(
         select(EducationSchool).where(
@@ -77,7 +89,7 @@ def seed_education_catalog(db: Session) -> dict[str, int]:
             db,
             district_id=district.id,
             name="Mason Elementary",
-            school_type="elementary",
+            school_type="Elementary",
         )
         counts["schools"] += 1
 
@@ -124,6 +136,7 @@ def seed_education_catalog(db: Session) -> dict[str, int]:
                 counts["subjects"] += 1
 
     objective_defs = [
+        ("5", "ELA", GOLDEN_PATH_ELA_OBJECTIVE_ID, GOLDEN_PATH_ELA_OBJECTIVE_DESCRIPTION),
         ("5", "ELA", "5.ELA.1", "Students identify main idea and supporting details."),
         ("5", "ELA", "5.ELA.2", "Students summarize informational texts."),
         ("5", "Math", "5.MATH.1", "Students perform operations with decimals."),
@@ -152,6 +165,12 @@ def seed_education_catalog(db: Session) -> dict[str, int]:
                 coverage_type="required",
             )
             counts["objectives"] += 1
+        elif objective_id == GOLDEN_PATH_ELA_OBJECTIVE_ID:
+            existing.description = description
+            existing.objective_type = "TEKS"
+            existing.coverage_type = "required"
+            existing.subject_code = subject_code
+            existing.grade_level = grade_level
 
     curriculum_titles = {
         "ELA": "5th Grade ELA Curriculum Guide",

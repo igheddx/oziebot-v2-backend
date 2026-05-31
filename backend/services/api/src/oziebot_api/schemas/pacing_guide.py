@@ -8,6 +8,22 @@ from pydantic import BaseModel, ConfigDict, Field
 
 PacingGuideTypeLiteral = Literal["DISTRICT", "GRADE_LEVEL", "TEACHER"]
 PacingGuidePeriodTypeLiteral = Literal["YEAR", "GRADING_PERIOD", "UNIT", "WEEK"]
+PacingSchoolYearRoleLiteral = Literal["current", "next", "above_next"]
+
+
+class PacingSchoolYearOptionOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    role: PacingSchoolYearRoleLiteral
+    start_date: date
+    end_date: date
+    is_default: bool
+    is_active: bool
+
+
+class PacingSchoolYearOptionsOut(BaseModel):
+    options: list[PacingSchoolYearOptionOut]
+    default_school_year_id: uuid.UUID | None = None
 
 
 class CatalogPacingGuideCreate(BaseModel):

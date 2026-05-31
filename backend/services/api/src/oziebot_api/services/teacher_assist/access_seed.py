@@ -31,6 +31,7 @@ class TeacherAssistAccessSeedResult:
     teacher_assist_granted: bool
     default_product: str
     temporary_password_generated: bool
+    temporary_password: str | None = None
 
 
 def _normalized_email(value: str) -> str:
@@ -72,14 +73,23 @@ def _create_user(
     full_name: str,
     password: str | None,
     now: datetime,
-) -> tuple[User, bool]:
-    generated_password = password is None
+) -> tuple[User, bool, str | None]:
+    if password is None:
+        temporary_password = secrets.token_urlsafe(12)
+        password_hash = hash_password(temporary_password)
+        generated_password = True
+    else:
+        temporary_password = None
+        password_hash = hash_password(password)
+        generated_password = False
     user = User(
         id=uuid.uuid4(),
         email=_normalized_email(email),
         full_name=full_name.strip(),
-        password_hash=hash_password(password or secrets.token_urlsafe(32)),
+        password_hash=password_hash,
         is_root_admin=False,
+        teacher_assist_role="teacher" if generated_password else None,
+        must_change_password=generated_password,
         is_active=True,
         email_verified_at=None,
         current_trading_mode="paper",
@@ -88,7 +98,7 @@ def _create_user(
     )
     db.add(user)
     db.flush()
-    return user, generated_password
+    return user, generated_password, temporary_password
 
 
 def _ensure_user_and_membership(
@@ -98,13 +108,14 @@ def _ensure_user_and_membership(
     full_name: str,
     tenant_name: str,
     password: str | None,
-) -> tuple[User, TenantMembership, bool, bool, bool]:
+) -> tuple[User, TenantMembership, bool, bool, bool, str | None]:
     now = datetime.now(UTC)
     user = _get_user_by_email(db, email)
     created_user = False
     temporary_password_generated = False
+    temporary_password: str | None = None
     if user is None:
-        user, temporary_password_generated = _create_user(
+        user, temporary_password_generated, temporary_password = _create_user(
             db,
             email=email,
             full_name=full_name,
@@ -136,7 +147,27 @@ def _ensure_user_and_membership(
         created_tenant = True
     else:
         _ensure_tenant_integration(db, tenant_id=membership.tenant_id, now=now)
-    return user, membership, created_user, created_tenant, temporary_password_generated
+    return user, membership, created_user, created_tenant, temporary_password_generated, temporary_password
+
+
+TEACHER_ASSIST_ROOT_ADMIN_EMAILS = frozenset(
+    {
+        "dvaten.1992@gmail.com",
+        "aweleu@yahoo.com",
+        "aweuleu@yahoo.com",
+    }
+)
+
+
+def ensure_teacher_assist_root_admin(db: Session, *, email: str) -> bool:
+    user = _get_user_by_email(db, email)
+    if user is None:
+        return False
+    if not user.is_root_admin:
+        user.is_root_admin = True
+        user.updated_at = datetime.now(UTC)
+        db.flush()
+    return True
 
 
 def ensure_existing_user_teacher_assist_access(
@@ -153,6 +184,8 @@ def ensure_existing_user_teacher_assist_access(
         raise LookupError(f"User has no tenant membership: {email}")
     now = datetime.now(UTC)
     _ensure_tenant_integration(db, tenant_id=membership.tenant_id, now=now)
+    if _normalized_email(email) in TEACHER_ASSIST_ROOT_ADMIN_EMAILS:
+        ensure_teacher_assist_root_admin(db, email=email)
     access_row = grant_tenant_product_access(
         db,
         tenant_id=membership.tenant_id,
@@ -173,6 +206,7 @@ def ensure_existing_user_teacher_assist_access(
         teacher_assist_granted=access_row.status == "active",
         default_product=default_product,
         temporary_password_generated=False,
+        temporary_password=None,
     )
 
 
@@ -185,7 +219,7 @@ def ensure_user_teacher_assist_access(
     password: str | None = None,
 ) -> TeacherAssistAccessSeedResult:
     ensure_platform_products(db)
-    user, membership, created_user, created_tenant, temporary_password_generated = (
+    user, membership, created_user, created_tenant, temporary_password_generated, temporary_password = (
         _ensure_user_and_membership(
             db,
             email=email,
@@ -205,6 +239,8 @@ def ensure_user_teacher_assist_access(
         user=user,
         product_key=TEACHER_ASSIST_PRODUCT_KEY,
     )
+    if _normalized_email(email) in TEACHER_ASSIST_ROOT_ADMIN_EMAILS:
+        ensure_teacher_assist_root_admin(db, email=email)
     return TeacherAssistAccessSeedResult(
         email=user.email,
         user_id=user.id,
@@ -214,5 +250,6 @@ def ensure_user_teacher_assist_access(
         teacher_assist_granted=access_row.status == "active",
         default_product=default_product,
         temporary_password_generated=temporary_password_generated,
+        temporary_password=temporary_password,
     )
 

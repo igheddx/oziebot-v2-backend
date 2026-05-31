@@ -26,6 +26,7 @@ from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
     get_catalog_pacing_guide_detail,
     list_catalog_pacing_guides,
 )
+from oziebot_api.services.teacher_assist.constants import instructional_week_href, weekly_planning_href
 from oziebot_api.services.teacher_assist.instructional_weeks import find_instructional_week_for_period
 from oziebot_api.services.teacher_assist.user_preferences import get_user_preferences_or_create
 
@@ -48,13 +49,13 @@ def _instructional_week_navigation(
     if week is not None:
         return {
             "instructional_week_id": str(week.id),
-            "instructional_week_href": f"/teacher-assist/week/{week.id}",
+            "instructional_week_href": instructional_week_href(str(week.id)),
+            "weekly_planning_href": weekly_planning_href(str(period_id)),
             "instructional_week_status": week.status,
         }
     return {
-        "create_instructional_week_href": (
-            f"/teacher-assist/planning/weeks?period_id={period_id}&action=create_instructional_week"
-        ),
+        "weekly_planning_href": weekly_planning_href(str(period_id)),
+        "create_instructional_week_href": None,
     }
 
 

@@ -128,6 +128,9 @@ from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssi
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
 from oziebot_api.models.teacher_assist_pacing_guide_period_note import TeacherAssistPacingGuidePeriodNote
 from oziebot_api.models.teacher_assist_pacing_guide_resource import TeacherAssistPacingGuideResource
+from oziebot_api.models.teacher_assist_pacing_guide_supporting_material import (
+    TeacherAssistPacingGuideSupportingMaterial,
+)
 from oziebot_api.models.teacher_assist_pacing_item import TeacherAssistPacingItem
 from oziebot_api.models.teacher_assist_pacing_item_resource import TeacherAssistPacingItemResource
 from oziebot_api.models.teacher_assist_pacing_item_standard import TeacherAssistPacingItemStandard
@@ -145,6 +148,21 @@ from oziebot_api.models.teacher_assist_planning_input_draft_subject import (
     TeacherAssistPlanningInputDraftSubject,
 )
 from oziebot_api.models.teacher_assist_profile import TeacherAssistProfile
+from oziebot_api.models.teacher_assist_v2_onboarding import (
+    TeacherAssistV2Onboarding,
+    TeacherAssistV2PacingGuideAssignment,
+)
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackage,
+    TeacherAssistV2InstructionalPackageArtifact,
+    TeacherAssistV2PlanningSupplementalMaterial,
+)
+from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
+from oziebot_api.models.teacher_assist_v2_assignment_print_packet import TeacherAssistV2AssignmentPrintPacket
+from oziebot_api.models.teacher_assist_v2_assignment_print_page import TeacherAssistV2AssignmentPrintPage
+from oziebot_api.models.teacher_assist_v2_grading_draft import TeacherAssistV2GradingDraft
+from oziebot_api.models.teacher_assist_v2_grading_job import TeacherAssistV2GradingJob
+from oziebot_api.models.teacher_assist_v2_submission_batch import TeacherAssistV2SubmissionBatch
 from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
 from oziebot_api.models.education_catalog import (
     EducationCurriculumResource,

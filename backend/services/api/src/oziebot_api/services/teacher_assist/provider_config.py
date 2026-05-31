@@ -15,7 +15,17 @@ from oziebot_api.services.teacher_assist.constants import (
 from oziebot_api.services.teacher_assist.fixture_store import TeacherAssistAIFixtureStore
 from oziebot_api.services.teacher_assist.mock_ai_provider import MockTeacherAssistAIProvider
 from oziebot_api.services.teacher_assist.openai_ai_provider import OpenAITeacherAssistAIProvider
-from oziebot_api.services.teacher_assist.prompt_contracts import INSTRUCTIONAL_PLAN_GENERATION_FEATURE
+from oziebot_api.services.teacher_assist.prompt_contracts import (
+    GRADING_ASSIST_FEATURE,
+    INSTRUCTIONAL_PLAN_GENERATION_FEATURE,
+)
+
+REAL_AI_WORKFLOWS = frozenset(
+    {
+        INSTRUCTIONAL_PLAN_GENERATION_FEATURE,
+        GRADING_ASSIST_FEATURE,
+    }
+)
 
 
 class FixtureAwareTeacherAssistAIProvider(TeacherAssistAIProvider):
@@ -95,8 +105,8 @@ def get_teacher_assist_ai_provider(
     provider_name = validate_teacher_assist_ai_provider(settings.teacher_assist_ai_provider)
     fixture_mode = validate_teacher_assist_ai_fixture_mode(settings.teacher_assist_ai_fixture_mode)
     TeacherAssistProviderCircuitBreaker().assert_can_execute(settings, provider_name)
-    if provider_name != "mock" and workflow_type != INSTRUCTIONAL_PLAN_GENERATION_FEATURE:
-        raise RuntimeError("TeacherAssist real provider execution is limited to instructional-plan generation")
+    if provider_name != "mock" and workflow_type not in REAL_AI_WORKFLOWS:
+        raise RuntimeError("TeacherAssist real provider execution is limited to supported workflows")
 
     if provider_name == "mock":
         provider: TeacherAssistAIProvider = MockTeacherAssistAIProvider()

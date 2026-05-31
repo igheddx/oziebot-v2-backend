@@ -10,11 +10,14 @@ from starlette.responses import Response
 
 from oziebot_api.config import Settings
 from oziebot_api.deps import DbSession, settings_dep
+from oziebot_api.deps.auth import CurrentUser
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.tenant import Tenant
 from oziebot_api.models.tenant_integration import TenantIntegration
 from oziebot_api.models.user import User
 from oziebot_api.schemas.auth import (
+    ChangePasswordRequest,
+    ChangePasswordResponse,
     LoginRequest,
     LogoutRequest,
     RefreshRequest,
@@ -149,3 +152,35 @@ def logout(body: LogoutRequest, db: DbSession) -> Response:
     if not revoke_session_by_refresh(db, body.refresh_token):
         raise HTTPException(status_code=400, detail="Invalid refresh token")
     return Response(status_code=204)
+
+
+@router.post("/change-password", response_model=ChangePasswordResponse)
+def change_password(body: ChangePasswordRequest, user: CurrentUser, db: DbSession) -> ChangePasswordResponse:
+    field_errors: dict[str, str] = {}
+    if body.new_password != body.confirm_password:
+        field_errors["confirm_password"] = "Passwords must match."
+    if not body.new_password.strip():
+        field_errors["new_password"] = "Password is required."
+    if field_errors:
+        raise HTTPException(status_code=400, detail={"field_errors": field_errors})
+
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(
+            status_code=400,
+            detail={"field_errors": {"current_password": "Current password is incorrect."}},
+        )
+
+    user.password_hash = hash_password(body.new_password)
+    user.must_change_password = False
+    user.updated_at = datetime.now(UTC)
+    db.flush()
+
+    landing_route = None
+    if user.teacher_assist_role == "teacher" or (
+        user.teacher_assist_role is None and not user.is_root_admin
+    ):
+        from oziebot_api.services.teacher_assist_v2.catalog_integrity import build_v2_context
+
+        landing_route = build_v2_context(db, user=user).get("landing_route")
+
+    return ChangePasswordResponse(requires_password_change=False, landing_route=landing_route)

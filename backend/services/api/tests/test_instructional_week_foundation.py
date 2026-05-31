@@ -4,6 +4,8 @@ from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
+from oziebot_api.services.teacher_assist.constants import instructional_week_href, weekly_planning_href
+
 from tests.test_current_week_foundation import _align_teacher_tenant, _create_week_guide
 from tests.test_education_catalog import _root_token
 from tests.test_pacing_guide_foundation import _catalog_scope, _school_year, _teacher_token
@@ -37,7 +39,8 @@ def test_active_selection_auto_creates_instructional_week(client, db_session: Se
     assert home.status_code == 200, home.text
     home_payload = home.json()
     assert home_payload["instructional_week_id"] == week_id
-    assert home_payload["continue_planning"]["instructional_week_href"] == f"/teacher-assist/week/{week_id}"
+    assert home_payload["continue_planning"]["current_week_href"] == weekly_planning_href(str(period_id))
+    assert home_payload["continue_planning"]["instructional_week_href"] == instructional_week_href(week_id)
 
     workspace = client.get(
         "/v1/teacher-assist/pacing-guide-workspace",
@@ -147,6 +150,13 @@ def test_instructional_week_create_workspace_snapshot_and_next_week(client, db_s
     assert "action_center" in payload
     assert "health_indicators" in payload
     assert "overview" in payload["tabs"]
+
+    # React Strict Mode fires duplicate requests in dev; workspace must stay idempotent.
+    workspace_repeat = client.get(
+        f"/v1/teacher-assist/instructional-weeks/{week_id}/workspace",
+        headers={"Authorization": f"Bearer {teacher_token}"},
+    )
+    assert workspace_repeat.status_code == 200, workspace_repeat.text
 
     snapshot = client.post(
         f"/v1/teacher-assist/instructional-weeks/{week_id}/snapshots",

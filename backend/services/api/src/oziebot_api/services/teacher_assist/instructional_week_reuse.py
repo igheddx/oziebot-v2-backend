@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from oziebot_api.models.teacher_assist_instructional_week import TeacherAssistInstructionalWeek
 from oziebot_api.models.user import User
+from oziebot_api.services.teacher_assist.constants import instructional_week_href
 from oziebot_api.services.teacher_assist.generate_next_week import generate_next_week_draft
 from oziebot_api.services.teacher_assist.instructional_weeks import (
     create_instructional_week_from_pacing_period,
@@ -40,7 +41,7 @@ def generate_next_instructional_week(
     return {
         **draft,
         "instructional_week_id": str(next_week.id),
-        "navigation_href": f"/teacher-assist/week/{next_week.id}",
+        "navigation_href": instructional_week_href(str(next_week.id)),
     }
 
 
@@ -116,7 +117,7 @@ def reuse_prior_instructional_week(
         "target_instructional_week_id": str(target.id),
         "source_instructional_week_id": str(source.id),
         "copied": copied,
-        "navigation_href": f"/teacher-assist/week/{target.id}",
+        "navigation_href": instructional_week_href(str(target.id)),
     }
 
 

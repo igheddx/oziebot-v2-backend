@@ -14,7 +14,11 @@ from oziebot_api.models.teacher_assist_reteach_plan import TeacherAssistReteachP
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
 from oziebot_api.services.teacher_assist.action_workspace import get_teacher_assist_action_workspace
-from oziebot_api.services.teacher_assist.constants import TEACHER_ASSIST_QUICK_CREATE_ACTIONS
+from oziebot_api.services.teacher_assist.constants import (
+    class_workspace_href,
+    instructional_week_href,
+    weekly_planning_href,
+)
 from oziebot_api.services.teacher_assist.mastery_dashboard import build_mastery_dashboard
 from oziebot_api.services.teacher_assist.teacher_shortcuts import build_teacher_shortcuts
 from oziebot_api.services.teacher_assist.today_workspace import get_teacher_assist_today_workspace
@@ -144,9 +148,9 @@ def build_home_classes(
                     }
                     for row in due_assignments
                 ],
-                "navigation_href": f"/teacher-assist/classes/{class_id}",
+                "navigation_href": class_workspace_href(str(class_id)),
                 "actions": [
-                    {"label": "Open class", "href": f"/teacher-assist/classes/{class_id}"},
+                    {"label": "Open class", "href": class_workspace_href(str(class_id))},
                     {"label": "Assignments", "href": f"/teacher-assist/assignments?class_id={class_id}"},
                     {"label": "Mastery", "href": f"/teacher-assist/mastery?class_id={class_id}"},
                     {"label": "Reteach", "href": f"/teacher-assist/reteach-plans?class_id={class_id}"},
@@ -324,35 +328,42 @@ def build_home_mastery_alerts(
 
 
 def build_home_quick_actions(current_week: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    period_id = None
-    if current_week and current_week.get("has_active_guide"):
-        period_id = (current_week.get("current_week") or {}).get("id")
-    week_base = f"/teacher-assist/planning/weeks?period_id={period_id}" if period_id else "/teacher-assist/planning/pacing-guides/workspace"
-    mapping = {
-        "lesson": ("Generate Instructional Plan", f"{week_base}&action=instructional_plan" if period_id else "/teacher-assist/weekly-planning"),
-        "assignment": ("Generate Assignment", f"{week_base}&action=assignment" if period_id else "/teacher-assist/assignments"),
-        "quiz": ("Generate Quiz", f"{week_base}&action=quiz" if period_id else "/teacher-assist/exports"),
-        "reteach_plan": ("Generate Rubric", f"{week_base}&action=rubric" if period_id else "/teacher-assist/reteach-plans"),
-        "newsletter": ("Generate Newsletter", f"{week_base}&action=newsletter" if period_id else "/teacher-assist/newsletters"),
-    }
-    extra = []
-    if period_id:
-        extra.append(
+    """Pacing-first workflow actions only — no standalone generate shortcuts on Home."""
+    has_active_guide = bool(current_week and current_week.get("has_active_guide"))
+    period_id = (current_week.get("current_week") or {}).get("id") if current_week else None
+
+    if not has_active_guide or period_id is None:
+        return [
             {
-                "action_key": "generate_next_week",
-                "label": "Generate Next Week",
-                "navigation_href": f"{week_base}&action=generate_next_week",
-            }
-        )
+                "action_key": "browse_pacing_guides",
+                "label": "Browse pacing guides",
+                "navigation_href": "/teacher-assist/pacing-guides",
+            },
+            {
+                "action_key": "open_pacing_workspace",
+                "label": "Open pacing workspace",
+                "navigation_href": "/teacher-assist/planning/pacing-guides/workspace",
+            },
+        ]
+
+    week_base = weekly_planning_href(str(period_id))
     return [
         {
-            "action_key": key,
-            "label": mapping[key][0],
-            "navigation_href": mapping[key][1],
-        }
-        for key in TEACHER_ASSIST_QUICK_CREATE_ACTIONS
-        if key in mapping
-    ] + extra
+            "action_key": "weekly_planning",
+            "label": "Plan this week",
+            "navigation_href": f"{week_base}&action=instructional_plan",
+        },
+        {
+            "action_key": "upload_resources",
+            "label": "Upload supporting materials",
+            "navigation_href": f"{week_base}&tab=resources",
+        },
+        {
+            "action_key": "open_pacing_workspace",
+            "label": "Open pacing workspace",
+            "navigation_href": "/teacher-assist/planning/pacing-guides/workspace",
+        },
+    ]
 
 
 def build_home_this_week(
@@ -407,9 +418,9 @@ def _build_recently_used_resources(
         WeekContextService.build(db, tenant_id=tenant_id, user=user, period_id=period_id)
     )
     navigation_href = (
-        f"/teacher-assist/week/{instructional_week_id}?tab=resources"
+        instructional_week_href(str(instructional_week_id), tab="resources")
         if instructional_week_id
-        else f"/teacher-assist/planning/weeks?period_id={period_id}&tab=resources"
+        else weekly_planning_href(str(period_id), focus="resources")
     )
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -523,7 +534,12 @@ def get_teacher_assist_home_workspace(
         tenant_id=tenant_id,
         user_id=user_id,
     )
-    current_week = build_current_week_payload(db, tenant_id=tenant_id, user_id=user_id)
+    current_week = build_current_week_payload(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        require_explicit_guide_selection=True,
+    )
     period_id = (current_week.get("current_week") or {}).get("id") if current_week.get("has_active_guide") else None
     upcoming_period_id = (current_week.get("upcoming_week") or {}).get("id") if current_week.get("has_active_guide") else None
     instructional_week_id = None
@@ -547,7 +563,7 @@ def get_teacher_assist_home_workspace(
         if upcoming_instructional_week is not None:
             upcoming_instructional_week_id = str(upcoming_instructional_week.id)
     recommended_reuse = []
-    if period_id is not None:
+    if onboarding["is_complete"] and current_week.get("has_active_guide") and period_id is not None:
         from oziebot_api.models.user import User
 
         user = db.get(User, user_id)
@@ -555,14 +571,37 @@ def get_teacher_assist_home_workspace(
             recommended_reuse = build_week_recommendations(
                 db, tenant_id=tenant_id, user=user, period_id=period_id
             ).get("recommended_for_this_week", {}).get("top_reusable", [])
-    efficiency = build_teacher_efficiency_dashboard(db, tenant_id=tenant_id, user_id=user_id)
-    time_savings = build_home_time_savings_summary(db, tenant_id=tenant_id, user_id=user_id)
-    instructional_loop = build_home_instructional_loop(
-        db,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        instructional_week_id=instructional_week_id,
-    )
+    if onboarding["is_complete"] and current_week.get("has_active_guide"):
+        efficiency = build_teacher_efficiency_dashboard(db, tenant_id=tenant_id, user_id=user_id)
+        time_savings = build_home_time_savings_summary(db, tenant_id=tenant_id, user_id=user_id)
+        instructional_loop = build_home_instructional_loop(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            instructional_week_id=instructional_week_id,
+        )
+        recently_used_resources = _build_recently_used_resources(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            period_id=uuid.UUID(str(period_id)) if period_id else None,
+            instructional_week_id=instructional_week_id,
+        )
+    else:
+        efficiency = {
+            "estimated_hours_saved": 0,
+            "reuse_rate_percent": 0,
+            "recent_templates": [],
+        }
+        time_savings = {"time_saved_this_year_hours": 0.0, "time_saved_this_year_minutes": 0}
+        instructional_loop = {
+            "objectives_requiring_attention": [],
+            "students_needing_support": [],
+            "loop_recommendations": [],
+            "instructional_health": {},
+            "week_closure_status": None,
+        }
+        recently_used_resources = []
     return {
         "summary": today.get("summary") or {},
         "priorities": priorities,
@@ -578,41 +617,27 @@ def get_teacher_assist_home_workspace(
         "quick_actions": build_home_quick_actions(current_week),
         "continue_planning": {
             "current_week_href": (
-                f"/teacher-assist/week/{instructional_week_id}"
-                if instructional_week_id
-                else (f"/teacher-assist/planning/weeks?period_id={period_id}" if period_id else "/teacher-assist/planning/pacing-guides/workspace")
+                weekly_planning_href(str(period_id))
+                if period_id
+                else "/teacher-assist/planning/pacing-guides/workspace"
             ),
-            "instructional_week_href": f"/teacher-assist/week/{instructional_week_id}" if instructional_week_id else None,
-            "create_instructional_week_href": (
-                f"/teacher-assist/planning/weeks?period_id={period_id}&action=create_instructional_week"
-                if period_id and not instructional_week_id
-                else None
-            ),
+            "instructional_week_href": instructional_week_href(str(instructional_week_id)) if instructional_week_id else None,
+            "create_instructional_week_href": None,
             "generate_next_week_href": (
-                f"/teacher-assist/week/{instructional_week_id}?action=generate_next_week"
-                if instructional_week_id
-                else (f"/teacher-assist/planning/weeks?period_id={period_id}&action=generate_next_week" if period_id else None)
+                weekly_planning_href(str(upcoming_period_id))
+                if upcoming_period_id
+                else None
             ),
             "template_library_href": "/teacher-assist/planning/templates",
             "upcoming_instructional_week_href": (
-                f"/teacher-assist/week/{upcoming_instructional_week_id}"
-                if upcoming_instructional_week_id
-                else (
-                    f"/teacher-assist/planning/weeks?period_id={upcoming_period_id}&action=create_instructional_week"
-                    if upcoming_period_id
-                    else None
-                )
+                weekly_planning_href(str(upcoming_period_id))
+                if upcoming_period_id
+                else None
             ),
         },
         "instructional_week_id": instructional_week_id,
         "upcoming_instructional_week_id": upcoming_instructional_week_id,
-        "recently_used_resources": _build_recently_used_resources(
-            db,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            period_id=uuid.UUID(str(period_id)) if period_id else None,
-            instructional_week_id=instructional_week_id,
-        ),
+        "recently_used_resources": recently_used_resources,
         "instructional_loop": instructional_loop,
         "copilot": {
             "href": "/teacher-assist/copilot",

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { TeacherAssistEmptyState } from "@/components/teacher-assist/teacher-assist-empty-state";
@@ -115,23 +116,35 @@ function TabPanel({
   );
 }
 
-export function TeacherAssistClassWorkspaceScreen({ classId }: { classId: string }) {
+export function TeacherAssistClassWorkspaceScreen({ classId: classIdProp }: { classId?: string }) {
+  const searchParams = useSearchParams();
+  const classId = classIdProp ?? searchParams.get("id") ?? "";
   const [workspace, setWorkspace] = useState<TeacherAssistClassOperationalWorkspace | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (!classId) return;
     setWorkspace(await fetchTeacherAssistClassOperationalWorkspace(classId));
   }, [classId]);
 
   useEffect(() => {
+    if (!classId) return;
     load().catch((err: Error) => setError(err.message));
-  }, [load]);
+  }, [classId, load]);
 
   const tabLabels = useMemo(
     () => Object.fromEntries(TAB_KEYS.map((key) => [key, labelize(key)])) as Record<TabKey, string>,
     [],
   );
+
+  if (!classId) {
+    return (
+      <div className="ta-panel p-6 text-sm text-slate-600">
+        Missing class id. Open a class from Home or the class list.
+      </div>
+    );
+  }
 
   if (error) {
     return <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>;

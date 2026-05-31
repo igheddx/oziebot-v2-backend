@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
+import { useAuth } from "@/components/providers/auth-provider";
+import { TeacherAssistOnboardingGatePanel } from "@/components/teacher-assist/teacher-assist-onboarding-gate-panel";
+import { useTeacherAssistOnboarding } from "@/components/teacher-assist/teacher-assist-onboarding-context";
 import {
   TeacherAssistInlineAlert,
   sectionError,
@@ -28,6 +32,9 @@ function formatDateRange(start: string | null, end: string | null) {
 }
 
 export function TeacherAssistPacingGuidesScreen() {
+  const { user } = useAuth();
+  const { isComplete: onboardingComplete, loading: onboardingLoading } = useTeacherAssistOnboarding();
+  const isRootAdmin = Boolean(user?.is_root_admin);
   const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
   const [loading, setLoading] = useState(true);
   const [guideType, setGuideType] = useState<PacingGuideType | "">("");
@@ -110,6 +117,17 @@ export function TeacherAssistPacingGuidesScreen() {
     }
   };
 
+  if (!onboardingLoading && !onboardingComplete) {
+    return (
+      <div id="pacing-guides-panel" className="space-y-5">
+        <TeacherAssistOnboardingGatePanel
+          title="Finish setup before browsing pacing guides"
+          description="Pacing guides depend on your district, school, grade, and classroom setup. Complete onboarding first, then return here to browse and copy district guides."
+        />
+      </div>
+    );
+  }
+
   return (
     <div id="pacing-guides-panel" className="space-y-5">
       <section className="ta-panel p-5">
@@ -117,8 +135,34 @@ export function TeacherAssistPacingGuidesScreen() {
         <h1 className="mt-2 text-2xl font-semibold text-slate-900">Pacing Guides</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
           Browse district, grade-level, and personal pacing guides aligned to the education catalog. Review weekly
-          objectives and resources, then copy a district guide into your own teacher guide when you are ready.
+          objectives and resources, then copy a district guide into your own teacher guide when you are ready. Open{" "}
+          <Link href="/teacher-assist/planning/pacing-guides/workspace" className="font-semibold text-sky-700 underline">
+            Pacing Workspace
+          </Link>{" "}
+          to work from your active guide week by week.
         </p>
+        {isRootAdmin ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            <p className="font-semibold">Root admin: create district pacing guides</p>
+            <p className="mt-1 leading-6">
+              There is no pacing-guide file upload yet. Create guides in{" "}
+              <Link
+                href="/teacher-assist/administration/education-catalog?tab=pacing_guides"
+                className="font-semibold text-amber-900 underline"
+              >
+                Catalog Admin → Pacing Guides
+              </Link>
+              , or import objectives first under{" "}
+              <Link
+                href="/teacher-assist/administration/education-catalog?tab=objectives"
+                className="font-semibold text-amber-900 underline"
+              >
+                Objectives (CSV)
+              </Link>
+              .
+            </p>
+          </div>
+        ) : null}
       </section>
 
       <TeacherAssistInlineAlert alert={getSectionAlert("pacing-guides")} />
@@ -143,8 +187,22 @@ export function TeacherAssistPacingGuidesScreen() {
           {loading ? (
             <p className="mt-4 text-sm text-slate-600">Loading pacing guides...</p>
           ) : guides.length === 0 ? (
-            <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-              No pacing guides match this filter yet.
+            <div className="mt-4 space-y-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+              <p>No pacing guides match this filter yet.</p>
+              {isRootAdmin ? (
+                <p>
+                  Create a district guide in{" "}
+                  <Link
+                    href="/teacher-assist/administration/education-catalog?tab=pacing_guides"
+                    className="font-semibold underline"
+                  >
+                    Catalog Admin
+                  </Link>
+                  .
+                </p>
+              ) : (
+                <p>Ask a root admin to publish district pacing guides, then copy one here for your classroom.</p>
+              )}
             </div>
           ) : (
             <div className="mt-4 space-y-2">

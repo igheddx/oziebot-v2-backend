@@ -9,7 +9,11 @@ import type {
   EducationState,
   EducationSubject,
   TeacherCatalogContext,
+  TeacherMySchoolSetup,
   TeacherSchoolAssignment,
+  TeacherSchoolAssignmentListItem,
+  AvailableTeacher,
+  TeacherSchoolAssignmentProvisionResult,
 } from "@/lib/education-catalog-types";
 
 const base = "/v1/teacher-assist/education-catalog";
@@ -41,9 +45,26 @@ export function fetchMyCatalogContext() {
   return readJson<TeacherCatalogContext>(`${base}/my-context`);
 }
 
-export function fetchCatalogStates(q?: string) {
-  const params = q ? `?q=${encodeURIComponent(q)}` : "";
-  return readJson<EducationState[]>(`${base}/states${params}`);
+export function fetchMySchoolSetup() {
+  return readJson<TeacherMySchoolSetup>(`${base}/my-school-setup`);
+}
+
+export function saveMySchoolSetup(body: {
+  state_id: string;
+  district_id: string;
+  school_id: string;
+  catalog_grade_id: string;
+  catalog_subject_ids: string[];
+}) {
+  return writeJson<TeacherMySchoolSetup>(`${base}/my-school-setup`, "PUT", body);
+}
+
+export function fetchCatalogStates(q?: string, activeOnly = true) {
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (activeOnly) params.set("active_only", "true");
+  const query = params.toString();
+  return readJson<EducationState[]>(`${base}/states${query ? `?${query}` : ""}`);
 }
 
 export function createCatalogState(body: Record<string, unknown>) {
@@ -54,10 +75,11 @@ export function updateCatalogState(id: string, body: Record<string, unknown>) {
   return writeJson<EducationState>(`${base}/states/${id}`, "PUT", body);
 }
 
-export function fetchCatalogDistricts(stateId?: string, q?: string) {
+export function fetchCatalogDistricts(stateId?: string, q?: string, activeOnly = true) {
   const params = new URLSearchParams();
   if (stateId) params.set("state_id", stateId);
   if (q) params.set("q", q);
+  if (activeOnly) params.set("active_only", "true");
   const query = params.toString();
   return readJson<EducationDistrict[]>(`${base}/districts${query ? `?${query}` : ""}`);
 }
@@ -70,10 +92,11 @@ export function updateCatalogDistrict(id: string, body: Record<string, unknown>)
   return writeJson<EducationDistrict>(`${base}/districts/${id}`, "PUT", body);
 }
 
-export function fetchCatalogSchools(districtId?: string, q?: string) {
+export function fetchCatalogSchools(districtId?: string, q?: string, activeOnly = true) {
   const params = new URLSearchParams();
   if (districtId) params.set("district_id", districtId);
   if (q) params.set("q", q);
+  if (activeOnly) params.set("active_only", "true");
   const query = params.toString();
   return readJson<EducationSchool[]>(`${base}/schools${query ? `?${query}` : ""}`);
 }
@@ -174,9 +197,31 @@ export function updateCatalogCurriculumResource(id: string, body: Record<string,
   return writeJson<EducationCurriculumResource>(`${base}/curriculum-resources/${id}`, "PUT", body);
 }
 
-export function fetchCatalogTeacherAssignments(userId?: string) {
-  const params = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
-  return readJson<TeacherSchoolAssignment[]>(`${base}/teacher-assignments${params}`);
+export function fetchCatalogTeacherAssignments(filters?: {
+  userId?: string;
+  stateId?: string;
+  districtId?: string;
+  schoolId?: string;
+  activeOnly?: boolean;
+}) {
+  const params = new URLSearchParams();
+  if (filters?.userId) params.set("user_id", filters.userId);
+  if (filters?.stateId) params.set("state_id", filters.stateId);
+  if (filters?.districtId) params.set("district_id", filters.districtId);
+  if (filters?.schoolId) params.set("school_id", filters.schoolId);
+  if (filters?.activeOnly) params.set("active_only", "true");
+  const query = params.toString();
+  return readJson<TeacherSchoolAssignmentListItem[]>(`${base}/teacher-assignments${query ? `?${query}` : ""}`);
+}
+
+export function fetchCatalogAvailableTeachers(schoolId: string, q?: string) {
+  const params = new URLSearchParams({ school_id: schoolId });
+  if (q?.trim()) params.set("q", q.trim());
+  return readJson<AvailableTeacher[]>(`${base}/teacher-assignments/available-teachers?${params.toString()}`);
+}
+
+export function provisionCatalogTeacherAssignment(body: Record<string, unknown>) {
+  return writeJson<TeacherSchoolAssignmentProvisionResult>(`${base}/teacher-assignments/provision`, "POST", body);
 }
 
 export function createCatalogTeacherAssignment(body: Record<string, unknown>) {

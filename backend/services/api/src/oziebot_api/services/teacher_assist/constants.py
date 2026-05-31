@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 GRADING_PERIOD_TYPES = ("nine_weeks", "six_weeks", "semester", "trimester", "custom")
@@ -154,16 +155,9 @@ LESSON_EFFECTIVENESS_HIGHLY_THRESHOLD = 0.85
 LESSON_EFFECTIVENESS_EFFECTIVE_THRESHOLD = 0.70
 LESSON_EFFECTIVENESS_ADJUSTMENT_THRESHOLD = 0.40
 TEACHER_ASSIST_ONBOARDING_STEP_KEYS = (
-    "profile",
+    "school_placement",
     "school_year",
-    "grading_periods",
-    "classes",
-    "subjects",
-    "standards",
-    "resources",
-    "first_lesson_plan",
-    "first_assignment",
-    "first_mastery_matrix",
+    "classroom",
 )
 TEACHER_ASSIST_HOME_PRIORITY_LEVELS = ("critical", "high", "medium", "informational")
 TEACHER_ASSIST_PREFERRED_LANDINGS = ("home", "today", "work_queue")
@@ -772,3 +766,40 @@ def validate_pilot_feedback_status(value: str | None) -> str:
     if normalized not in PILOT_FEEDBACK_STATUSES:
         raise ValueError("Unsupported pilot feedback status")
     return normalized
+
+
+def weekly_planning_href(
+    period_id: str | None = None,
+    *,
+    action: str | None = None,
+    focus: str | None = None,
+) -> str:
+    """Primary teacher planning route — attach resources, then generate plan artifacts."""
+    params: dict[str, str] = {}
+    if period_id:
+        params["period_id"] = period_id
+    if action:
+        params["action"] = action
+    if focus:
+        params["focus"] = focus
+    if not params:
+        return "/teacher-assist/planning/weeks"
+    return f"/teacher-assist/planning/weeks?{urlencode(params)}"
+
+
+def instructional_week_href(
+    week_id: str,
+    *,
+    tab: str | None = None,
+    action: str | None = None,
+) -> str:
+    params: dict[str, str] = {"id": week_id}
+    if tab:
+        params["tab"] = tab
+    if action:
+        params["action"] = action
+    return f"/teacher-assist/week/?{urlencode(params)}"
+
+
+def class_workspace_href(class_id: str) -> str:
+    return f"/teacher-assist/classes/?{urlencode({'id': class_id})}"

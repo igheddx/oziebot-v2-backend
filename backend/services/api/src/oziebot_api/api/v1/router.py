@@ -24,6 +24,7 @@ from oziebot_api.api.v1 import (
     teacher_assist_pilot,
     teacher_assist_catalog,
     teacher_assist_education_catalog,
+    teacher_assist_v2,
     strategic_aggressive_allocation,
     volatility_harvest,
     tenants,
@@ -45,6 +46,7 @@ api_router.include_router(teacher_assist_copilot.router)
 api_router.include_router(teacher_assist_pilot.router)
 api_router.include_router(teacher_assist_catalog.router)
 api_router.include_router(teacher_assist_education_catalog.router)
+api_router.include_router(teacher_assist_v2.router)
 api_router.include_router(strategic_aggressive_allocation.router)
 api_router.include_router(volatility_harvest.router)
 api_router.include_router(alerts.router)

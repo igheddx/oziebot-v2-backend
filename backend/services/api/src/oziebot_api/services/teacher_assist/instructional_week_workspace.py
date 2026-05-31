@@ -14,6 +14,7 @@ from oziebot_api.models.teacher_assist_instructional_week import TeacherAssistIn
 from oziebot_api.models.teacher_assist_newsletter import TeacherAssistNewsletter
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.models.user import User
+from oziebot_api.services.teacher_assist.constants import instructional_week_href
 from oziebot_api.services.teacher_assist.current_week_resolver import build_objective_coverage
 from oziebot_api.services.teacher_assist.generated_artifacts import (
     build_generation_history,
@@ -126,14 +127,14 @@ def _build_action_center(
             {
                 "action_key": "reuse_prior_work",
                 "label": "Reuse prior year assignment",
-                "navigation_href": first.get("navigation_href") or f"/teacher-assist/week/{instructional_week_id}?tab=recommendations",
+                "navigation_href": first.get("navigation_href") or instructional_week_href(str(instructional_week_id), tab="recommendations"),
             }
         )
     actions.append(
         {
             "action_key": "generate_next_week",
             "label": "Generate next week",
-            "navigation_href": f"/teacher-assist/week/{instructional_week_id}?action=generate_next_week",
+            "navigation_href": instructional_week_href(str(instructional_week_id), action="generate_next_week"),
         }
     )
     return actions
@@ -295,7 +296,7 @@ def build_instructional_week_workspace(
             "event_type": row.event_type,
             "title": row.summary_text,
             "created_at": row.created_at.isoformat(),
-            "navigation_href": f"/teacher-assist/week/{week.id}?tab=timeline",
+            "navigation_href": instructional_week_href(str(week.id), tab="timeline"),
         }
         for row in history
     ] + [
@@ -304,7 +305,7 @@ def build_instructional_week_workspace(
             "event_type": row.event_type,
             "title": row.summary_text,
             "created_at": row.created_at.isoformat(),
-            "navigation_href": f"/teacher-assist/week/{week.id}?tab=timeline",
+            "navigation_href": instructional_week_href(str(week.id), tab="timeline"),
         }
         for row in activity
         if (row.metadata_json or {}).get("pacing_guide_period_id") == str(week.pacing_guide_period_id)

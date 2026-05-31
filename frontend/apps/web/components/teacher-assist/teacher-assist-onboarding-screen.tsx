@@ -68,18 +68,35 @@ export function TeacherAssistOnboardingScreen() {
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Setup complete</p>
           <h1 className="mt-2 text-3xl font-semibold text-slate-900">Your classroom is ready</h1>
           <p className="mx-auto mt-3 max-w-xl text-sm text-slate-600">
-            You&apos;ve completed the Day 1 setup. Here are recommended next actions.
+            Next: browse district pacing guides for your grade, copy one to your library, then start weekly planning
+            for each subject.
           </p>
         </header>
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-4 md:grid-cols-3">
           {[
-            { label: "Create lesson", href: "/teacher-assist/weekly-planning" },
-            { label: "Create assignment", href: "/teacher-assist/assignments" },
-            { label: "Review mastery", href: "/teacher-assist/mastery" },
-            { label: "Open Home Workspace", href: "/teacher-assist/home" },
+            {
+              label: "1. Browse pacing guides",
+              href: "/teacher-assist/pacing-guides",
+              detail: "Find the district guide for your grade and subject.",
+            },
+            {
+              label: "2. Open pacing workspace",
+              href: "/teacher-assist/planning/pacing-guides/workspace",
+              detail: "Set your copied guide active and pick the current week.",
+            },
+            {
+              label: "3. Generate this week’s plan",
+              href: "/teacher-assist/planning/weeks",
+              detail: "Upload curriculum, attach resources, then click Generate Plan.",
+            },
           ].map((action) => (
-            <Link key={action.href} href={action.href} className="ta-panel p-5 text-center transition hover:border-sky-300">
+            <Link
+              key={action.href}
+              href={action.href}
+              className="ta-panel p-5 transition hover:border-sky-300"
+            >
               <span className="text-sm font-semibold text-sky-700">{action.label}</span>
+              <p className="mt-2 text-xs leading-5 text-slate-600">{action.detail}</p>
             </Link>
           ))}
         </section>
@@ -93,7 +110,7 @@ export function TeacherAssistOnboardingScreen() {
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">Get started</p>
         <h1 className="mt-2 text-2xl font-semibold text-slate-900">Guided onboarding</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Complete these steps to move from Day 1 setup to a productive classroom workflow.
+          Complete setup in three steps on this page, then browse pacing guides to begin weekly planning.
         </p>
         <div className="mt-5">
           <OnboardingProgressBar progress={onboarding} />
@@ -138,12 +155,22 @@ export function TeacherAssistOnboardingScreen() {
       {onboarding.completed_count === 0 ? (
         <TeacherAssistEmptyState
           title="Welcome to TeacherAssist"
-          description="Start with your teacher profile and school year, then add classes and your first plan."
-          whyItMatters="Onboarding aligns TeacherAssist with how you actually teach — by class, period, and workflow."
-          actionLabel="Open settings"
-          actionHref="/teacher-assist/settings"
+          description="Start with school placement, school year, and homeroom setup below."
+          whyItMatters="Setup aligns TeacherAssist with your district catalog — grade, subjects, and pacing come from there."
+          actionLabel="Begin step 1"
+          actionHref="/teacher-assist/settings#school-setup"
         />
       ) : null}
+
+      <section className="ta-panel p-5">
+        <h2 className="text-lg font-semibold text-slate-900">Setup workspace</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          All three setup steps live on the Settings page — use the links above or open Settings directly.
+        </p>
+        <Link href="/teacher-assist/settings" className="ta-button-secondary mt-4 inline-flex text-sm">
+          Open Settings
+        </Link>
+      </section>
     </div>
   );
 }

@@ -113,6 +113,7 @@ def resolve_active_pacing_guide(
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
     guide_id: uuid.UUID | None = None,
+    allow_auto_fallback: bool = True,
 ) -> TeacherAssistPacingGuide | None:
     preferences = get_user_preferences_or_create(db, tenant_id=tenant_id, user_id=user_id)
     selected_id = guide_id or preferences.active_pacing_guide_id
@@ -126,6 +127,8 @@ def resolve_active_pacing_guide(
         ).one_or_none()
         if guide is not None:
             return guide
+    if not allow_auto_fallback:
+        return None
     for guide_type in ("TEACHER", "GRADE_LEVEL", "DISTRICT"):
         guide = db.scalars(
             select(TeacherAssistPacingGuide)
@@ -150,9 +153,16 @@ class CurrentWeekResolver:
         user_id: uuid.UUID,
         guide_id: uuid.UUID | None = None,
         as_of_date: date | None = None,
+        require_explicit_guide_selection: bool = False,
     ) -> ResolvedWeekContext | None:
         preferences = get_user_preferences_or_create(db, tenant_id=tenant_id, user_id=user_id)
-        guide = resolve_active_pacing_guide(db, tenant_id=tenant_id, user_id=user_id, guide_id=guide_id)
+        guide = resolve_active_pacing_guide(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            guide_id=guide_id,
+            allow_auto_fallback=not require_explicit_guide_selection,
+        )
         if guide is None:
             return None
         detail = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=guide.id)
@@ -301,6 +311,7 @@ def build_current_week_payload(
     user_id: uuid.UUID,
     guide_id: uuid.UUID | None = None,
     as_of_date: date | None = None,
+    require_explicit_guide_selection: bool = False,
 ) -> dict[str, Any]:
     target_date = as_of_date or date.today()
     context = CurrentWeekResolver.resolve(
@@ -309,6 +320,7 @@ def build_current_week_payload(
         user_id=user_id,
         guide_id=guide_id,
         as_of_date=target_date,
+        require_explicit_guide_selection=require_explicit_guide_selection,
     )
     preferences = get_user_preferences_or_create(db, tenant_id=tenant_id, user_id=user_id)
     if context is None:

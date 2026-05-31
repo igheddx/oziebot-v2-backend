@@ -1,5 +1,5 @@
-import { TeacherAssistWeekWorkspaceScreen } from "@/components/teacher-assist/teacher-assist-week-workspace-screen";
+import { TeacherAssistWeeklyPlanningScreen } from "@/components/teacher-assist/teacher-assist-weekly-planning-screen";
 
-export default function TeacherAssistWeekWorkspacePage() {
-  return <TeacherAssistWeekWorkspaceScreen />;
+export default function TeacherAssistWeekPlanningPage() {
+  return <TeacherAssistWeeklyPlanningScreen />;
 }

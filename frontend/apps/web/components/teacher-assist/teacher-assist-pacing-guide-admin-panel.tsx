@@ -25,10 +25,10 @@ import {
   deactivateCatalogPacingGuide,
   fetchCatalogPacingGuideDetail,
   fetchCatalogPacingGuides,
+  fetchPacingGuideSchoolYearOptions,
 } from "@/lib/pacing-guide-api";
 import { PACING_GUIDE_PERIOD_TYPE_OPTIONS } from "@/lib/pacing-guide-types";
-import type { CatalogPacingGuideDetail, CatalogPacingGuideSummary } from "@/lib/pacing-guide-types";
-import { fetchSchoolYears } from "@/lib/teacher-assist-api";
+import type { CatalogPacingGuideDetail, CatalogPacingGuideSummary, PacingSchoolYearOption } from "@/lib/pacing-guide-types";
 import { withPreservedScroll } from "@/lib/teacher-assist-scroll";
 
 export function TeacherAssistPacingGuideAdminPanel() {
@@ -37,12 +37,13 @@ export function TeacherAssistPacingGuideAdminPanel() {
   const [guides, setGuides] = useState<CatalogPacingGuideSummary[]>([]);
   const [selectedGuideId, setSelectedGuideId] = useState("");
   const [detail, setDetail] = useState<CatalogPacingGuideDetail | null>(null);
-  const [schoolYears, setSchoolYears] = useState<Awaited<ReturnType<typeof fetchSchoolYears>>>([]);
+  const [schoolYears, setSchoolYears] = useState<PacingSchoolYearOption[]>([]);
   const [states, setStates] = useState<Awaited<ReturnType<typeof fetchCatalogStates>>>([]);
   const [districts, setDistricts] = useState<Awaited<ReturnType<typeof fetchCatalogDistricts>>>([]);
   const [schools, setSchools] = useState<Awaited<ReturnType<typeof fetchCatalogSchools>>>([]);
   const [grades, setGrades] = useState<Awaited<ReturnType<typeof fetchCatalogGrades>>>([]);
   const [subjects, setSubjects] = useState<Awaited<ReturnType<typeof fetchCatalogSubjects>>>([]);
+  const [schoolYearsLoading, setSchoolYearsLoading] = useState(true);
   const [objectives, setObjectives] = useState<Awaited<ReturnType<typeof fetchCatalogObjectives>>>([]);
   const [resources, setResources] = useState<Awaited<ReturnType<typeof fetchCatalogCurriculumResources>>>([]);
   const [guideForm, setGuideForm] = useState({
@@ -70,40 +71,64 @@ export function TeacherAssistPacingGuideAdminPanel() {
     notes: "",
   });
 
+  const loadSchoolYearOptions = useCallback(async () => {
+    setSchoolYearsLoading(true);
+    try {
+      const nextSchoolYears = await fetchPacingGuideSchoolYearOptions();
+      setSchoolYears(nextSchoolYears.options);
+      setGuideForm((current) => ({
+        ...current,
+        school_year_id:
+          current.school_year_id && nextSchoolYears.options.some((row) => row.id === current.school_year_id)
+            ? current.school_year_id
+            : nextSchoolYears.default_school_year_id ||
+              nextSchoolYears.options.find((row) => row.is_default)?.id ||
+              nextSchoolYears.options[0]?.id ||
+              "",
+      }));
+    } catch (nextError) {
+      setSchoolYears([]);
+      setSectionAlert(
+        "pacing-admin",
+        sectionError(
+          nextError instanceof Error ? nextError.message : "Could not load school year options.",
+          "School years unavailable",
+        ),
+      );
+    } finally {
+      setSchoolYearsLoading(false);
+    }
+  }, [setSectionAlert]);
+
   const refresh = useCallback(async (preserveGuideId?: string) => {
     setLoading(true);
     clearSectionAlert("pacing-admin");
     try {
       const [
         nextGuides,
-        nextSchoolYears,
         nextStates,
         nextDistricts,
         nextSchools,
         nextGrades,
-        nextSubjects,
         nextObjectives,
         nextResources,
       ] = await Promise.all([
         fetchCatalogPacingGuides({ guide_type: "DISTRICT", active_only: true }),
-        fetchSchoolYears(),
         fetchCatalogStates(),
         fetchCatalogDistricts(),
         fetchCatalogSchools(),
         fetchCatalogGrades(),
-        fetchCatalogSubjects(),
         fetchCatalogObjectives(),
         fetchCatalogCurriculumResources(),
       ]);
       setGuides(nextGuides);
-      setSchoolYears(nextSchoolYears);
       setStates(nextStates);
       setDistricts(nextDistricts);
       setSchools(nextSchools);
       setGrades(nextGrades);
-      setSubjects(nextSubjects);
       setObjectives(nextObjectives);
       setResources(nextResources);
+      await loadSchoolYearOptions();
       const nextSelected = preserveGuideId || selectedGuideId || nextGuides[0]?.id || "";
       setSelectedGuideId(nextSelected);
       if (nextSelected) {
@@ -119,11 +144,37 @@ export function TeacherAssistPacingGuideAdminPanel() {
     } finally {
       setLoading(false);
     }
-  }, [clearSectionAlert, selectedGuideId, setSectionAlert]);
+  }, [clearSectionAlert, loadSchoolYearOptions, selectedGuideId, setSectionAlert]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!guideForm.catalog_grade_id) {
+      setSubjects([]);
+      setGuideForm((current) => ({ ...current, catalog_subject_id: "" }));
+      return;
+    }
+    void fetchCatalogSubjects(guideForm.catalog_grade_id)
+      .then((rows) => {
+        const seen = new Set<string>();
+        const distinct = rows.filter((row) => {
+          const key = `${row.grade_id ?? ""}:${row.subject_code}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setSubjects(distinct);
+        setGuideForm((current) => ({
+          ...current,
+          catalog_subject_id: distinct.some((row) => row.id === current.catalog_subject_id)
+            ? current.catalog_subject_id
+            : "",
+        }));
+      })
+      .catch(() => setSubjects([]));
+  }, [guideForm.catalog_grade_id]);
 
   const gradeLabelById = useMemo(
     () => new Map(grades.map((row) => [row.id, `${row.display_name} (${row.grade_code})`])),
@@ -133,6 +184,12 @@ export function TeacherAssistPacingGuideAdminPanel() {
     () => new Map(subjects.map((row) => [row.id, `${row.display_name} (${row.subject_code})`])),
     [subjects],
   );
+  const selectedSchoolYearId =
+    guideForm.school_year_id ||
+    schoolYears.find((row) => row.is_default)?.id ||
+    schoolYears[0]?.id ||
+    "";
+  const canCreateGuide = Boolean(selectedSchoolYearId && guideForm.title.trim());
 
   const runSave = async (action: () => Promise<void>, successMessage: string) => {
     clearSectionAlert("pacing-admin");
@@ -159,11 +216,18 @@ export function TeacherAssistPacingGuideAdminPanel() {
             className="mt-4 grid gap-3"
             onSubmit={(event) => {
               event.preventDefault();
+              if (!selectedSchoolYearId) {
+                setSectionAlert(
+                  "pacing-admin",
+                  sectionError("Select a school year before creating a district pacing guide.", "School year required"),
+                );
+                return;
+              }
               void runSave(async () => {
                 const created = await createCatalogPacingGuide({
-                  school_year_id: guideForm.school_year_id,
+                  school_year_id: selectedSchoolYearId,
                   guide_type: "DISTRICT",
-                  title: guideForm.title,
+                  title: guideForm.title.trim(),
                   description: guideForm.description || null,
                   catalog_state_id: guideForm.catalog_state_id || null,
                   catalog_district_id: guideForm.catalog_district_id || null,
@@ -177,9 +241,25 @@ export function TeacherAssistPacingGuideAdminPanel() {
               }, "District pacing guide created.");
             }}
           >
-            <select className="ta-input" value={guideForm.school_year_id} onChange={(e) => setGuideForm((c) => ({ ...c, school_year_id: e.target.value }))}>
-              <option value="">School year</option>
-              {schoolYears.map((row) => <option key={row.id} value={row.id}>{row.title}</option>)}
+            <select
+              className="ta-input"
+              value={selectedSchoolYearId}
+              onChange={(e) => setGuideForm((c) => ({ ...c, school_year_id: e.target.value }))}
+              required
+              disabled={schoolYearsLoading || schoolYears.length === 0}
+            >
+              {schoolYearsLoading ? (
+                <option value="">Loading school years...</option>
+              ) : schoolYears.length === 0 ? (
+                <option value="">No school years available</option>
+              ) : (
+                schoolYears.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.title}
+                    {row.is_default ? " (default)" : ""}
+                  </option>
+                ))
+              )}
             </select>
             <input className="ta-input" placeholder="Guide title" value={guideForm.title} onChange={(e) => setGuideForm((c) => ({ ...c, title: e.target.value }))} />
             <textarea className="ta-input min-h-20" placeholder="Description" value={guideForm.description} onChange={(e) => setGuideForm((c) => ({ ...c, description: e.target.value }))} />
@@ -195,15 +275,40 @@ export function TeacherAssistPacingGuideAdminPanel() {
               <option value="">School</option>
               {schools.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
             </select>
-            <select className="ta-input" value={guideForm.catalog_grade_id} onChange={(e) => setGuideForm((c) => ({ ...c, catalog_grade_id: e.target.value }))}>
+            <select
+              className="ta-input"
+              value={guideForm.catalog_grade_id}
+              onChange={(e) =>
+                setGuideForm((c) => ({
+                  ...c,
+                  catalog_grade_id: e.target.value,
+                  catalog_subject_id: "",
+                }))
+              }
+            >
               <option value="">Grade</option>
-              {grades.map((row) => <option key={row.id} value={row.id}>{gradeLabelById.get(row.id)}</option>)}
+              {grades.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {gradeLabelById.get(row.id)}
+                </option>
+              ))}
             </select>
-            <select className="ta-input" value={guideForm.catalog_subject_id} onChange={(e) => setGuideForm((c) => ({ ...c, catalog_subject_id: e.target.value }))}>
-              <option value="">Subject</option>
-              {subjects.map((row) => <option key={row.id} value={row.id}>{subjectLabelById.get(row.id)}</option>)}
+            <select
+              className="ta-input"
+              value={guideForm.catalog_subject_id}
+              onChange={(e) => setGuideForm((c) => ({ ...c, catalog_subject_id: e.target.value }))}
+              disabled={!guideForm.catalog_grade_id}
+            >
+              <option value="">{guideForm.catalog_grade_id ? "Subject" : "Select grade first"}</option>
+              {subjects.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {subjectLabelById.get(row.id)}
+                </option>
+              ))}
             </select>
-            <button type="submit" className="ta-button-primary">Create district guide</button>
+            <button type="submit" className="ta-button-primary" disabled={!canCreateGuide}>
+              Create district guide
+            </button>
           </form>
         </article>
 

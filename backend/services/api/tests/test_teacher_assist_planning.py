@@ -6283,7 +6283,7 @@ def test_today_workspace_read_only_no_side_effects(client, db_session: Session):
     assert "priority_items" in payload
     assert "workflow_progress_cards" in payload
     assert "onboarding_checklist" in payload
-    assert payload["onboarding_checklist"]["total_count"] == 7
+    assert payload["onboarding_checklist"]["total_count"] == 3
 
     after_audit = db_session.scalar(select(func.count()).select_from(TeacherAssistMasteryAuditEvent))
     after_ai = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
@@ -6716,7 +6716,7 @@ def test_home_workspace_and_work_queue_read_only(client, db_session: Session):
     assert home_payload["read_only"] is True
     assert "priorities" in home_payload
     assert "onboarding" in home_payload
-    assert home_payload["onboarding"]["total_count"] == 10
+    assert home_payload["onboarding"]["total_count"] == 3
 
     assert priorities.status_code == 200, priorities.text
     assert "items" in priorities.json()
@@ -6731,7 +6731,7 @@ def test_home_workspace_and_work_queue_read_only(client, db_session: Session):
     assert isinstance(mastery_alerts.json(), list)
 
     assert quick_actions.status_code == 200, quick_actions.text
-    assert len(quick_actions.json()) >= 4
+    assert len(quick_actions.json()) >= 2
 
     assert work_queue.status_code == 200, work_queue.text
     queue_payload = work_queue.json()

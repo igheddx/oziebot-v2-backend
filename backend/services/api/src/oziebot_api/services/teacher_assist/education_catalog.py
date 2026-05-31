@@ -138,23 +138,42 @@ def get_district_or_404(db: Session, district_id: uuid.UUID) -> EducationDistric
 
 
 def create_district(
-    db: Session, *, state_id: uuid.UUID, name: str, active: bool = True
+    db: Session,
+    *,
+    state_id: uuid.UUID,
+    name: str,
+    district_code: str | None = None,
+    active: bool = True,
 ) -> EducationDistrict:
     get_state_or_404(db, state_id)
     now = _now()
-    row = EducationDistrict(state_id=state_id, name=name.strip(), active=active, created_at=now, updated_at=now)
+    row = EducationDistrict(
+        state_id=state_id,
+        name=name.strip(),
+        district_code=district_code.strip().upper() if district_code else None,
+        active=active,
+        created_at=now,
+        updated_at=now,
+    )
     db.add(row)
     db.flush()
     return row
 
 
 def update_district(
-    db: Session, *, district_id: uuid.UUID, state_id: uuid.UUID, name: str, active: bool
+    db: Session,
+    *,
+    district_id: uuid.UUID,
+    state_id: uuid.UUID,
+    name: str,
+    district_code: str | None,
+    active: bool,
 ) -> EducationDistrict:
     row = get_district_or_404(db, district_id)
     get_state_or_404(db, state_id)
     row.state_id = state_id
     row.name = name.strip()
+    row.district_code = district_code.strip().upper() if district_code else None
     row.active = active
     row.updated_at = _now()
     db.flush()
@@ -350,6 +369,11 @@ def list_objectives(
     db: Session,
     *,
     state_id: uuid.UUID | None = None,
+    district_id: uuid.UUID | None = None,
+    school_id: uuid.UUID | None = None,
+    grade_id: uuid.UUID | None = None,
+    subject_id: uuid.UUID | None = None,
+    school_year_id: uuid.UUID | None = None,
     grade_level: str | None = None,
     subject_code: str | None = None,
     q: str | None = None,
@@ -360,6 +384,16 @@ def list_objectives(
     )
     if state_id is not None:
         stmt = stmt.where(EducationObjective.state_id == state_id)
+    if district_id is not None:
+        stmt = stmt.where(EducationObjective.district_id == district_id)
+    if school_id is not None:
+        stmt = stmt.where(EducationObjective.school_id == school_id)
+    if grade_id is not None:
+        stmt = stmt.where(EducationObjective.grade_id == grade_id)
+    if subject_id is not None:
+        stmt = stmt.where(EducationObjective.subject_id == subject_id)
+    if school_year_id is not None:
+        stmt = stmt.where(EducationObjective.school_year_id == school_year_id)
     if grade_level:
         stmt = stmt.where(EducationObjective.grade_level == grade_level.strip())
     if subject_code:
@@ -393,11 +427,35 @@ def create_objective(
     description: str,
     coverage_type: str,
     active: bool = True,
+    district_id: uuid.UUID | None = None,
+    school_id: uuid.UUID | None = None,
+    grade_id: uuid.UUID | None = None,
+    subject_id: uuid.UUID | None = None,
+    school_year_id: uuid.UUID | None = None,
 ) -> EducationObjective:
     get_state_or_404(db, state_id)
+    if district_id is not None:
+        get_district_or_404(db, district_id)
+    if school_id is not None:
+        get_school_or_404(db, school_id)
+    if grade_id is not None:
+        get_grade_or_404(db, grade_id)
+    if subject_id is not None:
+        get_subject_or_404(db, subject_id)
+    if school_year_id is not None:
+        from oziebot_api.models.education_catalog import EducationSchoolYear
+
+        row = db.get(EducationSchoolYear, school_year_id)
+        if row is None:
+            raise LookupError("School year not found")
     now = _now()
     row = EducationObjective(
         state_id=state_id,
+        district_id=district_id,
+        school_id=school_id,
+        grade_id=grade_id,
+        subject_id=subject_id,
+        school_year_id=school_year_id,
         grade_level=grade_level.strip(),
         subject_code=subject_code.strip(),
         objective_type=validate_objective_type(objective_type),
@@ -425,10 +483,34 @@ def update_objective(
     description: str,
     coverage_type: str,
     active: bool,
+    district_id: uuid.UUID | None = None,
+    school_id: uuid.UUID | None = None,
+    grade_id: uuid.UUID | None = None,
+    subject_id: uuid.UUID | None = None,
+    school_year_id: uuid.UUID | None = None,
 ) -> EducationObjective:
     row = get_objective_or_404(db, row_id)
     get_state_or_404(db, state_id)
+    if district_id is not None:
+        get_district_or_404(db, district_id)
+    if school_id is not None:
+        get_school_or_404(db, school_id)
+    if grade_id is not None:
+        get_grade_or_404(db, grade_id)
+    if subject_id is not None:
+        get_subject_or_404(db, subject_id)
+    if school_year_id is not None:
+        from oziebot_api.models.education_catalog import EducationSchoolYear
+
+        school_year = db.get(EducationSchoolYear, school_year_id)
+        if school_year is None:
+            raise LookupError("School year not found")
     row.state_id = state_id
+    row.district_id = district_id
+    row.school_id = school_id
+    row.grade_id = grade_id
+    row.subject_id = subject_id
+    row.school_year_id = school_year_id
     row.grade_level = grade_level.strip()
     row.subject_code = subject_code.strip()
     row.objective_type = validate_objective_type(objective_type)

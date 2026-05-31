@@ -83,6 +83,30 @@ export type TeacherSchoolAssignment = {
   updated_at: string;
 };
 
+export type TeacherSchoolAssignmentListItem = TeacherSchoolAssignment & {
+  user_email?: string | null;
+  user_full_name?: string | null;
+  state_name?: string | null;
+  district_name?: string | null;
+  school_name?: string | null;
+};
+
+export type AvailableTeacher = {
+  user_id: string;
+  email: string;
+  full_name?: string | null;
+};
+
+export type TeacherSchoolAssignmentProvisionResult = {
+  assignment: TeacherSchoolAssignment;
+  user_id: string;
+  email: string;
+  full_name?: string | null;
+  created_user: boolean;
+  temporary_password?: string | null;
+  grade_setup_applied: boolean;
+};
+
 export type CatalogImportPreview = {
   total_rows: number;
   valid_count: number;
@@ -116,6 +140,29 @@ export type TeacherCatalogContext = {
     grade_level: string;
     subject_code: string;
     description: string | null;
+  }>;
+};
+
+export type TeacherMySchoolSetup = {
+  assignment: {
+    id: string;
+    state_id: string;
+    state_name: string;
+    state_abbreviation: string;
+    district_id: string;
+    district_name: string;
+    school_id: string;
+    school_name: string;
+    school_type: string | null;
+  } | null;
+  catalog_grade_id: string | null;
+  catalog_grade_code: string | null;
+  selected_catalog_subject_ids: string[];
+  synced_subjects: Array<{
+    catalog_subject_id: string;
+    tenant_subject_id: string;
+    subject_code: string;
+    display_name: string;
   }>;
 };
 

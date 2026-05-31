@@ -30,7 +30,7 @@ from oziebot_api.services.teacher_assist.access_seed import (
 )
 
 DEFAULT_DOMINIC_EMAIL = "Dominic@oziebot.com"
-DEFAULT_AWELE_EMAIL = "aweleu@gmail.com"
+DEFAULT_AWELE_EMAIL = "aweleu@yahoo.com"
 DEFAULT_AWELE_FULL_NAME = "Awele Ighedosa"
 DEFAULT_AWELE_TENANT_NAME = "Awele Ighedosa"
 DEFAULT_OZIE_EMAIL = "dvaten.1992@gmail.com"
@@ -81,6 +81,10 @@ def run() -> None:
             tenant_name=ozie_tenant_name,
             password=ozie_password,
         )
+        from oziebot_api.services.teacher_assist.access_seed import ensure_teacher_assist_root_admin
+
+        for admin_email in (ozie_email, awele_email):
+            ensure_teacher_assist_root_admin(session, email=admin_email)
         session.commit()
         for result in (dominic, awele, ozie):
             print(

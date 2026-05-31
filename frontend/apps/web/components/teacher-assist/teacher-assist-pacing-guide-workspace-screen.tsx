@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   TeacherAssistInlineAlert,
@@ -9,7 +9,10 @@ import {
   sectionSuccess,
   useTeacherAssistSectionAlerts,
 } from "@/components/teacher-assist/teacher-assist-inline-alert";
+import { TeacherAssistOnboardingGatePanel } from "@/components/teacher-assist/teacher-assist-onboarding-gate-panel";
+import { useTeacherAssistOnboarding } from "@/components/teacher-assist/teacher-assist-onboarding-context";
 import {
+  coercePacingGuideId,
   fetchCatalogPacingGuides,
   fetchPacingGuideWorkspace,
   updateActivePacingGuideSelection,
@@ -52,6 +55,7 @@ function PeriodCard({ period, label }: { period: PeriodPayload | null | undefine
 }
 
 export function TeacherAssistPacingGuideWorkspaceScreen() {
+  const { isComplete: onboardingComplete, loading: onboardingLoading } = useTeacherAssistOnboarding();
   const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
   const [loading, setLoading] = useState(true);
   const [workspace, setWorkspace] = useState<Awaited<ReturnType<typeof fetchPacingGuideWorkspace>> | null>(null);
@@ -65,19 +69,32 @@ export function TeacherAssistPacingGuideWorkspaceScreen() {
     clearSectionAlert("workspace");
     try {
       const guideRows = await fetchCatalogPacingGuides({ active_only: true });
+      const resolvedGuideId =
+        coercePacingGuideId(guideId) ??
+        coercePacingGuideId(selectedGuideId) ??
+        undefined;
+      const resolvedPeriodId =
+        coercePacingGuideId(periodId) ??
+        coercePacingGuideId(selectedPeriodId) ??
+        undefined;
       const payload = await fetchPacingGuideWorkspace({
-        guide_id: guideId || selectedGuideId || undefined,
-        period_id: periodId || selectedPeriodId || undefined,
+        guide_id: resolvedGuideId,
+        period_id: resolvedPeriodId,
       });
       setGuides(guideRows);
       setWorkspace(payload);
       const context = payload.current_week_context as Record<string, unknown>;
       if (!guideId) {
-        setSelectedGuideId(String(context.active_pacing_guide_id ?? guideRows[0]?.id ?? ""));
+        setSelectedGuideId(
+          coercePacingGuideId(context.active_pacing_guide_id) ??
+            coercePacingGuideId(context.pacing_guide) ??
+            coercePacingGuideId(guideRows[0]?.id) ??
+            "",
+        );
       }
       const period = (payload.selected_period ?? context.current_week) as PeriodPayload | null;
       if (!periodId) {
-        setSelectedPeriodId(String(period?.id ?? ""));
+        setSelectedPeriodId(coercePacingGuideId(period?.id) ?? "");
       }
       setNotesDraft(period?.teacher_notes ?? "");
     } catch (nextError) {
@@ -91,37 +108,38 @@ export function TeacherAssistPacingGuideWorkspaceScreen() {
   }, [clearSectionAlert, selectedGuideId, selectedPeriodId, setSectionAlert]);
 
   useEffect(() => {
+    if (!onboardingComplete) return;
     void refresh();
-  }, []);
+  }, [onboardingComplete, refresh]);
 
-  const context = (workspace?.current_week_context ?? {}) as Record<string, any>;
+  const context = (workspace?.current_week_context ?? {}) as Record<string, unknown>;
   const selectedPeriod = (workspace?.selected_period ?? context.current_week) as PeriodPayload | null;
-  const instructionalWeek = (workspace?.instructional_week ?? {}) as Record<string, string | undefined>;
-  const upcomingInstructionalWeek = (workspace?.upcoming_instructional_week ?? {}) as Record<string, string | undefined>;
   const coverage = workspace?.objective_coverage as
     | { objectives?: Array<{ objective_code?: string; coverage_status?: string; period_title?: string }>; summary?: Record<string, number> }
     | undefined;
   const progress = context.teaching_progress as Record<string, number> | undefined;
 
-  const launchHref = useMemo(
-    () => ({
-      week:
-        instructionalWeek.instructional_week_href ??
-        (selectedPeriod?.id ? `/teacher-assist/planning/weeks?period_id=${selectedPeriod.id}` : "/teacher-assist/planning/weeks"),
-      plan: selectedPeriod?.id ? `/teacher-assist/planning/weeks?period_id=${selectedPeriod.id}&action=instructional_plan` : "/teacher-assist/planning/weeks",
-      assignment: selectedPeriod?.id ? `/teacher-assist/planning/weeks?period_id=${selectedPeriod.id}&action=assignment` : "/teacher-assist/planning/weeks",
-      newsletter: selectedPeriod?.id ? `/teacher-assist/planning/weeks?period_id=${selectedPeriod.id}&action=newsletter` : "/teacher-assist/planning/weeks",
-      exports: selectedPeriod?.id ? `/teacher-assist/planning/weeks?period_id=${selectedPeriod.id}&action=quiz` : "/teacher-assist/planning/weeks",
-    }),
-    [instructionalWeek.instructional_week_href, selectedPeriod?.id],
-  );
+  const weeklyPlanningHref = selectedPeriod?.id
+    ? `/teacher-assist/planning/weeks?period_id=${selectedPeriod.id}`
+    : "/teacher-assist/planning/weeks";
+  const uploadResourcesHref = "/teacher-assist/resources";
+
+  if (!onboardingLoading && !onboardingComplete) {
+    return (
+      <div id="pacing-workspace-panel" className="space-y-4">
+        <TeacherAssistOnboardingGatePanel title="Finish setup before using Pacing Workspace" />
+      </div>
+    );
+  }
 
   return (
     <div id="pacing-workspace-panel" className="space-y-4">
       <header className="ta-panel p-4">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">Planning</p>
         <h1 className="mt-1 text-2xl font-semibold text-slate-900">Pacing Guide Workspace</h1>
-        <p className="mt-1 text-sm text-slate-600">Navigate your active guide, review the current week, and launch existing instructional workflows.</p>
+        <p className="mt-1 text-sm text-slate-600">
+          Review your active guide and current week, then open weekly planning to upload materials and generate your plan.
+        </p>
       </header>
 
       <TeacherAssistInlineAlert alert={getSectionAlert("workspace")} />
@@ -136,7 +154,7 @@ export function TeacherAssistPacingGuideWorkspaceScreen() {
           >
             <option value="">Select guide</option>
             {guides.map((guide) => (
-              <option key={guide.id} value={guide.id}>
+              <option key={guide.id} value={coercePacingGuideId(guide.id) ?? ""}>
                 {guide.title} ({guide.guide_type})
               </option>
             ))}
@@ -147,7 +165,9 @@ export function TeacherAssistPacingGuideWorkspaceScreen() {
           className="ta-button-primary"
           onClick={() => {
             void withPreservedScroll("pacing-workspace-panel", async () => {
-              await updateActivePacingGuideSelection({ active_pacing_guide_id: selectedGuideId || null });
+              await updateActivePacingGuideSelection({
+                active_pacing_guide_id: coercePacingGuideId(selectedGuideId) ?? null,
+              });
               setSectionAlert("workspace", sectionSuccess("Active pacing guide updated."));
               await refresh();
             }).catch((nextError) => {
@@ -178,35 +198,17 @@ export function TeacherAssistPacingGuideWorkspaceScreen() {
                 <p>School year: {(context.school_year as { title?: string } | null)?.title ?? "Not set"}</p>
                 <p>Guide: {(context.pacing_guide as { title?: string } | null)?.title ?? "Not selected"}</p>
                 <p>Grading period: {(context.grading_period as { title?: string } | null)?.title ?? "Not resolved"}</p>
-                <p>Unit: {context.guide_unit?.title ?? "Not resolved"}</p>
+                <p>Unit: {(context.guide_unit as { title?: string } | null)?.title ?? "Not resolved"}</p>
               </div>
               <PeriodCard period={context.current_week as PeriodPayload} label="Current week" />
               <PeriodCard period={context.upcoming_week as PeriodPayload} label="Upcoming week" />
               <div className="flex flex-wrap gap-2">
-                <Link href={launchHref.week} className="ta-button-primary text-xs">
-                  {instructionalWeek.instructional_week_href ? "Open instructional week" : "Open week workspace"}
+                <Link href={weeklyPlanningHref} className="ta-button-primary text-xs">
+                  Open weekly planning
                 </Link>
-                {instructionalWeek.create_instructional_week_href ? (
-                  <Link href={instructionalWeek.create_instructional_week_href} className="ta-button-secondary text-xs">
-                    Create instructional week
-                  </Link>
-                ) : null}
-                {upcomingInstructionalWeek.instructional_week_href ? (
-                  <Link href={upcomingInstructionalWeek.instructional_week_href} className="ta-button-secondary text-xs">
-                    Open upcoming instructional week
-                  </Link>
-                ) : upcomingInstructionalWeek.create_instructional_week_href ? (
-                  <Link href={upcomingInstructionalWeek.create_instructional_week_href} className="ta-button-secondary text-xs">
-                    Prepare upcoming week
-                  </Link>
-                ) : null}
-                {Object.entries(launchHref)
-                  .filter(([key]) => key !== "week")
-                  .map(([key, href]) => (
-                  <Link key={key} href={href} className="ta-button-secondary text-xs capitalize">
-                    {key === "plan" ? "Create instructional plan" : key === "exports" ? "Generate quiz" : `Create ${key}`}
-                  </Link>
-                ))}
+                <Link href={uploadResourcesHref} className="ta-button-secondary text-xs">
+                  Upload curriculum files
+                </Link>
               </div>
             </article>
 
@@ -229,7 +231,7 @@ export function TeacherAssistPacingGuideWorkspaceScreen() {
                     type="button"
                     onClick={() => {
                       setSelectedPeriodId(row.id);
-                      void updateActivePacingGuideSelection({ manual_pacing_period_id: row.id }).then(refresh);
+                      void updateActivePacingGuideSelection({ manual_pacing_period_id: row.id }).then(() => refresh());
                     }}
                     className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm ${
                       row.is_current ? "border-sky-300 bg-sky-50" : "border-slate-200 bg-white"
@@ -280,9 +282,11 @@ export function TeacherAssistPacingGuideWorkspaceScreen() {
                     type="button"
                     className="ta-button-secondary"
                     onClick={() => {
-                      if (!selectedPeriod.id || !selectedGuideId) return;
+                      if (!selectedPeriod.id) return;
+                      const guideId = coercePacingGuideId(selectedGuideId);
+                      if (!guideId) return;
                       void withPreservedScroll("pacing-workspace-panel", async () => {
-                        await updatePacingPeriodNotes(selectedGuideId, selectedPeriod.id!, notesDraft || null);
+                        await updatePacingPeriodNotes(guideId, selectedPeriod.id!, notesDraft || null);
                         setSectionAlert("workspace", sectionSuccess("Week notes saved."));
                         await refresh();
                       }).catch((nextError) => {

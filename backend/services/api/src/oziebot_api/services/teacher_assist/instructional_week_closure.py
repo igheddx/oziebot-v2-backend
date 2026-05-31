@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_instructional_week_closure import (
@@ -31,6 +32,22 @@ def default_closure_checklist() -> dict[str, bool]:
     return {key: False for key in WEEK_CLOSURE_CHECKLIST_KEYS}
 
 
+def _get_week_closure(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    instructional_week_id: uuid.UUID,
+) -> TeacherAssistInstructionalWeekClosure | None:
+    return db.scalars(
+        select(TeacherAssistInstructionalWeekClosure).where(
+            TeacherAssistInstructionalWeekClosure.tenant_id == tenant_id,
+            TeacherAssistInstructionalWeekClosure.owner_user_id == user_id,
+            TeacherAssistInstructionalWeekClosure.instructional_week_id == instructional_week_id,
+        )
+    ).one_or_none()
+
+
 def get_or_create_week_closure(
     db: Session,
     *,
@@ -41,13 +58,12 @@ def get_or_create_week_closure(
     get_instructional_week(
         db, tenant_id=tenant_id, user_id=user_id, instructional_week_id=instructional_week_id
     )
-    row = db.scalars(
-        select(TeacherAssistInstructionalWeekClosure).where(
-            TeacherAssistInstructionalWeekClosure.tenant_id == tenant_id,
-            TeacherAssistInstructionalWeekClosure.owner_user_id == user_id,
-            TeacherAssistInstructionalWeekClosure.instructional_week_id == instructional_week_id,
-        )
-    ).one_or_none()
+    row = _get_week_closure(
+        db,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        instructional_week_id=instructional_week_id,
+    )
     if row is not None:
         return row
     now = _now()
@@ -61,7 +77,19 @@ def get_or_create_week_closure(
         updated_at=now,
     )
     db.add(row)
-    db.flush()
+    try:
+        with db.begin_nested():
+            db.flush()
+    except IntegrityError:
+        row = _get_week_closure(
+            db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            instructional_week_id=instructional_week_id,
+        )
+        if row is None:
+            raise
+        return row
     return row
 
 

@@ -75,7 +75,7 @@ def ensure_platform_products(db: Session) -> None:
 
 
 def product_route_key(pathname: str) -> str | None:
-    if pathname.startswith("/teacher-assist"):
+    if pathname.startswith("/teacher-assist-v2") or pathname.startswith("/teacher-assist"):
         return TEACHER_ASSIST_PRODUCT_KEY
     if pathname.startswith("/admin"):
         return None

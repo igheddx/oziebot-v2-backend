@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.user import User
+from oziebot_api.services.teacher_assist.constants import instructional_week_href
 from oziebot_api.services.teacher_assist.current_week_resolver import (
     _serialize_period,
     build_objective_coverage,
@@ -85,7 +86,7 @@ def build_week_workspace(
     instructional_week_payload = (
         {
             "id": str(instructional_week.id),
-            "navigation_href": f"/teacher-assist/week/{instructional_week.id}",
+            "navigation_href": instructional_week_href(str(instructional_week.id)),
             "status": instructional_week.status,
         }
         if instructional_week is not None

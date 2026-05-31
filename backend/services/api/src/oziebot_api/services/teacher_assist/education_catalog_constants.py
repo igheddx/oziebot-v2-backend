@@ -4,11 +4,29 @@ from __future__ import annotations
 
 from typing import Literal
 
-ObjectiveTypeLiteral = Literal["TEKS", "CommonCore", "DistrictObjective", "Custom"]
+ObjectiveTypeLiteral = Literal[
+    "TEKS",
+    "StateStandard",
+    "DistrictStandard",
+    "CustomStandard",
+    "CommonCore",
+    "DistrictObjective",
+    "Custom",
+]
 CoverageTypeLiteral = Literal["required", "optional", "enrichment"]
 CatalogResourceTypeLiteral = Literal["curriculum", "textbook", "reference"]
 
-OBJECTIVE_TYPES = frozenset({"TEKS", "CommonCore", "DistrictObjective", "Custom"})
+OBJECTIVE_TYPES = frozenset(
+    {
+        "TEKS",
+        "StateStandard",
+        "DistrictStandard",
+        "CustomStandard",
+        "CommonCore",
+        "DistrictObjective",
+        "Custom",
+    }
+)
 COVERAGE_TYPES = frozenset({"required", "optional", "enrichment"})
 CATALOG_RESOURCE_TYPES = frozenset({"curriculum", "textbook", "reference"})
 

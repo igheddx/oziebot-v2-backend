@@ -25,12 +25,14 @@ from oziebot_api.schemas.pacing_guide import (
     CatalogPacingGuideRolloverIn,
     CatalogPacingGuideSummaryOut,
     CatalogPacingGuideUpdate,
+    PacingSchoolYearOptionsOut,
     WeekArtifactGenerateIn,
 )
 from oziebot_api.services.teacher_assist.current_week_resolver import (
     build_current_week_payload,
     build_objective_coverage,
 )
+from oziebot_api.services.teacher_assist.pacing_school_year_options import build_pacing_school_year_options
 from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
     PacingGuideRolloverService,
     add_pacing_guide_objective,
@@ -155,6 +157,13 @@ def _detail_out(guide) -> CatalogPacingGuideDetailOut:
             )
         )
     return CatalogPacingGuideDetailOut(**summary.model_dump(), periods=periods)
+
+
+@router.get("/pacing-guides/school-year-options", response_model=PacingSchoolYearOptionsOut)
+def read_pacing_guide_school_year_options(user: CurrentUser, db: DbSession) -> PacingSchoolYearOptionsOut:
+    tenant_id = _tenant_id(db, user)
+    payload = build_pacing_school_year_options(db, tenant_id=tenant_id)
+    return PacingSchoolYearOptionsOut(**payload)
 
 
 @router.get("/pacing-guides", response_model=list[CatalogPacingGuideSummaryOut])

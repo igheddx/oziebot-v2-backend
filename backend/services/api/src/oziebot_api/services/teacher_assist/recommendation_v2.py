@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from oziebot_api.services.teacher_assist.constants import instructional_week_href
 from oziebot_api.services.teacher_assist.objective_performance import ObjectivePerformanceService
 from oziebot_api.services.teacher_assist.reteach_plans import list_reteach_plans
 from oziebot_api.services.teacher_assist.student_support_groups import list_support_groups
@@ -99,7 +100,7 @@ def build_instructional_loop_recommendations(
                 "title": "Prepare reassessment checkpoint",
                 "description": "Schedule a short reassessment after reteach to measure improvement.",
                 "action_key": "prepare_reassessment",
-                "navigation_href": f"/teacher-assist/week/{instructional_week_id}?tab=assessments",
+                "navigation_href": instructional_week_href(str(instructional_week_id), tab="assessments"),
                 "requires_teacher_review": True,
             }
         )

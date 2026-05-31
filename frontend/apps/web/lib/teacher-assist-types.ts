@@ -8,6 +8,27 @@ export type TeacherProfile = {
   updated_at: string | null;
 };
 
+export type TeacherMyClassroom = {
+  grade_level: string | null;
+  grade_display_name: string | null;
+  homeroom_name: string;
+  student_count: number | null;
+  timezone: string | null;
+  class_id: string | null;
+  synced_subjects: Array<{
+    catalog_subject_id: string;
+    tenant_subject_id: string;
+    subject_code: string;
+    display_name: string;
+  }>;
+  has_active_school_year: boolean;
+  requires_school_setup: boolean;
+  active_school_year_id: string | null;
+  active_school_year_title: string | null;
+  active_school_year_start_date: string | null;
+  active_school_year_end_date: string | null;
+};
+
 export type TeacherAssistOptions = {
   grading_period_types: string[];
   standard_types: string[];

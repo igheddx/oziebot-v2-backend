@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { useAuth } from "@/components/providers/auth-provider";
 import { TeacherAssistPacingGuideAdminPanel } from "@/components/teacher-assist/teacher-assist-pacing-guide-admin-panel";
+import { TeacherAssistTeacherAssignmentsPanel } from "@/components/teacher-assist/teacher-assist-teacher-assignments-panel";
 import { TeacherAssistFormErrorSummary } from "@/components/teacher-assist/teacher-assist-form-error-summary";
 import {
   TeacherAssistInlineAlert,
@@ -21,7 +23,6 @@ import {
   createCatalogSchool,
   createCatalogState,
   createCatalogSubject,
-  createCatalogTeacherAssignment,
   fetchCatalogCurriculumResources,
   fetchCatalogDistricts,
   fetchCatalogGrades,
@@ -29,7 +30,6 @@ import {
   fetchCatalogSchools,
   fetchCatalogStates,
   fetchCatalogSubjects,
-  fetchCatalogTeacherAssignments,
   previewCatalogObjectivesImport,
   updateCatalogCurriculumResource,
   updateCatalogDistrict,
@@ -56,8 +56,17 @@ const SECTIONS: Array<{ key: CatalogSection; label: string }> = [
 
 export function TeacherAssistEducationCatalogAdminScreen() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
+  const initialSection = useMemo(() => {
+    const tab = searchParams.get("tab");
+    return SECTIONS.some((row) => row.key === tab) ? (tab as CatalogSection) : "states";
+  }, [searchParams]);
   const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
-  const [section, setSection] = useState<CatalogSection>("states");
+  const [section, setSection] = useState<CatalogSection>(initialSection);
+
+  useEffect(() => {
+    setSection(initialSection);
+  }, [initialSection]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -70,7 +79,6 @@ export function TeacherAssistEducationCatalogAdminScreen() {
   const [curriculumResources, setCurriculumResources] = useState<
     Awaited<ReturnType<typeof fetchCatalogCurriculumResources>>
   >([]);
-  const [assignments, setAssignments] = useState<Awaited<ReturnType<typeof fetchCatalogTeacherAssignments>>>([]);
   const [stateForm, setStateForm] = useState({ name: "", abbreviation: "", active: true });
   const [districtForm, setDistrictForm] = useState({ state_id: "", name: "", active: true });
   const [schoolForm, setSchoolForm] = useState({ district_id: "", name: "", school_type: "elementary", active: true });
@@ -96,13 +104,6 @@ export function TeacherAssistEducationCatalogAdminScreen() {
     coverage_type: "required",
     active: true,
   });
-  const [assignmentForm, setAssignmentForm] = useState({
-    user_id: "",
-    state_id: "",
-    district_id: "",
-    school_id: "",
-    active: true,
-  });
   const [editingStateId, setEditingStateId] = useState<string | null>(null);
   const [editingDistrictId, setEditingDistrictId] = useState<string | null>(null);
   const [editingSchoolId, setEditingSchoolId] = useState<string | null>(null);
@@ -118,7 +119,7 @@ export function TeacherAssistEducationCatalogAdminScreen() {
       if (!silent) setLoading(true);
       setPageError(null);
       try {
-        const [nextStates, nextDistricts, nextSchools, nextGrades, nextSubjects, nextObjectives, nextCurriculum, nextAssignments] =
+        const [nextStates, nextDistricts, nextSchools, nextGrades, nextSubjects, nextObjectives, nextCurriculum] =
           await Promise.all([
           fetchCatalogStates(search || undefined),
           fetchCatalogDistricts(undefined, search || undefined),
@@ -127,7 +128,6 @@ export function TeacherAssistEducationCatalogAdminScreen() {
           fetchCatalogSubjects(),
           fetchCatalogObjectives({ q: search || undefined, active_only: false }),
           fetchCatalogCurriculumResources({ active_only: false }),
-          fetchCatalogTeacherAssignments(),
         ]);
         setStates(nextStates);
         setDistricts(nextDistricts);
@@ -136,7 +136,6 @@ export function TeacherAssistEducationCatalogAdminScreen() {
         setSubjects(nextSubjects);
         setObjectives(nextObjectives);
         setCurriculumResources(nextCurriculum);
-        setAssignments(nextAssignments);
       } catch (nextError) {
         if (!silent) {
           setPageError(nextError instanceof Error ? nextError.message : "Could not load education catalog.");
@@ -592,49 +591,13 @@ export function TeacherAssistEducationCatalogAdminScreen() {
               ))}
             </div>
           ) : section === "assignments" ? (
-            <div className="mt-5 space-y-5">
-              <form
-                className="grid gap-3 md:grid-cols-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void runSave(async () => {
-                    const school = schoolById.get(assignmentForm.school_id);
-                    const district = school ? districtById.get(school.district_id) : undefined;
-                    await createCatalogTeacherAssignment({
-                      ...assignmentForm,
-                      state_id: district?.state_id ?? assignmentForm.state_id,
-                      district_id: school?.district_id ?? assignmentForm.district_id,
-                    });
-                    setAssignmentForm({ user_id: "", state_id: states[0]?.id ?? "", district_id: districts[0]?.id ?? "", school_id: schools[0]?.id ?? "", active: true });
-                  }, "Teacher assignment created.");
-                }}
-              >
-                <input className="ta-input" placeholder="User ID" value={assignmentForm.user_id} onChange={(e) => setAssignmentForm((c) => ({ ...c, user_id: e.target.value }))} />
-                <select
-                  className="ta-input"
-                  value={assignmentForm.school_id}
-                  onChange={(e) => {
-                    const school = schoolById.get(e.target.value);
-                    const district = school ? districtById.get(school.district_id) : undefined;
-                    setAssignmentForm((c) => ({
-                      ...c,
-                      school_id: e.target.value,
-                      district_id: school?.district_id ?? c.district_id,
-                      state_id: district?.state_id ?? c.state_id,
-                    }));
-                  }}
-                >
-                  <option value="">Select school</option>
-                  {schools.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
-                </select>
-                <button type="submit" className="ta-button-primary md:col-span-2">Assign teacher to school</button>
-              </form>
-              {assignments.map((row) => (
-                <div key={row.id} className="rounded-xl border border-slate-200 px-4 py-3 text-sm">
-                  User {row.user_id.slice(0, 8)}… · {schoolNameById.get(row.school_id) ?? row.school_id}
-                </div>
-              ))}
-            </div>
+            <TeacherAssistTeacherAssignmentsPanel
+              states={states}
+              districts={districts}
+              schools={schools}
+              grades={grades}
+              onRefreshCatalog={() => refresh(true)}
+            />
           ) : (
             <div className="mt-5">
               <TeacherAssistPacingGuideAdminPanel />

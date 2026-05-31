@@ -88,6 +88,7 @@ import type {
   TeacherAssistClassOperationalWorkspace,
   TeacherAssistUserPreferences,
   TeacherClass,
+  TeacherMyClassroom,
   TeacherProfile,
   WeeklyPlan,
   WeeklyPlanCopyInput,
@@ -175,6 +176,18 @@ export function fetchTeacherProfile() {
 
 export function saveTeacherProfile(body: Record<string, unknown>) {
   return writeJson<TeacherProfile>("/v1/teacher-assist/profile", "PUT", body);
+}
+
+export function fetchMyClassroom() {
+  return readJson<TeacherMyClassroom>("/v1/teacher-assist/my-classroom");
+}
+
+export function saveMyClassroom(body: {
+  homeroom_name: string;
+  student_count: number;
+  timezone?: string | null;
+}) {
+  return writeJson<TeacherMyClassroom>("/v1/teacher-assist/my-classroom", "PUT", body);
 }
 
 export function fetchSchoolYears() {

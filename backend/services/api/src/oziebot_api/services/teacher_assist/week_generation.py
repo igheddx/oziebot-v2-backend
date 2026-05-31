@@ -15,19 +15,35 @@ from oziebot_api.services.teacher_assist.generated_artifacts import register_gen
 from oziebot_api.services.teacher_assist.newsletters import create_newsletter
 from oziebot_api.services.teacher_assist.planning import attach_planning_draft_resource, create_planning_draft
 from oziebot_api.services.teacher_assist.instructional_weeks import link_entities_to_instructional_week
+from oziebot_api.services.teacher_assist.teacher_classroom import _resolve_homeroom_class
 from oziebot_api.services.teacher_assist.user_preferences import get_user_preferences_or_create
 from oziebot_api.services.teacher_assist.week_context_service import WeekContextService
 
 
-def _resolve_standard_ids(db: Session, *, tenant_id: uuid.UUID, objective_codes: list[str]) -> list[uuid.UUID]:
+def _resolve_standard_ids(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    objective_codes: list[str],
+    school_year_id: uuid.UUID | None = None,
+) -> list[uuid.UUID]:
     standard_ids: list[uuid.UUID] = []
     for code in objective_codes:
-        standard = db.scalars(
-            select(TeacherAssistStandard).where(
-                TeacherAssistStandard.tenant_id == tenant_id,
-                TeacherAssistStandard.code == code,
-            )
-        ).first()
+        base_query = select(TeacherAssistStandard).where(
+            TeacherAssistStandard.tenant_id == tenant_id,
+            TeacherAssistStandard.code == code,
+        )
+        standard = None
+        if school_year_id is not None:
+            standard = db.scalars(
+                base_query.where(TeacherAssistStandard.school_year_id == school_year_id)
+            ).first()
+        if standard is None:
+            standard = db.scalars(
+                base_query.where(TeacherAssistStandard.school_year_id.is_(None))
+            ).first()
+        if standard is None:
+            standard = db.scalars(base_query).first()
         if standard is not None:
             standard_ids.append(standard.id)
     return standard_ids
@@ -42,17 +58,46 @@ def _resolve_resource_ids(week_context: dict[str, Any]) -> list[uuid.UUID]:
     return resource_ids
 
 
-def _default_class_id(db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> uuid.UUID:
+def _default_class_id(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    school_year_id: uuid.UUID | None = None,
+    grade_level: str | None = None,
+) -> uuid.UUID:
     prefs = get_user_preferences_or_create(db, tenant_id=tenant_id, user_id=user_id)
     if prefs.last_class_id is not None:
-        return prefs.last_class_id
-    first_class = db.scalars(
-        select(TeacherAssistClass).where(
-            TeacherAssistClass.tenant_id == tenant_id,
-            TeacherAssistClass.teacher_user_id == user_id,
+        preferred = db.scalars(
+            select(TeacherAssistClass).where(
+                TeacherAssistClass.id == prefs.last_class_id,
+                TeacherAssistClass.tenant_id == tenant_id,
+            )
+        ).first()
+        if preferred is not None and (
+            school_year_id is None or preferred.school_year_id == school_year_id
+        ):
+            return preferred.id
+
+    if school_year_id is not None and grade_level:
+        homeroom = _resolve_homeroom_class(
+            db,
+            tenant_id=tenant_id,
+            school_year_id=school_year_id,
+            grade_level=grade_level,
         )
-    ).first()
+        if homeroom is not None:
+            return homeroom.id
+
+    query = select(TeacherAssistClass).where(TeacherAssistClass.tenant_id == tenant_id)
+    if school_year_id is not None:
+        query = query.where(TeacherAssistClass.school_year_id == school_year_id)
+    first_class = db.scalars(query.order_by(TeacherAssistClass.created_at.desc())).first()
     if first_class is None:
+        if school_year_id is not None:
+            raise ValueError(
+                "Add at least one class for the pacing guide school year before generating week artifacts."
+            )
         raise ValueError("Add at least one class before generating week artifacts.")
     return first_class.id
 
@@ -123,7 +168,12 @@ def generate_week_artifact(
     dto = WeekContextService.build(db, tenant_id=tenant_id, user=user, period_id=period_id)
     week_context = WeekContextService.serialize(dto)
     objective_codes = [row.get("objective_code") for row in week_context.get("objectives", []) if row.get("objective_code")]
-    standard_ids = _resolve_standard_ids(db, tenant_id=tenant_id, objective_codes=objective_codes)
+    standard_ids = _resolve_standard_ids(
+        db,
+        tenant_id=tenant_id,
+        objective_codes=objective_codes,
+        school_year_id=dto.school_year_id,
+    )
     resource_ids = _resolve_resource_ids(week_context)
     traceability = week_context.get("traceability") or {}
     resource_links = week_context.get("resources") or []
@@ -136,7 +186,14 @@ def generate_week_artifact(
             planning_scope="weekly",
             school_year_id=dto.school_year_id,
             grading_period_id=dto.grading_period_id,
-            class_id=class_id or _default_class_id(db, tenant_id=tenant_id, user_id=user.id),
+            class_id=class_id
+            or _default_class_id(
+                db,
+                tenant_id=tenant_id,
+                user_id=user.id,
+                school_year_id=dto.school_year_id,
+                grade_level=dto.grade_level,
+            ),
             subject_id=dto.subject_id,
             subject_ids=[dto.subject_id] if dto.subject_id else [],
             pacing_item_ids=[],
@@ -182,7 +239,13 @@ def generate_week_artifact(
         payload["navigation_href"] = f"/teacher-assist/weekly-planning?draft_id={draft.id}"
         return payload
 
-    resolved_class_id = class_id or _default_class_id(db, tenant_id=tenant_id, user_id=user.id)
+    resolved_class_id = class_id or _default_class_id(
+        db,
+        tenant_id=tenant_id,
+        user_id=user.id,
+        school_year_id=dto.school_year_id,
+        grade_level=dto.grade_level,
+    )
     if dto.subject_id is None:
         raise ValueError("Week context is missing a subject. Complete setup or select a subject-aligned pacing guide.")
     due_date = None

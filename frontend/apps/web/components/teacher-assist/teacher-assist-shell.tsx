@@ -13,6 +13,14 @@ import {
   type TeacherAssistNavGroup,
   type TeacherAssistNavLink,
 } from "@/components/teacher-assist/teacher-assist-nav";
+import {
+  TeacherAssistOnboardingProvider,
+  useTeacherAssistOnboarding,
+} from "@/components/teacher-assist/teacher-assist-onboarding-context";
+import {
+  filterQuickCreateLinks,
+  teacherAssistHrefRequiresOnboarding,
+} from "@/lib/teacher-assist-onboarding-gate";
 
 function isActivePath(pathname: string, href: string) {
   if (href === "/teacher-assist/home") {
@@ -34,8 +42,50 @@ function pillClass(active: boolean, compact = false) {
     : `${base} border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900`;
 }
 
-function QuickCreateMenu() {
+function GatedNavLink({
+  item,
+  pathname,
+  compact = false,
+  onboardingComplete,
+}: {
+  item: TeacherAssistNavLink;
+  pathname: string;
+  compact?: boolean;
+  onboardingComplete: boolean;
+}) {
+  const active = isActivePath(pathname, item.href);
+  const gated = teacherAssistHrefRequiresOnboarding(item.href) && !onboardingComplete;
+  if (gated) {
+    return (
+      <span
+        className={`${pillClass(active, compact)} cursor-not-allowed opacity-45`}
+        title="Complete setup on the Setup page first"
+      >
+        {item.label}
+      </span>
+    );
+  }
+  return (
+    <Link href={item.href} className={pillClass(active, compact)}>
+      {item.label}
+    </Link>
+  );
+}
+
+function QuickCreateMenu({ onboardingComplete }: { onboardingComplete: boolean }) {
   const [open, setOpen] = useState(false);
+  const links = filterQuickCreateLinks(TEACHER_ASSIST_QUICK_CREATE_LINKS, onboardingComplete);
+
+  if (links.length === 0) {
+    return (
+      <span
+        className="inline-flex h-8 cursor-not-allowed items-center rounded-full border border-slate-200 bg-slate-100 px-3 text-xs font-semibold text-slate-400"
+        title="Complete onboarding to unlock quick create"
+      >
+        Quick create
+      </span>
+    );
+  }
 
   return (
     <div className="relative">
@@ -49,7 +99,7 @@ function QuickCreateMenu() {
       </button>
       {open ? (
         <div className="absolute right-0 z-40 mt-1 min-w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
-          {TEACHER_ASSIST_QUICK_CREATE_LINKS.map((item) => (
+          {links.map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -69,24 +119,30 @@ function ChildNavRow({
   group,
   pathname,
   isRootAdmin,
+  onboardingComplete,
 }: {
   group: TeacherAssistNavGroup;
   pathname: string;
   isRootAdmin: boolean;
+  onboardingComplete: boolean;
 }) {
   const links = group.links.filter((item) => !item.rootAdminOnly || isRootAdmin);
   return (
     <div className="flex gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {links.map((item) => (
-        <Link key={item.href} href={item.href} className={pillClass(isActivePath(pathname, item.href), true)}>
-          {item.label}
-        </Link>
+        <GatedNavLink
+          key={item.href}
+          item={item}
+          pathname={pathname}
+          compact
+          onboardingComplete={onboardingComplete}
+        />
       ))}
     </div>
   );
 }
 
-export function TeacherAssistShell({ children }: { children: React.ReactNode }) {
+function TeacherAssistShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { logoutUser, user } = useAuth();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -109,6 +165,7 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
   const selectedGroup =
     TEACHER_ASSIST_NAV_GROUPS.find((group) => group.key === selectedCategory) ?? TEACHER_ASSIST_NAV_GROUPS[0];
   const isRootAdmin = Boolean(user?.is_root_admin);
+  const { isComplete: onboardingComplete, progressPercent } = useTeacherAssistOnboarding();
 
   return (
     <div className="teacher-assist-theme min-h-dvh bg-background text-foreground">
@@ -122,11 +179,15 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
             <div className="hidden h-4 w-px bg-slate-200 sm:block" />
             <div className="flex flex-wrap items-center gap-1.5">
               {TEACHER_ASSIST_PRIMARY_LINKS.map((item: TeacherAssistNavLink) => (
-                <Link key={item.href} href={item.href} className={pillClass(isActivePath(pathname, item.href), true)}>
-                  {item.label}
-                </Link>
+                <GatedNavLink
+                  key={item.href}
+                  item={item}
+                  pathname={pathname}
+                  compact
+                  onboardingComplete={onboardingComplete}
+                />
               ))}
-              <QuickCreateMenu />
+              <QuickCreateMenu onboardingComplete={onboardingComplete} />
             </div>
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <AppSwitcher />
@@ -155,6 +216,12 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
             </div>
           </div>
 
+          {!onboardingComplete ? (
+            <p className="mt-2 text-xs font-medium text-amber-800">
+              Setup {progressPercent}% complete — finish onboarding to unlock planning and classroom workflows.
+            </p>
+          ) : null}
+
           {/* Row 2 – category pills */}
           <nav
             className={`mt-2 flex gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${mobileNavOpen ? "flex" : "hidden lg:flex"}`}
@@ -179,12 +246,25 @@ export function TeacherAssistShell({ children }: { children: React.ReactNode }) 
 
           {/* Row 3 – child navigation */}
           <div className={`mt-1.5 ${mobileNavOpen ? "block" : "hidden lg:block"}`}>
-            <ChildNavRow group={selectedGroup} pathname={pathname} isRootAdmin={isRootAdmin} />
+            <ChildNavRow
+              group={selectedGroup}
+              pathname={pathname}
+              isRootAdmin={isRootAdmin}
+              onboardingComplete={onboardingComplete}
+            />
           </div>
         </header>
 
         <main className="flex-1 py-4 sm:py-5">{children}</main>
       </div>
     </div>
+  );
+}
+
+export function TeacherAssistShell({ children }: { children: React.ReactNode }) {
+  return (
+    <TeacherAssistOnboardingProvider>
+      <TeacherAssistShellInner>{children}</TeacherAssistShellInner>
+    </TeacherAssistOnboardingProvider>
   );
 }

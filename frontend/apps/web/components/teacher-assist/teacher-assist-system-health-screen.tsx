@@ -62,7 +62,7 @@ export function TeacherAssistSystemHealthScreen() {
               { label: "Users", value: users.total ?? 0 },
               { label: "Active workflows", value: jobs.workflows_active ?? 0 },
               { label: "Failed workflows (30d)", value: jobs.workflows_failed_30d ?? 0 },
-              { label: "Open pilot feedback", value: health?.open_pilot_feedback ?? 0 },
+              { label: "Open pilot feedback", value: Number(health?.open_pilot_feedback ?? 0) },
             ].map((card) => (
               <article key={card.label} className="ta-panel p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{card.label}</p>
