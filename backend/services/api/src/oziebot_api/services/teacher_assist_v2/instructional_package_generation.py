@@ -109,10 +109,14 @@ def _resolve_artifact_content(
     return ai_content if ai_content is not None else deterministic_content
 
 
-def _objective_fields(week_subject: dict[str, Any] | None, subject_name: str) -> tuple[str | None, str, list[str]]:
+def _objective_fields(
+    week_subject: dict[str, Any] | None, subject_name: str
+) -> tuple[str | None, str, list[str], list[str], list[str]]:
     objective_code = None
     objective_text = f"Students demonstrate understanding in {subject_name}."
     objectives_list: list[str] = []
+    objective_ids: list[str] = []
+    teks_ids: list[str] = []
     if week_subject and week_subject.get("objectives"):
         first = week_subject["objectives"][0]
         objective_code = first.get("objective_code")
@@ -122,7 +126,17 @@ def _objective_fields(week_subject: dict[str, Any] | None, subject_name: str) ->
             for row in week_subject["objectives"]
             if row.get("objective_code") or row.get("description")
         ]
-    return objective_code, objective_text, objectives_list
+        objective_ids = [
+            str(row.get("education_objective_id"))
+            for row in week_subject["objectives"]
+            if row.get("education_objective_id")
+        ]
+        teks_ids = [
+            str(row.get("objective_code"))
+            for row in week_subject["objectives"]
+            if row.get("objective_code")
+        ]
+    return objective_code, objective_text, objectives_list, objective_ids, teks_ids
 
 
 def _link_assessment_rubric(
@@ -223,7 +237,9 @@ def _persist_linked_writing_rubric(
     sequence: int,
     now: datetime,
 ) -> tuple[int, TeacherAssistV2InstructionalPackageArtifact]:
-    objective_code, objective_text, _ = _objective_fields(week_subject, subject_meta["subject_name"])
+    objective_code, objective_text, _, objective_ids, teks_ids = _objective_fields(
+        week_subject, subject_meta["subject_name"]
+    )
     rubric_deterministic = build_rubric_for_writing_response(
         writing_content=writing_content,
         subject_name=subject_meta["subject_name"],
@@ -231,6 +247,15 @@ def _persist_linked_writing_rubric(
         objective_code=objective_code,
         objective_text=objective_text,
     )
+    rubric_deterministic["objective_ids"] = objective_ids
+    rubric_deterministic["teks_ids"] = teks_ids
+    rubric_deterministic["alignment_summary"] = (
+        f"Aligned to {objective_code or 'selected objective'}: {objective_text}"
+    )
+    if isinstance(rubric_deterministic.get("objective_mapping"), dict):
+        rubric_deterministic["objective_mapping"]["objective_ids"] = objective_ids
+        rubric_deterministic["objective_mapping"]["teks_ids"] = teks_ids
+        rubric_deterministic["objective_mapping"]["alignment_summary"] = rubric_deterministic["alignment_summary"]
     return _persist_linked_assessment_rubric(
         db,
         settings=settings,
@@ -266,7 +291,9 @@ def _persist_linked_assignment_rubric(
     sequence: int,
     now: datetime,
 ) -> tuple[int, TeacherAssistV2InstructionalPackageArtifact]:
-    objective_code, objective_text, _ = _objective_fields(week_subject, subject_meta["subject_name"])
+    objective_code, objective_text, _, objective_ids, teks_ids = _objective_fields(
+        week_subject, subject_meta["subject_name"]
+    )
     rubric_deterministic = build_rubric_for_written_assignment(
         assignment_content=assignment_content,
         subject_name=subject_meta["subject_name"],
@@ -274,6 +301,15 @@ def _persist_linked_assignment_rubric(
         objective_code=objective_code,
         objective_text=objective_text,
     )
+    rubric_deterministic["objective_ids"] = objective_ids
+    rubric_deterministic["teks_ids"] = teks_ids
+    rubric_deterministic["alignment_summary"] = (
+        f"Aligned to {objective_code or 'selected objective'}: {objective_text}"
+    )
+    if isinstance(rubric_deterministic.get("objective_mapping"), dict):
+        rubric_deterministic["objective_mapping"]["objective_ids"] = objective_ids
+        rubric_deterministic["objective_mapping"]["teks_ids"] = teks_ids
+        rubric_deterministic["objective_mapping"]["alignment_summary"] = rubric_deterministic["alignment_summary"]
     return _persist_linked_assessment_rubric(
         db,
         settings=settings,
@@ -414,7 +450,9 @@ def generate_instructional_package(
                 for subject_id in teaching_order_keys:
                     week_subject = week_subjects.get(subject_id)
                     subject_meta = subject_lookup[subject_id]
-                    subj_code, subj_text, _ = _objective_fields(week_subject, subject_meta["subject_name"])
+                    subj_code, subj_text, _, _, _ = _objective_fields(
+                        week_subject, subject_meta["subject_name"]
+                    )
                     if objective_code is None:
                         objective_code = subj_code
                     block = build_subject_lesson_block_from_pacing(
@@ -430,7 +468,7 @@ def generate_instructional_package(
                     week_subjects.get(teaching_order_keys[0]) if teaching_order_keys else None
                 )
                 if primary_week_subject:
-                    _, week_objective_text, _ = _objective_fields(
+                    _, week_objective_text, _, _, _ = _objective_fields(
                         primary_week_subject,
                         subject_lookup[teaching_order_keys[0]]["subject_name"] if teaching_order_keys else "",
                     )
@@ -448,6 +486,10 @@ def generate_instructional_package(
                     fallback=week_objective_text,
                 )
 
+                _, _, _, objective_ids, teks_ids = _objective_fields(
+                    primary_week_subject,
+                    subject_lookup[teaching_order_keys[0]]["subject_name"] if primary_week_subject and teaching_order_keys else "",
+                )
                 deterministic = build_daily_lesson_plan(
                     day_label=day_label,
                     week_label=week_label,
@@ -455,6 +497,8 @@ def generate_instructional_package(
                     subject_blocks=subject_blocks,
                     objective_code=objective_code,
                     objective_text=objective_text,
+                    objective_ids=objective_ids,
+                    teks_ids=teks_ids,
                     summary=plan_summary,
                     daily_topic=daily_topic,
                 )
@@ -492,7 +536,7 @@ def generate_instructional_package(
             for subject_id in teaching_order_keys:
                 week_subject = week_subjects.get(subject_id)
                 subject_meta = subject_lookup[subject_id]
-                objective_code, objective_text, objectives_list = _objective_fields(
+                objective_code, objective_text, objectives_list, objective_ids, teks_ids = _objective_fields(
                     week_subject, subject_meta["subject_name"]
                 )
                 deterministic = build_deterministic_fallback(
@@ -503,6 +547,8 @@ def generate_instructional_package(
                     objective_code=objective_code,
                     objective_text=objective_text,
                     objectives_list=objectives_list,
+                    objective_ids=objective_ids,
+                    teks_ids=teks_ids,
                 )
                 content = _resolve_artifact_content(
                     db,
@@ -540,7 +586,7 @@ def generate_instructional_package(
             for subject_id in teaching_order_keys:
                 week_subject = week_subjects.get(subject_id)
                 subject_meta = subject_lookup[subject_id]
-                objective_code, objective_text, objectives_list = _objective_fields(
+                objective_code, objective_text, objectives_list, objective_ids, teks_ids = _objective_fields(
                     week_subject, subject_meta["subject_name"]
                 )
                 deterministic = build_deterministic_fallback(
@@ -552,6 +598,8 @@ def generate_instructional_package(
                     objective_text=objective_text,
                     daily_topic=resolve_subject_daily_topic(week_subject, day_label="Monday"),
                     objectives_list=objectives_list,
+                    objective_ids=objective_ids,
+                    teks_ids=teks_ids,
                 )
                 content = _resolve_artifact_content(
                     db,

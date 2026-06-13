@@ -15,6 +15,7 @@ from oziebot_api.config import Settings
 from oziebot_api.models.education_catalog import EducationSubject
 from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2InstructionalPackage,
+    TeacherAssistV2InstructionalPackageArtifact,
     TeacherAssistV2PlanningSupplementalMaterial,
 )
 from oziebot_api.models.teacher_assist_v2_onboarding import TeacherAssistV2PacingGuideAssignment
@@ -628,7 +629,11 @@ def get_instructional_package_detail(
             TeacherAssistV2InstructionalPackage.id == package_id,
             TeacherAssistV2InstructionalPackage.teacher_user_id == user.id,
         )
-        .options(selectinload(TeacherAssistV2InstructionalPackage.artifacts))
+        .options(
+            selectinload(TeacherAssistV2InstructionalPackage.artifacts).selectinload(
+                TeacherAssistV2InstructionalPackageArtifact.slide_visual_assets
+            )
+        )
     ).one_or_none()
     if row is None:
         raise LookupError("Instructional package not found")
@@ -656,11 +661,36 @@ def get_instructional_package_detail(
             "status": artifact.status,
             "description": metadata.get("description") or content.get("description") or content.get("summary"),
             "objective_mapping": metadata.get("objective_mapping") or content.get("objective_mapping"),
+            "objective_ids": metadata.get("objective_ids") or content.get("objective_ids") or [],
+            "teks_ids": metadata.get("teks_ids") or content.get("teks_ids") or [],
+            "alignment_summary": metadata.get("alignment_summary") or content.get("alignment_summary"),
             "preview_html": artifact.preview_html,
             "export_format": artifact.export_format,
             "download_url": artifact_download_url(artifact, settings=settings),
             "export_available": bool(artifact.storage_key),
             "additional_downloads": [],
+            "slide_visual_assets": [
+                {
+                    "id": str(asset.id),
+                    "slide_id": asset.slide_id,
+                    "visual_type": asset.visual_type,
+                    "title": asset.title,
+                    "description": asset.description,
+                    "source_type": asset.source_type,
+                    "source_url": asset.source_url,
+                    "attribution": asset.attribution,
+                    "local_asset_key": asset.local_asset_key,
+                    "prompt_hint": asset.prompt_hint,
+                    "educational_purpose": asset.educational_purpose,
+                    "suggested_placement": asset.suggested_placement,
+                    "layout_template": asset.layout_template,
+                    "visual_generation_status": asset.visual_generation_status,
+                    "search_terms": list(asset.search_terms_json or []),
+                    "suggested_sources": list(asset.suggested_sources_json or []),
+                    "created_at": asset.created_at,
+                }
+                for asset in sorted(artifact.slide_visual_assets, key=lambda item: (item.slide_id, item.created_at))
+            ],
         }
         if content:
             entry["content_json"] = content

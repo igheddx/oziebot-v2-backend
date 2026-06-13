@@ -11,6 +11,7 @@ from oziebot_api.db.base import Base
 
 if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
+    from oziebot_api.models.teacher_assist_v2_slide_visual_asset import TeacherAssistV2SlideVisualAsset
 
 
 class TeacherAssistV2InstructionalPackage(Base):
@@ -111,6 +112,11 @@ class TeacherAssistV2InstructionalPackageArtifact(Base):
     )
     assignment: Mapped["TeacherAssistV2Assignment | None"] = relationship(
         "TeacherAssistV2Assignment", back_populates="artifacts"
+    )
+    slide_visual_assets: Mapped[list["TeacherAssistV2SlideVisualAsset"]] = relationship(
+        "TeacherAssistV2SlideVisualAsset",
+        back_populates="artifact",
+        cascade="all, delete-orphan",
     )
 
 

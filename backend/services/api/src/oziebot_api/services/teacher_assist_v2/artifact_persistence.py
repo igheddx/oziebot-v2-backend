@@ -14,12 +14,51 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2InstructionalPackage,
     TeacherAssistV2InstructionalPackageArtifact,
 )
+from oziebot_api.models.teacher_assist_v2_slide_visual_asset import TeacherAssistV2SlideVisualAsset
 from oziebot_api.services.teacher_assist_v2.assignment_print_packets import generate_assignment_print_packet
 from oziebot_api.services.teacher_assist_v2.student_packet_content import compute_pages_per_student
 from oziebot_api.services.teacher_assist_v2.package_export import (
     render_artifact_preview_html,
     save_artifact_export,
 )
+from oziebot_api.services.teacher_assist_v2.slide_visuals import build_slide_visual_assets
+
+
+def _sync_slide_visual_assets(
+    db: Session,
+    *,
+    artifact: TeacherAssistV2InstructionalPackageArtifact,
+    content: dict[str, Any],
+    updated_at: datetime,
+) -> None:
+    for row in list(artifact.slide_visual_assets):
+        db.delete(row)
+    slides = content.get("slides")
+    if not isinstance(slides, list):
+        return
+    for asset in build_slide_visual_assets([item for item in slides if isinstance(item, dict)]):
+        db.add(
+            TeacherAssistV2SlideVisualAsset(
+                artifact_id=artifact.id,
+                slide_id=asset["slide_id"],
+                visual_type=asset["visual_type"],
+                title=asset["title"],
+                description=asset["description"],
+                source_type=asset["source_type"],
+                source_url=asset.get("source_url"),
+                attribution=asset.get("attribution"),
+                local_asset_key=asset.get("local_asset_key"),
+                prompt_hint=asset.get("prompt_hint"),
+                educational_purpose=asset.get("educational_purpose"),
+                suggested_placement=asset.get("suggested_placement"),
+                layout_template=asset.get("layout_template"),
+                visual_generation_status=asset.get("visual_generation_status") or "recommendation_only",
+                search_terms_json=list(asset.get("search_terms_json") or []),
+                suggested_sources_json=list(asset.get("suggested_sources_json") or []),
+                created_at=updated_at,
+                updated_at=updated_at,
+            )
+        )
 
 
 def persist_package_artifact(
@@ -54,6 +93,11 @@ def persist_package_artifact(
             "provider": provider_name,
             "description": content.get("description") or content.get("summary"),
             "objective_mapping": content.get("objective_mapping"),
+            "objective_ids": content.get("objective_ids")
+            or (content.get("objective_mapping") or {}).get("objective_ids"),
+            "teks_ids": content.get("teks_ids") or (content.get("objective_mapping") or {}).get("teks_ids"),
+            "alignment_summary": content.get("alignment_summary")
+            or (content.get("objective_mapping") or {}).get("alignment_summary"),
             "additional_exports": [],
             **({"export_note": export_note} if export_note else {}),
         },
@@ -71,6 +115,7 @@ def persist_package_artifact(
     artifact.export_format = export_format
     db.add(artifact)
     db.flush()
+    _sync_slide_visual_assets(db, artifact=artifact, content=content, updated_at=created_at)
     return artifact
 
 
@@ -95,6 +140,11 @@ def refresh_package_artifact_exports(
             "provider": provider_name,
             "description": content.get("description") or content.get("summary"),
             "objective_mapping": content.get("objective_mapping"),
+            "objective_ids": content.get("objective_ids")
+            or (content.get("objective_mapping") or {}).get("objective_ids"),
+            "teks_ids": content.get("teks_ids") or (content.get("objective_mapping") or {}).get("teks_ids"),
+            "alignment_summary": content.get("alignment_summary")
+            or (content.get("objective_mapping") or {}).get("alignment_summary"),
         }
     )
     if export_note:
@@ -122,6 +172,7 @@ def refresh_package_artifact_exports(
         metadata["additional_exports"] = metadata.get("additional_exports") or []
     artifact.metadata_json = metadata
     artifact.updated_at = updated_at
+    _sync_slide_visual_assets(db, artifact=artifact, content=content, updated_at=updated_at)
 
 
 def attach_qr_student_packet(

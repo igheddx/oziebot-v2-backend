@@ -5,22 +5,40 @@ from __future__ import annotations
 from typing import Any
 
 from oziebot_api.services.teacher_assist_v2.planning_constants import WEEKDAY_LABELS
+from oziebot_api.services.teacher_assist_v2.slide_visuals import add_slide_visual_metadata
 
 
 def _objective_mapping(
     objective_code: str | None,
     objective_text: str,
     *,
+    objective_ids: list[str] | None = None,
+    teks_ids: list[str] | None = None,
     daily_topic: str | None = None,
 ) -> dict[str, Any]:
     mapping = {
         "objective_code": objective_code,
         "objective_text": objective_text,
         "standard_set": "TEKS" if objective_code else None,
+        "objective_ids": list(objective_ids or []),
+        "teks_ids": list(teks_ids or ([objective_code] if objective_code else [])),
+        "alignment_summary": (
+            f"Aligned to {objective_code or 'selected objective'}: {objective_text}"
+            if objective_text
+            else None
+        ),
     }
     if daily_topic:
         mapping["daily_topic"] = daily_topic
     return mapping
+
+
+def _with_alignment(content: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
+    content["objective_mapping"] = mapping
+    content["objective_ids"] = list(mapping.get("objective_ids") or [])
+    content["teks_ids"] = list(mapping.get("teks_ids") or [])
+    content["alignment_summary"] = mapping.get("alignment_summary")
+    return content
 
 
 def _subject_lesson_block(
@@ -86,24 +104,99 @@ def build_daily_lesson_plan(
     subject_blocks: list[dict[str, Any]],
     objective_code: str | None,
     objective_text: str,
+    objective_ids: list[str] | None = None,
+    teks_ids: list[str] | None = None,
     summary: str | None = None,
     daily_topic: str | None = None,
 ) -> dict[str, Any]:
     day_index = WEEKDAY_LABELS.index(day_label) if day_label in WEEKDAY_LABELS else 0
     focus = summary or _DAILY_FOCUS_ROTATION[day_index % len(_DAILY_FOCUS_ROTATION)]
     resolved_topic = daily_topic or focus
-    return {
+    mapping = _objective_mapping(
+        objective_code,
+        objective_text,
+        objective_ids=objective_ids,
+        teks_ids=teks_ids,
+        daily_topic=resolved_topic,
+    )
+    slides = add_slide_visual_metadata(
+        [
+            {
+                "id": f"{day_label.lower()}-title",
+                "slideType": "title",
+                "title": f"{day_label} Focus",
+                "subtitle": resolved_topic,
+                "bullets": [focus],
+                "layout": "full_width_visual",
+                "teacherNotes": "State the daily focus and set students up for the lesson sequence.",
+            },
+            *[
+                {
+                    "id": f"{day_label.lower()}-{index}-objective",
+                    "slideType": "objective",
+                    "title": f"{block['subject_name']} Objective",
+                    "bullets": [str(block.get("objective") or objective_text)],
+                    "layout": "concept_map",
+                    "teacherNotes": "\n".join(str(item) for item in (block.get("teacher_actions") or [])[:2]),
+                }
+                for index, block in enumerate(subject_blocks, start=1)
+            ],
+            *[
+                {
+                    "id": f"{day_label.lower()}-{index}-vocabulary",
+                    "slideType": "vocabulary",
+                    "title": f"{block['subject_name']} Vocabulary & Materials",
+                    "bullets": list(block.get("materials") or []),
+                    "layout": "vocabulary_card",
+                    "teacherNotes": str(block.get("notes") or ""),
+                }
+                for index, block in enumerate(subject_blocks, start=1)
+            ],
+            *[
+                {
+                    "id": f"{day_label.lower()}-{index}-guided",
+                    "slideType": "guided_practice",
+                    "title": f"{block['subject_name']} Guided Practice",
+                    "bullets": list(block.get("guided_practice") or block.get("student_activity") or []),
+                    "layout": "guided_practice",
+                    "teacherNotes": str(block.get("mini_lesson") or ""),
+                }
+                for index, block in enumerate(subject_blocks, start=1)
+            ],
+            *[
+                {
+                    "id": f"{day_label.lower()}-{index}-independent",
+                    "slideType": "independent_practice",
+                    "title": f"{block['subject_name']} Independent Practice",
+                    "bullets": list(block.get("independent_practice") or []),
+                    "layout": "independent_practice",
+                    "teacherNotes": str(block.get("closure") or ""),
+                }
+                for index, block in enumerate(subject_blocks, start=1)
+            ],
+            *[
+                {
+                    "id": f"{day_label.lower()}-{index}-exit",
+                    "slideType": "exit_ticket",
+                    "title": f"{block['subject_name']} Exit Ticket",
+                    "bullets": [str(block.get("assessment") or "")],
+                    "layout": "exit_ticket",
+                    "teacherNotes": str(block.get("notes") or ""),
+                }
+                for index, block in enumerate(subject_blocks, start=1)
+            ],
+        ],
+        objective_text=objective_text,
+        teks_ids=list(mapping.get("teks_ids") or []),
+    )
+    return _with_alignment({
         "title": f"{day_label} Daily Teaching Plan — {package_title}",
         "summary": focus,
         "daily_topic": resolved_topic,
         "description": f"Full-day plan for {day_label} covering all subjects in teaching order.",
-        "objective_mapping": _objective_mapping(
-            objective_code,
-            objective_text,
-            daily_topic=resolved_topic,
-        ),
         "subjects": subject_blocks,
-    }
+        "slides": slides,
+    }, mapping)
 
 
 def build_subject_slide_deck(
@@ -114,81 +207,98 @@ def build_subject_slide_deck(
     objective_code: str | None,
     objective_text: str,
     objectives_list: list[str],
+    objective_ids: list[str] | None = None,
+    teks_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     obj_bullets = objectives_list[:3] if objectives_list else [objective_text]
-    slides: list[dict[str, Any]] = [
+    mapping = _objective_mapping(
+        objective_code,
+        objective_text,
+        objective_ids=objective_ids,
+        teks_ids=teks_ids,
+    )
+    slides = add_slide_visual_metadata([
         {
+            "id": "title-slide",
+            "slideType": "title",
             "title": package_title,
             "subtitle": f"{subject_name} · {week_label}",
             "bullets": [objective_text],
-            "layout": "title_only",
-            "visualType": "none",
+            "layout": "full_width_visual",
             "teacherNotes": "Welcome students and state the learning objective.",
         },
         {
+            "id": "learning-objective",
+            "slideType": "objective",
             "title": "Learning Objective",
             "bullets": obj_bullets + ([f"Standard: {objective_code}"] if objective_code else []),
-            "layout": "text_only",
-            "visualType": "checklist",
+            "layout": "concept_map",
             "teacherNotes": "Students restate the objective in student-friendly language.",
         },
         {
+            "id": "key-vocabulary",
+            "slideType": "vocabulary",
             "title": "Key Vocabulary",
             "bullets": ["Review academic vocabulary for this week's topic.", "Use student-friendly definitions."],
-            "layout": "two_column",
-            "visualType": "vocabulary_card",
+            "layout": "vocabulary_card",
         },
         {
+            "id": "concept-introduction",
+            "slideType": "mini_lesson",
             "title": f"{subject_name} — Concept Introduction",
             "bullets": ["Introduce the core concept for the week.", "Connect to prior learning."],
             "layout": "text_left_visual_right",
-            "visualType": "main_idea_web",
             "teacherNotes": "Use the graphic to organize main ideas and supporting details.",
         },
         {
+            "id": "teacher-modeling",
+            "slideType": "mini_lesson",
             "title": "Teacher Modeling",
             "bullets": ["Model the target skill step by step.", "Think aloud so students see your process."],
-            "layout": "text_only",
-            "visualType": "paragraph_structure",
+            "layout": "visual_left_text_right",
         },
         {
+            "id": "guided-practice",
+            "slideType": "guided_practice",
             "title": "Guided Practice",
             "bullets": ["Work through an example together.", "Invite student responses and discussion."],
-            "layout": "practice_activity",
-            "visualType": "supporting_details_chart",
+            "layout": "guided_practice",
         },
         {
+            "id": "independent-practice",
+            "slideType": "independent_practice",
             "title": "Independent Practice",
             "bullets": ["Students apply the skill independently.", "Circulate and support as needed."],
-            "layout": "practice_activity",
-            "visualType": "supporting_details_chart",
+            "layout": "independent_practice",
         },
         {
+            "id": "check-understanding",
+            "slideType": "check_for_understanding",
             "title": "Check for Understanding",
             "bullets": ["Ask students to explain the learning target.", "Collect a quick formative response."],
             "layout": "question_prompt",
-            "visualType": "text_evidence_icon",
         },
         {
+            "id": "exit-ticket",
+            "slideType": "exit_ticket",
             "title": "Exit Ticket",
             "bullets": ["One question aligned to today's objective.", "Use responses to plan tomorrow's lesson."],
             "layout": "exit_ticket",
-            "visualType": "text_evidence_icon",
         },
         {
+            "id": "wrap-up",
+            "slideType": "closing",
             "title": "Wrap-Up",
             "bullets": ["Celebrate strong work.", "Preview the next lesson."],
             "layout": "title_only",
-            "visualType": "none",
         },
-    ]
-    return {
+    ], objective_text=objective_text, teks_ids=list(mapping.get("teks_ids") or []))
+    return _with_alignment({
         "title": f"{subject_name} {week_label} — {package_title}",
         "summary": f"Classroom slide deck for {subject_name}.",
         "description": "Presentation-ready slides for one subject block or week overview.",
-        "objective_mapping": _objective_mapping(objective_code, objective_text),
         "slides": slides,
-    }
+    }, mapping)
 
 
 def _default_passage(subject_name: str, topic: str) -> tuple[str, str]:
@@ -293,11 +403,10 @@ def build_quiz(
     ]
     title = f"{package_title} — {subject_name} Quiz"
     mapping = _objective_mapping(objective_code, objective_text)
-    return {
+    return _with_alignment({
         "title": title,
         "summary": f"Formative quiz for {week_label} {subject_name}.",
         "description": "Eight-question quiz with mixed item types.",
-        "objective_mapping": mapping,
         "student_number_field": True,
         "questions": questions,
         "answer_key": [
@@ -310,7 +419,7 @@ def build_quiz(
             for q in questions
         ],
         "google_forms_package": None,
-    }
+    }, mapping)
 
 
 def build_exit_ticket(
@@ -320,17 +429,17 @@ def build_exit_ticket(
     objective_code: str | None,
     objective_text: str,
 ) -> dict[str, Any]:
-    return {
+    mapping = _objective_mapping(objective_code, objective_text)
+    return _with_alignment({
         "title": f"{package_title} — {subject_name} Exit Ticket",
         "summary": "End-of-lesson check for understanding.",
         "description": "Short constructed-response exit ticket.",
-        "objective_mapping": _objective_mapping(objective_code, objective_text),
         "questions": [
             {"prompt": "What was today's learning target?", "response_lines": 2},
             {"prompt": "Write one detail or example from today's lesson.", "response_lines": 2},
             {"prompt": "How does that detail support the learning target?", "response_lines": 3},
         ],
-    }
+    }, mapping)
 
 
 def build_writing_response(
@@ -344,11 +453,11 @@ def build_writing_response(
         f"Write a clear, organized response showing your understanding of this week's {subject_name} learning target: "
         f"{objective_text}"
     )
-    return {
+    mapping = _objective_mapping(objective_code, objective_text)
+    return _with_alignment({
         "title": f"{package_title} — {subject_name} Writing Response",
         "summary": "Constructed writing response aligned to the weekly objective.",
         "description": "Students write directly on lined response pages.",
-        "objective_mapping": _objective_mapping(objective_code, objective_text),
         "prompt": prompt,
         "instructions": [
             "Read the writing prompt carefully.",
@@ -358,7 +467,7 @@ def build_writing_response(
         ],
         "response_pages": 1,
         "writing_lines_per_page": 14,
-    }
+    }, mapping)
 
 
 def build_rubric_for_writing_response(
@@ -426,16 +535,16 @@ def build_rubric_for_writing_response(
         criteria[0]["levels"][0] = f"Fully addresses the prompt: {instructions[0]}"
     total_points = sum(int(row["points"]) for row in criteria)
     rubric_title = f"{package_title} — {subject_name} Writing Rubric"
-    return {
+    mapping = _objective_mapping(objective_code, objective_text)
+    return _with_alignment({
         "title": rubric_title,
         "summary": "Rubric for the writing response assignment.",
         "description": prompt,
-        "objective_mapping": _objective_mapping(objective_code, objective_text),
         "total_points": total_points,
         "criteria": criteria,
         "writing_prompt": prompt,
         "writing_response_title": writing_content.get("title"),
-    }
+    }, mapping)
 
 
 def build_written_assignment(
@@ -449,11 +558,11 @@ def build_written_assignment(
     topic = daily_topic or f"{subject_name} weekly focus"
     passage_title, passage_text = _default_passage(subject_name, topic)
     rubric_title = f"{package_title} — {subject_name} Rubric"
-    return {
+    mapping = _objective_mapping(objective_code, objective_text)
+    return _with_alignment({
         "title": f"{package_title} — {subject_name} Written Assignment",
         "summary": "Written response aligned to the weekly objective.",
         "description": "Students read a passage and write a paragraph with supporting details.",
-        "objective_mapping": _objective_mapping(objective_code, objective_text),
         "passage_title": passage_title,
         "passage_text": passage_text,
         "student_instructions": [
@@ -470,7 +579,7 @@ def build_written_assignment(
         ],
         "rubric_reference": rubric_title,
         "writing_lines": 12,
-    }
+    }, mapping)
 
 
 def build_rubric_for_written_assignment(
@@ -535,16 +644,16 @@ def build_rubric_for_written_assignment(
         },
     ]
     total_points = sum(int(row["points"]) for row in criteria)
-    return {
+    mapping = _objective_mapping(objective_code, objective_text)
+    return _with_alignment({
         "title": f"{package_title} — {subject_name} Written Assignment Rubric",
         "summary": "Rubric for the written assignment.",
         "description": f"Rubric aligned to {passage_title} and {objective_text}",
-        "objective_mapping": _objective_mapping(objective_code, objective_text),
         "total_points": total_points,
         "criteria": criteria,
         "assignment_title": assignment_content.get("title"),
         "passage_title": passage_title,
-    }
+    }, mapping)
 
 
 def build_rubric(
@@ -561,14 +670,14 @@ def build_rubric(
         {"name": "Organization", "points": 4, "levels": ["Logical structure", "Some organization", "Disorganized"]},
         {"name": "Grammar / Conventions", "points": 4, "levels": ["Strong conventions", "Minor errors", "Frequent errors affecting meaning"]},
     ]
-    return {
+    mapping = _objective_mapping(objective_code, objective_text)
+    return _with_alignment({
         "title": f"{package_title} — {subject_name} Rubric",
         "summary": "20-point rubric for the written assignment.",
         "description": f"Rubric aligned to {objective_text}",
-        "objective_mapping": _objective_mapping(objective_code, objective_text),
         "total_points": 20,
         "criteria": criteria,
-    }
+    }, mapping)
 
 
 def build_parent_newsletter(
@@ -579,11 +688,11 @@ def build_parent_newsletter(
     objective_code: str | None,
     objective_text: str,
 ) -> dict[str, Any]:
-    return {
+    mapping = _objective_mapping(objective_code, objective_text)
+    return _with_alignment({
         "title": f"{package_title} — Parent Newsletter Summary",
         "summary": f"Weekly family update for {subject_name}.",
         "description": "Parent-friendly summary of learning and home practice.",
-        "objective_mapping": _objective_mapping(objective_code, objective_text),
         "sections": [
             {"heading": "What We Are Learning", "body": f"In {subject_name} this week, students are working on: {objective_text}"},
             {"heading": "In Family-Friendly Language", "body": "Ask your child to explain what they practiced and give an example from class."},
@@ -597,50 +706,50 @@ def build_parent_newsletter(
             {"heading": "Upcoming Assessment", "body": f"Students will complete a {week_label} check aligned to the objective."},
             {"heading": "Reminders", "bullets": ["Return signed forms by Friday.", "Contact the teacher with questions about assignments."]},
         ],
-    }
+    }, mapping)
 
 
 def build_bell_ringer(*, subject_name: str, package_title: str, objective_text: str, objective_code: str | None) -> dict[str, Any]:
-    return {
+    mapping = _objective_mapping(objective_code, objective_text)
+    return _with_alignment({
         "title": f"{package_title} — {subject_name} Bell Ringer",
         "summary": "Daily warm-up prompts.",
         "description": "Short opener activities for the week.",
-        "objective_mapping": _objective_mapping(objective_code, objective_text),
         "sections": [
             {"heading": "Monday", "body": "Define the week's objective in your own words."},
             {"heading": "Tuesday", "body": "List two details from yesterday's lesson."},
             {"heading": "Wednesday", "body": "Explain how one detail supports the learning target."},
         ],
-    }
+    }, mapping)
 
 
 def build_vocabulary_list(*, subject_name: str, package_title: str, objective_text: str, objective_code: str | None) -> dict[str, Any]:
-    return {
+    mapping = _objective_mapping(objective_code, objective_text)
+    return _with_alignment({
         "title": f"{package_title} — {subject_name} Vocabulary",
         "summary": "Key terms for the week.",
         "description": "Vocabulary connected to the weekly objective.",
-        "objective_mapping": _objective_mapping(objective_code, objective_text),
         "terms": [
             {"term": "objective", "definition": "What students should learn this week."},
             {"term": "evidence", "definition": "Proof from the text or lesson that supports your thinking."},
             {"term": "main idea", "definition": "The most important point the author or lesson wants you to understand."},
             {"term": "supporting detail", "definition": "A fact or example that explains the main idea."},
         ],
-    }
+    }, mapping)
 
 
 def build_study_guide(*, subject_name: str, week_label: str, package_title: str, objective_text: str, objective_code: str | None) -> dict[str, Any]:
-    return {
+    mapping = _objective_mapping(objective_code, objective_text)
+    return _with_alignment({
         "title": f"{package_title} — {subject_name} Study Guide",
         "summary": f"Review guide for {week_label}.",
         "description": "Student review before the weekly assessment.",
-        "objective_mapping": _objective_mapping(objective_code, objective_text),
         "sections": [
             {"heading": "Learning Target", "body": objective_text},
             {"heading": "Review Steps", "bullets": ["Reread your notes.", "Practice explaining the objective.", "Find two supporting details."]},
             {"heading": "Practice", "body": f"Prepare for the {subject_name} quiz and written assignment."},
         ],
-    }
+    }, mapping)
 
 
 def build_deterministic_fallback(
@@ -655,6 +764,8 @@ def build_deterministic_fallback(
     daily_topic: str | None = None,
     subject_blocks: list[dict[str, Any]] | None = None,
     objectives_list: list[str] | None = None,
+    objective_ids: list[str] | None = None,
+    teks_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     objective_text = objective_text or f"Students demonstrate understanding in {subject_name}."
     builders = {
@@ -665,6 +776,8 @@ def build_deterministic_fallback(
             subject_blocks=subject_blocks or [],
             objective_code=objective_code,
             objective_text=objective_text,
+            objective_ids=objective_ids,
+            teks_ids=teks_ids,
         ),
         "subject_slide_deck": lambda: build_subject_slide_deck(
             subject_name=subject_name,
@@ -673,6 +786,8 @@ def build_deterministic_fallback(
             objective_code=objective_code,
             objective_text=objective_text,
             objectives_list=objectives_list or [],
+            objective_ids=objective_ids,
+            teks_ids=teks_ids,
         ),
         "quiz": lambda: build_quiz(
             subject_name=subject_name,
@@ -735,14 +850,34 @@ def build_deterministic_fallback(
     }
     builder = builders.get(artifact_type)
     if builder is None:
-        return {
+        mapping = _objective_mapping(
+            objective_code,
+            objective_text,
+            objective_ids=objective_ids,
+            teks_ids=teks_ids,
+        )
+        return _with_alignment({
             "title": f"{package_title} — {subject_name} Resource",
             "summary": f"Instructional resource for {week_label}.",
             "description": f"Supports {objective_text}",
-            "objective_mapping": _objective_mapping(objective_code, objective_text),
             "sections": [{"heading": "Overview", "body": objective_text}],
-        }
+        }, mapping)
     content = builder()
+    if objective_ids is not None and "objective_ids" not in content:
+        content["objective_ids"] = list(objective_ids)
+    if teks_ids is not None and "teks_ids" not in content:
+        content["teks_ids"] = list(teks_ids)
+    if content.get("alignment_summary") is None:
+        content["alignment_summary"] = (
+            f"Aligned to {objective_code or 'selected objective'}: {objective_text}"
+        )
+    if isinstance(content.get("objective_mapping"), dict):
+        if objective_ids is not None and "objective_ids" not in content["objective_mapping"]:
+            content["objective_mapping"]["objective_ids"] = list(objective_ids)
+        if teks_ids is not None and "teks_ids" not in content["objective_mapping"]:
+            content["objective_mapping"]["teks_ids"] = list(teks_ids)
+        if content["objective_mapping"].get("alignment_summary") is None:
+            content["objective_mapping"]["alignment_summary"] = content["alignment_summary"]
     if artifact_type == "quiz" and content.get("google_forms_package") is None:
         from oziebot_api.services.teacher_assist_v2.package_export import build_google_forms_package_payload
 
