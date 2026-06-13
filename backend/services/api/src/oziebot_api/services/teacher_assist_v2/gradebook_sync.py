@@ -18,7 +18,9 @@ from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssis
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist_v2.mastery_constants import (
     EVIDENCE_TYPE_CONFIRMED_GRADE,
+    format_mastery_level_label,
     resolve_mastery_level,
+    serialize_mastery_level_fields,
 )
 
 
@@ -138,6 +140,7 @@ def sync_confirmed_grade_to_gradebook_and_mastery(
             score=grade.score,
             max_score=grade.max_score,
             percentage=grade.percentage,
+            mastery_level=grade.mastery_level,
             teacher_comment=grade.teacher_comment,
             confirmed_at=grade.confirmed_at,
             sync_status="SYNCED",
@@ -178,6 +181,7 @@ def sync_confirmed_grade_to_gradebook_and_mastery(
     existing.score = grade.score
     existing.max_score = grade.max_score
     existing.percentage = grade.percentage
+    existing.mastery_level = grade.mastery_level
     existing.teacher_comment = grade.teacher_comment
     existing.confirmed_at = grade.confirmed_at
     existing.education_objective_ids_json = [str(value) for value in objective_ids]
@@ -197,7 +201,7 @@ def sync_confirmed_grade_to_gradebook_and_mastery(
 
 
 def serialize_gradebook_record(row: TeacherAssistV2GradebookRecord, *, assignment_title: str | None = None) -> dict[str, Any]:
-    return {
+    payload = {
         "id": str(row.id),
         "assignment_id": str(row.assignment_id),
         "assignment_title": assignment_title,
@@ -220,6 +224,10 @@ def serialize_gradebook_record(row: TeacherAssistV2GradebookRecord, *, assignmen
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
     }
+    payload.update(
+        serialize_mastery_level_fields(percentage=row.percentage, mastery_level=row.mastery_level)
+    )
+    return payload
 
 
 def serialize_mastery_evidence(row: TeacherAssistV2MasteryEvidence, *, objective_label: str | None = None) -> dict[str, Any]:
@@ -235,6 +243,7 @@ def serialize_mastery_evidence(row: TeacherAssistV2MasteryEvidence, *, objective
         "score": row.score,
         "percentage": row.percentage,
         "mastery_level": row.mastery_level,
+        "mastery_level_label": format_mastery_level_label(row.mastery_level),
         "teacher_confirmed": row.teacher_confirmed,
         "is_current": row.is_current,
         "created_at": row.created_at.isoformat(),

@@ -8,6 +8,11 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
 from oziebot_api.models.user import User
+from oziebot_api.services.teacher_assist_v2.document_extraction import (
+    build_ai_readiness_summary,
+    build_document_prompt_context,
+)
+from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import flatten_pacing_materials
 from oziebot_api.services.teacher_assist_v2.planning_workflow import (
     _assignment_context,
     _teacher_assignments,
@@ -25,6 +30,7 @@ def build_teacher_planning_generation_context(
     teaching_order: list[uuid.UUID],
     selected_outputs: list[str],
     settings: Settings | None = None,
+    excluded_pacing_material_ids: list[uuid.UUID] | None = None,
 ) -> dict:
     base = _assignment_context(db, user=user)
     onboarding = base["onboarding"]
@@ -34,6 +40,7 @@ def build_teacher_planning_generation_context(
         week_start=week_start,
         week_end=week_end,
         settings=settings,
+        excluded_pacing_material_ids=excluded_pacing_material_ids,
     )
     supplemental = list_planning_supplemental_materials(
         db,
@@ -41,6 +48,7 @@ def build_teacher_planning_generation_context(
         week_start=week_start,
         week_end=week_end,
         settings=settings,
+        unlinked_only=True,
     )
 
     allowed_subject_ids = {row["subject_id"] for row in base["subjects"]}
@@ -54,6 +62,31 @@ def build_teacher_planning_generation_context(
 
     assignments = _teacher_assignments(db, user=user)
     pacing_guide_ids = [str(row.pacing_guide_id) for row in assignments]
+
+    excluded_ids = {str(value) for value in (excluded_pacing_material_ids or [])}
+    pacing_materials = [
+        material
+        for week in review["weeks"]
+        for subject in week["subjects"]
+        for material in flatten_pacing_materials(
+            subject.get("pacing_context"),
+            excluded_material_ids=excluded_ids or None,
+        )
+    ]
+    district_files = [row for row in pacing_materials if row.get("material_kind") == "file"]
+    teacher_files = [row for row in supplemental if row.get("material_kind") == "file"]
+    district_document_context = build_document_prompt_context(
+        district_files,
+        source_label="district_curriculum",
+    )
+    teacher_document_context = build_document_prompt_context(
+        teacher_files,
+        source_label="teacher_supplemental",
+    )
+    readiness_summary = build_ai_readiness_summary(
+        district_materials=pacing_materials,
+        teacher_materials=supplemental,
+    )
 
     return {
         "teacher": {"id": str(user.id), "email": user.email, "full_name": user.full_name},
@@ -70,15 +103,14 @@ def build_teacher_planning_generation_context(
         "week_start": week_start,
         "week_end": week_end,
         "weeks": review["weeks"],
-        "district_materials_summary": [
-            material
-            for week in review["weeks"]
-            for subject in week["subjects"]
-            for material in subject["district_materials"]
-        ],
+        "pacing_materials": pacing_materials,
+        "district_materials_summary": pacing_materials,
         "teacher_supplemental_files": [row for row in supplemental if row["material_kind"] == "file"],
         "teacher_supplemental_links": [row for row in supplemental if row["material_kind"] == "link"],
         "teacher_supplemental_notes": [row for row in supplemental if row["material_kind"] == "note"],
+        "district_document_context": district_document_context,
+        "teacher_document_context": teacher_document_context,
+        "ai_readiness_summary": readiness_summary,
         "selected_output_types": selected_outputs,
         "teaching_order": [row["subject_id"] for row in ordered_subjects],
     }

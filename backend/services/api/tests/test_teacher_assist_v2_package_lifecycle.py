@@ -39,7 +39,7 @@ def _planning_ready_teacher(db_session, client) -> tuple[User, uuid.UUID]:
     )
     assert state and school and school_year and grade
 
-    result = provision_teacher_school_assignment(
+    provision_teacher_school_assignment(
         db_session,
         state_id=state.id,
         district_id=school.district_id,

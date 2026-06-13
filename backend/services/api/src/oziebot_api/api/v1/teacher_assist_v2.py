@@ -5,7 +5,8 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import RedirectResponse
 
 from oziebot_api.config import Settings
 from oziebot_api.deps import DbSession, settings_dep
@@ -28,19 +29,27 @@ from oziebot_api.schemas.teacher_assist_v2 import (
     EducationObjectiveV2Out,
     EducationSchoolYearCreate,
     EducationSchoolYearOut,
+    V2PacingGuideBuilderIn,
     V2PacingGuideCopyIn,
     V2PacingGuidePeriodUpdate,
     V2PacingGuideSetupSaveIn,
     V2PlanningGenerateIn,
     V2PlanningSupplementalLinkCreate,
     V2PlanningSupplementalNoteCreate,
+    V2GradeReviewAcceptIn,
     V2GradeReviewModifyIn,
     V2GradeReviewRejectIn,
     V2GradeReviewSaveIn,
+    V2GradeEntryAssignmentCreateIn,
+    V2GradebookGridCellIn,
+    V2ManualAssignmentCreateIn,
     V2TeacherAssistAiProviderConfigIn,
     V2StudentSubmissionManualMatchIn,
+    V2StudentSubmissionResponseTextIn,
     V2StudentSubmissionStatusIn,
     V2PackageCloseOutIn,
+    V2PackageRubricUpdateIn,
+    V2PackageAdditionalAssignmentGenerateIn,
     V2SupportingLinkCreate,
     V2SupportingMaterialOut,
     V2SupportingNoteCreate,
@@ -81,6 +90,7 @@ from oziebot_api.services.teacher_assist_v2.catalog_integrity import (
     school_archive_dependencies,
     state_archive_dependencies,
 )
+from oziebot_api.services.teacher_assist_v2.objective_performance import ObjectivePerformanceService
 from oziebot_api.services.teacher_assist_v2.objectives import (
     archive_v2_objective,
     create_v2_objective,
@@ -116,6 +126,30 @@ from oziebot_api.services.teacher_assist_v2.assignments import (
     list_teacher_assignments,
 )
 from oziebot_api.services.teacher_assist_v2.instructional_package_generation import generate_instructional_package
+from oziebot_api.services.teacher_assist_v2.package_additional_assignments import (
+    build_additional_assignment_form,
+    generate_additional_package_assignment,
+)
+from oziebot_api.services.teacher_assist_v2.package_artifact_update import update_teacher_package_artifact_content
+from oziebot_api.services.teacher_assist_v2.package_artifact_refresh import regenerate_package_artifacts
+from oziebot_api.services.teacher_assist_v2.google_oauth import (
+    build_google_integration_status,
+    build_oauth_authorization_url,
+    complete_oauth_callback,
+    disconnect_teacher_google,
+)
+from oziebot_api.services.teacher_assist_v2.google_form_quizzes import (
+    build_teacher_google_status,
+    create_google_form_for_assignment,
+    import_google_form_results,
+    import_google_form_results_csv,
+)
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackage,
+    TeacherAssistV2PlanningSupplementalMaterial,
+)
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from oziebot_api.services.teacher_assist_v2.package_dashboard import (
     build_package_dashboard,
     close_out_instructional_package,
@@ -129,7 +163,6 @@ from oziebot_api.services.teacher_assist_v2.planning_workflow import (
     build_planning_review_context,
     create_planning_supplemental_link,
     create_planning_supplemental_note,
-    get_instructional_package_detail,
     list_planning_supplemental_materials,
     serialize_supplemental_material,
     upload_planning_supplemental_file,
@@ -145,11 +178,31 @@ from oziebot_api.services.teacher_assist_v2.grading_drafts import (
     generate_all_grading_drafts,
     get_latest_grading_draft,
 )
+from oziebot_api.services.teacher_assist_v2.document_extraction import (
+    ensure_planning_supplemental_extraction_record,
+    ensure_student_submission_extraction_record,
+    run_document_extraction,
+    save_student_submission_response_text,
+)
 from oziebot_api.services.teacher_assist_v2.gradebook_workspace import (
     list_gradebook_records,
     list_mastery_evidence,
 )
-from oziebot_api.services.teacher_assist_v2.objective_performance import ObjectivePerformanceService
+from oziebot_api.services.teacher_assist_v2.gradebook_grid import (
+    build_gradebook_grid_form,
+    build_subject_gradebook_grid,
+    export_subject_gradebook_grid_csv,
+)
+from oziebot_api.services.teacher_assist_v2.gradebook_manual_entry import (
+    create_teacher_grade_entry_assignment,
+    save_gradebook_grid_cell,
+)
+from oziebot_api.services.teacher_assist_v2.manual_assignments import (
+    build_manual_assignment_form,
+    create_teacher_manual_assignment,
+    list_manual_assignment_objectives,
+)
+from oziebot_api.services.teacher_assist_v2.assignment_print_packets import generate_assignment_cover_sheets
 from oziebot_api.services.teacher_assist_v2.grade_reviews import (
     accept_all_viewed_drafts,
     accept_grading_draft,
@@ -161,6 +214,11 @@ from oziebot_api.services.teacher_assist_v2.grade_reviews import (
     reject_grading_draft,
     save_grade_review_draft,
 )
+from oziebot_api.services.teacher_assist_v2.rubric_score_exports import (
+    RUBRIC_SCORE_REPORT_DOCX_MIME,
+    build_assignment_rubric_score_report_docx,
+    build_submission_rubric_scorecard_html,
+)
 from oziebot_api.services.teacher_assist_v2.submission_intake import (
     create_assignment_submission_batch,
     get_student_submission_detail,
@@ -168,8 +226,11 @@ from oziebot_api.services.teacher_assist_v2.submission_intake import (
     list_assignment_student_submissions,
     list_assignment_submission_batches,
     manually_match_student_submission,
+    mark_student_submission_incomplete,
     update_student_submission_status,
+    upload_supplement_for_submission,
 )
+from oziebot_api.services.teacher_assist_v2.submission_workflow import list_assignment_review_queue
 from oziebot_api.services.teacher_assist_v2.teacher_onboarding import (
     build_teacher_onboarding_form,
     get_v2_onboarding,
@@ -297,6 +358,63 @@ def read_teacher_ai_generation_status(
 ) -> dict:
     _require_v2_access(db, user)
     return get_teacher_assist_ai_mode_status(db, settings)
+
+
+@router.get("/teacher/ai-readiness")
+def read_teacher_ai_readiness(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_v2_access(db, user)
+    ai_status = get_teacher_assist_ai_mode_status(db, settings)
+    ocr_real_enabled = bool(settings.teacher_assist_real_ocr_enabled)
+    return {
+        "ai_generation": ai_status,
+        "supported_document_types": ["pdf", "docx", "txt", "pptx", "images_via_ocr"],
+        "checks": [
+            {
+                "key": "real_ai_mode_enabled",
+                "label": "Real AI mode enabled",
+                "status": "green" if ai_status.get("real_ai_enabled") else "yellow",
+                "detail": ai_status.get("banner_message"),
+            },
+            {
+                "key": "document_extraction_available",
+                "label": "Document extraction available",
+                "status": "green",
+                "detail": "Local extraction is available for PDF, DOCX, TXT, and PPTX files.",
+            },
+            {
+                "key": "ocr_available",
+                "label": "Image OCR available",
+                "status": "green" if ocr_real_enabled else "yellow",
+                "detail": (
+                    "Real OCR is enabled for image-based uploads."
+                    if ocr_real_enabled
+                    else "Image-based uploads may need manual response text until real OCR is enabled."
+                ),
+            },
+            {
+                "key": "planning_context_uses_extracted_text",
+                "label": "Planning context includes extracted text",
+                "status": "green",
+                "detail": "Package generation now includes extracted district and teacher document excerpts when available.",
+            },
+            {
+                "key": "grading_requires_student_text",
+                "label": "Grading requires actual student text",
+                "status": "green",
+                "detail": "Real AI grading is blocked until extracted or teacher-entered student response text exists.",
+            },
+            {
+                "key": "usage_tracking_enabled",
+                "label": "Usage tracking enabled",
+                "status": "green",
+                "detail": "Package generation and grading usage events are recorded with provider and model metadata.",
+            },
+        ],
+    }
 
 
 @router.get("/catalog/states", response_model=list[EducationStateOut])
@@ -748,7 +866,55 @@ def read_v2_pacing_guides(
         catalog_grade_id=catalog_grade_id,
         active_only=active_only,
     )
-    return [serialize_pacing_guide_summary(guide, period_count=len(guide.periods)) for guide in guides]
+    return [
+        serialize_pacing_guide_summary(guide, period_count=len(guide.periods), db=db) for guide in guides
+    ]
+
+
+@router.post("/instructional/pacing-guides/builder", response_model=CatalogPacingGuideDetailOut)
+def create_v2_pacing_guide_builder_route(
+    body: V2PacingGuideBuilderIn,
+    user: RootAdminUser,
+    db: DbSession,
+) -> CatalogPacingGuideDetailOut:
+    _require_root_admin(db, user)
+    tenant_id, actor = resolve_v2_platform_context(db, user=user)
+    from oziebot_api.services.teacher_assist_v2.pacing_guide_builder import create_v2_pacing_guide_from_builder
+
+    guide = _handle(
+        lambda: create_v2_pacing_guide_from_builder(
+            db,
+            tenant_id=tenant_id,
+            actor=actor,
+            body=body.model_dump(mode="json"),
+        )
+    )
+    db.commit()
+    return serialize_pacing_guide_detail(guide, db=db)
+
+
+@router.put("/instructional/pacing-guides/{pacing_guide_id}/builder", response_model=CatalogPacingGuideDetailOut)
+def update_v2_pacing_guide_builder_route(
+    pacing_guide_id: uuid.UUID,
+    body: V2PacingGuideBuilderIn,
+    user: RootAdminUser,
+    db: DbSession,
+) -> CatalogPacingGuideDetailOut:
+    _require_root_admin(db, user)
+    tenant_id, actor = resolve_v2_platform_context(db, user=user)
+    from oziebot_api.services.teacher_assist_v2.pacing_guide_builder import update_v2_pacing_guide_from_builder
+
+    guide = _handle(
+        lambda: update_v2_pacing_guide_from_builder(
+            db,
+            tenant_id=tenant_id,
+            actor=actor,
+            pacing_guide_id=pacing_guide_id,
+            body=body.model_dump(mode="json"),
+        )
+    )
+    db.commit()
+    return serialize_pacing_guide_detail(guide, db=db)
 
 
 @router.get("/instructional/pacing-guides/{pacing_guide_id}", response_model=CatalogPacingGuideDetailOut)
@@ -758,7 +924,7 @@ def read_v2_pacing_guide_detail(
     _require_root_admin(db, user)
     tenant_id, _ = resolve_v2_platform_context(db, user=user)
     guide = _handle(lambda: get_v2_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id))
-    return serialize_pacing_guide_detail(guide)
+    return serialize_pacing_guide_detail(guide, db=db)
 
 
 @router.put("/instructional/pacing-guides/{pacing_guide_id}", response_model=CatalogPacingGuideDetailOut)
@@ -780,7 +946,7 @@ def update_v2_pacing_guide_route(
         )
     )
     detail = get_v2_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=guide.id)
-    return serialize_pacing_guide_detail(detail)
+    return serialize_pacing_guide_detail(detail, db=db)
 
 
 @router.post("/instructional/pacing-guides/{pacing_guide_id}/clone", response_model=CatalogPacingGuideDetailOut)
@@ -806,9 +972,10 @@ def clone_v2_pacing_guide_route(
             source_guide_id=pacing_guide_id,
             title=body.title,
             school_year_id=tenant_school_year_id,
+            target_guide_type=body.target_guide_type,
         )
     )
-    return serialize_pacing_guide_detail(guide)
+    return serialize_pacing_guide_detail(guide, db=db)
 
 
 @router.post("/instructional/pacing-guides/{pacing_guide_id}/archive", response_model=CatalogPacingGuideSummaryOut)
@@ -823,7 +990,7 @@ def archive_v2_pacing_guide_route(
         )
     )
     detail = get_v2_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=guide.id)
-    return serialize_pacing_guide_summary(detail, period_count=len(detail.periods))
+    return serialize_pacing_guide_summary(detail, period_count=len(detail.periods), db=db)
 
 
 @router.put(
@@ -848,7 +1015,7 @@ def update_v2_pacing_guide_period_route(
         )
     )
     detail = get_v2_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=period.pacing_guide_id)
-    return serialize_pacing_guide_detail(detail)
+    return serialize_pacing_guide_detail(detail, db=db)
 
 
 def _material_out(row, settings: Settings) -> V2SupportingMaterialOut:
@@ -865,7 +1032,10 @@ def read_v2_pacing_guide_supporting_materials(
     db: DbSession,
     settings: Settings = Depends(settings_dep),
     period_id: uuid.UUID | None = None,
+    period_day_id: uuid.UUID | None = None,
     education_objective_id: uuid.UUID | None = None,
+    guide_level_only: bool = False,
+    week_level_only: bool = False,
 ) -> list[V2SupportingMaterialOut]:
     _require_root_admin(db, user)
     tenant_id, _ = resolve_v2_platform_context(db, user=user)
@@ -875,7 +1045,10 @@ def read_v2_pacing_guide_supporting_materials(
             tenant_id=tenant_id,
             pacing_guide_id=pacing_guide_id,
             period_id=period_id,
+            period_day_id=period_day_id,
             education_objective_id=education_objective_id,
+            guide_level_only=guide_level_only,
+            week_level_only=week_level_only,
             settings=settings,
         )
     )
@@ -897,6 +1070,7 @@ async def upload_v2_pacing_guide_supporting_file(
     description: str | None = Form(default=None),
     resource_type: str = Form(...),
     period_id: uuid.UUID | None = Form(default=None),
+    period_day_id: uuid.UUID | None = Form(default=None),
     education_objective_id: uuid.UUID | None = Form(default=None),
 ) -> V2SupportingMaterialOut:
     _require_root_admin(db, user)
@@ -913,6 +1087,7 @@ async def upload_v2_pacing_guide_supporting_file(
             description=description,
             resource_type=resource_type,
             period_id=period_id,
+            period_day_id=period_day_id,
             education_objective_id=education_objective_id,
         )
     except LookupError as exc:
@@ -949,6 +1124,7 @@ def create_v2_pacing_guide_supporting_link(
             resource_type=body.resource_type,
             description=body.description,
             period_id=body.period_id,
+            period_day_id=body.period_day_id,
             education_objective_id=body.education_objective_id,
         )
     )
@@ -978,6 +1154,7 @@ def create_v2_pacing_guide_supporting_note(
             note_body=body.note_body,
             title=body.title,
             period_id=body.period_id,
+            period_day_id=body.period_day_id,
             education_objective_id=body.education_objective_id,
         )
     )
@@ -1186,6 +1363,7 @@ def read_teacher_planning_supplemental_materials(
             week_start=week_start,
             week_end=week_end,
             settings=settings,
+            unlinked_only=True,
         )
     )
 
@@ -1281,6 +1459,34 @@ def archive_teacher_planning_supplemental_material(
     return serialize_supplemental_material(row)
 
 
+@router.post("/teacher/planning/supplemental-materials/{material_id}/extract")
+def extract_teacher_planning_supplemental_material(
+    material_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/planning")
+
+    def action() -> dict:
+        row = db.scalars(
+            select(TeacherAssistV2PlanningSupplementalMaterial).where(
+                TeacherAssistV2PlanningSupplementalMaterial.id == material_id,
+                TeacherAssistV2PlanningSupplementalMaterial.teacher_user_id == user.id,
+            )
+        ).one_or_none()
+        if row is None:
+            raise LookupError("Supplemental material not found")
+        if row.material_kind != "file" or not row.storage_key:
+            raise ValueError("Only uploaded files can be extracted")
+        record = ensure_planning_supplemental_extraction_record(db, row=row)
+        run_document_extraction(db, settings=settings, record=record)
+        return serialize_supplemental_material(row, settings=settings)
+
+    return _handle(action)
+
+
 @router.post("/teacher/planning/packages/generate", status_code=201)
 def generate_teacher_instructional_package(
     body: V2PlanningGenerateIn,
@@ -1301,6 +1507,7 @@ def generate_teacher_instructional_package(
             selected_outputs=body.selected_outputs,
             plan_start_date=body.plan_start_date,
             plan_end_date=body.plan_end_date,
+            excluded_pacing_material_ids=body.excluded_pacing_material_ids,
         )
     )
     return get_instructional_package_detail_enriched(db, user=user, package_id=package.id, settings=settings)
@@ -1334,6 +1541,7 @@ def read_teacher_instructional_packages(
 
 
 @router.get("/teacher/planning/packages/{package_id}")
+@router.get("/teacher/packages/{package_id}")
 def read_teacher_instructional_package(
     package_id: uuid.UUID,
     user: CurrentUser,
@@ -1350,6 +1558,89 @@ def read_teacher_instructional_package(
             settings=settings,
         )
     )
+
+
+@router.put("/teacher/planning/packages/{package_id}/artifacts/{artifact_id}/rubric")
+def update_teacher_package_rubric(
+    package_id: uuid.UUID,
+    artifact_id: uuid.UUID,
+    body: V2PackageRubricUpdateIn,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/packages")
+    _handle(
+        lambda: update_teacher_package_artifact_content(
+            db,
+            settings=settings,
+            user=user,
+            package_id=package_id,
+            artifact_id=artifact_id,
+            content_json=body.model_dump(),
+        )
+    )
+    db.commit()
+    return get_instructional_package_detail_enriched(db, user=user, package_id=package_id, settings=settings)
+
+
+@router.get("/teacher/planning/packages/{package_id}/additional-assignments/form")
+def read_package_additional_assignment_form(
+    package_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/packages")
+    return _handle(lambda: build_additional_assignment_form(db, user=user, package_id=package_id))
+
+
+@router.post("/teacher/planning/packages/{package_id}/additional-assignments/generate", status_code=201)
+def generate_package_additional_assignment(
+    package_id: uuid.UUID,
+    body: V2PackageAdditionalAssignmentGenerateIn,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/packages")
+    _handle(
+        lambda: generate_additional_package_assignment(
+            db,
+            settings=settings,
+            user=user,
+            package_id=package_id,
+            subject_id=body.subject_id,
+            artifact_type=body.artifact_type,
+            teacher_notes=body.teacher_notes,
+            title_hint=body.title_hint,
+        )
+    )
+    db.commit()
+    return get_instructional_package_detail_enriched(db, user=user, package_id=package_id, settings=settings)
+
+
+@router.post("/admin/packages/{package_id}/regenerate-artifacts")
+def admin_regenerate_package_artifacts(
+    package_id: uuid.UUID,
+    user: RootAdminUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    """Idempotent refresh of package artifacts (deterministic or ELA demo profile)."""
+    _require_root_admin(db, user)
+    package = db.scalars(
+        select(TeacherAssistV2InstructionalPackage)
+        .where(TeacherAssistV2InstructionalPackage.id == package_id)
+        .options(selectinload(TeacherAssistV2InstructionalPackage.artifacts))
+    ).one_or_none()
+    if package is None:
+        raise HTTPException(status_code=404, detail="Instructional package not found")
+    result = _handle(lambda: regenerate_package_artifacts(db, settings=settings, package=package))
+    db.commit()
+    return result
 
 
 @router.post("/teacher/planning/packages/{package_id}/close-out")
@@ -1371,7 +1662,81 @@ def close_out_teacher_instructional_package(
             completed_date=body.completed_date,
         )
     )
+    db.commit()
     return get_instructional_package_detail_enriched(db, user=user, package_id=package_id, settings=settings)
+
+
+@router.get("/teacher/assignments/manual/form")
+def read_manual_assignment_form(user: CurrentUser, db: DbSession) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    return _handle(lambda: build_manual_assignment_form(db, user=user))
+
+
+@router.get("/teacher/assignments/manual/objectives")
+def read_manual_assignment_objectives(
+    user: CurrentUser,
+    db: DbSession,
+    week_number: int = Query(ge=1),
+    subject_id: uuid.UUID = Query(...),
+) -> list[dict]:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    return _handle(
+        lambda: list_manual_assignment_objectives(
+            db,
+            user=user,
+            week_number=week_number,
+            subject_id=subject_id,
+        )
+    )
+
+
+@router.post("/teacher/assignments/manual", status_code=201)
+def create_manual_assignment_route(
+    body: V2ManualAssignmentCreateIn,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    return _handle(
+        lambda: create_teacher_manual_assignment(
+            db,
+            settings=settings,
+            user=user,
+            title=body.title,
+            description=body.description,
+            week_number=body.week_number,
+            subject_id=body.subject_id,
+            education_objective_ids=body.education_objective_ids,
+            assignment_type=body.assignment_type,
+            generate_cover_sheets=body.generate_cover_sheets,
+        )
+    )
+
+
+@router.post("/teacher/assignments/{assignment_id}/cover-sheets/generate")
+def generate_assignment_cover_sheets_route(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
+
+    assignment = db.scalars(
+        select(TeacherAssistV2Assignment).where(
+            TeacherAssistV2Assignment.id == assignment_id,
+            TeacherAssistV2Assignment.teacher_user_id == user.id,
+        )
+    ).one_or_none()
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="Assignment not found.")
+    return _handle(lambda: generate_assignment_cover_sheets(db, settings=settings, assignment=assignment))
 
 
 @router.get("/teacher/assignments")
@@ -1391,6 +1756,124 @@ def read_teacher_assignments(
             assignment_type=assignment_type,
         )
     )
+
+
+@router.get("/admin/google-settings")
+def read_admin_google_settings(user: RootAdminUser, db: DbSession, settings: Settings = Depends(settings_dep)) -> dict:
+    _require_root_admin(db, user)
+    return build_google_integration_status(settings)
+
+
+@router.get("/teacher/google/connection")
+def read_teacher_google_connection(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    return build_teacher_google_status(db, user=user, settings=settings)
+
+
+@router.get("/teacher/google/oauth/start")
+def start_teacher_google_oauth(
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    return _handle(lambda: build_oauth_authorization_url(settings, teacher_user_id=user.id))
+
+
+@router.get("/teacher/google/oauth/callback")
+def complete_teacher_google_oauth_callback(
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    if error:
+        return RedirectResponse(
+            f"{settings.teacher_assist_google_oauth_frontend_redirect}?error={error}"
+        )
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing Google OAuth code or state.")
+    try:
+        complete_oauth_callback(db, settings=settings, code=code, state=state)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return RedirectResponse(
+            f"{settings.teacher_assist_google_oauth_frontend_redirect}?error={str(exc)}"
+        )
+    return RedirectResponse(f"{settings.teacher_assist_google_oauth_frontend_redirect}?connected=1")
+
+
+@router.delete("/teacher/google/connection", status_code=204)
+def delete_teacher_google_connection(user: CurrentUser, db: DbSession) -> None:
+    _require_teacher(db, user)
+    disconnect_teacher_google(db, teacher_user_id=user.id)
+    db.commit()
+
+
+@router.post("/teacher/assignments/{assignment_id}/google-form/create")
+def create_assignment_google_form(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/packages")
+    result = _handle(
+        lambda: create_google_form_for_assignment(
+            db, settings=settings, user=user, assignment_id=assignment_id
+        )
+    )
+    db.commit()
+    return result
+
+
+@router.post("/teacher/assignments/{assignment_id}/google-form/import-results")
+def import_assignment_google_form_results(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    result = _handle(
+        lambda: import_google_form_results(
+            db, settings=settings, user=user, assignment_id=assignment_id
+        )
+    )
+    db.commit()
+    return result
+
+
+@router.post("/teacher/assignments/{assignment_id}/google-form/import-csv")
+async def import_assignment_google_form_csv(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    file: UploadFile = File(...),
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    csv_text = (await file.read()).decode("utf-8", errors="replace")
+    await file.close()
+    try:
+        result = import_google_form_results_csv(
+            db, user=user, assignment_id=assignment_id, csv_text=csv_text
+        )
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        if isinstance(exc.args[0], dict) and "row_errors" in exc.args[0]:
+            raise HTTPException(status_code=400, detail=exc.args[0]) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/teacher/assignments/{assignment_id}")
@@ -1468,6 +1951,7 @@ async def upload_assignment_submission_batch(
             stored=stored,
             file_bytes=contents,
             student_number=student_number,
+            settings=settings,
         )
     )
 
@@ -1493,6 +1977,56 @@ def read_student_submission(
         )
 
     return _handle(_payload)
+
+
+@router.post("/teacher/submissions/{submission_id}/extract")
+def extract_student_submission_text(
+    submission_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+
+    def action() -> dict:
+        row = get_student_submission_or_404(db, user=user, submission_id=submission_id)
+        if row.status == "NOT_UPLOADED":
+            raise ValueError("No uploaded student work is available for extraction.")
+        record = ensure_student_submission_extraction_record(db, row=row)
+        run_document_extraction(db, settings=settings, record=record)
+        return get_student_submission_detail(
+            db,
+            user=user,
+            submission_id=submission_id,
+            settings=settings,
+        )
+
+    return _handle(action)
+
+
+@router.put("/teacher/submissions/{submission_id}/response-text")
+def save_student_submission_response_text_route(
+    submission_id: uuid.UUID,
+    body: V2StudentSubmissionResponseTextIn,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+
+    def action() -> dict:
+        row = get_student_submission_or_404(db, user=user, submission_id=submission_id)
+        save_student_submission_response_text(db, submission=row, response_text=body.response_text)
+        return get_student_submission_detail(
+            db,
+            user=user,
+            submission_id=submission_id,
+            settings=settings,
+        )
+
+    return _handle(action)
 
 
 @router.post("/teacher/submissions/{submission_id}/manual-match")
@@ -1549,6 +2083,72 @@ def patch_student_submission_status(
         )
 
     return _handle(action)
+
+
+@router.get("/teacher/assignments/{assignment_id}/review-queue")
+def read_assignment_review_queue(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> list[dict]:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    return _handle(lambda: list_assignment_review_queue(db, user=user, assignment_id=assignment_id))
+
+
+@router.post("/teacher/submissions/{submission_id}/incomplete")
+def mark_submission_incomplete_route(
+    submission_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+
+    def action() -> dict:
+        mark_student_submission_incomplete(db, user=user, submission_id=submission_id)
+        return get_student_submission_detail(
+            db,
+            user=user,
+            submission_id=submission_id,
+            settings=settings,
+        )
+
+    return _handle(action)
+
+
+@router.post("/teacher/submissions/{submission_id}/supplement-upload", status_code=200)
+async def upload_submission_supplement(
+    submission_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+    file: UploadFile = File(...),
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    ctx = teacher_assist_context_for_user(db, user)
+    contents = await file.read()
+    await file.close()
+    stored = save_teacher_assist_bytes(
+        settings,
+        tenant_id=ctx.tenant_id,
+        area="student-work",
+        original_filename=file.filename or "upload.bin",
+        contents=contents,
+        mime_type=file.content_type or "application/octet-stream",
+    )
+    return _handle(
+        lambda: upload_supplement_for_submission(
+            db,
+            user=user,
+            submission_id=submission_id,
+            stored=stored,
+            file_bytes=contents,
+            settings=settings,
+        )
+    )
 
 
 @router.post("/teacher/assignments/{assignment_id}/grading-jobs/generate-all")
@@ -1627,6 +2227,97 @@ def read_teacher_gradebook(
     )
 
 
+@router.get("/teacher/gradebook/grid/form")
+def read_gradebook_grid_form(user: CurrentUser, db: DbSession) -> dict:
+    _require_v2_access(db, user)
+    return _handle(lambda: build_gradebook_grid_form(db, user=user))
+
+
+@router.get("/teacher/gradebook/grid")
+def read_gradebook_grid(
+    user: CurrentUser,
+    db: DbSession,
+    subject_id: uuid.UUID,
+    grading_period_id: uuid.UUID | None = None,
+) -> dict:
+    _require_v2_access(db, user)
+    return _handle(
+        lambda: build_subject_gradebook_grid(
+            db,
+            user=user,
+            subject_id=subject_id,
+            grading_period_id=grading_period_id,
+        )
+    )
+
+
+@router.get("/teacher/gradebook/grid/export")
+def export_gradebook_grid(
+    user: CurrentUser,
+    db: DbSession,
+    subject_id: uuid.UUID,
+    grading_period_id: uuid.UUID | None = None,
+):
+    from fastapi.responses import Response
+
+    _require_v2_access(db, user)
+    filename, payload = export_subject_gradebook_grid_csv(
+        db,
+        user=user,
+        subject_id=subject_id,
+        grading_period_id=grading_period_id,
+    )
+    return Response(
+        content=payload,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/teacher/gradebook/grid/assignments", status_code=201)
+def create_gradebook_grid_assignment_route(
+    body: V2GradeEntryAssignmentCreateIn,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/gradebook")
+    return _handle(
+        lambda: create_teacher_grade_entry_assignment(
+            db,
+            settings=settings,
+            user=user,
+            title=body.title,
+            week_number=body.week_number,
+            subject_id=body.subject_id,
+            education_objective_ids=body.education_objective_ids,
+            description=body.description,
+        )
+    )
+
+
+@router.post("/teacher/gradebook/grid/grades", status_code=201)
+def save_gradebook_grid_grade_route(
+    body: V2GradebookGridCellIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/gradebook")
+    return _handle(
+        lambda: save_gradebook_grid_cell(
+            db,
+            user=user,
+            assignment_id=body.assignment_id,
+            student_number=body.student_number,
+            score=body.score,
+            max_score=body.max_score,
+            teacher_comment=body.teacher_comment,
+        )
+    )
+
+
 @router.get("/teacher/mastery")
 def read_teacher_mastery(
     user: CurrentUser,
@@ -1700,15 +2391,59 @@ def read_submission_grade_audit_history(
     return _handle(lambda: get_grade_audit_history(db, user=user, submission_id=submission_id))
 
 
+@router.get("/teacher/submissions/{submission_id}/rubric-scorecard")
+def read_submission_rubric_scorecard(
+    submission_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+):
+    from fastapi.responses import HTMLResponse
+
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    html = _handle(lambda: build_submission_rubric_scorecard_html(db, user=user, submission_id=submission_id))
+    return HTMLResponse(content=html)
+
+
+@router.get("/teacher/assignments/{assignment_id}/rubric-score-report")
+def read_assignment_rubric_score_report(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+):
+    from fastapi.responses import Response
+
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    filename, payload = _handle(lambda: build_assignment_rubric_score_report_docx(db, user=user, assignment_id=assignment_id))
+    return Response(
+        content=payload,
+        media_type=RUBRIC_SCORE_REPORT_DOCX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/teacher/submissions/{submission_id}/grade-review/accept", status_code=201)
 def accept_submission_grade_review(
     submission_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
+    body: V2GradeReviewAcceptIn | None = None,
 ) -> dict:
     _require_teacher(db, user)
     _ensure_teacher_route_allowed(db, user, "/assignments")
-    return _handle(lambda: accept_grading_draft(db, user=user, submission_id=submission_id))
+    payload = body or V2GradeReviewAcceptIn()
+    return _handle(
+        lambda: accept_grading_draft(
+            db,
+            user=user,
+            submission_id=submission_id,
+            score=payload.score,
+            max_score=payload.max_score,
+            teacher_comment=payload.teacher_comment,
+            rubric_json=payload.rubric_json,
+        )
+    )
 
 
 @router.post("/teacher/submissions/{submission_id}/grade-review/modify", status_code=201)

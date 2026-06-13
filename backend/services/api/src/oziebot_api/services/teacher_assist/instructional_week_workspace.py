@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import uuid
 from typing import Any
 
@@ -9,8 +8,6 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_activity_event import TeacherAssistActivityEvent
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
-from oziebot_api.models.teacher_assist_generated_artifact import TeacherAssistGeneratedArtifact
-from oziebot_api.models.teacher_assist_instructional_week import TeacherAssistInstructionalWeek
 from oziebot_api.models.teacher_assist_newsletter import TeacherAssistNewsletter
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.models.user import User

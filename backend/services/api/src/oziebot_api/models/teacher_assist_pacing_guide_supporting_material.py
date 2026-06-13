@@ -22,6 +22,9 @@ class TeacherAssistPacingGuideSupportingMaterial(Base):
     period_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("pacing_guide_periods.id", ondelete="CASCADE"), nullable=True, index=True
     )
+    period_day_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("pacing_guide_period_days.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     education_objective_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("education_objectives.id", ondelete="CASCADE"), nullable=True, index=True
     )
@@ -57,12 +60,36 @@ class TeacherAssistPacingGuideSupportingMaterial(Base):
     uploaded_by_user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
+    source_resource_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guide_supporting_materials.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    source_pacing_guide_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("pacing_guides.id", ondelete="SET NULL"), nullable=True
+    )
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    pacing_guide: Mapped["TeacherAssistPacingGuide"] = relationship("TeacherAssistPacingGuide")
+    pacing_guide: Mapped["TeacherAssistPacingGuide"] = relationship(
+        "TeacherAssistPacingGuide",
+        foreign_keys=[pacing_guide_id],
+    )
+    source_pacing_guide: Mapped["TeacherAssistPacingGuide | None"] = relationship(
+        "TeacherAssistPacingGuide",
+        foreign_keys=[source_pacing_guide_id],
+    )
     period: Mapped["TeacherAssistPacingGuidePeriod | None"] = relationship("TeacherAssistPacingGuidePeriod")
+    period_day: Mapped["TeacherAssistPacingGuidePeriodDay | None"] = relationship(
+        "TeacherAssistPacingGuidePeriodDay", back_populates="supporting_materials"
+    )
+    source_resource: Mapped["TeacherAssistPacingGuideSupportingMaterial | None"] = relationship(
+        "TeacherAssistPacingGuideSupportingMaterial",
+        foreign_keys=[source_resource_id],
+        remote_side=[id],
+    )
     objective: Mapped["EducationObjective | None"] = relationship("EducationObjective")
     uploaded_by: Mapped["User"] = relationship("User")
 
@@ -73,4 +100,5 @@ if TYPE_CHECKING:
     from oziebot_api.models.education_catalog import EducationObjective
     from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
     from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
+    from oziebot_api.models.teacher_assist_pacing_guide_period_day import TeacherAssistPacingGuidePeriodDay
     from oziebot_api.models.user import User

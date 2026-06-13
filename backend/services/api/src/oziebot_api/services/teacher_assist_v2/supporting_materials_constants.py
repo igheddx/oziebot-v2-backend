@@ -4,8 +4,11 @@ PACING_SUPPORTING_MATERIAL_KINDS = ("file", "link", "note")
 
 PACING_SUPPORTING_RESOURCE_TYPES = (
     "curriculum_file",
+    "curriculum_reference",
     "reference_link",
     "textbook_reference",
+    "website",
+    "video",
     "worksheet",
     "slide_deck",
     "assessment_resource",

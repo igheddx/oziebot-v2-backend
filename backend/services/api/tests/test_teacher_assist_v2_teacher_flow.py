@@ -123,6 +123,21 @@ def test_v2_teacher_temp_password_and_onboarding_flow(client, db_session):
     assert setup_saved.status_code == 200, setup_saved.text
     assert setup_saved.json()["landing_route"] == "/teacher-assist-v2/planning"
 
+    resaved = client.post(
+        "/v1/teacher-assist-v2/teacher/pacing-guide-setup",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "selections": [
+                {
+                    "subject_id": subject["id"],
+                    "source_guide_id": guide_id,
+                    "mode": "district",
+                }
+            ]
+        },
+    )
+    assert resaved.status_code == 200, resaved.text
+
     home = client.get("/v1/teacher-assist-v2/teacher/home", headers={"Authorization": f"Bearer {token}"})
     assert home.status_code == 200, home.text
     assert home.json()["ready_to_plan"] is True

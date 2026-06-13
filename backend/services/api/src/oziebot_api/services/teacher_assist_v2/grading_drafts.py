@@ -11,17 +11,18 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsageEvent
-from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
 from oziebot_api.models.teacher_assist_v2_grading_draft import TeacherAssistV2GradingDraft
 from oziebot_api.models.teacher_assist_v2_grading_job import TeacherAssistV2GradingJob
 from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssistV2StudentSubmission
 from oziebot_api.models.user import User
+from oziebot_api.services.teacher_assist.ai_mode import is_teacher_assist_real_ai_active
 from oziebot_api.services.teacher_assist.constants import validate_teacher_assist_ai_provider
 from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher_assist_settings
 from oziebot_api.services.teacher_assist.prompt_contracts import GRADING_DRAFT_GENERATION_FEATURE
 from oziebot_api.services.teacher_assist_v2.grading_ai import generate_grading_draft_ai_result
 from oziebot_api.services.teacher_assist_v2.grading_constants import GRADING_JOB_STATUSES
 from oziebot_api.services.teacher_assist_v2.grading_context import build_grading_context
+from oziebot_api.services.teacher_assist_v2.mastery_constants import serialize_mastery_level_fields
 from oziebot_api.services.teacher_assist_v2.submission_intake import (
     _get_assignment_or_404,
     get_student_submission_or_404,
@@ -40,7 +41,7 @@ def _validate_job_status(status: str) -> str:
 
 
 def serialize_grading_draft(row: TeacherAssistV2GradingDraft) -> dict[str, Any]:
-    return {
+    payload = {
         "id": str(row.id),
         "assignment_id": str(row.assignment_id),
         "student_submission_id": str(row.student_submission_id),
@@ -59,6 +60,8 @@ def serialize_grading_draft(row: TeacherAssistV2GradingDraft) -> dict[str, Any]:
         "created_at": row.created_at.isoformat(),
         "teacher_review_required": True,
     }
+    payload.update(serialize_mastery_level_fields(percentage=row.percentage))
+    return payload
 
 
 def serialize_grading_job(row: TeacherAssistV2GradingJob) -> dict[str, Any]:
@@ -121,8 +124,8 @@ def get_latest_grading_draft(
 
 
 def _require_ready_submission(submission: TeacherAssistV2StudentSubmission) -> None:
-    if submission.status != "READY_FOR_GRADING":
-        raise ValueError("Only submissions marked READY_FOR_GRADING can enter the grading workflow.")
+    if submission.status not in {"PROCESSING", "READY_FOR_GRADING", "READY_FOR_REVIEW"}:
+        raise ValueError("Submission is not ready for auto-grading.")
     if submission.student_number is None:
         raise ValueError("Submission must have an assigned student number before grading.")
 
@@ -166,6 +169,10 @@ def create_grading_job_for_submission(
 
     try:
         context = build_grading_context(db, assignment=assignment, submission=submission)
+        if is_teacher_assist_real_ai_active(db, settings) and not context["student_submission"].get("response_text"):
+            raise ValueError(
+                "Student work text is required before AI grading. Extract the submission or enter the student response manually."
+            )
         ai_result = generate_grading_draft_ai_result(settings=settings, context=context, db=db)
         job.provider = ai_result.provider
         job.model = ai_result.model
@@ -207,6 +214,10 @@ def create_grading_job_for_submission(
                 "student_submission_id": str(submission.id),
                 "assignment_id": str(assignment.id),
                 "teacher_review_required": True,
+                "student_response_used": bool(context["student_submission"].get("response_text")),
+                "student_response_status": (
+                    (context["student_submission"].get("extraction") or {}).get("status")
+                ),
             },
             created_at=_now(),
         )
@@ -216,6 +227,9 @@ def create_grading_job_for_submission(
         job.completed_at = _now()
         job.updated_at = job.completed_at
         job.draft = draft
+        if submission.status in {"PROCESSING", "READY_FOR_GRADING"}:
+            submission.status = "READY_FOR_REVIEW"
+            submission.updated_at = job.completed_at
         db.flush()
         return serialize_grading_job(job)
     except Exception as exc:
@@ -239,7 +253,7 @@ def generate_all_grading_drafts(
         select(TeacherAssistV2StudentSubmission).where(
             TeacherAssistV2StudentSubmission.assignment_id == assignment_id,
             TeacherAssistV2StudentSubmission.teacher_user_id == user.id,
-            TeacherAssistV2StudentSubmission.status == "READY_FOR_GRADING",
+            TeacherAssistV2StudentSubmission.status.in_({"READY_FOR_REVIEW", "READY_FOR_GRADING", "PROCESSING"}),
         )
     ).all()
     if not submissions:

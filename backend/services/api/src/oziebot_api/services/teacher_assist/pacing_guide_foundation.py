@@ -8,16 +8,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from oziebot_api.models.education_catalog import (
     EducationCurriculumResource,
-    EducationGrade,
-    EducationObjective,
-    EducationSchool,
-    EducationSubject,
 )
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
 from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
 from oziebot_api.models.teacher_assist_pacing_guide_resource import TeacherAssistPacingGuideResource
-from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.education_catalog import (
     get_district_or_404,
@@ -398,13 +393,18 @@ def _copy_guide_tree(
     *,
     source: TeacherAssistPacingGuide,
     target: TeacherAssistPacingGuide,
-) -> None:
+) -> tuple[dict[str, uuid.UUID], dict[str, uuid.UUID]]:
+    from oziebot_api.services.teacher_assist_v2.pacing_guide_period_days import copy_period_days
+
+    period_id_map: dict[str, uuid.UUID] = {}
+    day_id_map: dict[str, uuid.UUID] = {}
     source_detail = db.scalars(
         select(TeacherAssistPacingGuide)
         .where(TeacherAssistPacingGuide.id == source.id)
         .options(
             selectinload(TeacherAssistPacingGuide.periods).selectinload(TeacherAssistPacingGuidePeriod.objectives),
             selectinload(TeacherAssistPacingGuide.periods).selectinload(TeacherAssistPacingGuidePeriod.resources),
+            selectinload(TeacherAssistPacingGuide.periods).selectinload(TeacherAssistPacingGuidePeriod.days),
         )
     ).one()
     for period in sorted(source_detail.periods, key=lambda row: row.sequence_number):
@@ -416,11 +416,14 @@ def _copy_guide_tree(
             sequence_number=period.sequence_number,
             start_date=period.start_date,
             end_date=period.end_date,
+            metadata_json=period.metadata_json,
             created_at=_now(),
             updated_at=_now(),
         )
         db.add(new_period)
         db.flush()
+        period_id_map[str(period.id)] = new_period.id
+        day_id_map.update(copy_period_days(db, source_period=period, target_period=new_period))
         for objective in period.objectives:
             db.add(
                 TeacherAssistPacingGuideObjective(
@@ -443,6 +446,7 @@ def _copy_guide_tree(
                 )
             )
     db.flush()
+    return period_id_map, day_id_map
 
 
 def copy_pacing_guide(
@@ -454,6 +458,7 @@ def copy_pacing_guide(
     target_guide_type: str,
     title: str | None,
     school_year_id: uuid.UUID | None,
+    copy_materials: bool = False,
 ) -> TeacherAssistPacingGuide:
     source = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=source_guide_id)
     normalized_type = validate_pacing_guide_type(target_guide_type)
@@ -474,7 +479,20 @@ def copy_pacing_guide(
         is_template=source.is_template,
         is_shared=normalized_type in {"DISTRICT", "GRADE_LEVEL"},
     )
-    _copy_guide_tree(db, source=source, target=target)
+    target.metadata_json = source.metadata_json
+    period_id_map, day_id_map = _copy_guide_tree(db, source=source, target=target)
+    if copy_materials:
+        from oziebot_api.services.teacher_assist_v2.supporting_materials import copy_pacing_guide_supporting_materials
+
+        copy_pacing_guide_supporting_materials(
+            db,
+            tenant_id=tenant_id,
+            actor=actor,
+            source_guide_id=source.id,
+            target_guide_id=target.id,
+            period_id_map=period_id_map,
+            day_id_map=day_id_map,
+        )
     return get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=target.id)
 
 

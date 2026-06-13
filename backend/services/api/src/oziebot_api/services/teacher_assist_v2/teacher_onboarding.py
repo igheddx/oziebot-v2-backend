@@ -8,9 +8,9 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
-from oziebot_api.models.education_catalog import EducationGrade, EducationSchoolYear, EducationSubject
+from oziebot_api.models.education_catalog import EducationGrade, EducationSubject
 from oziebot_api.models.teacher_assist_v2_onboarding import TeacherAssistV2Onboarding
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.education_catalog import (
@@ -61,7 +61,8 @@ def get_or_create_v2_onboarding(
         with db.begin_nested():
             db.flush()
     except IntegrityError:
-        db.expunge(row)
+        if object_session(row) is db:
+            db.expunge(row)
         existing = get_v2_onboarding(db, user_id=user_id)
         if existing is None:
             raise
@@ -225,7 +226,7 @@ def save_teacher_onboarding(
         catalog_subject_ids=selected_subject_ids,
     )
 
-    tenant_year = ensure_tenant_school_year(db, tenant_id=ctx.tenant_id, platform_year=platform_year)
+    ensure_tenant_school_year(db, tenant_id=ctx.tenant_id, platform_year=platform_year)
     profile = get_teacher_profile(db, user_id=user.id)
     upsert_teacher_profile(
         db,

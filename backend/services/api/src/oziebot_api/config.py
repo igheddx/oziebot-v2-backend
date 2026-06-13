@@ -234,6 +234,22 @@ class Settings(BaseSettings):
         default=14,
         description="Recent window in days for mastery analytics counts and trends.",
     )
+    teacher_assist_google_oauth_client_id: str | None = Field(
+        default=None,
+        description="Google OAuth client ID for TeacherAssist Forms integration.",
+    )
+    teacher_assist_google_oauth_client_secret: str | None = Field(
+        default=None,
+        description="Google OAuth client secret (server-only).",
+    )
+    teacher_assist_google_oauth_redirect_uri: str = Field(
+        default="http://localhost:8000/v1/teacher-assist-v2/teacher/google/oauth/callback",
+        description="OAuth redirect URI registered in Google Cloud Console.",
+    )
+    teacher_assist_google_oauth_frontend_redirect: str = Field(
+        default="http://localhost:3000/teacher-assist-v2/settings/google",
+        description="Frontend URL after successful Google OAuth callback.",
+    )
 
 
 def get_settings() -> Settings:

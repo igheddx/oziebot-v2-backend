@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.education_catalog import (

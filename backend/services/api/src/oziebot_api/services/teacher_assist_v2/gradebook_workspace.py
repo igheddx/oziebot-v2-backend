@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.education_catalog import EducationObjective, EducationSubject
+from oziebot_api.models.education_catalog import EducationObjective
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
 from oziebot_api.models.teacher_assist_v2_assignment_grade import TeacherAssistV2AssignmentGrade
 from oziebot_api.models.teacher_assist_v2_gradebook_record import TeacherAssistV2GradebookRecord

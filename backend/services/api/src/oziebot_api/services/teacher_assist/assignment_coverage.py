@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session, selectinload
 
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
 from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
-from oziebot_api.models.teacher_assist_assignment_standard import TeacherAssistAssignmentStandard
 from oziebot_api.models.teacher_assist_instructional_evidence import TeacherAssistInstructionalEvidence
 from oziebot_api.models.teacher_assist_standard import TeacherAssistStandard
 from oziebot_api.services.teacher_assist.objective_performance import ObjectivePerformanceService

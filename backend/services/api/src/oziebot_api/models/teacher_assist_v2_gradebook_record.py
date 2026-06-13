@@ -60,6 +60,7 @@ class TeacherAssistV2GradebookRecord(Base):
     score: Mapped[float] = mapped_column(Float(), nullable=False)
     max_score: Mapped[float] = mapped_column(Float(), nullable=False)
     percentage: Mapped[float] = mapped_column(Float(), nullable=False)
+    mastery_level: Mapped[str] = mapped_column(String(32), nullable=False)
     teacher_comment: Mapped[str] = mapped_column(Text(), nullable=False)
     confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     sync_status: Mapped[str] = mapped_column(String(32), nullable=False, default="SYNCED", server_default="SYNCED")

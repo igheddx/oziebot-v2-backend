@@ -16,7 +16,14 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2PlanningSupplementalMaterial,
 )
 from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssistV2StudentSubmission
-from oziebot_api.services.teacher_assist_v2.grading_constants import DEFAULT_RUBRIC_SECTIONS
+from oziebot_api.services.teacher_assist_v2.document_extraction import (
+    load_submission_extractions,
+    serialize_document_extraction,
+)
+from oziebot_api.services.teacher_assist_v2.grading_rubric import (
+    grading_template_from_package_rubric,
+    resolve_linked_rubric_content,
+)
 
 
 def _artifact_content_summary(content: dict[str, Any] | None) -> str | None:
@@ -41,22 +48,12 @@ def _artifact_content_summary(content: dict[str, Any] | None) -> str | None:
             bullets = section.get("bullets")
             if isinstance(bullets, list):
                 parts.extend(str(item) for item in bullets[:3])
+    criteria = content.get("criteria")
+    if isinstance(criteria, list):
+        for row in criteria[:6]:
+            if isinstance(row, dict) and row.get("name"):
+                parts.append(f"{row['name']} ({row.get('points', 0)} pts)")
     return "\n".join(part for part in parts if part).strip() or None
-
-
-def _default_rubric_template() -> dict[str, Any]:
-    section_max = 25.0
-    return {
-        "sections": [
-            {
-                "name": name,
-                "score": 0.0,
-                "max_score": section_max,
-                "feedback": "",
-            }
-            for name in DEFAULT_RUBRIC_SECTIONS
-        ]
-    }
 
 
 def build_grading_context(
@@ -85,17 +82,24 @@ def build_grading_context(
     ).all()
 
     assignment_instructions = assignment.description
-    rubric_content: dict[str, Any] | None = None
-    rubric_summary: str | None = None
+    rubric_content: dict[str, Any] | None = resolve_linked_rubric_content(artifacts, assignment=assignment)
     for artifact in artifacts:
         content = artifact.content_json if isinstance(artifact.content_json, dict) else None
-        if artifact.artifact_type == "assignment" and artifact.subject_id == assignment.catalog_subject_id:
+        if artifact.assignment_id == assignment.id and artifact.artifact_type == "writing_response":
+            prompt = content.get("prompt") if content else None
+            instructions = content.get("instructions") if content else None
+            parts = [str(prompt).strip()] if prompt else []
+            if isinstance(instructions, list):
+                parts.extend(str(item).strip() for item in instructions if str(item).strip())
+            if parts:
+                assignment_instructions = "\n".join(parts)
+        if artifact.assignment_id == assignment.id and artifact.artifact_type == "assignment":
             summary = _artifact_content_summary(content)
             if summary:
                 assignment_instructions = summary
-        if artifact.artifact_type == "rubric" and artifact.subject_id == assignment.catalog_subject_id:
-            rubric_content = content
-            rubric_summary = _artifact_content_summary(content)
+
+    rubric_template = grading_template_from_package_rubric(rubric_content)
+    rubric_summary = _artifact_content_summary(rubric_content)
 
     teacher_notes = db.scalars(
         select(TeacherAssistV2PlanningSupplementalMaterial).where(
@@ -112,6 +116,12 @@ def build_grading_context(
     ]
     if package.close_out_notes:
         teacher_note_bodies.append(package.close_out_notes.strip())
+
+    extraction = serialize_document_extraction(
+        load_submission_extractions(db, submission_ids=[submission.id]).get(submission.id),
+        include_full_text=True,
+    )
+    student_response_text = (extraction or {}).get("effective_text")
 
     return {
         "assignment": {
@@ -133,7 +143,8 @@ def build_grading_context(
             }
             for objective in objectives
         ],
-        "rubric": rubric_content or _default_rubric_template(),
+        "rubric": rubric_content or {},
+        "rubric_template": rubric_template,
         "rubric_summary": rubric_summary,
         "teacher_notes": teacher_note_bodies,
         "student_submission": {
@@ -142,5 +153,8 @@ def build_grading_context(
             "original_filename": submission.original_filename,
             "mime_type": submission.mime_type,
             "match_method": submission.match_method,
+            "extraction": extraction,
+            "response_text": student_response_text,
+            "response_text_available": bool(student_response_text),
         },
     }

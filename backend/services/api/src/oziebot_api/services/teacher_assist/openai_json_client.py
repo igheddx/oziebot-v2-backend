@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import httpx
@@ -10,6 +11,13 @@ import httpx
 from oziebot_api.config import Settings
 from oziebot_api.services.teacher_assist.ai_provider import TeacherAssistAIProviderResult
 from oziebot_api.services.teacher_assist.openai_pricing import estimate_openai_cost_cents
+
+
+def _raise_openai_connection_error() -> None:
+    raise ValueError(
+        "TeacherAssist could not reach the OpenAI API. Check the configured model, base URL, API key, "
+        "and outbound network access, then try again."
+    )
 
 
 def execute_openai_json_completion(
@@ -54,14 +62,32 @@ def execute_openai_json_completion(
         "Authorization": f"Bearer {settings.teacher_assist_openai_api_key}",
         "Content-Type": "application/json",
     }
-    with httpx.Client(timeout=timeout_seconds) as client:
-        response = client.post(
-            f"{settings.teacher_assist_openai_base_url.rstrip('/')}/chat/completions",
-            headers=headers,
-            json=request_body,
-        )
-        response.raise_for_status()
-        payload = response.json()
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            with httpx.Client(timeout=timeout_seconds) as client:
+                response = client.post(
+                    f"{settings.teacher_assist_openai_base_url.rstrip('/')}/chat/completions",
+                    headers=headers,
+                    json=request_body,
+                )
+                response.raise_for_status()
+                payload = response.json()
+            break
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+            last_error = exc
+            if attempt == 2:
+                _raise_openai_connection_error()
+            time.sleep(1.0 + attempt)
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text.strip()
+            raise ValueError(
+                f"TeacherAssist OpenAI request failed ({exc.response.status_code}). "
+                f"{detail or 'Check the provider configuration and try again.'}"
+            ) from exc
+    else:
+        if last_error is not None:
+            raise last_error
 
     choices = payload.get("choices") or []
     if not choices:

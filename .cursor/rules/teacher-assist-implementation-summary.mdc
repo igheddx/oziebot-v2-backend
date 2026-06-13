@@ -1,0 +1,43 @@
+---
+description: Keep TeacherAssist IMPLEMENTATION_SUMMARY.md current with every meaningful change
+alwaysApply: true
+---
+
+# TeacherAssist implementation summary discipline
+
+Whenever you implement, fix, or materially change TeacherAssist behavior, **update `docs/teacher-assist/IMPLEMENTATION_SUMMARY.md` in the same pass**. Do not defer doc updates to a follow-up unless the user explicitly asks for code-only work.
+
+## Required updates
+
+For phase work or any substantive TeacherAssist change, the summary must reflect:
+
+- What was added or changed (APIs, services, UI, migrations, config)
+- Files touched (backend, frontend, tests)
+- Tests run and validation performed
+- Remaining gaps / known limitations affected
+- Next recommended phase (when applicable)
+
+Also keep aligned when relevant:
+
+- `docs/teacher-assist/PHASE_STATUS.md`
+- `docs/teacher-assist/KNOWN_LIMITATIONS.md`
+
+## Phase sections
+
+New phases get a dedicated section in `IMPLEMENTATION_SUMMARY.md` following existing format:
+
+- What was implemented
+- Explicit non-goals preserved
+- Backend / frontend files changed
+- Tests added / run
+- Manual validation checklist (for phases)
+- Remaining gaps
+- Next recommended phase
+
+Update prior phase "next recommended phase" and stale limitation bullets so they do not contradict the new work.
+
+## Scope
+
+This applies to TeacherAssist changes across backend, frontend, worker, migrations, infrastructure under `infrastructure/aws/teacher-assist/`, and related tests/docs — not trading/Coinbase code unless the user explicitly includes it.
+
+Reference: `docs/teacher-assist/IMPLEMENTATION_RULES.md`

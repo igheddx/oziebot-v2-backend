@@ -173,7 +173,6 @@ def analyze_copilot_question(*, question: str, context: dict[str, Any]) -> dict[
         assign_count = len(assignments)
         assessed = sum(1 for row in assignments if (row.get("students_assessed") or 0) > 0)
         reteach_count = len(reteach_ws.get("objectives_requiring_reteach") or [])
-        reflection_note = reflections[0].get("what_worked") if reflections else None
         return _response(
             intent=intent,
             answer=(

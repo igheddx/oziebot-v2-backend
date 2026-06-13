@@ -42,6 +42,7 @@ class TeacherAssistV2AssignmentPrintPacket(Base):
         Uuid(as_uuid=True), ForeignKey("education_subjects.id", ondelete="CASCADE"), nullable=False
     )
     packet_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    packet_kind: Mapped[str] = mapped_column(String(32), nullable=False, default="STUDENT_PACKET", server_default="STUDENT_PACKET")
     pages_per_student: Mapped[int] = mapped_column(Integer, nullable=False)
     student_count: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

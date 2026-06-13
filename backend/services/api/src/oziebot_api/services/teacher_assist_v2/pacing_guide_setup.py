@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.education_catalog import EducationSubject
+from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
 from oziebot_api.models.teacher_assist_v2_onboarding import (
     TeacherAssistV2Onboarding,
     TeacherAssistV2PacingGuideAssignment,
@@ -68,7 +69,47 @@ def _copy_platform_guide_for_teacher(
         is_shared=False,
     )
     _copy_guide_tree(db, source=source, target=target)
+    metadata = target.metadata_json if isinstance(target.metadata_json, dict) else {}
+    target.metadata_json = {
+        **metadata,
+        "source_district_guide_id": str(source.id),
+    }
+    db.flush()
     return target.id
+
+
+def _resolve_district_source_guide_id(
+    db: Session,
+    *,
+    source_guide_id: uuid.UUID,
+    platform_tenant_id: uuid.UUID,
+    teacher_tenant_id: uuid.UUID,
+    available_guides: list[TeacherAssistPacingGuide],
+) -> uuid.UUID | None:
+    if any(guide.id == source_guide_id for guide in available_guides):
+        return source_guide_id
+
+    for tenant_id in (platform_tenant_id, teacher_tenant_id):
+        try:
+            guide = get_catalog_pacing_guide_detail(
+                db,
+                tenant_id=tenant_id,
+                pacing_guide_id=source_guide_id,
+            )
+        except LookupError:
+            continue
+        metadata = guide.metadata_json if isinstance(guide.metadata_json, dict) else {}
+        stored = metadata.get("source_district_guide_id")
+        if stored:
+            stored_id = uuid.UUID(str(stored))
+            if any(row.id == stored_id for row in available_guides):
+                return stored_id
+        if guide.title.startswith("My "):
+            candidate_title = guide.title[3:]
+            for row in available_guides:
+                if row.title == candidate_title:
+                    return row.id
+    return None
 
 
 def _load_guide_summary(
@@ -95,6 +136,53 @@ def _require_completed_onboarding(row: TeacherAssistV2Onboarding | None) -> Teac
     return row
 
 
+def _guide_matches_teacher_school_year(guide: TeacherAssistPacingGuide, *, platform_year) -> bool:
+    if guide.school_year_label and guide.school_year_label != platform_year.title:
+        metadata = guide.metadata_json if isinstance(guide.metadata_json, dict) else {}
+        platform_year_id = metadata.get("platform_school_year_id")
+        if platform_year_id and str(platform_year_id) != str(platform_year.id):
+            return False
+        if not platform_year_id:
+            return False
+    return True
+
+
+def _guide_matches_teacher_school_scope(guide: TeacherAssistPacingGuide, *, school_id: uuid.UUID | None) -> bool:
+    if guide.catalog_school_id is None:
+        return True
+    return school_id is not None and guide.catalog_school_id == school_id
+
+
+def list_teacher_available_pacing_guides(
+    db: Session,
+    *,
+    platform_tenant_id: uuid.UUID,
+    onboarding: TeacherAssistV2Onboarding,
+    platform_year,
+    subject_id: uuid.UUID | None = None,
+) -> list[TeacherAssistPacingGuide]:
+    assert onboarding.district_id is not None
+    assert onboarding.grade_id is not None
+
+    guides = list_v2_district_pacing_guides(
+        db,
+        tenant_id=platform_tenant_id,
+        catalog_district_id=onboarding.district_id,
+        catalog_grade_id=onboarding.grade_id,
+        active_only=True,
+    )
+    filtered: list[TeacherAssistPacingGuide] = []
+    for guide in guides:
+        if subject_id is not None and guide.catalog_subject_id != subject_id:
+            continue
+        if not _guide_matches_teacher_school_scope(guide, school_id=onboarding.school_id):
+            continue
+        if not _guide_matches_teacher_school_year(guide, platform_year=platform_year):
+            continue
+        filtered.append(guide)
+    return filtered
+
+
 def build_pacing_guide_setup_form(db: Session, *, user: User) -> dict[str, Any]:
     ctx = teacher_assist_context_for_user(db, user)
     onboarding = _require_completed_onboarding(get_v2_onboarding(db, user_id=user.id))
@@ -112,12 +200,11 @@ def build_pacing_guide_setup_form(db: Session, *, user: User) -> dict[str, Any]:
     ).all()
     subject_by_id = {row.id: row for row in subjects}
 
-    district_guides = list_v2_district_pacing_guides(
+    district_guides = list_teacher_available_pacing_guides(
         db,
-        tenant_id=platform_tenant_id,
-        catalog_district_id=onboarding.district_id,
-        catalog_grade_id=onboarding.grade_id,
-        active_only=True,
+        platform_tenant_id=platform_tenant_id,
+        onboarding=onboarding,
+        platform_year=platform_year,
     )
 
     guides_by_subject: dict[str, list[dict[str, Any]]] = {}
@@ -162,6 +249,24 @@ def build_pacing_guide_setup_form(db: Session, *, user: User) -> dict[str, Any]:
                 "subject_id": str(row.subject_id),
                 "pacing_guide_id": str(row.pacing_guide_id),
                 "guide_scope": row.guide_scope,
+                "source_district_guide_id": (
+                    str(resolved)
+                    if (
+                        resolved := _resolve_district_source_guide_id(
+                            db,
+                            source_guide_id=row.pacing_guide_id,
+                            platform_tenant_id=platform_tenant_id,
+                            teacher_tenant_id=ctx.tenant_id,
+                            available_guides=[
+                                guide
+                                for guide in district_guides
+                                if guide.catalog_subject_id == row.subject_id
+                            ],
+                        )
+                    )
+                    is not None
+                    else None
+                ),
             }
             for row in existing
         ],
@@ -188,14 +293,26 @@ def save_pacing_guide_setup(
 
     selected_subject_ids = {str(subject_id) for subject_id in (onboarding.selected_subject_ids or [])}
     if not selections:
-        raise ValueError({"selections": "Choose a pacing guide for each subject you teach."})
+        raise ValueError({"selections": "Select at least one pacing guide to include in planning."})
 
     covered_subjects: set[str] = set()
     now = _now()
 
+    existing_by_subject: dict[uuid.UUID, TeacherAssistV2PacingGuideAssignment] = {
+        row.subject_id: row
+        for row in db.scalars(
+            select(TeacherAssistV2PacingGuideAssignment).where(
+                TeacherAssistV2PacingGuideAssignment.user_id == user.id,
+                TeacherAssistV2PacingGuideAssignment.school_year_id == tenant_year.id,
+            )
+        ).all()
+    }
+
     for row in db.scalars(
         select(TeacherAssistV2PacingGuideAssignment).where(
             TeacherAssistV2PacingGuideAssignment.user_id == user.id,
+            TeacherAssistV2PacingGuideAssignment.school_year_id != tenant_year.id,
+            TeacherAssistV2PacingGuideAssignment.active.is_(True),
         )
     ).all():
         row.active = False
@@ -212,14 +329,21 @@ def save_pacing_guide_setup(
         if mode not in {"district", "teacher_copy"}:
             raise ValueError({"selections": "Invalid pacing guide option."})
 
-        district_guides = list_v2_district_pacing_guides(
+        district_guides = list_teacher_available_pacing_guides(
             db,
-            tenant_id=platform_tenant_id,
-            catalog_district_id=onboarding.district_id,
-            catalog_grade_id=onboarding.grade_id,
-            active_only=True,
+            platform_tenant_id=platform_tenant_id,
+            onboarding=onboarding,
+            platform_year=platform_year,
+            subject_id=subject_id,
         )
-        source = next((guide for guide in district_guides if guide.id == source_guide_id), None)
+        resolved_source_id = _resolve_district_source_guide_id(
+            db,
+            source_guide_id=source_guide_id,
+            platform_tenant_id=platform_tenant_id,
+            teacher_tenant_id=ctx.tenant_id,
+            available_guides=district_guides,
+        )
+        source = next((guide for guide in district_guides if guide.id == resolved_source_id), None)
         if source is None or source.catalog_subject_id != subject_id:
             raise ValueError({"selections": "Selected pacing guide is not available for this subject."})
 
@@ -238,27 +362,43 @@ def save_pacing_guide_setup(
             pacing_guide_id = source.id
             guide_scope = "district"
 
-        assignment = TeacherAssistV2PacingGuideAssignment(
-            id=uuid.uuid4(),
-            user_id=user.id,
-            tenant_id=ctx.tenant_id,
-            school_year_id=tenant_year.id,
-            grade_id=onboarding.grade_id,
-            subject_id=subject_id,
-            pacing_guide_id=pacing_guide_id,
-            guide_scope=guide_scope,
-            active=True,
-            created_at=now,
-            updated_at=now,
-        )
-        db.add(assignment)
+        existing = existing_by_subject.get(subject_id)
+        if existing is not None:
+            existing.pacing_guide_id = pacing_guide_id
+            existing.guide_scope = guide_scope
+            existing.grade_id = onboarding.grade_id
+            existing.active = True
+            existing.updated_at = now
+        else:
+            existing = TeacherAssistV2PacingGuideAssignment(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                tenant_id=ctx.tenant_id,
+                school_year_id=tenant_year.id,
+                grade_id=onboarding.grade_id,
+                subject_id=subject_id,
+                pacing_guide_id=pacing_guide_id,
+                guide_scope=guide_scope,
+                active=True,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(existing)
+            existing_by_subject[subject_id] = existing
         covered_subjects.add(str(subject_id))
         if first_active_guide_id is None:
             first_active_guide_id = pacing_guide_id
 
-    missing = selected_subject_ids - covered_subjects
-    if missing:
-        raise ValueError({"selections": "Choose a pacing guide for each subject you teach."})
+    for subject_id_str in selected_subject_ids:
+        if subject_id_str in covered_subjects:
+            continue
+        existing = existing_by_subject.get(uuid.UUID(subject_id_str))
+        if existing is not None:
+            existing.active = False
+            existing.updated_at = now
+
+    if not covered_subjects:
+        raise ValueError({"selections": "Select at least one pacing guide to include in planning."})
 
     onboarding.pacing_guide_setup_completed_at = now
     onboarding.updated_at = now

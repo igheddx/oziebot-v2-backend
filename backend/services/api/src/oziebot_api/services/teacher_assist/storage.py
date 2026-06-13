@@ -69,6 +69,7 @@ class StorageProvider(ABC):
         storage_key: str,
         original_filename: str,
         mime_type: str,
+        inline: bool = False,
     ) -> str:
         raise NotImplementedError
 
@@ -200,6 +201,7 @@ class LocalStorageProvider(StorageProvider):
         storage_key: str,
         original_filename: str,
         mime_type: str,
+        inline: bool = False,
     ) -> str:
         token = _create_local_download_token(
             self._settings,
@@ -207,7 +209,8 @@ class LocalStorageProvider(StorageProvider):
             original_filename=original_filename,
             mime_type=mime_type,
         )
-        return f"{LOCAL_DOWNLOAD_PATH}?token={quote(token)}"
+        inline_query = "&inline=1" if inline else ""
+        return f"{LOCAL_DOWNLOAD_PATH}?token={quote(token)}{inline_query}"
 
     def file_exists(self, *, storage_key: str) -> bool:
         return _safe_local_path(self._storage_root, storage_key).exists()
@@ -256,6 +259,7 @@ class S3StorageProvider(StorageProvider):
         storage_key: str,
         original_filename: str,
         mime_type: str,
+        inline: bool = False,
     ) -> str:
         return str(
             self._client.generate_presigned_url(
@@ -265,7 +269,8 @@ class S3StorageProvider(StorageProvider):
                     "Key": _normalize_storage_key(storage_key),
                     "ResponseContentType": _normalize_mime_type(mime_type),
                     "ResponseContentDisposition": build_content_disposition(
-                        _normalize_filename(original_filename)
+                        _normalize_filename(original_filename),
+                        inline=inline,
                     ),
                 },
                 ExpiresIn=max(1, int(self._settings.teacher_assist_s3_presign_expiration_seconds)),
@@ -392,10 +397,36 @@ def get_teacher_assist_download_url(
         storage_key=storage_key,
         original_filename=original_filename,
         mime_type=mime_type,
+        inline=False,
     )
 
 
-def build_content_disposition(filename: str) -> str:
+def get_teacher_assist_preview_url(
+    settings: Settings,
+    *,
+    storage_key: str,
+    original_filename: str,
+    mime_type: str,
+) -> str:
+    return get_teacher_assist_storage_provider(settings).get_download_url(
+        storage_key=storage_key,
+        original_filename=original_filename,
+        mime_type=mime_type,
+        inline=True,
+    )
+
+
+def _ascii_filename_fallback(filename: str) -> str:
+    fallback = "".join(
+        ch if 32 <= ord(ch) < 127 and ch not in {'"', "\\"} else "_"
+        for ch in filename
+    )
+    fallback = fallback.strip("._")
+    return fallback or "download"
+
+
+def build_content_disposition(filename: str, *, inline: bool = False) -> str:
     normalized = _normalize_filename(filename)
-    ascii_name = normalized.replace('"', "")
-    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(normalized)}'
+    ascii_name = _ascii_filename_fallback(normalized)
+    disposition = "inline" if inline else "attachment"
+    return f'{disposition}; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(normalized)}'

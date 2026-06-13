@@ -109,6 +109,7 @@ def _ensure_golden_path_ela_supporting_materials(
                 guide=guide,
                 actor=actor,
                 period_id=period_id,
+                period_day_id=None,
                 education_objective_id=objective_id,
                 material_kind="file",
                 resource_type="curriculum_file",

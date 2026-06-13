@@ -13,9 +13,7 @@ from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAss
 from oziebot_api.models.teacher_assist_assignment_grading_review import TeacherAssistAssignmentGradingReview
 from oziebot_api.models.teacher_assist_class import TeacherAssistClass
 from oziebot_api.models.teacher_assist_mastery_evaluation import TeacherAssistMasteryEvaluation
-from oziebot_api.models.teacher_assist_mastery_matrix import TeacherAssistMasteryMatrix
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
-from oziebot_api.models.teacher_assist_standard import TeacherAssistStandard
 from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.services.teacher_assist.action_workspace import (
@@ -223,31 +221,6 @@ def _build_onboarding_checklist(
     class_count = db.scalar(
         select(func.count()).select_from(TeacherAssistClass).where(TeacherAssistClass.tenant_id == tenant_id)
     )
-    plan_count = db.scalar(
-        select(func.count())
-        .select_from(TeacherAssistWeeklyPlan)
-        .where(
-            TeacherAssistWeeklyPlan.tenant_id == tenant_id,
-            TeacherAssistWeeklyPlan.user_id == user_id,
-        )
-    )
-    assignment_count = db.scalar(
-        select(func.count())
-        .select_from(TeacherAssistAssignment)
-        .where(
-            TeacherAssistAssignment.tenant_id == tenant_id,
-            TeacherAssistAssignment.teacher_user_id == user_id,
-        )
-    )
-    mastery_matrix_count = db.scalar(
-        select(func.count())
-        .select_from(TeacherAssistMasteryMatrix)
-        .where(
-            TeacherAssistMasteryMatrix.tenant_id == tenant_id,
-            TeacherAssistMasteryMatrix.owner_user_id == user_id,
-        )
-    )
-
     items = [
         {
             "key": "school_placement",

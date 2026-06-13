@@ -42,6 +42,7 @@ class TeacherAssistV2AssignmentGrade(Base):
     score: Mapped[float] = mapped_column(Float(), nullable=False)
     max_score: Mapped[float] = mapped_column(Float(), nullable=False)
     percentage: Mapped[float] = mapped_column(Float(), nullable=False)
+    mastery_level: Mapped[str] = mapped_column(String(32), nullable=False)
     rubric_json: Mapped[dict[str, Any]] = mapped_column(JSON(), nullable=False)
     teacher_comment: Mapped[str] = mapped_column(Text(), nullable=False)
     teacher_override_reason: Mapped[str | None] = mapped_column(Text(), nullable=True)

@@ -3,7 +3,9 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, Uuid
+from typing import Any
+
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, JSON, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from oziebot_api.db.base import Base
@@ -22,6 +24,7 @@ class TeacherAssistPacingGuidePeriod(Base):
     sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
     start_date: Mapped[date | None] = mapped_column(Date(), nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date(), nullable=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -38,6 +41,12 @@ class TeacherAssistPacingGuidePeriod(Base):
         back_populates="period",
         cascade="all, delete-orphan",
     )
+    days: Mapped[list["TeacherAssistPacingGuidePeriodDay"]] = relationship(
+        "TeacherAssistPacingGuidePeriodDay",
+        back_populates="period",
+        cascade="all, delete-orphan",
+        order_by="TeacherAssistPacingGuidePeriodDay.sequence_number",
+    )
 
 
 from typing import TYPE_CHECKING  # noqa: E402
@@ -45,4 +54,5 @@ from typing import TYPE_CHECKING  # noqa: E402
 if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
     from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
+    from oziebot_api.models.teacher_assist_pacing_guide_period_day import TeacherAssistPacingGuidePeriodDay
     from oziebot_api.models.teacher_assist_pacing_guide_resource import TeacherAssistPacingGuideResource

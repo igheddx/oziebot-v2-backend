@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 
 from oziebot_api.deps import DbSession
 from oziebot_api.deps.auth import CurrentUser

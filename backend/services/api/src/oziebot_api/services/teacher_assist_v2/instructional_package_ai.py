@@ -21,6 +21,7 @@ from oziebot_api.services.teacher_assist.prompt_contracts import (
 )
 from oziebot_api.services.teacher_assist.provider_config import get_teacher_assist_provider_model
 from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher_assist_settings
+from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import resolve_pacing_day_plan
 
 V2_PACKAGE_PROMPT_VERSION = "v2-instructional-package-v1"
 
@@ -106,20 +107,29 @@ def _instruction_for_artifact(artifact_type: str) -> str:
         "daily_lesson_plan": (
             "Generate a teacher-usable daily lesson plan with objectives, materials, direct instruction, "
             "guided practice, independent practice, checks for understanding, closure, and teacher notes "
-            "for each subject block."
+            "for each subject block. Use the pacing guide day plan in week_subject.pacing_context.days "
+            "that matches day_label. Only reference materials listed in pacing_context, catalog_resources, "
+            "district_materials_summary, district_document_context, and teacher_document_context. "
+            "Use extracted document content below when creating daily teaching plans, slide deck content, "
+            "quiz questions, exit tickets, written assignments, rubrics, and newsletters. "
+            "Do not invent textbook or curriculum names."
         ),
         "subject_slide_deck": (
-            "Generate classroom-ready slide deck content with clear titles and concise bullet points."
+            "Generate classroom-ready slide deck content with clear titles and concise bullet points. "
+            "Use extracted district curriculum content and teacher supplemental document content when available."
         ),
         "quiz": (
-            "Generate a quiz with questions, answer key, objective mapping, and teacher-facing sections."
+            "Generate a quiz with questions, answer key, objective mapping, and teacher-facing sections. "
+            "Use the extracted document content and do not rely on filenames alone."
         ),
         "rubric": (
-            "Generate a rubric with criteria, point values, and performance levels aligned to objectives."
+            "Generate a rubric with criteria, point values, and performance levels aligned to objectives, "
+            "using the extracted district and teacher document content when it clarifies expectations."
         ),
         "parent_newsletter_summary": (
             "Generate a parent-friendly weekly newsletter summary with what students will learn, reminders, "
-            "and upcoming focus."
+            "and upcoming focus. Use the extracted document content only as instructional context; "
+            "keep the final tone family friendly."
         ),
     }
     default = (
@@ -217,18 +227,34 @@ def generate_v2_instructional_artifact(
         "week": week,
         "subject": subject_meta,
         "week_subject": week_subject,
+        "resolved_day_plan": resolve_pacing_day_plan(week_subject, day_label) if week_subject and day_label else None,
+        "pacing_materials": generation_context.get("pacing_materials"),
         "district_materials_summary": generation_context.get("district_materials_summary"),
+        "district_document_context": generation_context.get("district_document_context"),
         "teacher_supplemental_files": generation_context.get("teacher_supplemental_files"),
         "teacher_supplemental_links": generation_context.get("teacher_supplemental_links"),
         "teacher_supplemental_notes": generation_context.get("teacher_supplemental_notes"),
+        "teacher_document_context": generation_context.get("teacher_document_context"),
+        "ai_readiness_summary": generation_context.get("ai_readiness_summary"),
         "selected_output_types": generation_context.get("selected_output_types"),
         "teaching_order": generation_context.get("teaching_order"),
+        "generation_mode": generation_context.get("generation_mode"),
+        "teacher_generation_notes": generation_context.get("teacher_generation_notes"),
+        "existing_package_assignments": generation_context.get("existing_package_assignments"),
+        "require_distinct_from_existing": generation_context.get("require_distinct_from_existing"),
     }
 
+    instruction = _instruction_for_artifact(artifact_type)
+    if generation_context.get("generation_mode") == "package_additional_assignment":
+        instruction += (
+            " This is an ADDITIONAL assignment for an existing instructional package. "
+            "It must be clearly different from existing_package_assignments in focus, format, and tasks. "
+            "Follow teacher_generation_notes closely."
+        )
     result = execute_openai_json_completion(
         effective_settings,
         model_name=model_name,
-        instruction=_instruction_for_artifact(artifact_type),
+        instruction=instruction,
         prompt_payload=prompt_payload,
         required_output_schema=_schema_for_artifact(artifact_type),
     )

@@ -208,7 +208,6 @@ def _students_needing_support(
     objectives: list[dict[str, Any]],
     evidence_rows: list[TeacherAssistInstructionalEvidence],
 ) -> list[dict[str, Any]]:
-    weak_codes = {row.get("objective_code") for row in objectives if (row.get("mastery_pct") or 0) < 50}
     grouped: dict[str, set[str]] = {}
     for row in evidence_rows:
         if not row.teacher_confirmed:

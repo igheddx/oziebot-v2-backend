@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,9 +12,10 @@ import httpx
 from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
+from oziebot_api.services.teacher_assist.ai_usage import assert_teacher_assist_ai_cost_available
 from oziebot_api.services.teacher_assist.constants import validate_teacher_assist_ai_provider
+from oziebot_api.services.teacher_assist.openai_pricing import estimate_openai_cost_cents
 from oziebot_api.services.teacher_assist.prompt_contracts import (
-    GRADING_ASSIST_FEATURE,
     GRADING_ASSIST_PROMPT_VERSION,
 )
 from oziebot_api.services.teacher_assist.provider_config import (
@@ -24,6 +26,11 @@ from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher
 from oziebot_api.services.teacher_assist_v2.grading_constants import (
     DEFAULT_RUBRIC_SECTIONS,
     GRADING_DRAFT_MAX_SCORE,
+)
+from oziebot_api.services.teacher_assist_v2.grading_rubric import (
+    grading_template_from_package_rubric,
+    mock_sections_from_template,
+    totals_from_grading_rubric,
 )
 
 
@@ -75,7 +82,10 @@ def _confidence_from_context(*, student_number: int, assignment_title: str) -> f
     return round(0.55 + (0.4 * bucket), 2)
 
 
-def _mock_rubric_sections(*, score_ratio: float) -> list[dict[str, Any]]:
+def _mock_rubric_sections(*, score_ratio: float, context: dict[str, Any]) -> list[dict[str, Any]]:
+    template = context.get("rubric_template")
+    if isinstance(template, dict) and template.get("sections"):
+        return mock_sections_from_template(template, score_ratio=score_ratio)
     section_max = GRADING_DRAFT_MAX_SCORE / len(DEFAULT_RUBRIC_SECTIONS)
     sections: list[dict[str, Any]] = []
     for index, name in enumerate(DEFAULT_RUBRIC_SECTIONS):
@@ -94,10 +104,19 @@ def _mock_rubric_sections(*, score_ratio: float) -> list[dict[str, Any]]:
 def generate_mock_grading_draft(*, context: dict[str, Any]) -> GradingDraftAIResult:
     assignment = context["assignment"]
     student_number = int(context["student_submission"]["student_number"] or 0)
-    max_score = GRADING_DRAFT_MAX_SCORE
+    template = context.get("rubric_template")
+    if not isinstance(template, dict):
+        template = grading_template_from_package_rubric(context.get("rubric"))
+    max_score = float(template.get("total_points") or GRADING_DRAFT_MAX_SCORE)
     score_ratio = 0.72 + ((student_number % 5) * 0.04)
     score = round(max_score * min(score_ratio, 0.95), 1)
-    percentage = round((score / max_score) * 100, 1)
+    percentage = round((score / max_score) * 100, 1) if max_score > 0 else 0.0
+    rubric_json = {"sections": _mock_rubric_sections(score_ratio=score / max_score if max_score else 0, context=context)}
+    score, max_score = totals_from_grading_rubric(rubric_json)
+    if max_score <= 0:
+        max_score = float(template.get("total_points") or GRADING_DRAFT_MAX_SCORE)
+        score = round(max_score * min(score_ratio, 0.95), 1)
+    percentage = round((score / max_score) * 100, 1) if max_score > 0 else 0.0
     objectives = context.get("objectives") or []
     primary_objective = objectives[0]["objective_id"] if objectives else "objective"
     objective_description = objectives[0]["description"] if objectives else "learning objective"
@@ -108,7 +127,7 @@ def generate_mock_grading_draft(*, context: dict[str, Any]) -> GradingDraftAIRes
         score=score,
         max_score=max_score,
         percentage=percentage,
-        rubric_json={"sections": _mock_rubric_sections(score_ratio=score / max_score)},
+        rubric_json=rubric_json,
         teacher_comment_draft=(
             f"[MOCK AI] Draft comment for STUDENT #{student_number} on '{assignment['title']}'. "
             f"The response shows progress toward {primary_objective}.{note_suffix} "
@@ -142,11 +161,6 @@ def generate_mock_grading_draft(*, context: dict[str, Any]) -> GradingDraftAIRes
         estimated_cost_cents=0,
     )
 
-
-from oziebot_api.services.teacher_assist.ai_usage import assert_teacher_assist_ai_cost_available
-from oziebot_api.services.teacher_assist.openai_pricing import estimate_openai_cost_cents
-
-
 def generate_openai_grading_draft(
     *, settings: Settings, context: dict[str, Any], db: Session | None = None
 ) -> GradingDraftAIResult:
@@ -178,8 +192,12 @@ def generate_openai_grading_draft(
                     {
                         "prompt_version": GRADING_ASSIST_PROMPT_VERSION,
                         "instruction": (
-                            "Generate a draft grade suggestion, rubric section scores, strengths, "
-                            "improvements, teacher comment draft, and objective evidence."
+                            "Generate a draft grade suggestion using the rubric_template criteria names and "
+                            "max_score values exactly. Evaluate only the provided student_submission.response_text. "
+                            "Do not infer missing student work from filenames or metadata. Return rubric_sections "
+                            "with one entry per criterion, matching criterion names and max_score from rubric_template. "
+                            "Sum section scores for score. If extraction quality appears weak or incomplete, lower "
+                            "confidence_score and mention the uncertainty in teacher_comment_draft."
                         ),
                         "grading_context": context,
                         "required_output_schema": GRADING_OUTPUT_SCHEMA,
@@ -193,14 +211,35 @@ def generate_openai_grading_draft(
         "Authorization": f"Bearer {effective_settings.teacher_assist_openai_api_key}",
         "Content-Type": "application/json",
     }
-    with httpx.Client(timeout=90.0) as client:
-        response = client.post(
-            f"{effective_settings.teacher_assist_openai_base_url.rstrip('/')}/chat/completions",
-            headers=headers,
-            json=request_body,
-        )
-        response.raise_for_status()
-        payload = response.json()
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            with httpx.Client(timeout=90.0) as client:
+                response = client.post(
+                    f"{effective_settings.teacher_assist_openai_base_url.rstrip('/')}/chat/completions",
+                    headers=headers,
+                    json=request_body,
+                )
+                response.raise_for_status()
+                payload = response.json()
+            break
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+            last_error = exc
+            if attempt == 2:
+                raise ValueError(
+                    "TeacherAssist could not reach the OpenAI API for grading. Check the configured model, "
+                    "base URL, API key, and outbound network access, then try again."
+                ) from exc
+            time.sleep(1.0 + attempt)
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text.strip()
+            raise ValueError(
+                f"TeacherAssist grading request failed ({exc.response.status_code}). "
+                f"{detail or 'Check the provider configuration and try again.'}"
+            ) from exc
+    else:
+        if last_error is not None:
+            raise last_error
 
     choices = payload.get("choices") or []
     if not choices:
@@ -211,10 +250,28 @@ def generate_openai_grading_draft(
         raise ValueError("OpenAI grading returned empty content")
     content = json.loads(raw_content)
 
-    max_score = float(content.get("max_score") or GRADING_DRAFT_MAX_SCORE)
-    score = float(content.get("score") or 0)
-    percentage = round((score / max_score) * 100, 1) if max_score > 0 else 0.0
     rubric_sections = content.get("rubric_sections") or []
+    template = context.get("rubric_template")
+    if isinstance(template, dict) and template.get("sections") and not rubric_sections:
+        rubric_sections = [
+            {
+                "name": row.get("name"),
+                "score": 0.0,
+                "max_score": row.get("max_score"),
+                "feedback": "",
+            }
+            for row in template.get("sections") or []
+        ]
+    rubric_json = {"sections": rubric_sections}
+    max_score = float(content.get("max_score") or 0)
+    score = float(content.get("score") or 0)
+    if max_score <= 0:
+        score, max_score = totals_from_grading_rubric(rubric_json)
+    if max_score <= 0:
+        max_score = float((template or {}).get("total_points") or GRADING_DRAFT_MAX_SCORE)
+    if score <= 0 and rubric_json.get("sections"):
+        score, max_score = totals_from_grading_rubric(rubric_json)
+    percentage = round((score / max_score) * 100, 1) if max_score > 0 else 0.0
     usage = payload.get("usage") or {}
     input_tokens = int(usage.get("prompt_tokens") or 0)
     output_tokens = int(usage.get("completion_tokens") or 0)
@@ -223,7 +280,7 @@ def generate_openai_grading_draft(
         score=score,
         max_score=max_score,
         percentage=percentage,
-        rubric_json={"sections": rubric_sections},
+        rubric_json=rubric_json,
         teacher_comment_draft=str(content.get("teacher_comment_draft") or ""),
         strengths=[str(item) for item in (content.get("strengths") or [])],
         improvements=[str(item) for item in (content.get("improvements") or [])],

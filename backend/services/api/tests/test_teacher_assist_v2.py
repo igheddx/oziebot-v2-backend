@@ -126,7 +126,6 @@ def test_v2_archive_school_blocked_with_grades(client, db_session):
     seed_teacher_assist_v2(db_session)
     db_session.commit()
 
-    from oziebot_api.models.education_catalog import EducationSchool
 
     school = db_session.scalar(
         select(EducationSchool).where(EducationSchool.name == "Mason Elementary")
@@ -160,7 +159,6 @@ def test_v2_platform_school_year_single_active(client, db_session):
     state = db_session.scalar(select(EducationState).where(EducationState.abbreviation == "TX"))
     assert state is not None
 
-    from datetime import date
     from oziebot_api.models.education_catalog import EducationSchoolYear
 
     second = client.post(

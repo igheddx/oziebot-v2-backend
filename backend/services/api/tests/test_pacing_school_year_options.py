@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import date
 
 from oziebot_api.services.teacher_assist.pacing_school_year_options import (
-    build_pacing_school_year_options,
     build_pacing_school_year_specs,
     current_school_year_start_year,
 )

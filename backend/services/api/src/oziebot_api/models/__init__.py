@@ -126,6 +126,7 @@ from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradin
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
 from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
+from oziebot_api.models.teacher_assist_pacing_guide_period_day import TeacherAssistPacingGuidePeriodDay
 from oziebot_api.models.teacher_assist_pacing_guide_period_note import TeacherAssistPacingGuidePeriodNote
 from oziebot_api.models.teacher_assist_pacing_guide_resource import TeacherAssistPacingGuideResource
 from oziebot_api.models.teacher_assist_pacing_guide_supporting_material import (
@@ -162,6 +163,8 @@ from oziebot_api.models.teacher_assist_v2_assignment_print_packet import Teacher
 from oziebot_api.models.teacher_assist_v2_assignment_print_page import TeacherAssistV2AssignmentPrintPage
 from oziebot_api.models.teacher_assist_v2_grading_draft import TeacherAssistV2GradingDraft
 from oziebot_api.models.teacher_assist_v2_grading_job import TeacherAssistV2GradingJob
+from oziebot_api.models.teacher_assist_v2_assignment_google_form import TeacherAssistV2AssignmentGoogleForm
+from oziebot_api.models.teacher_assist_v2_teacher_google_connection import TeacherAssistV2TeacherGoogleConnection
 from oziebot_api.models.teacher_assist_v2_assignment_grade import TeacherAssistV2AssignmentGrade
 from oziebot_api.models.teacher_assist_v2_assignment_grade_audit_event import (
     TeacherAssistV2AssignmentGradeAuditEvent,
@@ -170,6 +173,8 @@ from oziebot_api.models.teacher_assist_v2_submission_review_view import TeacherA
 from oziebot_api.models.teacher_assist_v2_mastery_evidence import TeacherAssistV2MasteryEvidence
 from oziebot_api.models.teacher_assist_v2_gradebook_record_revision import TeacherAssistV2GradebookRecordRevision
 from oziebot_api.models.teacher_assist_v2_gradebook_record import TeacherAssistV2GradebookRecord
+from oziebot_api.models.teacher_assist_v2_document_extraction import TeacherAssistV2DocumentExtraction
+from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssistV2StudentSubmission
 from oziebot_api.models.teacher_assist_v2_submission_batch import TeacherAssistV2SubmissionBatch
 from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
 from oziebot_api.models.education_catalog import (
@@ -319,8 +324,10 @@ __all__ = [
     "TeacherAssistPacingGuide",
     "TeacherAssistPacingGuideObjective",
     "TeacherAssistPacingGuidePeriod",
+    "TeacherAssistPacingGuidePeriodDay",
     "TeacherAssistPacingGuidePeriodNote",
     "TeacherAssistPacingGuideResource",
+    "TeacherAssistPacingGuideSupportingMaterial",
     "TeacherAssistPacingItem",
     "TeacherAssistPacingItemResource",
     "TeacherAssistPacingItemStandard",
@@ -331,6 +338,27 @@ __all__ = [
     "TeacherAssistPlanningInputDraftSubject",
     "TeacherAssistProfile",
     "TeacherAssistResourceLibraryItem",
+    "TeacherAssistV2Onboarding",
+    "TeacherAssistV2PacingGuideAssignment",
+    "TeacherAssistV2InstructionalPackage",
+    "TeacherAssistV2InstructionalPackageArtifact",
+    "TeacherAssistV2PlanningSupplementalMaterial",
+    "TeacherAssistV2Assignment",
+    "TeacherAssistV2AssignmentPrintPacket",
+    "TeacherAssistV2AssignmentPrintPage",
+    "TeacherAssistV2GradingDraft",
+    "TeacherAssistV2GradingJob",
+    "TeacherAssistV2AssignmentGoogleForm",
+    "TeacherAssistV2TeacherGoogleConnection",
+    "TeacherAssistV2AssignmentGrade",
+    "TeacherAssistV2AssignmentGradeAuditEvent",
+    "TeacherAssistV2SubmissionReviewView",
+    "TeacherAssistV2MasteryEvidence",
+    "TeacherAssistV2GradebookRecordRevision",
+    "TeacherAssistV2GradebookRecord",
+    "TeacherAssistV2DocumentExtraction",
+    "TeacherAssistV2StudentSubmission",
+    "TeacherAssistV2SubmissionBatch",
     "EducationCurriculumResource",
     "EducationDistrict",
     "EducationGrade",

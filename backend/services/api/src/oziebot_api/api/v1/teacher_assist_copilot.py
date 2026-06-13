@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from oziebot_api.config import get_settings
@@ -14,7 +14,6 @@ from oziebot_api.services.teacher_assist.teacher_context_engine import build_tea
 from oziebot_api.services.teacher_assist.teacher_copilot_intents import analyze_admin_copilot_question
 from oziebot_api.services.teacher_assist.teacher_copilot_service import (
     create_copilot_session,
-    get_copilot_session,
     get_suggested_questions,
     list_copilot_sessions,
     list_session_messages,

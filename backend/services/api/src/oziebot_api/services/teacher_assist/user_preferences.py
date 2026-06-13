@@ -6,15 +6,11 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
-from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
 from oziebot_api.models.teacher_assist_class import TeacherAssistClass
-from oziebot_api.models.teacher_assist_mastery_matrix import TeacherAssistMasteryMatrix
-from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
 from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
 from oziebot_api.models.teacher_assist_user_preference import TeacherAssistUserPreference
-from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.services.teacher_assist.constants import (
     TEACHER_ASSIST_ONBOARDING_STEP_KEYS,
     TEACHER_ASSIST_PREFERRED_LANDINGS,
@@ -58,7 +54,9 @@ def get_user_preferences_or_create(
         with db.begin_nested():
             db.flush()
     except IntegrityError:
-        db.expunge(row)
+        # Nested rollback may already detach the failed insert from the session.
+        if object_session(row) is db:
+            db.expunge(row)
         existing = _get_user_preferences(db, tenant_id=tenant_id, user_id=user_id)
         if existing is None:
             raise
@@ -135,48 +133,6 @@ def build_onboarding_progress(
         )
         or 0
     )
-    resource_count = int(
-        db.scalar(
-            select(func.count()).select_from(TeacherAssistResourceLibraryItem).where(
-                TeacherAssistResourceLibraryItem.tenant_id == tenant_id
-            )
-        )
-        or 0
-    )
-    plan_count = int(
-        db.scalar(
-            select(func.count())
-            .select_from(TeacherAssistWeeklyPlan)
-            .where(
-                TeacherAssistWeeklyPlan.tenant_id == tenant_id,
-                TeacherAssistWeeklyPlan.user_id == user_id,
-            )
-        )
-        or 0
-    )
-    assignment_count = int(
-        db.scalar(
-            select(func.count())
-            .select_from(TeacherAssistAssignment)
-            .where(
-                TeacherAssistAssignment.tenant_id == tenant_id,
-                TeacherAssistAssignment.teacher_user_id == user_id,
-            )
-        )
-        or 0
-    )
-    mastery_matrix_count = int(
-        db.scalar(
-            select(func.count())
-            .select_from(TeacherAssistMasteryMatrix)
-            .where(
-                TeacherAssistMasteryMatrix.tenant_id == tenant_id,
-                TeacherAssistMasteryMatrix.owner_user_id == user_id,
-            )
-        )
-        or 0
-    )
-
     step_definitions: list[dict[str, Any]] = [
         {
             "key": "school_placement",

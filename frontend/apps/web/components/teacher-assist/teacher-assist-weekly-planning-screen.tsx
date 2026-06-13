@@ -206,7 +206,7 @@ export function TeacherAssistWeeklyPlanningScreen() {
   const pacingPeriodId = searchParams.get("pacing_period_id") ?? searchParams.get("period_id");
   const focusResources = searchParams.get("focus") === "resources";
   const pacingPrefillRef = useRef<string | null>(null);
-  const resourcesSectionRef = useRef<HTMLElement | null>(null);
+  const resourcesSectionRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { setSectionAlert, clearSectionAlert, getSectionAlert } = useTeacherAssistSectionAlerts();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);

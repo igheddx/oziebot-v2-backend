@@ -10,6 +10,7 @@ from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
 from oziebot_api.models.teacher_assist_class import TeacherAssistClass
 from oziebot_api.models.teacher_assist_reteach_plan import TeacherAssistReteachPlan
 from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
+from oziebot_api.models.teacher_assist_user_preference import TeacherAssistUserPreference
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.services.teacher_assist.constants import class_workspace_href
 from oziebot_api.services.teacher_assist.user_preferences import get_user_preferences_or_create

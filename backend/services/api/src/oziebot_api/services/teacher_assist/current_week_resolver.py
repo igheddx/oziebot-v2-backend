@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from oziebot_api.models.education_catalog import EducationSubject
 from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
@@ -16,7 +16,6 @@ from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistP
 from oziebot_api.models.teacher_assist_pacing_guide_period_note import TeacherAssistPacingGuidePeriodNote
 from oziebot_api.models.teacher_assist_pacing_guide_resource import TeacherAssistPacingGuideResource
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
-from oziebot_api.models.teacher_assist_user_preference import TeacherAssistUserPreference
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.services.teacher_assist.pacing_guide_foundation import get_catalog_pacing_guide_detail
 from oziebot_api.services.teacher_assist.user_preferences import get_user_preferences_or_create

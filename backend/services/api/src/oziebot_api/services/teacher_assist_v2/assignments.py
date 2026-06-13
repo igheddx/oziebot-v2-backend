@@ -24,6 +24,7 @@ from oziebot_api.services.teacher_assist_v2.assignment_constants import (
     ASSIGNMENT_TYPES,
 )
 from oziebot_api.services.teacher_assist_v2.package_export import artifact_download_url
+from oziebot_api.services.teacher_assist_v2.assignment_print_packets import get_assignment_cover_sheets
 from oziebot_api.services.teacher_assist_v2.submission_intake import get_assignment_submission_summary
 from oziebot_api.services.teacher_assist_v2.gradebook_workspace import build_assignment_gradebook_summary
 from oziebot_api.services.teacher_assist_v2.objective_performance import ObjectivePerformanceService
@@ -31,7 +32,13 @@ from oziebot_api.services.teacher_assist_v2.grade_reviews import (
     build_assignment_completion_summary,
     list_assignment_grade_reviews,
 )
+from oziebot_api.services.teacher_assist_v2.grading_rubric import (
+    grading_template_from_package_rubric,
+    resolve_assignment_rubric_content,
+)
 from oziebot_api.services.teacher_assist_v2.planning_workflow import _require_planning_ready
+from oziebot_api.services.teacher_assist_v2.rubric_score_exports import assignment_rubric_score_report_status
+from oziebot_api.services.teacher_assist_v2.submission_workflow import refresh_assignment_completion_status
 
 
 def _now() -> datetime:
@@ -184,6 +191,7 @@ def serialize_assignment_summary(
         "subject_id": str(row.catalog_subject_id),
         "subject_name": subject_name,
         "status": row.status,
+        "creation_origin": row.creation_origin,
         "instructional_plan_id": str(row.instructional_package_id),
         "created_at": row.created_at.isoformat(),
     }
@@ -282,12 +290,34 @@ def get_teacher_assignment_detail(
     )
     submission_summary["teacher_reviewed_count"] = completion_summary["grades_confirmed_count"]
 
+    google_form = None
+    google_connection = None
+    if row.assignment_type == "QUIZ" and settings is not None:
+        from oziebot_api.services.teacher_assist_v2.google_form_quizzes import (
+            build_teacher_google_status,
+            get_assignment_google_form,
+            serialize_assignment_google_form,
+        )
+
+        google_connection = build_teacher_google_status(db, user=user, settings=settings)
+        google_form = serialize_assignment_google_form(get_assignment_google_form(db, assignment_id=row.id))
+
+    rubric_content = resolve_assignment_rubric_content(db, assignment=row)
+    rubric_template = grading_template_from_package_rubric(rubric_content)
+    refresh_assignment_completion_status(db, user=user, assignment=row)
+    rubric_report_available, rubric_report_blocker = assignment_rubric_score_report_status(
+        db,
+        user=user,
+        assignment=row,
+    )
+
     return {
         "id": str(row.id),
         "title": row.title,
         "description": row.description,
         "assignment_type": row.assignment_type,
         "status": row.status,
+        "creation_origin": row.creation_origin,
         "week_number": row.week_number,
         "school_year_id": str(row.platform_school_year_id),
         "district_id": str(row.catalog_district_id),
@@ -318,4 +348,13 @@ def get_teacher_assignment_detail(
         ),
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
+        "google_connection": google_connection,
+        "google_form": google_form,
+        "cover_sheet": get_assignment_cover_sheets(db, assignment_id=row.id, settings=settings)
+        if settings is not None
+        else None,
+        "assignment_rubric": rubric_content,
+        "rubric_template": rubric_template,
+        "rubric_score_report_available": rubric_report_available,
+        "rubric_score_report_blocker": rubric_report_blocker,
     }

@@ -12,8 +12,765 @@ This document summarizes the current Oziebot repo findings and the proposed impl
 - **Phase 38** — Assignment → gradebook → mastery → reteach instructional loop (instructional evidence, objective performance, reteach workspace, week closure, health reporting)
 - **Phase 39** — Teacher Copilot (context engine, explainable analysis intents, sessions/messages audit trail, copilot UI, home integration)
 - **Phase 41** — Pilot readiness (feature inventory, feedback workspace, usage metrics, system health, deployment checklists, nav audit)
+- **Grade mastery levels on v2 grades** — Mastery / Developing / Beginning stored on assignment grades and gradebook records; shown in gradebook, review, and grading UI
+- **Subject gradebook grid** — 9-week subject matrix with TEKS rollups, Missing level, grade-entry assignments, CSV export
+- **Teacher-created assignments + QR cover sheets** — Manual assignment create (week, subject, TEKS) with downloadable Word cover sheets (one page per student) for external work
 
 **Next recommended:** Phase 42 — Mastery v2 / gradebook v2 UI completion, parent communication send, or LMS/SIS import (no auto-grade or auto-mastery commits).
+
+## Class rubric score report DOCX export (2026-06-12)
+
+### What was changed
+
+- The assignment-level **Class rubric score report** now downloads as a **Word DOCX** instead of opening printable HTML.
+- Each student gets a dedicated page with **Student #**, total score, mastery label, rubric criteria scores/feedback, and teacher comment.
+- DOCX output inserts a **page break between students** so the document prints cleanly one student per page.
+- Assignment view now shows the download button only when the backend marks the report as available, preventing false-positive clicks that could return a 400 blocker.
+- Readiness now treats a submission as resolved when that exact submission already has an **official grade** (`CONFIRMED` or `REVISED`), even if the submission row itself is stuck on an older non-terminal status.
+
+### Files changed
+
+- `backend/services/api/src/oziebot_api/services/teacher_assist_v2/rubric_score_exports.py`
+- `backend/services/api/src/oziebot_api/api/v1/teacher_assist_v2.py`
+- `frontend/apps/web/lib/teacher-assist-v2-api.ts`
+- `frontend/apps/web/components/teacher-assist-v2/teacher-assist-v2-assignment-viewer-screen.tsx`
+- `backend/services/api/tests/test_grading_rubric.py`
+
+### Remaining gaps
+
+- Per-student rubric score cards still open as printable HTML; only the class-wide report was converted to DOCX in this pass.
+
+## Teacher onboarding duplicate-preferences race (2026-06-02)
+
+### What was fixed
+
+- New-teacher onboarding could fail with a browser **CORS / “Could not reach API”** message when two parallel requests both tried to create `teacher_assist_user_preferences` for the same user.
+- Root cause: `get_user_preferences_or_create` caught the duplicate-key `IntegrityError` but then called `db.expunge(row)` after the nested savepoint rollback had already detached the failed insert, raising `InvalidRequestError` → HTTP 500 without a usable response (browser surfaces this as CORS + `net::ERR_FAILED`).
+- Same safe-expunge pattern applied to `get_or_create_v2_onboarding`.
+
+### Files changed
+
+- `backend/services/api/src/oziebot_api/services/teacher_assist/user_preferences.py`
+- `backend/services/api/src/oziebot_api/services/teacher_assist_v2/teacher_onboarding.py`
+- `backend/services/api/tests/test_teacher_assist_access_seed.py` — `test_user_preferences_or_create_recovers_from_duplicate_insert`
+
+### Tests run
+
+- `pytest tests/test_teacher_assist_access_seed.py::test_user_preferences_or_create_recovers_from_duplicate_insert`
+- `pytest tests/test_teacher_assist_access_seed.py::test_user_preferences_or_create_is_idempotent`
+
+### Remaining gaps
+
+- `Unchecked runtime.lastError: Could not establish connection. Receiving end does not exist` is **browser extension noise** (not TeacherAssist); safe to ignore.
+
+## Pacing guide → lesson plan carryover (2026-06-02)
+
+### What was implemented
+
+- Instructional package generation now reads **per-day pacing guide plans** (`pacing_context.days`): daily topics, objective focus, materials, teacher notes, and assessment checks.
+- **All pacing materials** (guide/week/day/objective supporting materials + catalog book/resources) flatten into generation context and appear in lesson plan materials unless removed by the teacher before generate.
+- Planning review `daily_topic` and `district_materials` now come from pacing context instead of legacy week description blobs.
+- AI prompts instruct models to use only listed pacing materials (no invented textbook names).
+- Demo ELA backfill no longer triggers from package title heuristics — only explicit `content_profile=ela_week1_main_idea` metadata.
+
+### Backend files changed
+
+- `pacing_plan_resolver.py` (new), `instructional_package_generation.py`, `planning_workflow.py`, `planning_context.py`, `supporting_materials.py`, `deterministic_package_content.py`, `package_artifact_refresh.py`, `instructional_package_ai.py`
+- Tests: `test_pacing_plan_resolver.py`
+
+### Manual validation checklist
+
+1. Build a 1-week pacing guide with distinct daily topics + book reference
+2. Assign guide to teacher subject
+3. Open planning review — verify daily topics/materials appear
+4. Generate package — Monday vs Tuesday daily plans should differ and include your materials
+5. Old seed/demo curriculum should not appear on new custom guides
+
+---
+
+## Planning supplemental materials scoped per package (2026-06-02)
+
+### What was implemented
+
+- Teacher supplemental materials uploaded during planning are now **session-scoped**: planning review and the supplemental-materials list return only rows with `package_id IS NULL` (not yet linked to a generated package).
+- On package generate, only **unlinked** supplemental rows for that week range are attached to the new package (`package_id` set).
+- Package detail still shows supplemental materials linked to that specific package via `package_id`.
+
+### Backend files changed
+
+- `planning_workflow.py` — `list_planning_supplemental_materials(unlinked_only=..., package_id=...)`
+- `planning_context.py`, `teacher_assist_v2.py` — planning flows use `unlinked_only=True`
+- `instructional_package_generation.py` — link only unlinked rows on generate
+- `package_dashboard.py` — package detail lists supplemental by `package_id`
+- Tests: `test_teacher_assist_v2_planning.py` (`test_v2_planning_supplemental_materials_scoped_to_current_session`)
+
+### Manual validation checklist
+
+1. Add PDF/link supplemental materials and generate a lesson plan package
+2. Start a new plan for the same week — supplemental step should be empty
+3. Add new supplemental materials and generate again — only new items attach to the new package
+4. Open the prior package viewer — prior supplemental materials still visible there
+
+---
+
+## Planning pacing materials + daily teaching plan focus (2026-06-02)
+
+### What was implemented
+
+- **Step 3 (materials):** Shows pacing guide template materials grouped by subject with **Remove** (confirm dialog). Removed items are excluded from package generation via `excluded_pacing_material_ids` (not deleted from the pacing guide).
+- **Step 2 (pacing review):** Shows each day's **daily topic** and **objective focus** from the pacing guide instead of repeating weekly TEKS codes.
+- **Daily teaching plans:** Plan-level and per-subject content now uses pacing day `daily_topic` and `objective_focus`. Package viewer shows "Today's focus" and day objective; TEKS code appears separately as "Standard:" when present.
+
+### Backend files changed
+
+- `pacing_plan_resolver.py`, `deterministic_package_content.py`, `package_export.py`
+- `planning_workflow.py`, `planning_context.py`, `instructional_package_generation.py`, `package_artifact_refresh.py`
+- `teacher_assist_v2.py` schema — `excluded_pacing_material_ids` on generate
+- Frontend: `teacher-assist-v2-planning-screen.tsx`, `teacher-assist-v2-package-viewer-screen.tsx`, types/api
+- Tests: `test_pacing_plan_resolver.py`
+
+### Manual validation checklist
+
+1. Open planning step 2 — verify Mon/Tue/Wed show topic + objective from pacing guide
+2. Step 3 — verify pacing guide PDFs/links listed with Remove; confirm dialog appears; removed items stay out after generate
+3. Generate package — daily teaching plans show different focus/objective per day, not repeated TEKS text
+
+---
+
+## Writing response rubric auto-generation + teacher edit (2026-06-02)
+
+### What was implemented
+
+- Selecting **Writing Response Pages** now automatically generates a linked **rubric per subject** based on that writing assignment's prompt and instructions (no need to separately check Rubrics).
+- Standalone rubric output is skipped when writing response is selected to avoid duplicates.
+- Teachers can **edit and save** rubric criteria, points, and performance levels from the package viewer (`Edit rubric` → `Save rubric`).
+- Saved rubrics refresh preview/export HTML and are used in grading context for linked writing assignments.
+
+### Backend files changed
+
+- `deterministic_package_content.py` — `build_rubric_for_writing_response()`
+- `instructional_package_generation.py` — auto-link rubric to writing response artifacts
+- `package_artifact_update.py` (new), `grading_context.py`
+- `teacher_assist_v2.py` — `PUT .../artifacts/{artifact_id}/rubric`
+- Frontend: `teacher-assist-v2-rubric-editor.tsx`, package viewer, planning note, API/types
+- Tests: `test_package_rubric.py`
+
+### Manual validation checklist
+
+1. Generate a package with **Writing Response Pages** selected
+2. Open package viewer — verify a rubric appears for each writing response subject
+3. Edit rubric criteria/points, save, refresh — changes persist in preview
+4. Optional: generate grading draft for a writing submission and confirm rubric context is present
+
+---
+
+## Additional package assignments after generation (2026-06-02)
+
+### What was implemented
+
+- Teachers can add **new assignments** to an existing instructional package from the package viewer without removing prior assignments.
+- Form supports subject, assignment type (quiz / written assignment / writing response), required guidance notes, and optional title hint.
+- Generation uses the existing v2 AI artifact pipeline with `generation_mode=package_additional_assignment`, existing-assignment context, and teacher notes so output differs from the original plan.
+- Each new artifact is appended with its own sequence number, mapped to TEKS/objectives/pacing/package, and creates a linked gradebook assignment record.
+- Writing response additions also auto-generate a linked rubric (same behavior as initial package generation).
+
+### Backend files changed
+
+- `package_additional_assignments.py` (new)
+- `instructional_package_ai.py`, `planning_workflow.py`, `teacher_assist_v2.py`, schemas
+- Frontend: `teacher-assist-v2-add-assignment-panel.tsx`, package viewer, API/types
+- Tests: `test_package_additional_assignments.py`
+
+### Manual validation checklist
+
+1. Open a generated package → **Assessments** → use **Add another assignment**
+2. Pick subject + type, add notes describing how it should differ, generate
+3. Verify original assignments remain and the new one appears with **Additional assignment** label
+4. Confirm new assignment appears in assignments list / gradebook with correct subject and TEKS mapping
+
+### Bug fix (close-out error, 2026-06-02)
+
+- **Symptom:** Closing a plan surfaced `Closed packages cannot receive additional assignments.` (raw JSON in UI).
+- **Cause:** Package viewer showed **Add another assignment** when `can_close_out` was **false** (inverted conditional). After close-out, the panel mounted and called the additional-assignment form API on a completed package.
+- **Fix:** Show the panel only when `can_close_out` is true; gate generate (not form read) on open packages in `package_additional_assignments.py`; add missing `db.commit()` on close-out endpoint.
+- **Files:** `teacher-assist-v2-package-viewer-screen.tsx`, `package_additional_assignments.py`, `teacher_assist_v2.py`
+
+---
+
+## Optional pacing guide per subject (2026-06-02)
+
+### What was implemented
+
+- Pacing guide setup dropdown includes **No option** (default) for each subject with available district guides.
+- Teachers may save pacing choices without assigning a guide to every onboarded subject.
+- Subjects left on **No option** have their pacing assignment deactivated and are **excluded from planning**, package generation, and teaching-order defaults.
+- At least one subject must still have a pacing guide selected before setup can be saved.
+
+### Backend / frontend files changed
+
+- `pacing_guide_setup.py` — partial save, deactivate omitted subjects, validation message
+- `teacher-assist-v2-pacing-guide-setup-screen.tsx` — No option default, UI copy, client validation
+- Tests: `test_teacher_assist_v2_planning.py` (`test_v2_pacing_guide_setup_allows_no_option_and_excludes_from_planning`)
+
+### Manual validation checklist
+
+1. Open **Pacing Guides** — each subject defaults to **No option**
+2. Select a guide for one subject only, save — planning form lists only that subject
+3. Re-open pacing setup, switch to **No option** for that subject and pick a guide for another subject — planning follows the new selection
+
+---
+
+## Rubric-linked grading and score reports (2026-06-02)
+
+### Package viewer rubric pairing (2026-06-02)
+
+- Writing responses and written assignments show their **linked rubric in the same card** (preview, edit, print) instead of a separate Rubrics section.
+- Orphan rubrics (no linked assignment) still appear under **Unlinked Rubrics**.
+- **Files:** `teacher-assist-v2-package-viewer-screen.tsx`, `planning_workflow.py`
+
+### Class rubric score report availability fix (2026-06-02)
+
+- Class report button now appears when **every submission row** on the assignment is resolved (confirmed or incomplete), matching the Submissions table teachers see — not hidden roster slots with no submission row.
+- Stopped creating `NOT_UPLOADED` placeholder rows when opening the assignment page (that could block the report).
+- Assignment view always shows the class report section for writing/written assignments (green when ready, amber with reason when not).
+- **Files:** `submission_workflow.py`, `rubric_score_exports.py`, `assignments.py`, `teacher-assist-v2-assignment-viewer-screen.tsx`
+
+### What was implemented
+
+- **Written assignment** and **writing response** artifacts now auto-generate a **linked rubric** (same pattern as writing responses; standalone rubric output skipped when assignment is selected).
+- AI grading uses package rubric **criteria names and point values** instead of a generic 100-point template.
+- Grade confirmation shows an **editable rubric score card**; criterion scores sync to the total grade on confirm.
+- **Per-student rubric score card** (printable HTML) after grade confirmation.
+- **Class rubric score report** (Word DOCX with one student per page) when every roster student is resolved.
+
+### Backend / frontend files changed
+
+- `grading_rubric.py`, `rubric_score_exports.py`, `grading_context.py`, `grading_ai.py`, `grade_reviews.py`
+- `deterministic_package_content.py` — `build_rubric_for_written_assignment()`
+- `instructional_package_generation.py`, `package_additional_assignments.py`, `assignments.py`, `submission_intake.py`
+- API: accept grade with rubric body, `GET .../rubric-scorecard`, `GET .../rubric-score-report`
+- Frontend: `teacher-assist-v2-rubric-score-editor.tsx`, assignment review/viewer, submission viewer
+- Tests: `test_grading_rubric.py`
+
+### Manual validation checklist
+
+1. Generate a package with **Written assignment** and/or **Writing response**
+2. Grade a submission — rubric criteria appear with editable scores on confirm
+3. Confirm grade — print per-student rubric score card
+4. Confirm all students — assignment shows **Download class rubric report (Word)**
+
+---
+
+## Subject gradebook grid (2026-06-02)
+
+### What was implemented
+
+- Spreadsheet-style **subject gradebook** for each **9-week grading period** tied to the teacher's active pacing plan.
+- Grid layout: **students in rows**, **TEKS groups with assignment columns** plus **TEKS mastery summary** (yellow-style) columns.
+- Assignment cells show **percentage + M/D/B/Missing**; TEKS mastery auto-calculates from assignment average unless any assignment is Missing.
+- **`Missing`** added as fourth mastery level (derived in grid; stored on confirmed grades only when scored).
+- **Grade-entry assignments** (`TEACHER_GRADE_ENTRY`) require TEKS mapping and appear automatically in the grid; inline grade save from the grid.
+- **CSV export** matching the grid for school-system import (`85|D`, `Missing`, etc.).
+
+### Backend files changed
+
+- `gradebook_grid.py`, `gradebook_manual_entry.py`, `mastery_constants.py`, `assignment_constants.py`, `grade_review_constants.py`, `grade_reviews.py`
+- API: `teacher_assist_v2.py`, schemas `teacher_assist_v2.py`
+- Tests: `test_teacher_assist_v2_gradebook_grid.py`
+
+### Frontend files changed
+
+- `teacher-assist-v2-gradebook-screen.tsx`, `teacher-assist-v2-mastery.ts`, `mastery-level-badge.tsx`
+- `teacher-assist-v2-types.ts`, `teacher-assist-v2-api.ts`
+
+### Tests run
+
+- `pytest tests/test_teacher_assist_v2_gradebook_grid.py`
+- `pytest tests/test_teacher_assist_v2_mastery_constants.py`
+
+### Manual validation checklist
+
+1. Open **Gradebook** → pick subject + 9-week period
+2. Grid shows students × TEKS/assignment columns
+3. Click cell → enter 0–100 → badge updates
+4. TEKS summary shows Missing if any assignment missing; average otherwise
+5. **Download CSV** exports spreadsheet-style file
+
+### Remaining gaps
+
+- No student name column (uses Student #001 roster numbers only)
+- Multi-TEKS assignments group under first linked objective only
+- Package-generated assignments appear once confirmed through normal grading flow
+
+---
+
+## Teacher-created assignments and QR cover sheets (2026-06-02)
+
+### What was implemented
+
+- Teachers can create assignments outside generated packages via **Create assignment** (`/teacher-assist-v2/assignments/create`): week, subject, TEKS objectives, title, type.
+- Assignments stored with `creation_origin=TEACHER_MANUAL` and anchored to teacher pacing context.
+- **Cover sheet generation** after create (and from assignment detail): one Word (`.docx`) page per student based on onboarding class size, each with QR code + student number for batch upload matching. Stored as `v2-assignment-{id}-cover-sheets.docx` for direct print from Word.
+- Print packets now use `packet_kind` (`STUDENT_PACKET` vs `COVER_SHEET`) so cover sheets do not overwrite full QR student packets.
+
+### Backend files changed
+
+- `manual_assignments.py`, `assignment_print_packets.py`, `student_packet_docx.py`, `assignments.py`, `assignment_constants.py`
+- Models: `teacher_assist_v2_assignment.py`, `teacher_assist_v2_assignment_print_packet.py`
+- Migration: `085_teacher_assist_v2_manual_assignments.py`
+- API: `teacher_assist_v2.py`, schemas `teacher_assist_v2.py`
+- Tests: `test_teacher_assist_v2_manual_assignments.py`
+
+### Frontend files changed
+
+- `teacher-assist-v2-create-assignment-screen.tsx`, `assignments/create/page.tsx`
+- `teacher-assist-v2-assignments-screen.tsx`, `teacher-assist-v2-assignment-viewer-screen.tsx`
+- `teacher-assist-v2-types.ts`, `teacher-assist-v2-api.ts`
+
+### Tests run
+
+- `pytest tests/test_teacher_assist_v2_manual_assignments.py`
+- `alembic upgrade head` (local)
+
+### Manual validation checklist
+
+1. Assignments → **Create assignment**
+2. Pick week, subject, TEKS, title → submit
+3. Word cover sheet file downloads with N pages (class size)
+4. Assignment detail shows **Download cover sheets (Word)** / **Generate cover sheets (Word)**
+5. Staple workflow: upload batch scan still matches students via QR on cover sheet
+
+### Remaining gaps
+
+- Upload assignment PDF + answer key on teacher-created assignments not yet in this pass (cover sheets + record only).
+- Cover sheet regeneration if class size changes requires re-download (uses current onboarding `student_count`).
+- Assignments created before the DOCX switch may still have old HTML cover sheet files in storage until regenerated.
+
+### Next recommended phase
+
+Upload external assignment + answer key on manual assignments, then full auto-grade on that content.
+
+
+### What was implemented
+
+- Stored `mastery_level` on `teacher_assist_v2_assignment_grades` and `teacher_assist_v2_gradebook_records` (migration `084_teacher_assist_v2_grade_mastery_level`), backfilled from percentage thresholds: **Mastery** 80–100, **Developing** 60–79, **Beginning** 0–59.
+- Set on grade persist (confirm/modify/reject flows), Google Form import drafts, and gradebook sync.
+- API responses now include `mastery_level` and `mastery_level_label` on assignment grades, grading drafts, gradebook records, grade review queue rows, and mastery evidence.
+- Frontend gradebook, assignment review, assignment viewer grade table, student submission viewer, and mastery screen show mastery badges alongside numeric scores.
+
+### Explicit non-goals preserved
+
+- Mastery thresholds remain fixed at 80/60; no per-assignment or per-rubric customization in this pass.
+- Grading drafts do not persist a separate mastery column; level is derived from draft percentage at serialize time.
+
+### Backend files changed
+
+- `mastery_constants.py`, `grade_reviews.py`, `gradebook_sync.py`, `grading_drafts.py`, `google_form_quizzes.py`, `submission_intake.py`
+- Models: `teacher_assist_v2_assignment_grade.py`, `teacher_assist_v2_gradebook_record.py`
+- Migration: `084_teacher_assist_v2_grade_mastery_level.py`
+- Tests: `test_teacher_assist_v2_mastery_constants.py`, `test_teacher_assist_v2_gradebook_mastery.py`
+
+### Frontend files changed
+
+- `teacher-assist-v2-types.ts`, `teacher-assist-v2-mastery.ts`, `mastery-level-badge.tsx`
+- `teacher-assist-v2-gradebook-screen.tsx`, `teacher-assist-v2-assignment-review-screen.tsx`, `teacher-assist-v2-assignment-viewer-screen.tsx`, `teacher-assist-v2-student-submission-viewer-screen.tsx`, `teacher-assist-v2-mastery-screen.tsx`
+
+### Tests added / run
+
+- `pytest tests/test_teacher_assist_v2_mastery_constants.py tests/test_teacher_assist_v2_gradebook_mastery.py`
+
+### Manual validation checklist
+
+1. Upload and auto-grade student work → open review → confirm suggested grade shows **Mastery / Developing / Beginning** badge next to score.
+2. Adjust score in review → badge updates for adjusted percentage before confirm.
+3. Confirm grade → gradebook row shows score and mastery badge.
+4. Assignment viewer grade table shows draft and confirmed mastery columns.
+
+### Remaining gaps
+
+- Gradebook record revision history does not yet store previous/new mastery level separately (score/percentage only).
+- Legacy v1 gradebook UI unchanged.
+
+### Next recommended phase
+
+Phase 42 — Mastery v2 / gradebook v2 UI completion, parent communication send, or LMS/SIS import.
+
+## Package detail UI cleanup — Daily Teaching Plans vs Teaching Mode (2026-06-02)
+
+### What was implemented
+
+- Removed duplicate **Teaching Mode** quick-launch block and separate **Daily plans** list from the instructional package detail page.
+- Consolidated teaching artifacts into one **Teaching Materials** section with:
+  - **Daily Teaching Plans** — day, title, subjects included, status, and **Review / Present / Download** actions
+  - **Subject Slide Decks** — subject, title, week range, status, and **Review / Present / Download** actions
+- Reorganized remaining package sections: **Assessment Materials**, **Communication**, **Student Materials** (when generated), **Supporting Materials** (district + teacher supplemental), close-out unchanged.
+- Inline empty states for missing daily teaching plans and subject slide decks (no duplicate fallback lists).
+- Teaching Mode launcher copy updated to **Choose what to present** with helper text distinguishing **Daily Teaching Plan** vs **Subject Slide Deck**; primary action labeled **Present**.
+
+### Explicit non-goals preserved
+
+- No backend/API schema changes; `teaching_presentations` API field retained for compatibility.
+- No full package page redesign; existing panel styling and close-out flow preserved.
+- PPTX export and non-HTML download formats still deferred where unavailable.
+
+### Frontend files changed
+
+- `frontend/apps/web/components/teacher-assist-v2/teacher-assist-v2-package-viewer-screen.tsx`
+- `frontend/apps/web/components/teacher-assist-v2/teacher-assist-v2-teach-screen.tsx`
+- `frontend/apps/web/lib/teacher-assist-v2-types.ts` (optional `status` on artifacts)
+
+### Tests added / run
+
+- `read_lints` on updated package viewer and teach screen — no issues.
+- Dev servers confirmed reachable (`/health` 200, frontend 200); full teacher login UI walkthrough not automated in this pass.
+
+### Manual validation checklist
+
+1. Login as teacher → Packages → open generated package
+2. Confirm daily lesson artifacts appear only under **Daily Teaching Plans**
+3. Confirm each daily item shows Review, Present, Download
+4. **Present** opens `/teacher-assist-v2/teach?...&mode=daily&day=...&start=1`
+5. **Subject Slide Decks** section separate with Present → `mode=subject&artifactId=...`
+6. Confirm **Daily plans** label no longer appears
+7. Teaching Mode launcher uses **Choose what to present** and consistent product labels
+
+### Remaining gaps
+
+- Download remains HTML-only where export exists; PPTX noted as coming soon in backend metadata.
+- Student Materials section shown when optional outputs exist but not listed in the product brief’s top-level outline.
+
+### Next recommended phase
+
+Phase 42 — Mastery v2 / gradebook v2 UI completion, parent communication send, or LMS/SIS import.
+
+## ELA Week 1 demo artifact backfill — Real teacher-facing outputs (2026-06-02)
+
+### What was implemented
+
+- Deterministic golden-path content for **ELA Week 1: Main Idea** with daily plans, slide deck (layouts/visuals), quiz + answer key + Google Forms-ready JSON, exit ticket, written assignment, rubric, newsletter, and supporting student materials.
+- In-place package backfill for `test2@teacher.com` (`package_demo_backfill.py`, `backfill_ela_week1_demo_package.py`).
+- Rich HTML exports, v2 QR student packet generation (3 students from onboarding class size), API artifact enrichment (`description`, `objective_mapping`, `additional_downloads`, `qr_student_packet`).
+- Teaching Mode visual slide layouts; package detail regrouped into Instruction / Assessment / Student Materials / Rubric / Communication with Review, Present, Download, Print.
+
+### Backend files changed
+
+- `demo_content/ela_week1_main_idea.py`, `package_demo_backfill.py`, `assignment_print_packets.py`, `slide_visuals.py`, `package_export.py`, `planning_workflow.py`, `package_dashboard.py`, `scripts/backfill_ela_week1_demo_package.py`, `models/__init__.py`
+
+### Frontend files changed
+
+- `teacher-assist-v2-package-viewer-screen.tsx`, `teaching-mode-presentation.tsx`, `teaching-slide-visual.tsx`, `teaching-mode-slides.ts`, `teacher-assist-v2-types.ts`
+
+### Tests run
+
+- Backfill script succeeded for package `61e86258-fa86-498d-8a23-802740f8a068`; 0 mock/placeholder strings in preview HTML.
+
+### Remaining gaps
+
+- Superseded by **Golden-path artifact limitations** section below for v2 package generation/export behavior.
+
+## Golden-path artifact limitations — production-real artifacts (2026-06-02)
+
+### What was implemented
+
+- **Deterministic classroom-ready generation** for all new v2 packages when real AI is off (`deterministic_package_content.py`, refactored `instructional_package_generation.py` with `artifact_persistence.py`). No `[MOCK OUTPUT]` / placeholder copy in teacher-facing artifacts.
+- **Quiz exports:** Word DOCX quiz + answer key, read-only Google Forms JSON, teacher answer-key HTML preview. Labels: Download Quiz DOCX, Download Answer Key DOCX, Download Google Forms JSON, Preview Answer Key.
+- **Fix (2026-06-10):** Quiz/JSON/DOCX downloads no longer 500 when artifact titles contain Unicode punctuation (e.g. em dash). `build_content_disposition()` now uses an ASCII `filename=` fallback plus RFC 5987 `filename*=`; quiz export metadata stores safe `original_filename` values for download tokens.
+- **Per-student assessment DOCX (2026-06-10):** Quiz, written assignment, and new **Writing Response** artifacts export a class-set DOCX via `assessment_student_exports.py` + `student_packet_docx.py`. Each student receives every content page; each page repeats that student's QR code (top-left) and `Student #NNN` label with Word page breaks between pages. Class size comes from onboarding `student_count`. Google Forms JSON now includes a required student-number dropdown (`Student #001`…). Planning adds optional **Writing Response Pages** output type.
+- **Print-friendly HTML:** shared print CSS, page breaks, `Print / Save as PDF` control on exports (`package_export.py`).
+- **Slide deck UX:** PPTX note only (no dead PPTX button); actions Review / Present / Print / Save as PDF.
+- **Package viewer:** Preview Quiz/Assignment/Rubric/Newsletter/Packet; quiz Google Forms helper text; QR packet on assignment card.
+- **QR upload UX:** filename-token MVP instructions + highlighted manual match fallback on assignment viewer.
+- **Admin regeneration:** `POST /v1/teacher-assist-v2/admin/packages/{package_id}/regenerate-artifacts` (idempotent; ELA Week 1 uses demo backfill, others use deterministic refresh via `package_artifact_refresh.py`).
+
+### Backend files changed
+
+- `deterministic_package_content.py`, `artifact_persistence.py`, `package_artifact_refresh.py`, `instructional_package_generation.py`, `package_export.py`, `demo_content/ela_week1_main_idea.py`, `api/v1/teacher_assist_v2.py`
+
+### Frontend files changed
+
+- `teacher-assist-v2-package-viewer-screen.tsx`, `teacher-assist-v2-assignment-viewer-screen.tsx`
+
+### Tests run
+
+- `python3 -m compileall` on modified v2 service modules (pass).
+
+### Manual validation checklist
+
+1. Login as `test2@teacher.com` → Packages → **ELA Week 1: Main Idea**.
+2. Confirm quiz actions: Preview Quiz, Download Quiz DOCX, Download Answer Key DOCX, Download Google Forms JSON, Print / Save as PDF, Preview Answer Key; helper text for Forms JSON (not live integration).
+3. Confirm slide deck shows PPTX note, no PPTX download button.
+4. Generate a **new** package; confirm artifacts are classroom-ready without manual backfill.
+5. Optional: `POST /v1/teacher-assist-v2/admin/packages/{id}/regenerate-artifacts` to refresh stale mock artifacts.
+
+### Remaining gaps
+
+- No Google Forms API or Google Classroom publish.
+- No native PDF/PPTX server export (browser print HTML only).
+- QR scan/OCR extraction not implemented; filename token + manual match only.
+- Answer key preview opens exported HTML in a new tab (not inline iframe).
+
+### Next recommended phase
+
+Wire real AI generation for v2 packages when provider enabled; optional inline answer-key preview.
+
+## Multi-student QR scan upload — PDF/image intake (2026-06-02)
+
+### What was implemented
+
+- **QR decode from uploaded files:** `qr_decoding.py` renders PDF pages (PyMuPDF) and image uploads, decodes QR payloads (OpenCV), extracts `qr_token` values, and matches each to assignment print pages. One scanned PDF with three student QR codes now creates three matched submissions in a single batch.
+- **Student dedupe:** Multiple pages for the same student in one scan collapse to one submission with merged `page_range`.
+- **Per-student file extraction (2026-06-10):** Multi-student PDF scans are split in `submission_pdf_split.py` — each matched submission stores its own extracted PDF (only that student&apos;s pages) so Review shows individual work, not the full batch file.
+- **Always extract on upload:** Batch uploads now always persist `{batch}-student-{NNN}.pdf` extracts (no longer reuse the master batch file key).
+- **Auto-repair on review:** Opening a submission re-splits from the batch master PDF when the row still points at the combined upload and QR pages match the assignment.
+- **Upload 500 / false CORS fix (2026-06-10):** QR JSON payloads can reference stale `packet_id` values after packet regeneration. `resolve_qr_match_from_content()` now validates against `teacher_assist_v2_assignment_print_packets` and falls back to the assignment&apos;s current packet instead of inserting a nonexistent FK.
+- **Filename fallback preserved:** QR tokens embedded in filenames still match when file-content decode finds nothing.
+- **Upload UX:** Assignment viewer clarifies that optional **Student #** forces every selected file to that student; leave blank for QR auto-match from scan content.
+
+### Explicit non-goals preserved
+
+- No handwritten OCR or answer extraction from scanned work.
+
+### Backend files changed
+
+- `qr_decoding.py`, `qr_matching.py`, `submission_intake.py`, `submission_pdf_split.py`, `grade_reviews.py`, `pyproject.toml` (`pymupdf`, `opencv-python-headless`, `numpy`)
+
+### Frontend files changed
+
+- `teacher-assist-v2-assignment-viewer-screen.tsx`
+
+### Tests added / run
+
+- `tests/test_teacher_assist_v2_qr_decoding.py` — JSON payload parse, PNG multi-QR extract, PDF 3-student extract (3 passed).
+
+### Manual validation checklist
+
+1. Download **Student Assignment DOCX** (or print QR packet) for an assignment with 3+ students.
+2. Scan/print completed work so each student's pages include their QR code (top-left).
+3. Combine into one PDF scan (or upload a multi-page image).
+4. On assignment viewer → **Upload student work**, leave **Student #** blank, upload the scan.
+5. Confirm submissions list shows one row per detected student (e.g. Students #1, #2, #3) with match method **QR**.
+
+### Remaining gaps
+
+- Low-quality scans, skewed pages, or damaged QR codes may still fall back to **NEEDS_REVIEW** (manual match).
+- Handwritten OCR and auto-grading remain deferred.
+
+### Fix (2026-06-10): submission review viewer 500 / false CORS
+
+- **Root cause:** Opening the submission viewer fires duplicate GET requests (React Strict Mode). `record_submission_review_view()` used check-then-insert and the second concurrent request hit unique constraint `(teacher_user_id, student_submission_id)` → HTTP 500. Browsers report this as a CORS error because error responses omit CORS headers.
+- **Fix:** Upsert with PostgreSQL `ON CONFLICT DO NOTHING` in `grade_reviews.py`.
+- **Test:** `test_v2_submission_review_view_is_idempotent` — two consecutive GETs both return 200.
+
+### Next recommended phase
+
+Teacher review UX polish (bulk confirm, keyboard prev/next), Google Form import aligned to same review queue, and stronger scan-quality diagnostics.
+
+## Assignment upload → auto-grade → review workflow redesign (2026-06-10)
+
+### What was implemented
+
+- **New submission statuses:** `PROCESSING` → `READY_FOR_REVIEW` → `CONFIRMED` (per student); roster placeholders use `NOT_UPLOADED`; teacher may mark `INCOMPLETE`. Assignment moves to `COMPLETED` when every roster student is `CONFIRMED` or `INCOMPLETE`.
+- **Upload pipeline:** QR batch uploads reject wrong-assignment QR payloads, split into per-student files, create `NOT_UPLOADED` placeholders for missing roster students, and **auto-run AI grading** before teacher review.
+- **Gradebook timing:** Gradebook sync still occurs only on teacher **confirm** (accept/modify official grade) — not at auto-grade time.
+- **Review APIs:** `GET .../review-queue`, `POST .../incomplete`, `POST .../supplement-upload` for missing-student uploads during review.
+- **Review UI:** New `/teacher-assist-v2/assignments/review` screen with embedded PDF/image viewer, previous/next navigation, grade adjust + confirm, mark incomplete, and supplemental upload for missing work.
+- **Inline preview (2026-06-10):** Preview URLs now use `Content-Disposition: inline` (`get_teacher_assist_preview_url`, `?inline=1` on local-download). Review screens load PDFs via in-browser blob iframe (`embedded-student-work-viewer.tsx`) so files no longer launch externally.
+- **Assignment viewer:** Simplified upload copy; primary CTA **Open review** instead of manual match / ready-for-grading / generate-grade steps.
+
+### Explicit non-goals preserved
+
+- Handwritten OCR answer extraction still deferred.
+- Google Form API import still uses student-number matching (no QR); status aligned to `READY_FOR_REVIEW`.
+
+### Backend files changed
+
+- `submission_intake_constants.py`, `submission_intake.py`, `submission_workflow.py`, `qr_decoding.py`, `grading_drafts.py`, `grade_reviews.py`, `google_form_quizzes.py`, `api/v1/teacher_assist_v2.py`
+
+### Frontend files changed
+
+- `teacher-assist-v2-assignment-review-screen.tsx`, `teacher-assist-v2-assignment-viewer-screen.tsx`, `teacher-assist-v2-api.ts`, `teacher-assist-v2-types.ts`, `app/teacher-assist-v2/assignments/review/page.tsx`
+
+### Tests added / run
+
+- Updated `tests/test_teacher_assist_v2_submission_intake.py` for reject-on-unmatched batch and new statuses (full suite blocked by unrelated pacing seed `period_day_id` fixture issue in local env).
+
+### Manual validation checklist
+
+1. Upload multi-student QR packet on the **matching** assignment (leave Student # blank).
+2. Confirm one row per uploaded student plus `NOT_UPLOADED` placeholders for missing roster students.
+3. Confirm uploaded rows reach **READY_FOR_REVIEW** with AI draft after processing.
+4. Open **Open review** → embedded viewer, prev/next, confirm grade.
+5. Upload wrong-assignment QR scan → upload rejected with clear error.
+6. For a missing student, upload supplemental file or mark incomplete during review.
+7. After all students confirmed/incomplete → assignment **COMPLETED** and gradebook records present only for confirmed grades.
+
+### Remaining gaps
+
+- Legacy rows with `NEEDS_REVIEW` / `READY_FOR_GRADING` remain readable but are not part of the new upload path.
+- Auto-grade failures leave submission in `PROCESSING` with error details only in batch `grading_result` (no dedicated teacher alert yet).
+- Google Form import does not yet create roster placeholders or auto-enter the same review screen flow.
+
+### Next recommended phase
+
+Unify Google Form import into the review queue; add batch-level processing progress UI; migrate/archive legacy submission statuses.
+
+## Pacing guide day linkage, clone materials, daily UI (2026-06-02)
+
+### What was implemented
+
+- **Day records:** New `pacing_guide_period_days` table with stable `day_id` per week day; daily topic, objective focus, materials, assessment, and notes stored on the row (not title/description hacks).
+- **Day-level resources:** `pacing_guide_supporting_materials.period_day_id` FK; list/upload/link/note APIs accept `period_day_id`; validation requires topic on save and title + file/URL/note for day resources.
+- **Clone copies materials:** `copy_pacing_guide(..., copy_materials=True)` used by v2 clone; copies guide/period/day metadata, reuses `storage_key` for files, sets `source_resource_id` and `source_pacing_guide_id`.
+- **Planning context:** `get_pacing_guide_planning_context` and teacher `build_planning_review_context` return guide/week/day/objective resource groupings plus per-day topic, notes, materials, assessment, and attachments.
+- **Builder UI:** Collapsible day cards expose all daily plan fields; compact day-level attachment panel after structure save; week panels use `week_level_only`.
+
+### Backend files changed
+
+- `083_pacing_guide_period_days.py`, `teacher_assist_pacing_guide_period_day.py`, `pacing_guide_period_days.py`, `pacing_guide_builder.py`, `supporting_materials.py`, `pacing_guides.py`, `pacing_guide_foundation.py`, `planning_workflow.py`, `teacher_assist_v2.py`, schemas, models
+
+### Frontend files changed
+
+- `teacher-assist-v2-pacing-guide-builder-screen.tsx`, `pacing-guide-supporting-materials-panel.tsx`, `teacher-assist-v2-pacing-guide-viewer-screen.tsx`, `teacher-assist-v2-api.ts`, `teacher-assist-v2-types.ts`
+
+### Tests run
+
+- `pytest tests/test_teacher_assist_v2_pacing_guide_builder.py` (4 passed, includes daily topic validation)
+- Migration `083` applied locally
+
+### Remaining gaps
+
+- Manual browser walkthrough (Tuesday day resources + clone + teacher planning) not automated in this pass.
+- District→teacher clone scope rules rely on existing guide assignment flows; clone API still targets `DISTRICT` type (teacher copy path unchanged from prior foundation).
+- `archived_at` set on archive; `active=false` retained for backward compatibility.
+
+### Next recommended phase
+
+Teacher planning smoke test using Week 1 Tuesday day context; optional integration test for clone-with-materials.
+
+## Root admin pacing guide builder (2026-06-09)
+
+### What was implemented
+
+- **Guided builder UI** at `/teacher-assist-v2/admin/pacing-guides/create` and `/edit` with steps: Scope → Objectives → Weekly/Daily Plan → Resources & Links → Review & Save.
+- **Create/update API:** `POST /instructional/pacing-guides/builder`, `PUT /instructional/pacing-guides/{id}/builder` with validation for district/school year/grade/subject, catalog objectives only, week/day plans, school scope requires school.
+- **Daily plans** stored in `pacing_guide_periods.metadata_json`; guide unit metadata in `pacing_guides.metadata_json` (migration `082`).
+- **List enhancements:** scope, grade/subject names, objective count, resource count, status; Create / Edit / Duplicate / Archive actions.
+- **Planning context:** `get_pacing_guide_planning_context` returns daily plans, guide metadata, guide-level materials.
+- **Guide-level attachments:** supporting materials can attach at guide scope (no orphan linkage validation failure).
+- **Resource types:** added `website`, `video`, `curriculum_reference` for reference links.
+
+### Backend files changed
+
+- `082_pacing_guide_builder_metadata.py`, `pacing_guide_builder.py`, `pacing_guides.py`, `supporting_materials.py`, `supporting_materials_constants.py`, `teacher_assist_v2.py`, `schemas/teacher_assist_v2.py`, `schemas/pacing_guide.py`, models for pacing guide + period metadata
+
+### Frontend files changed
+
+- `teacher-assist-v2-pacing-guide-builder-screen.tsx`, `teacher-assist-v2-pacing-guides-screen.tsx`, `teacher-assist-v2-pacing-guide-viewer-screen.tsx`, `pacing-guide-supporting-materials-panel.tsx`, create/edit pages, `teacher-assist-v2-api.ts`, `teacher-assist-v2-types.ts`
+
+### Tests run
+
+- `pytest tests/test_teacher_assist_v2_pacing_guide_builder.py` (week validation)
+
+### Remaining gaps
+
+- Day-level resource attachment uses week/objective/guide scope only (no separate day FK); day-specific links can use week materials with day noted in title/description.
+- Clone does not copy supporting materials (existing foundation behavior).
+- Full browser manual walkthrough not automated in this pass.
+
+### Follow-up polish (teacher pacing guide visibility, 2026-06-09)
+
+- Teachers filter available guides by district, grade, school year, and school scope (district-wide or matching school).
+- **Pacing Guides** added to teacher nav; teachers can re-open setup to adopt newly published guides.
+- Planning and Packages surfaces show active guide plus all available guides for the teacher's scope.
+- **Fix (2026-06-09):** Re-saving pacing guide choices no longer 500s. `save_pacing_guide_setup()` upserts the existing `(user, school_year, subject)` assignment row instead of deactivating all rows and inserting duplicates (which violated `uq_teacher_assist_v2_pacing_assignment_user_year_subject`). Browser CORS errors on this POST were a symptom of the 500, not a missing CORS config.
+- **Fix (2026-06-09):** Saving after a prior **Copy to my guide** assignment no longer fails with “Selected pacing guide is not available for this subject.” The UI was sending the teacher-copy guide id as `source_guide_id`; save now resolves district catalog ids (metadata, title match, or available-list lookup) and the setup form exposes `source_district_guide_id` for correct dropdown initialization.
+
+### Backend files changed (re-save fix)
+
+- `pacing_guide_setup.py` — upsert assignment on save; deactivate only prior school-year rows
+- `tests/test_teacher_assist_v2_teacher_flow.py` — assert second save succeeds
+
+### Tests run (re-save fix)
+
+- Manual DB verification: `test2@teacher.com` can adopt **My ELA 2026-2027** without unique-constraint failure
+- `pytest tests/test_teacher_assist_v2_teacher_flow.py` — re-save assertion added (full seed path blocked by unrelated `period_day_id` seed regression)
+
+### Follow-up polish (same pass)
+
+- Guide detail API now returns `platform_school_year_id`, `ownership_scope`, and unit/week metadata from `metadata_json` for reliable edit-mode load.
+- Supporting materials list uses explicit `guide_level_only` query param so planning context and objective-level listings are not filtered incorrectly.
+- Builder resources step shows guide-level and week-level attachment panels after structure save.
+
+### Next recommended phase
+
+Teacher pacing guide adoption smoke test with newly created district guides; optional day-level material metadata field.
+
+## Offline quiz exports — replace Google Cloud integration (2026-06-02)
+
+### What was implemented
+
+- **Deferred Google Cloud UI:** Google OAuth, Connect Google, Create Google Form, Open Form, Open Responses, and admin/teacher Google settings nav links are hidden from TeacherAssist v2 MVP surfaces. Backend Google integration code and migration `081` remain in repo but are not exposed.
+- **Quiz DOCX export:** Word quiz document with title, subject, grade, school year, learning objective, student number line, instructions, questions, choices, point values, and written-response space (`quiz_exports.py` — zip/XML DOCX, no new dependency).
+- **Answer Key DOCX export:** Separate teacher document with question number, correct answer, explanation, objective mapping, and points.
+- **Google Forms read-only JSON:** Downloadable future-ready structure (`formTitle`, `formDescription`, `studentNumberQuestion`, `questions`, `choices`, `correctAnswer`, `pointValue`, `objectiveMappings`, `teacherAssistAssignmentId`, `packageId`, catalog IDs). Not a published form; helper text in UI and JSON payload.
+- **Quiz card actions:** Preview Quiz (student-facing, no answers), Download Quiz DOCX, Download Answer Key DOCX, Download Google Forms JSON, Print / Save as PDF, Preview Answer Key (teacher-only iframe).
+- **Export context linkage:** `quiz_export_context.py` attaches assignment_id, package_id, teacher_id, school_year_id, district_id, school_id, grade_id, subject_id, objective_ids to all quiz exports.
+- **Print-friendly HTML:** Student quiz preview retains print CSS, page breaks, hidden nav on print.
+
+### Explicit non-goals preserved
+
+- No Google OAuth, Google Cloud setup, Google Forms API, or Google Classroom API in MVP UI.
+- No server-side PDF generation (browser print only).
+- Google backend routes/models kept but not surfaced.
+
+### Backend files changed
+
+- `quiz_exports.py`, `quiz_export_context.py`, `package_export.py`, `artifact_persistence.py`, `package_artifact_refresh.py`, `planning_workflow.py`, `package_dashboard.py`, `instructional_package_generation.py`, `package_demo_backfill.py`
+
+### Frontend files changed
+
+- `teacher-assist-v2-quiz-artifact-card.tsx` — offline-only quiz actions + helper copy
+- `teacher-assist-v2-package-viewer-screen.tsx` — removed Google props from quiz card
+- `teacher-assist-v2-assignment-viewer-screen.tsx` — removed Google Form quiz section
+- `teacher-assist-v2-nav.ts` — removed admin Google Settings nav link
+
+### Tests run
+
+- `python3 -m compileall` on modified v2 quiz export modules (pass).
+- ELA Week 1 demo backfill script for package `61e86258-fa86-498d-8a23-802740f8a068`.
+
+### Manual validation checklist
+
+1. Login as `test2@teacher.com` → Packages → **ELA Week 1: Main Idea** → Assessment → Quiz.
+2. Confirm no Google OAuth / Connect Google / Create Google Form buttons.
+3. Preview Quiz — answers hidden; student number line and point values visible.
+4. Download Quiz DOCX and Answer Key DOCX — open in Word; confirm layout.
+5. Download Google Forms JSON — confirm title, questions, choices, answers, points, objective mappings, package/assignment IDs.
+6. Print / Save as PDF — clean printable layout without app chrome.
+7. Preview Answer Key — teacher-only; separate from student preview.
+
+### Remaining gaps
+
+- Google Forms API / Classroom integration deferred; JSON is manual/future import only.
+- Google settings pages exist at direct URLs but are not linked in nav.
+- Native PDF/PPTX server export still not implemented.
+- QR scan/OCR extraction not implemented.
+
+### Next recommended phase
+
+Optional guarded Google Forms API integration after teachers validate offline export quality; or wire real AI generation for v2 packages.
+
+## Google Forms quiz integration (deferred — backend only, 2026-06-02)
+
+Backend scaffolding exists but is **not exposed in MVP UI**:
+
+- Migration `081`, `google_oauth.py`, `google_forms_client.py`, `google_form_quizzes.py`, admin/teacher Google settings pages at direct URLs only.
+- See `docs/teacher-assist/GOOGLE_FORMS_SETUP.md` for future enablement.
+
+### Remaining limitations
+
+- Google Classroom assignment publishing not implemented.
+- MVP uses offline DOCX + read-only JSON exports instead.
 
 ## Phase 36 — Teacher Time Savings Engine
 

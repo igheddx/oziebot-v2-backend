@@ -1,4 +1,4 @@
-"""Mock-safe instructional package generation for TeacherAssist v2."""
+"""Instructional package generation for TeacherAssist v2."""
 
 from __future__ import annotations
 
@@ -17,21 +17,46 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
 )
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.ai_mode import is_teacher_assist_real_ai_active
-from oziebot_api.services.teacher_assist_v2.instructional_package_ai import generate_v2_instructional_artifact
-from oziebot_api.services.teacher_assist_v2.package_export import render_artifact_preview_html, save_artifact_export
-from oziebot_api.services.teacher_assist_v2.planning_constants import (
-    OPTIONAL_PACKAGE_OUTPUTS,
-    REQUIRED_PACKAGE_OUTPUTS,
-    WEEKDAY_LABELS,
+from oziebot_api.services.teacher_assist_v2.artifact_persistence import (
+    attach_qr_student_packet,
+    persist_package_artifact,
 )
 from oziebot_api.services.teacher_assist_v2.assignments import maybe_create_assignment_for_artifact
+from oziebot_api.services.teacher_assist_v2.deterministic_package_content import (
+    build_daily_lesson_plan,
+    build_deterministic_fallback,
+    build_rubric_for_written_assignment,
+    build_rubric_for_writing_response,
+)
+from oziebot_api.services.teacher_assist_v2.instructional_package_ai import generate_v2_instructional_artifact
+from oziebot_api.services.teacher_assist_v2.package_export import render_artifact_preview_html
+from oziebot_api.services.teacher_assist_v2.package_artifact_refresh import SLIDE_DECK_EXPORT_NOTE
 from oziebot_api.services.teacher_assist_v2.package_lifecycle import (
     build_package_title,
     resolve_default_plan_dates,
     resolve_effective_package_status,
 )
+from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import (
+    build_subject_lesson_block_from_pacing,
+    resolve_daily_plan_objective_text,
+    resolve_daily_plan_summary,
+    resolve_subject_daily_topic,
+)
+from oziebot_api.services.teacher_assist_v2.planning_constants import (
+    OPTIONAL_PACKAGE_OUTPUTS,
+    REQUIRED_PACKAGE_OUTPUTS,
+    WEEKDAY_LABELS,
+)
 from oziebot_api.services.teacher_assist_v2.planning_context import build_teacher_planning_generation_context
 from oziebot_api.services.teacher_assist_v2.planning_workflow import _assignment_context
+
+_DAILY_FOCUS_ROTATION = [
+    "Launch the week's learning target and activate prior knowledge.",
+    "Build understanding through guided practice and discussion.",
+    "Apply the skill with collaborative and independent tasks.",
+    "Use evidence from text or problems to justify thinking.",
+    "Review, reflect, and prepare for the weekly assessment.",
+]
 
 
 def _now() -> datetime:
@@ -52,59 +77,6 @@ def _validate_outputs(selected_outputs: list[str]) -> list[str]:
     return normalized
 
 
-def _mock_subject_block(*, subject_name: str, objective_code: str | None, daily_topic: str | None) -> dict[str, Any]:
-    objective = objective_code or f"{subject_name} weekly objective"
-    topic = daily_topic or f"{subject_name} focus"
-    return {
-        "subject_name": subject_name,
-        "objective": f"[MOCK OUTPUT] {objective}",
-        "mini_lesson": f"[MOCK OUTPUT] Model {topic} with a short teacher-led example.",
-        "teacher_actions": [
-            f"Review the objective {objective}.",
-            f"Model the daily focus: {topic}.",
-        ],
-        "student_activity": [
-            f"Complete a guided practice task for {subject_name}.",
-            "Discuss evidence with a partner.",
-        ],
-        "materials": [
-            f"{subject_name} district curriculum file",
-            "Teacher supplemental notes",
-        ],
-        "assessment": "Quick check for understanding exit prompt.",
-        "notes": "Generated with mock provider for local testing.",
-    }
-
-
-def _mock_slides(*, subject_name: str, week_label: str, objectives: list[str]) -> list[dict[str, Any]]:
-    objective_text = objectives[0] if objectives else f"{subject_name} weekly objective"
-    return [
-        {"title": f"{subject_name} {week_label}", "bullets": ["Weekly instructional slides", "[MOCK OUTPUT]"]},
-        {"title": "Objectives", "bullets": [f"[MOCK OUTPUT] {item}" for item in objectives] or [objective_text]},
-        {"title": "Vocabulary", "bullets": [f"[MOCK OUTPUT] {subject_name} term 1", f"[MOCK OUTPUT] {subject_name} term 2"]},
-        {"title": "Mini lesson", "bullets": ["Model the target skill.", "Guide student practice."]},
-        {"title": "Practice / activity", "bullets": ["Collaborative task.", "Independent application."]},
-        {"title": "Exit ticket", "bullets": ["One question aligned to today's objective."]},
-    ]
-
-
-def _generic_sections(*, title: str, subject_name: str, week_label: str) -> dict[str, Any]:
-    return {
-        "title": title,
-        "summary": f"[MOCK OUTPUT] {subject_name} resource for {week_label}.",
-        "sections": [
-            {"heading": "Purpose", "body": f"Support {subject_name} instruction during {week_label}."},
-            {
-                "heading": "Key points",
-                "bullets": [
-                    "Aligned to pacing guide objectives.",
-                    "Uses district and teacher supplemental context.",
-                ],
-            },
-        ],
-    }
-
-
 def _resolve_artifact_content(
     db: Session,
     *,
@@ -113,7 +85,7 @@ def _resolve_artifact_content(
     package: TeacherAssistV2InstructionalPackage,
     context: dict[str, Any],
     artifact_type: str,
-    mock_content: dict[str, Any],
+    deterministic_content: dict[str, Any],
     week: dict[str, Any],
     subject_meta: dict[str, Any] | None = None,
     week_subject: dict[str, Any] | None = None,
@@ -134,7 +106,191 @@ def _resolve_artifact_content(
         day_label=day_label,
         title_hint=title_hint,
     )
-    return ai_content if ai_content is not None else mock_content
+    return ai_content if ai_content is not None else deterministic_content
+
+
+def _objective_fields(week_subject: dict[str, Any] | None, subject_name: str) -> tuple[str | None, str, list[str]]:
+    objective_code = None
+    objective_text = f"Students demonstrate understanding in {subject_name}."
+    objectives_list: list[str] = []
+    if week_subject and week_subject.get("objectives"):
+        first = week_subject["objectives"][0]
+        objective_code = first.get("objective_code")
+        objective_text = first.get("description") or objective_text
+        objectives_list = [
+            str(row.get("objective_code") or row.get("description"))
+            for row in week_subject["objectives"]
+            if row.get("objective_code") or row.get("description")
+        ]
+    return objective_code, objective_text, objectives_list
+
+
+def _link_assessment_rubric(
+    assessment_artifact: TeacherAssistV2InstructionalPackageArtifact,
+    rubric_artifact: TeacherAssistV2InstructionalPackageArtifact,
+    *,
+    assessment_content: dict[str, Any],
+) -> None:
+    assessment_content["rubric_reference"] = rubric_artifact.title
+    assessment_content["linked_rubric_artifact_id"] = str(rubric_artifact.id)
+    assessment_artifact.content_json = assessment_content
+    assessment_artifact.title = str(assessment_content["title"])
+    assessment_metadata = dict(assessment_artifact.metadata_json or {})
+    assessment_metadata["linked_rubric_artifact_id"] = str(rubric_artifact.id)
+    assessment_artifact.metadata_json = assessment_metadata
+    rubric_metadata = dict(rubric_artifact.metadata_json or {})
+    rubric_metadata["linked_assessment_artifact_id"] = str(assessment_artifact.id)
+    if assessment_artifact.artifact_type == "writing_response":
+        rubric_metadata["linked_writing_response_artifact_id"] = str(assessment_artifact.id)
+    rubric_artifact.metadata_json = rubric_metadata
+
+
+def _link_writing_response_rubric(
+    writing_artifact: TeacherAssistV2InstructionalPackageArtifact,
+    rubric_artifact: TeacherAssistV2InstructionalPackageArtifact,
+    *,
+    writing_content: dict[str, Any],
+) -> None:
+    _link_assessment_rubric(writing_artifact, rubric_artifact, assessment_content=writing_content)
+
+
+def _persist_linked_assessment_rubric(
+    db: Session,
+    *,
+    settings: Settings,
+    user: User,
+    package: TeacherAssistV2InstructionalPackage,
+    assessment_artifact: TeacherAssistV2InstructionalPackageArtifact,
+    assessment_content: dict[str, Any],
+    context: dict[str, Any],
+    week: dict[str, Any],
+    week_subject: dict[str, Any] | None,
+    subject_meta: dict[str, Any],
+    provider_name: str,
+    sequence: int,
+    now: datetime,
+    rubric_deterministic: dict[str, Any],
+    preview_artifact_type: str,
+) -> tuple[int, TeacherAssistV2InstructionalPackageArtifact]:
+    rubric_content = _resolve_artifact_content(
+        db,
+        settings=settings,
+        user=user,
+        package=package,
+        context=context,
+        artifact_type="rubric",
+        deterministic_content=rubric_deterministic,
+        week=week,
+        subject_meta=subject_meta,
+        week_subject=week_subject,
+        title_hint=rubric_deterministic["title"],
+    )
+    sequence += 1
+    rubric_artifact = persist_package_artifact(
+        db,
+        settings=settings,
+        package=package,
+        artifact_type="rubric",
+        content=rubric_content,
+        provider_name=provider_name,
+        sequence_number=sequence,
+        created_at=now,
+        subject_id=assessment_artifact.subject_id,
+        period_id=assessment_artifact.period_id,
+    )
+    _link_assessment_rubric(assessment_artifact, rubric_artifact, assessment_content=assessment_content)
+    assessment_artifact.preview_html = render_artifact_preview_html(
+        artifact_type=preview_artifact_type,
+        content=assessment_content,
+    )
+    assessment_artifact.updated_at = now
+    return sequence, rubric_artifact
+
+
+def _persist_linked_writing_rubric(
+    db: Session,
+    *,
+    settings: Settings,
+    user: User,
+    package: TeacherAssistV2InstructionalPackage,
+    writing_artifact: TeacherAssistV2InstructionalPackageArtifact,
+    writing_content: dict[str, Any],
+    context: dict[str, Any],
+    week: dict[str, Any],
+    week_subject: dict[str, Any] | None,
+    subject_meta: dict[str, Any],
+    provider_name: str,
+    sequence: int,
+    now: datetime,
+) -> tuple[int, TeacherAssistV2InstructionalPackageArtifact]:
+    objective_code, objective_text, _ = _objective_fields(week_subject, subject_meta["subject_name"])
+    rubric_deterministic = build_rubric_for_writing_response(
+        writing_content=writing_content,
+        subject_name=subject_meta["subject_name"],
+        package_title=package.title,
+        objective_code=objective_code,
+        objective_text=objective_text,
+    )
+    return _persist_linked_assessment_rubric(
+        db,
+        settings=settings,
+        user=user,
+        package=package,
+        assessment_artifact=writing_artifact,
+        assessment_content=writing_content,
+        context=context,
+        week=week,
+        week_subject=week_subject,
+        subject_meta=subject_meta,
+        provider_name=provider_name,
+        sequence=sequence,
+        now=now,
+        rubric_deterministic=rubric_deterministic,
+        preview_artifact_type="writing_response",
+    )
+
+
+def _persist_linked_assignment_rubric(
+    db: Session,
+    *,
+    settings: Settings,
+    user: User,
+    package: TeacherAssistV2InstructionalPackage,
+    assignment_artifact: TeacherAssistV2InstructionalPackageArtifact,
+    assignment_content: dict[str, Any],
+    context: dict[str, Any],
+    week: dict[str, Any],
+    week_subject: dict[str, Any] | None,
+    subject_meta: dict[str, Any],
+    provider_name: str,
+    sequence: int,
+    now: datetime,
+) -> tuple[int, TeacherAssistV2InstructionalPackageArtifact]:
+    objective_code, objective_text, _ = _objective_fields(week_subject, subject_meta["subject_name"])
+    rubric_deterministic = build_rubric_for_written_assignment(
+        assignment_content=assignment_content,
+        subject_name=subject_meta["subject_name"],
+        package_title=package.title,
+        objective_code=objective_code,
+        objective_text=objective_text,
+    )
+    return _persist_linked_assessment_rubric(
+        db,
+        settings=settings,
+        user=user,
+        package=package,
+        assessment_artifact=assignment_artifact,
+        assessment_content=assignment_content,
+        context=context,
+        week=week,
+        week_subject=week_subject,
+        subject_meta=subject_meta,
+        provider_name=provider_name,
+        sequence=sequence,
+        now=now,
+        rubric_deterministic=rubric_deterministic,
+        preview_artifact_type="assignment",
+    )
 
 
 def generate_instructional_package(
@@ -148,6 +304,7 @@ def generate_instructional_package(
     selected_outputs: list[str],
     plan_start_date: date | None = None,
     plan_end_date: date | None = None,
+    excluded_pacing_material_ids: list[uuid.UUID] | None = None,
 ) -> TeacherAssistV2InstructionalPackage:
     outputs = _validate_outputs(selected_outputs)
     if plan_start_date is None or plan_end_date is None:
@@ -167,10 +324,13 @@ def generate_instructional_package(
         teaching_order=teaching_order,
         selected_outputs=outputs,
         settings=settings,
+        excluded_pacing_material_ids=excluded_pacing_material_ids,
     )
+    excluded_ids = {str(value) for value in (excluded_pacing_material_ids or [])}
     base = _assignment_context(db, user=user)
     onboarding = base["onboarding"]
-    provider_name = "openai" if is_teacher_assist_real_ai_active(db, settings) else "mock"
+    real_ai = is_teacher_assist_real_ai_active(db, settings)
+    provider_name = "openai" if real_ai else "deterministic"
     subject_names = [row["subject_name"] for row in context["subjects"]]
     primary_guide_id = (
         uuid.UUID(context["pacing_guide_ids"][0]) if context["pacing_guide_ids"] else None
@@ -201,7 +361,7 @@ def generate_instructional_package(
         status=stored_status,
         provider_name=provider_name,
         metadata_json={
-            "is_mock": provider_name == "mock",
+            "is_mock": False,
             "context_weeks": len(context["weeks"]),
             "effective_status": resolve_effective_package_status(
                 stored_status=stored_status,
@@ -209,6 +369,11 @@ def generate_instructional_package(
                 plan_end_date=plan_end_date,
                 today=today,
             ),
+            "ai_readiness_summary": context.get("ai_readiness_summary"),
+            "generation_document_usage": {
+                "district": context.get("district_document_context"),
+                "teacher": context.get("teacher_document_context"),
+            },
         },
         created_at=now,
         updated_at=now,
@@ -221,6 +386,7 @@ def generate_instructional_package(
             TeacherAssistV2PlanningSupplementalMaterial.teacher_user_id == user.id,
             TeacherAssistV2PlanningSupplementalMaterial.week_start == week_start,
             TeacherAssistV2PlanningSupplementalMaterial.week_end == week_end,
+            TeacherAssistV2PlanningSupplementalMaterial.package_id.is_(None),
             TeacherAssistV2PlanningSupplementalMaterial.active.is_(True),
         )
     ).all()
@@ -231,6 +397,8 @@ def generate_instructional_package(
     sequence = 0
     subject_lookup = {row["subject_id"]: row for row in context["subjects"]}
     teaching_order_keys = [str(value) for value in teaching_order]
+    assignment_artifact = None
+    assignment_content: dict[str, Any] | None = None
 
     for week in context["weeks"]:
         week_label = week["title"]
@@ -238,20 +406,58 @@ def generate_instructional_package(
 
         if "daily_lesson_plan" in outputs:
             for day_index, day_label in enumerate(WEEKDAY_LABELS):
+                day_focus = _DAILY_FOCUS_ROTATION[day_index % len(_DAILY_FOCUS_ROTATION)]
                 subject_blocks = []
+                objective_code = None
+                objective_text = "Students demonstrate understanding across scheduled subjects."
+                plan_summary = day_focus
                 for subject_id in teaching_order_keys:
                     week_subject = week_subjects.get(subject_id)
                     subject_meta = subject_lookup[subject_id]
-                    objective_code = None
-                    if week_subject and week_subject["objectives"]:
-                        objective_code = week_subject["objectives"][0].get("objective_code")
-                    subject_blocks.append(
-                        _mock_subject_block(
-                            subject_name=subject_meta["subject_name"],
-                            objective_code=objective_code,
-                            daily_topic=week_subject.get("daily_topic") if week_subject else None,
-                        )
+                    subj_code, subj_text, _ = _objective_fields(week_subject, subject_meta["subject_name"])
+                    if objective_code is None:
+                        objective_code = subj_code
+                    block = build_subject_lesson_block_from_pacing(
+                        subject_name=subject_meta["subject_name"],
+                        week_subject=week_subject,
+                        day_label=day_label,
+                        fallback_objective_text=subj_text,
+                        excluded_material_ids=excluded_ids or None,
                     )
+                    subject_blocks.append(block)
+
+                primary_week_subject = (
+                    week_subjects.get(teaching_order_keys[0]) if teaching_order_keys else None
+                )
+                if primary_week_subject:
+                    _, week_objective_text, _ = _objective_fields(
+                        primary_week_subject,
+                        subject_lookup[teaching_order_keys[0]]["subject_name"] if teaching_order_keys else "",
+                    )
+                else:
+                    week_objective_text = objective_text
+                plan_summary = resolve_daily_plan_summary(
+                    primary_week_subject,
+                    day_label,
+                    fallback=day_focus,
+                )
+                daily_topic = resolve_subject_daily_topic(primary_week_subject, day_label=day_label)
+                objective_text = resolve_daily_plan_objective_text(
+                    primary_week_subject,
+                    day_label,
+                    fallback=week_objective_text,
+                )
+
+                deterministic = build_daily_lesson_plan(
+                    day_label=day_label,
+                    week_label=week_label,
+                    package_title=package.title,
+                    subject_blocks=subject_blocks,
+                    objective_code=objective_code,
+                    objective_text=objective_text,
+                    summary=plan_summary,
+                    daily_topic=daily_topic,
+                )
                 content = _resolve_artifact_content(
                     db,
                     settings=settings,
@@ -259,52 +465,45 @@ def generate_instructional_package(
                     package=package,
                     context=context,
                     artifact_type="daily_lesson_plan",
-                    mock_content={
-                        "title": f"{day_label} Daily Plan — {week_label}",
-                        "summary": f"[MOCK OUTPUT] Daily plan covering {', '.join(row['subject_name'] for row in context['subjects'])}.",
-                        "subjects": subject_blocks,
-                    },
+                    deterministic_content=deterministic,
                     week=week,
+                    week_subject=primary_week_subject,
                     day_label=day_label,
-                    title_hint=f"{day_label} Daily Plan — {week_label}",
+                    title_hint=deterministic["title"],
                 )
                 sequence += 1
-                artifact = TeacherAssistV2InstructionalPackageArtifact(
-                    id=uuid.uuid4(),
-                    tenant_id=package.tenant_id,
-                    package_id=package.id,
-                    artifact_type="daily_lesson_plan",
-                    subject_id=None,
-                    period_id=uuid.UUID(week_subjects[teaching_order_keys[0]]["period_id"]) if teaching_order_keys and teaching_order_keys[0] in week_subjects else None,
-                    day_label=day_label,
-                    sequence_number=sequence,
-                    title=content["title"],
-                    status="ready",
-                    content_json=content,
-                    preview_html=render_artifact_preview_html(artifact_type="daily_lesson_plan", content=content),
-                    metadata_json={"provider": provider_name},
-                    created_at=now,
-                    updated_at=now,
-                )
-                storage_key, export_format = save_artifact_export(
+                period_id = None
+                if teaching_order_keys and teaching_order_keys[0] in week_subjects:
+                    period_id = uuid.UUID(week_subjects[teaching_order_keys[0]]["period_id"])
+                persist_package_artifact(
+                    db,
                     settings=settings,
-                    tenant_id=package.tenant_id,
-                    artifact_id=artifact.id,
+                    package=package,
                     artifact_type="daily_lesson_plan",
                     content=content,
+                    provider_name=provider_name,
+                    sequence_number=sequence,
+                    created_at=now,
+                    period_id=period_id,
+                    day_label=day_label,
                 )
-                artifact.storage_key = storage_key
-                artifact.export_format = export_format
-                db.add(artifact)
 
         if "subject_slide_deck" in outputs:
             for subject_id in teaching_order_keys:
                 week_subject = week_subjects.get(subject_id)
                 subject_meta = subject_lookup[subject_id]
-                objectives = [
-                    row.get("objective_code") or row.get("description")
-                    for row in (week_subject or {}).get("objectives", [])
-                ]
+                objective_code, objective_text, objectives_list = _objective_fields(
+                    week_subject, subject_meta["subject_name"]
+                )
+                deterministic = build_deterministic_fallback(
+                    "subject_slide_deck",
+                    subject_name=subject_meta["subject_name"],
+                    week_label=week_label,
+                    package_title=package.title,
+                    objective_code=objective_code,
+                    objective_text=objective_text,
+                    objectives_list=objectives_list,
+                )
                 content = _resolve_artifact_content(
                     db,
                     settings=settings,
@@ -312,66 +511,48 @@ def generate_instructional_package(
                     package=package,
                     context=context,
                     artifact_type="subject_slide_deck",
-                    mock_content={
-                        "title": f"{subject_meta['subject_name']} {week_label} Slides",
-                        "slides": _mock_slides(
-                            subject_name=subject_meta["subject_name"],
-                            week_label=week_label,
-                            objectives=[str(item) for item in objectives if item],
-                        ),
-                    },
+                    deterministic_content=deterministic,
                     week=week,
                     subject_meta=subject_meta,
                     week_subject=week_subject,
-                    title_hint=f"{subject_meta['subject_name']} {week_label} Slides",
+                    title_hint=deterministic["title"],
                 )
                 sequence += 1
-                artifact = TeacherAssistV2InstructionalPackageArtifact(
-                    id=uuid.uuid4(),
-                    tenant_id=package.tenant_id,
-                    package_id=package.id,
-                    artifact_type="subject_slide_deck",
-                    subject_id=uuid.UUID(subject_id),
-                    period_id=uuid.UUID(week_subject["period_id"]) if week_subject else None,
-                    day_label=None,
-                    sequence_number=sequence,
-                    title=content["title"],
-                    status="ready",
-                    content_json=content,
-                    preview_html=render_artifact_preview_html(artifact_type="subject_slide_deck", content=content),
-                    metadata_json={"provider": provider_name, "export_note": "PPTX export coming soon; HTML preview available."},
-                    created_at=now,
-                    updated_at=now,
-                )
-                storage_key, export_format = save_artifact_export(
+                artifact = persist_package_artifact(
+                    db,
                     settings=settings,
-                    tenant_id=package.tenant_id,
-                    artifact_id=artifact.id,
+                    package=package,
                     artifact_type="subject_slide_deck",
                     content=content,
+                    provider_name=provider_name,
+                    sequence_number=sequence,
+                    created_at=now,
+                    subject_id=uuid.UUID(subject_id),
+                    period_id=uuid.UUID(week_subject["period_id"]) if week_subject else None,
+                    export_note=SLIDE_DECK_EXPORT_NOTE,
                 )
-                artifact.storage_key = storage_key
-                artifact.export_format = export_format
-                db.add(artifact)
 
-        optional_map = {
-            "assignment": "Assignment",
-            "quiz": "Quiz",
-            "rubric": "Rubric",
-            "exit_ticket": "Exit Ticket",
-            "bell_ringer": "Bell Ringer",
-            "vocabulary_list": "Vocabulary List",
-            "study_guide": "Study Guide",
-            "parent_newsletter_summary": "Parent Newsletter Summary",
-        }
         for output_type in outputs:
             if output_type in REQUIRED_PACKAGE_OUTPUTS:
+                continue
+            if output_type == "rubric" and ("writing_response" in outputs or "assignment" in outputs):
                 continue
             for subject_id in teaching_order_keys:
                 week_subject = week_subjects.get(subject_id)
                 subject_meta = subject_lookup[subject_id]
-                label = optional_map[output_type]
-                mock_title = f"{subject_meta['subject_name']} {week_label} {label}"
+                objective_code, objective_text, objectives_list = _objective_fields(
+                    week_subject, subject_meta["subject_name"]
+                )
+                deterministic = build_deterministic_fallback(
+                    output_type,
+                    subject_name=subject_meta["subject_name"],
+                    week_label=week_label,
+                    package_title=package.title,
+                    objective_code=objective_code,
+                    objective_text=objective_text,
+                    daily_topic=resolve_subject_daily_topic(week_subject, day_label="Monday"),
+                    objectives_list=objectives_list,
+                )
                 content = _resolve_artifact_content(
                     db,
                     settings=settings,
@@ -379,44 +560,27 @@ def generate_instructional_package(
                     package=package,
                     context=context,
                     artifact_type=output_type,
-                    mock_content=_generic_sections(
-                        title=mock_title,
-                        subject_name=subject_meta["subject_name"],
-                        week_label=week_label,
-                    ),
+                    deterministic_content=deterministic,
                     week=week,
                     subject_meta=subject_meta,
                     week_subject=week_subject,
-                    title_hint=mock_title,
+                    title_hint=deterministic["title"],
                 )
                 sequence += 1
-                artifact = TeacherAssistV2InstructionalPackageArtifact(
-                    id=uuid.uuid4(),
-                    tenant_id=package.tenant_id,
-                    package_id=package.id,
-                    artifact_type=output_type,
-                    subject_id=uuid.UUID(subject_id),
-                    period_id=uuid.UUID(week_subject["period_id"]) if week_subject and week_subject.get("period_id") else None,
-                    day_label=None,
-                    sequence_number=sequence,
-                    title=content["title"],
-                    status="ready",
-                    content_json=content,
-                    preview_html=render_artifact_preview_html(artifact_type=output_type, content=content),
-                    metadata_json={"provider": provider_name},
-                    created_at=now,
-                    updated_at=now,
-                )
-                storage_key, export_format = save_artifact_export(
+                artifact = persist_package_artifact(
+                    db,
                     settings=settings,
-                    tenant_id=package.tenant_id,
-                    artifact_id=artifact.id,
+                    package=package,
                     artifact_type=output_type,
                     content=content,
+                    provider_name=provider_name,
+                    sequence_number=sequence,
+                    created_at=now,
+                    subject_id=uuid.UUID(subject_id),
+                    period_id=uuid.UUID(week_subject["period_id"])
+                    if week_subject and week_subject.get("period_id")
+                    else None,
                 )
-                artifact.storage_key = storage_key
-                artifact.export_format = export_format
-                db.add(artifact)
                 db.flush()
                 objective_ids = [
                     uuid.UUID(str(row["education_objective_id"]))
@@ -437,6 +601,76 @@ def generate_instructional_package(
                     pacing_guide_id=pacing_guide_id,
                     education_objective_ids=objective_ids,
                 )
+                if output_type in {"quiz", "assignment"}:
+                    from oziebot_api.services.teacher_assist_v2.assessment_student_exports import (
+                        refresh_assessment_student_exports,
+                    )
+
+                    refresh_assessment_student_exports(
+                        db,
+                        settings=settings,
+                        package=package,
+                        artifact=artifact,
+                    )
+                if output_type == "assignment":
+                    sequence, _ = _persist_linked_assignment_rubric(
+                        db,
+                        settings=settings,
+                        user=user,
+                        package=package,
+                        assignment_artifact=artifact,
+                        assignment_content=dict(content),
+                        context=context,
+                        week=week,
+                        week_subject=week_subject,
+                        subject_meta=subject_meta,
+                        provider_name=provider_name,
+                        sequence=sequence,
+                        now=now,
+                    )
+                    refresh_assessment_student_exports(
+                        db,
+                        settings=settings,
+                        package=package,
+                        artifact=artifact,
+                    )
+                if output_type == "writing_response":
+                    from oziebot_api.services.teacher_assist_v2.assessment_student_exports import (
+                        refresh_assessment_student_exports,
+                    )
+
+                    sequence, _ = _persist_linked_writing_rubric(
+                        db,
+                        settings=settings,
+                        user=user,
+                        package=package,
+                        writing_artifact=artifact,
+                        writing_content=dict(content),
+                        context=context,
+                        week=week,
+                        week_subject=week_subject,
+                        subject_meta=subject_meta,
+                        provider_name=provider_name,
+                        sequence=sequence,
+                        now=now,
+                    )
+                    refresh_assessment_student_exports(
+                        db,
+                        settings=settings,
+                        package=package,
+                        artifact=artifact,
+                    )
+                if output_type == "assignment":
+                    assignment_artifact = artifact
+                    assignment_content = content
+
+    if assignment_artifact and assignment_content:
+        attach_qr_student_packet(
+            db,
+            settings=settings,
+            assignment_artifact=assignment_artifact,
+            assignment_content=assignment_content,
+        )
 
     db.flush()
     return package

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 import uuid
 from typing import Any
 
@@ -29,7 +29,6 @@ from oziebot_api.services.teacher_assist.user_preferences import (
 )
 from oziebot_api.services.teacher_assist.work_queue import (
     PRIORITY_LEVEL_BY_SEVERITY,
-    build_teacher_assist_work_queue,
 )
 from oziebot_api.services.teacher_assist.instructional_weeks import (
     find_instructional_week_for_period,
@@ -643,7 +642,7 @@ def get_teacher_assist_home_workspace(
             "href": "/teacher-assist/copilot",
             "suggested_questions": get_suggested_questions(is_root_admin=False)[:6],
             "weekly_summary_href": (
-                f"/teacher-assist/copilot?prompt=Summarize+this+week"
+                "/teacher-assist/copilot?prompt=Summarize+this+week"
                 if instructional_week_id
                 else "/teacher-assist/copilot"
             ),

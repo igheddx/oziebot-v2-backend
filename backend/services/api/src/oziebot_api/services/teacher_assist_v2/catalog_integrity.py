@@ -36,10 +36,6 @@ from oziebot_api.services.teacher_assist.education_catalog import (
     update_state,
     update_subject,
 )
-from oziebot_api.services.teacher_assist.user_preferences import (
-    build_onboarding_progress,
-    get_user_preferences_or_create,
-)
 from oziebot_api.services.teacher_assist_v2.roles import resolve_teacher_assist_role
 
 
@@ -299,6 +295,7 @@ def build_v2_context(db: Session, *, user: User) -> dict[str, Any]:
             allowed_routes.append("/teacher-assist-v2/pacing-guide-setup")
         if pacing_guide_setup_complete:
             allowed_routes.append("/teacher-assist-v2/home")
+            allowed_routes.append("/teacher-assist-v2/pacing-guide-setup")
             allowed_routes.append("/teacher-assist-v2/planning")
             allowed_routes.append("/teacher-assist-v2/packages")
             allowed_routes.append("/teacher-assist-v2/teach")

@@ -65,6 +65,17 @@ class CatalogPacingGuideSummaryOut(BaseModel):
     created_by_user_id: uuid.UUID
     updated_by_user_id: uuid.UUID | None = None
     period_count: int = 0
+    objective_count: int = 0
+    resource_count: int = 0
+    scope_label: str | None = None
+    grade_name: str | None = None
+    subject_name: str | None = None
+    platform_school_year_id: uuid.UUID | None = None
+    ownership_scope: Literal["district", "school"] | None = None
+    unit_title: str | None = None
+    estimated_duration_weeks: int | None = None
+    start_week: int | None = None
+    end_week: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -92,6 +103,17 @@ class CatalogPacingGuideResourceOut(BaseModel):
     resource_type: str | None = None
 
 
+class CatalogPacingGuideDailyPlanOut(BaseModel):
+    id: uuid.UUID | None = None
+    day_label: str
+    sequence_number: int | None = None
+    daily_topic: str | None = None
+    objective_focus: str | None = None
+    teacher_notes: str | None = None
+    materials_needed: str | None = None
+    assessment_check: str | None = None
+
+
 class CatalogPacingGuidePeriodOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -103,6 +125,8 @@ class CatalogPacingGuidePeriodOut(BaseModel):
     sequence_number: int
     start_date: date | None = None
     end_date: date | None = None
+    daily_plans: list[CatalogPacingGuideDailyPlanOut] = Field(default_factory=list)
+    unit_title: str | None = None
     objectives: list[CatalogPacingGuideObjectiveOut] = Field(default_factory=list)
     resources: list[CatalogPacingGuideResourceOut] = Field(default_factory=list)
     created_at: datetime

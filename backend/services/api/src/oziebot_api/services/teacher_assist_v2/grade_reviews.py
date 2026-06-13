@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_v2_assignment_grade import TeacherAssistV2AssignmentGrade
@@ -22,10 +22,19 @@ from oziebot_api.services.teacher_assist_v2.grade_review_constants import (
     GRADE_REVIEW_ACTIONS,
     OFFICIAL_ASSIGNMENT_GRADE_STATUSES,
 )
+from oziebot_api.services.teacher_assist_v2.grading_rubric import resolve_final_grade_values
 from oziebot_api.services.teacher_assist_v2.gradebook_sync import sync_confirmed_grade_to_gradebook_and_mastery
+from oziebot_api.services.teacher_assist_v2.mastery_constants import (
+    resolve_mastery_level,
+    serialize_mastery_level_fields,
+)
 from oziebot_api.services.teacher_assist_v2.submission_intake import (
     _get_assignment_or_404,
     get_student_submission_or_404,
+)
+from oziebot_api.services.teacher_assist_v2.submission_workflow import (
+    mark_submission_review_outcome,
+    refresh_assignment_completion_status,
 )
 from oziebot_api.services.teacher_assist_v2.teacher_onboarding import get_v2_onboarding
 
@@ -102,6 +111,8 @@ def record_submission_review_view(
     user: User,
     submission: TeacherAssistV2StudentSubmission,
 ) -> None:
+    from sqlalchemy.exc import IntegrityError
+
     existing = db.scalars(
         select(TeacherAssistV2SubmissionReviewView).where(
             TeacherAssistV2SubmissionReviewView.teacher_user_id == user.id,
@@ -110,16 +121,21 @@ def record_submission_review_view(
     ).first()
     if existing is not None:
         return
-    db.add(
-        TeacherAssistV2SubmissionReviewView(
-            id=uuid.uuid4(),
-            tenant_id=submission.tenant_id,
-            teacher_user_id=user.id,
-            student_submission_id=submission.id,
-            first_viewed_at=_now(),
-        )
-    )
-    db.flush()
+
+    try:
+        with db.begin_nested():
+            db.add(
+                TeacherAssistV2SubmissionReviewView(
+                    id=uuid.uuid4(),
+                    tenant_id=submission.tenant_id,
+                    teacher_user_id=user.id,
+                    student_submission_id=submission.id,
+                    first_viewed_at=_now(),
+                )
+            )
+            db.flush()
+    except IntegrityError:
+        return
 
 
 def resolve_review_queue_status(
@@ -144,7 +160,7 @@ def resolve_review_queue_status(
 
 
 def serialize_assignment_grade(row: TeacherAssistV2AssignmentGrade) -> dict[str, Any]:
-    return {
+    payload = {
         "id": str(row.id),
         "assignment_id": str(row.assignment_id),
         "student_submission_id": str(row.student_submission_id),
@@ -164,6 +180,10 @@ def serialize_assignment_grade(row: TeacherAssistV2AssignmentGrade) -> dict[str,
         "updated_at": row.updated_at.isoformat(),
         "is_official": row.status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES,
     }
+    payload.update(
+        serialize_mastery_level_fields(percentage=row.percentage, mastery_level=row.mastery_level)
+    )
+    return payload
 
 
 def serialize_grade_audit_event(row: TeacherAssistV2AssignmentGradeAuditEvent) -> dict[str, Any]:
@@ -266,6 +286,8 @@ def _persist_grade(
     normalized_action = _validate_review_action(review_action)
     normalized_status = _validate_grade_status(status)
     now = _now()
+    percentage = _percentage(score, max_score)
+    mastery_level = resolve_mastery_level(percentage)
     _archive_active_grades(db, submission_id=submission.id)
 
     grade = TeacherAssistV2AssignmentGrade(
@@ -278,7 +300,8 @@ def _persist_grade(
         grading_draft_id=draft.id if draft is not None else None,
         score=score,
         max_score=max_score,
-        percentage=_percentage(score, max_score),
+        percentage=percentage,
+        mastery_level=mastery_level,
         rubric_json=rubric_json,
         teacher_comment=teacher_comment.strip(),
         teacher_override_reason=teacher_override_reason.strip() if teacher_override_reason else None,
@@ -299,7 +322,35 @@ def _persist_grade(
             grade=grade,
             submission=submission,
         )
+        mark_submission_review_outcome(submission, outcome="CONFIRMED")
+        assignment = _get_assignment_or_404(db, user=user, assignment_id=submission.assignment_id)
+        refresh_assignment_completion_status(db, user=user, assignment=assignment)
     return grade
+
+
+def record_manual_assignment_grade(
+    db: Session,
+    *,
+    user: User,
+    submission: TeacherAssistV2StudentSubmission,
+    score: float,
+    max_score: float,
+    teacher_comment: str = "",
+) -> dict[str, Any]:
+    grade = _persist_grade(
+        db,
+        user=user,
+        submission=submission,
+        draft=None,
+        score=score,
+        max_score=max_score,
+        rubric_json={},
+        teacher_comment=teacher_comment or "Manual gradebook entry.",
+        teacher_override_reason=None,
+        review_action="MANUAL_ENTRY",
+        status="CONFIRMED",
+    )
+    return serialize_assignment_grade(grade)
 
 
 def get_assignment_grade_for_submission(
@@ -339,6 +390,10 @@ def accept_grading_draft(
     *,
     user: User,
     submission_id: uuid.UUID,
+    score: float | None = None,
+    max_score: float | None = None,
+    teacher_comment: str | None = None,
+    rubric_json: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     submission = get_student_submission_or_404(db, user=user, submission_id=submission_id)
     draft = _get_latest_grading_draft_row(db, user=user, submission_id=submission.id)
@@ -347,15 +402,25 @@ def accept_grading_draft(
     if _get_latest_active_grade(db, submission_id=submission.id, statuses=OFFICIAL_ASSIGNMENT_GRADE_STATUSES):
         raise ValueError("An official grade already exists for this submission.")
 
+    final_rubric = rubric_json if rubric_json is not None else draft.rubric_json
+    final_score, final_max, final_rubric = resolve_final_grade_values(
+        draft_score=draft.score,
+        draft_max_score=draft.max_score,
+        rubric_json=final_rubric if isinstance(final_rubric, dict) else {},
+        score=score,
+        max_score=max_score,
+    )
+    final_comment = teacher_comment if teacher_comment is not None else draft.teacher_comment_draft
+
     grade = _persist_grade(
         db,
         user=user,
         submission=submission,
         draft=draft,
-        score=draft.score,
-        max_score=draft.max_score,
-        rubric_json=draft.rubric_json,
-        teacher_comment=draft.teacher_comment_draft,
+        score=final_score,
+        max_score=final_max,
+        rubric_json=final_rubric,
+        teacher_comment=final_comment,
         teacher_override_reason=None,
         review_action="ACCEPT",
         status="CONFIRMED",
@@ -381,14 +446,22 @@ def modify_grading_draft(
     if not teacher_override_reason.strip():
         raise ValueError("Teacher override reason is required when modifying a grade.")
 
+    final_score, final_max, final_rubric = resolve_final_grade_values(
+        draft_score=draft.score,
+        draft_max_score=draft.max_score,
+        rubric_json=rubric_json,
+        score=score,
+        max_score=max_score,
+    )
+
     grade = _persist_grade(
         db,
         user=user,
         submission=submission,
         draft=draft,
-        score=score,
-        max_score=max_score,
-        rubric_json=rubric_json,
+        score=final_score,
+        max_score=final_max,
+        rubric_json=final_rubric,
         teacher_comment=teacher_comment,
         teacher_override_reason=teacher_override_reason,
         review_action="MODIFY",
@@ -413,14 +486,22 @@ def reject_grading_draft(
     if draft is None:
         raise ValueError("No AI grading draft exists for this submission.")
 
+    final_score, final_max, final_rubric = resolve_final_grade_values(
+        draft_score=draft.score,
+        draft_max_score=draft.max_score,
+        rubric_json=rubric_json,
+        score=score,
+        max_score=max_score,
+    )
+
     grade = _persist_grade(
         db,
         user=user,
         submission=submission,
         draft=draft,
-        score=score,
-        max_score=max_score,
-        rubric_json=rubric_json,
+        score=final_score,
+        max_score=final_max,
+        rubric_json=final_rubric,
         teacher_comment=teacher_comment,
         teacher_override_reason=teacher_override_reason,
         review_action="REJECT",
@@ -447,14 +528,22 @@ def save_grade_review_draft(
     if _get_latest_active_grade(db, submission_id=submission.id, statuses=OFFICIAL_ASSIGNMENT_GRADE_STATUSES):
         raise ValueError("An official grade already exists for this submission.")
 
+    final_score, final_max, final_rubric = resolve_final_grade_values(
+        draft_score=draft.score,
+        draft_max_score=draft.max_score,
+        rubric_json=rubric_json,
+        score=score,
+        max_score=max_score,
+    )
+
     grade = _persist_grade(
         db,
         user=user,
         submission=submission,
         draft=draft,
-        score=score,
-        max_score=max_score,
-        rubric_json=rubric_json,
+        score=final_score,
+        max_score=final_max,
+        rubric_json=final_rubric,
         teacher_comment=teacher_comment,
         teacher_override_reason=teacher_override_reason,
         review_action="SAVE_DRAFT",
@@ -580,17 +669,34 @@ def list_assignment_grade_reviews(
             has_review_view=submission.id in viewed_ids,
             grade=grade,
         )
+        draft_mastery = (
+            serialize_mastery_level_fields(percentage=draft.percentage)
+            if draft is not None
+            else None
+        )
+        official_mastery = (
+            serialize_mastery_level_fields(percentage=grade.percentage, mastery_level=grade.mastery_level)
+            if grade is not None and grade.status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES
+            else None
+        )
         rows.append(
             {
                 "student_submission_id": str(submission.id),
                 "student_number": submission.student_number,
                 "draft_score": draft.score if draft is not None else None,
                 "draft_max_score": draft.max_score if draft is not None else None,
+                "draft_percentage": draft.percentage if draft is not None else None,
+                "draft_mastery_level": draft_mastery["mastery_level"] if draft_mastery else None,
+                "draft_mastery_level_label": draft_mastery["mastery_level_label"] if draft_mastery else None,
                 "review_status": review_status,
                 "grade_status": grade.status if grade is not None else None,
                 "confirmed_by": str(grade.confirmed_by) if grade and grade.confirmed_by else None,
                 "confirmed_at": grade.confirmed_at.isoformat() if grade and grade.confirmed_at else None,
                 "official_score": grade.score if grade and grade.status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES else None,
+                "official_max_score": grade.max_score if grade and grade.status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES else None,
+                "official_percentage": grade.percentage if grade and grade.status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES else None,
+                "official_mastery_level": official_mastery["mastery_level"] if official_mastery else None,
+                "official_mastery_level_label": official_mastery["mastery_level_label"] if official_mastery else None,
                 "teacher_viewed": submission.id in viewed_ids,
                 "has_grading_draft": draft is not None,
             }

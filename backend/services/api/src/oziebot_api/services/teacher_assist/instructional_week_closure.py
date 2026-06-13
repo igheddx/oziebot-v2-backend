@@ -14,7 +14,6 @@ from oziebot_api.models.teacher_assist_instructional_week_closure import (
     TeacherAssistInstructionalWeekClosure,
     TeacherAssistInstructionalWeekSummary,
 )
-from oziebot_api.models.teacher_assist_instructional_week import TeacherAssistInstructionalWeek
 from oziebot_api.services.teacher_assist.assignment_coverage import build_assignment_coverage_view
 from oziebot_api.services.teacher_assist.constants import WEEK_CLOSURE_CHECKLIST_KEYS, validate_instructional_week_closure_status
 from oziebot_api.services.teacher_assist.instructional_reflections import list_instructional_reflections

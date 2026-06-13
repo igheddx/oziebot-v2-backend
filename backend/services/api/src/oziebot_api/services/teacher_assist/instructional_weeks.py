@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import uuid
 from typing import Any
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, selectinload
 
 from oziebot_api.models.education_catalog import EducationObjective

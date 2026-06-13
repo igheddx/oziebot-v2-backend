@@ -44,7 +44,6 @@ from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGu
 from oziebot_api.models.teacher_assist_pacing_item import TeacherAssistPacingItem
 from oziebot_api.models.teacher_assist_profile import TeacherAssistProfile
 from oziebot_api.models.teacher_assist_newsletter import TeacherAssistNewsletter
-from oziebot_api.models.teacher_assist_newsletter_export import TeacherAssistNewsletterExport
 from oziebot_api.models.teacher_assist_newsletter_version import TeacherAssistNewsletterVersion
 from oziebot_api.models.teacher_assist_lesson_reflection import TeacherAssistLessonReflection
 from oziebot_api.models.teacher_assist_lesson_reflection_version import TeacherAssistLessonReflectionVersion
@@ -77,7 +76,6 @@ from oziebot_api.schemas.teacher_assist import (
     TeacherAssistClassOperationalWorkspaceOut,
     TeacherAssistUserPreferencesOut,
     TeacherAssistUserPreferencesUpdate,
-    TeacherAssistOnboardingProgressOut,
     TeacherAssistActivityEventOut,
     AssignmentGradingReviewAISuggestionCreate,
     AssignmentGradingReviewAISuggestionOut,
@@ -307,7 +305,6 @@ from oziebot_api.services.teacher_assist.user_preferences import (
     get_user_preferences_or_create,
     mark_onboarding_step_complete,
     serialize_user_preferences,
-    update_user_preferences,
     validate_preferred_landing,
 )
 from oziebot_api.services.teacher_assist.today_workspace import get_teacher_assist_today_workspace
@@ -2714,6 +2711,7 @@ def read_resource_download_url(
 @router.get("/storage/local-download")
 def download_teacher_assist_local_file(
     token: str = Query(..., min_length=1),
+    inline: bool = Query(default=False),
     settings: Settings = Depends(settings_dep),
 ) -> Response:
     try:
@@ -2729,7 +2727,10 @@ def download_teacher_assist_local_file(
         content=contents,
         media_type=download_request.mime_type,
         headers={
-            "Content-Disposition": build_content_disposition(download_request.original_filename),
+            "Content-Disposition": build_content_disposition(
+                download_request.original_filename,
+                inline=inline,
+            ),
             "Cache-Control": "private, max-age=60",
         },
     )

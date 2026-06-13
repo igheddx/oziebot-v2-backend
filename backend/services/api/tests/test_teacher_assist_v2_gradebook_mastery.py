@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 
 from tests.test_teacher_assist_v2_grade_reviews import _upload_ready_submission
 from tests.test_teacher_assist_v2_submission_intake import (
@@ -30,6 +29,8 @@ def test_v2_confirmed_grade_syncs_gradebook_and_mastery(client, db_session):
     assert records[0]["assignment_id"] == assignment_id
     assert records[0]["student_number"] == 1
     assert records[0]["sync_status"] == "SYNCED"
+    assert records[0]["mastery_level"] in {"mastery", "developing", "beginning"}
+    assert records[0]["mastery_level_label"] in {"Mastery", "Developing", "Beginning"}
 
     mastery = client.get("/v1/teacher-assist-v2/teacher/mastery", headers=headers)
     assert mastery.status_code == 200, mastery.text
@@ -56,7 +57,7 @@ def test_v2_ai_draft_alone_does_not_sync_gradebook(client, db_session):
     headers = {"Authorization": f"Bearer {token}"}
     _generate_week1_package(client, headers)
     assignment_id = _written_assignment_id(client, headers)
-    submission_id = _upload_ready_submission(client, headers, assignment_id, student_number=2)
+    _upload_ready_submission(client, headers, assignment_id, student_number=2)
 
     gradebook = client.get(
         f"/v1/teacher-assist-v2/teacher/gradebook?assignment_id={assignment_id}",
@@ -78,7 +79,10 @@ def test_v2_modify_confirmed_grade_updates_gradebook(client, db_session):
         headers=headers,
     )
     assert accept.status_code == 201, accept.text
-    original_score = accept.json()["score"]
+    accept_payload = accept.json()
+    assert accept_payload["mastery_level"] in {"mastery", "developing", "beginning"}
+    assert accept_payload["mastery_level_label"] in {"Mastery", "Developing", "Beginning"}
+    original_score = accept_payload["score"]
 
     modify = client.post(
         f"/v1/teacher-assist-v2/teacher/submissions/{submission_id}/grade-review/modify",
@@ -101,3 +105,4 @@ def test_v2_modify_confirmed_grade_updates_gradebook(client, db_session):
     records = [row for row in gradebook.json() if row["student_number"] == 3]
     assert len(records) == 1
     assert records[0]["score"] == modify.json()["score"]
+    assert records[0]["mastery_level"] == modify.json()["mastery_level"]

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Date, DateTime, ForeignKey, Integer, JSON, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from oziebot_api.db.base import Base
+
+if TYPE_CHECKING:
+    from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
 
 
 class TeacherAssistV2InstructionalPackage(Base):

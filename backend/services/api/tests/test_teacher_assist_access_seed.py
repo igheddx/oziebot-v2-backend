@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from unittest.mock import patch
+
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.platform_product import PlatformProduct
+from oziebot_api.models.teacher_assist_user_preference import TeacherAssistUserPreference
 from oziebot_api.models.tenant import Tenant
 from oziebot_api.models.tenant_product_access import TenantProductAccess
 from oziebot_api.models.user import User
@@ -14,6 +19,7 @@ from oziebot_api.services.teacher_assist.access_seed import (
     ensure_existing_user_teacher_assist_access,
     ensure_user_teacher_assist_access,
 )
+from oziebot_api.services.teacher_assist import user_preferences as user_preferences_module
 from oziebot_api.services.teacher_assist.user_preferences import get_user_preferences_or_create
 
 
@@ -184,3 +190,53 @@ def test_user_preferences_or_create_is_idempotent(db_session: Session, client):
     )
     db_session.commit()
     assert first.id == second.id
+
+
+def test_user_preferences_or_create_recovers_from_duplicate_insert(db_session: Session, client):
+    email = "teacher-preferences-race@example.com"
+    token = client.post(
+        "/v1/auth/register",
+        json={
+            "email": email,
+            "full_name": "Preferences Race",
+            "password": "password-123",
+            "tenant_name": "Preferences Race Tenant",
+        },
+    )
+    assert token.status_code == 201, token.text
+    user = db_session.scalar(select(User).where(func.lower(User.email) == email.lower()))
+    assert user is not None
+    membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == user.id)
+    )
+    assert membership is not None
+
+    now = datetime.now(UTC)
+    existing = TeacherAssistUserPreference(
+        tenant_id=membership.tenant_id,
+        user_id=user.id,
+        preferred_landing="home",
+        recently_viewed_json=[],
+        onboarding_progress_json={},
+        created_at=now,
+        updated_at=now,
+    )
+    db_session.add(existing)
+    db_session.flush()
+
+    with patch.object(
+        user_preferences_module,
+        "_get_user_preferences",
+        side_effect=[None, existing],
+    ), patch.object(db_session, "begin_nested", db_session.begin_nested), patch.object(
+        db_session,
+        "flush",
+        side_effect=IntegrityError("duplicate key", None, None),
+    ):
+        recovered = get_user_preferences_or_create(
+            db_session,
+            tenant_id=membership.tenant_id,
+            user_id=user.id,
+        )
+
+    assert recovered.id == existing.id

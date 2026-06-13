@@ -9,7 +9,6 @@ from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.user import User
 from tests.test_education_catalog import _root_token
 from tests.test_pacing_guide_foundation import _catalog_scope, _school_year, _teacher_token
-from tests.test_teacher_assist_setup import _grant_teacher_assist_access, _register_user
 
 
 def _align_teacher_tenant(db_session: Session, *, teacher_email: str) -> None:

@@ -247,6 +247,7 @@ def get_instructional_package_detail_enriched(
         week_start=row.week_start,
         week_end=row.week_end,
         settings=settings,
+        package_id=row.id,
     )
     plan_start, plan_end = resolve_default_plan_dates(
         db, user=user, week_start=row.week_start, week_end=row.week_end
@@ -276,6 +277,17 @@ def get_instructional_package_detail_enriched(
             "teacher_supplemental_materials": supplemental,
             "suggested_plan_start_date": plan_start.isoformat(),
             "suggested_plan_end_date": plan_end.isoformat(),
+            "qr_student_packet": _extract_qr_student_packet(detail.get("artifacts") or []),
         }
     )
     return detail
+
+
+def _extract_qr_student_packet(artifacts: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for artifact in artifacts:
+        if artifact.get("artifact_type") != "assignment":
+            continue
+        qr = artifact.get("qr_student_packet")
+        if isinstance(qr, dict):
+            return qr
+    return None

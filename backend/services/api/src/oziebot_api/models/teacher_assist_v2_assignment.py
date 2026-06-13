@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from oziebot_api.db.base import Base
+
+if TYPE_CHECKING:
+    from oziebot_api.models.teacher_assist_v2_instructional_package import (
+        TeacherAssistV2InstructionalPackageArtifact,
+    )
 
 
 class TeacherAssistV2Assignment(Base):
@@ -49,6 +54,7 @@ class TeacherAssistV2Assignment(Base):
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str | None] = mapped_column(Text(), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT", server_default="DRAFT")
+    creation_origin: Mapped[str] = mapped_column(String(32), nullable=False, default="PACKAGE", server_default="PACKAGE")
     education_objective_ids_json: Mapped[list[Any]] = mapped_column(JSON(), nullable=False)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False

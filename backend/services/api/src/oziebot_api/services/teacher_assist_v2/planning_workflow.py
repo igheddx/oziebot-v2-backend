@@ -29,13 +29,28 @@ from oziebot_api.services.teacher_assist.storage import (
 from oziebot_api.services.teacher_assist_v2.pacing_guide_setup import (
     _load_guide_summary,
     _require_completed_onboarding,
+    list_teacher_available_pacing_guides,
 )
 from oziebot_api.services.teacher_assist_v2.pacing_guides import ensure_tenant_school_year
 from oziebot_api.services.teacher_assist_v2.planning_constants import WEEK_RANGE_PRESETS
 from oziebot_api.services.teacher_assist_v2.package_lifecycle import resolve_default_plan_dates
 from oziebot_api.services.teacher_assist_v2.platform_context import resolve_instructional_catalog_tenant_id
 from oziebot_api.services.teacher_assist_v2.school_years import get_platform_school_year_or_404
-from oziebot_api.services.teacher_assist_v2.supporting_materials import list_supporting_materials
+from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import (
+    filter_excluded_pacing_materials,
+    flatten_pacing_materials,
+    resolve_week_daily_topic,
+)
+from oziebot_api.services.teacher_assist_v2.document_extraction import (
+    build_ai_readiness_summary,
+    ensure_planning_supplemental_extraction_record,
+    load_planning_supplemental_extractions,
+    run_document_extraction,
+    serialize_document_extraction,
+)
+from oziebot_api.services.teacher_assist_v2.supporting_materials import (
+    get_pacing_guide_planning_context,
+)
 from oziebot_api.services.teacher_assist_v2.supporting_materials_constants import (
     PACING_SUPPORTING_UPLOAD_EXTENSIONS,
 )
@@ -107,6 +122,13 @@ def _assignment_context(db: Session, *, user: User) -> dict:
         )
         period_count = len(_week_periods(guide))
         min_periods = period_count if min_periods is None else min(min_periods, period_count)
+        available = list_teacher_available_pacing_guides(
+            db,
+            platform_tenant_id=platform_tenant_id,
+            onboarding=onboarding,
+            platform_year=platform_year,
+            subject_id=subject.id,
+        )
         guides.append(
             {
                 "subject_id": str(subject.id),
@@ -116,6 +138,17 @@ def _assignment_context(db: Session, *, user: User) -> dict:
                 "pacing_guide_title": guide.title,
                 "guide_scope": assignment.guide_scope,
                 "period_count": period_count,
+                "available_pacing_guides": [
+                    {
+                        "id": str(row.id),
+                        "title": row.title,
+                        "description": row.description,
+                        "school_year_label": row.school_year_label,
+                        "scope_label": "School" if row.catalog_school_id else "District",
+                        "is_selected": str(row.id) == str(guide.id),
+                    }
+                    for row in available
+                ],
             }
         )
 
@@ -202,10 +235,12 @@ def build_planning_review_context(
     week_start: int,
     week_end: int,
     settings: Settings | None = None,
+    excluded_pacing_material_ids: list[uuid.UUID] | None = None,
 ) -> dict:
     base = _assignment_context(db, user=user)
     min_periods = min(row["period_count"] for row in base["subjects"])
     _validate_week_range(week_start=week_start, week_end=week_end, max_periods=min_periods)
+    excluded_ids = {str(value) for value in (excluded_pacing_material_ids or [])}
 
     ctx = base["ctx"]
     platform_tenant_id = base["platform_tenant_id"]
@@ -244,12 +279,11 @@ def build_planning_review_context(
                         "description": getattr(objective, "description", None),
                     }
                 )
-            district_materials = list_supporting_materials(
+            pacing_context = get_pacing_guide_planning_context(
                 db,
                 tenant_id=guide_tenant_id,
                 pacing_guide_id=guide.id,
                 period_id=period.id,
-                active_only=True,
                 settings=settings,
             )
             week_entry["subjects"].append(
@@ -258,9 +292,28 @@ def build_planning_review_context(
                     "subject_name": subject_row["subject_name"],
                     "pacing_guide_id": str(guide.id),
                     "period_id": str(period.id),
-                    "daily_topic": period.description,
+                    "daily_topic": resolve_week_daily_topic({"pacing_context": pacing_context}),
                     "objectives": objectives,
-                    "district_materials": district_materials,
+                    "district_materials": filter_excluded_pacing_materials(
+                        flatten_pacing_materials(
+                            pacing_context,
+                            excluded_material_ids=excluded_ids or None,
+                        ),
+                        excluded_ids or None,
+                    ),
+                    "pacing_days": [
+                        {
+                            "day_label": day.get("day_label"),
+                            "sequence_number": day.get("sequence_number"),
+                            "daily_topic": day.get("daily_topic"),
+                            "objective_focus": day.get("objective_focus"),
+                            "teacher_notes": day.get("teacher_notes"),
+                            "materials_needed": day.get("materials_needed"),
+                            "assessment_check": day.get("assessment_check"),
+                        }
+                        for day in (pacing_context.get("days") or [])
+                    ],
+                    "pacing_context": pacing_context,
                 }
             )
 
@@ -271,6 +324,7 @@ def build_planning_review_context(
         week_start=week_start,
         week_end=week_end,
         settings=settings,
+        unlinked_only=True,
     )
     from oziebot_api.services.teacher_assist_v2.package_lifecycle import default_plan_dates_for_week_range
 
@@ -284,11 +338,21 @@ def build_planning_review_context(
         period_start_dates=period_starts,
         period_end_dates=period_ends,
     )
+    district_materials = [
+        material
+        for week in weeks
+        for subject in week["subjects"]
+        for material in subject["district_materials"]
+    ]
     return {
         "week_start": week_start,
         "week_end": week_end,
         "weeks": weeks,
         "teacher_supplemental_materials": supplemental,
+        "ai_readiness_summary": build_ai_readiness_summary(
+            district_materials=district_materials,
+            teacher_materials=supplemental,
+        ),
         "default_plan_start_date": plan_start.isoformat(),
         "default_plan_end_date": plan_end.isoformat(),
     }
@@ -311,7 +375,12 @@ def _supplemental_scope(db: Session, *, user: User, week_start: int, week_end: i
     }
 
 
-def serialize_supplemental_material(row: TeacherAssistV2PlanningSupplementalMaterial, *, settings: Settings | None = None) -> dict:
+def serialize_supplemental_material(
+    row: TeacherAssistV2PlanningSupplementalMaterial,
+    *,
+    settings: Settings | None = None,
+    extraction: dict | None = None,
+) -> dict:
     download_url = None
     if row.material_kind == "file" and row.storage_key and settings is not None:
         download_url = get_teacher_assist_download_url(
@@ -333,6 +402,7 @@ def serialize_supplemental_material(row: TeacherAssistV2PlanningSupplementalMate
         "week_start": row.week_start,
         "week_end": row.week_end,
         "created_at": row.created_at,
+        "extraction": extraction,
     }
 
 
@@ -343,17 +413,41 @@ def list_planning_supplemental_materials(
     week_start: int,
     week_end: int,
     settings: Settings | None = None,
+    unlinked_only: bool = False,
+    package_id: uuid.UUID | None = None,
 ) -> list[dict]:
-    _supplemental_scope(db, user=user, week_start=week_start, week_end=week_end)
-    rows = db.scalars(
-        select(TeacherAssistV2PlanningSupplementalMaterial).where(
-            TeacherAssistV2PlanningSupplementalMaterial.teacher_user_id == user.id,
+    if package_id is None:
+        _supplemental_scope(db, user=user, week_start=week_start, week_end=week_end)
+    stmt = select(TeacherAssistV2PlanningSupplementalMaterial).where(
+        TeacherAssistV2PlanningSupplementalMaterial.teacher_user_id == user.id,
+        TeacherAssistV2PlanningSupplementalMaterial.active.is_(True),
+    )
+    if package_id is not None:
+        stmt = stmt.where(TeacherAssistV2PlanningSupplementalMaterial.package_id == package_id)
+    else:
+        stmt = stmt.where(
             TeacherAssistV2PlanningSupplementalMaterial.week_start == week_start,
             TeacherAssistV2PlanningSupplementalMaterial.week_end == week_end,
-            TeacherAssistV2PlanningSupplementalMaterial.active.is_(True),
         )
-    ).all()
-    return [serialize_supplemental_material(row, settings=settings) for row in rows]
+        if unlinked_only:
+            stmt = stmt.where(TeacherAssistV2PlanningSupplementalMaterial.package_id.is_(None))
+    rows = db.scalars(stmt.order_by(TeacherAssistV2PlanningSupplementalMaterial.created_at.asc())).all()
+    if settings is not None:
+        for row in rows:
+            if row.material_kind != "file" or not row.storage_key:
+                continue
+            record = ensure_planning_supplemental_extraction_record(db, row=row)
+            if record.extraction_status == "not_started":
+                run_document_extraction(db, settings=settings, record=record)
+    extraction_map = load_planning_supplemental_extractions(db, material_ids=[row.id for row in rows])
+    return [
+        serialize_supplemental_material(
+            row,
+            settings=settings,
+            extraction=serialize_document_extraction(extraction_map.get(row.id)),
+        )
+        for row in rows
+    ]
 
 
 def _validate_file_extension(filename: str) -> None:
@@ -437,7 +531,7 @@ async def upload_planning_supplemental_file(
         upload=upload,
         area="resources",
     )
-    return _create_supplemental_row(
+    row = _create_supplemental_row(
         db,
         user=user,
         week_start=week_start,
@@ -447,6 +541,9 @@ async def upload_planning_supplemental_file(
         title=title or stored.original_filename,
         stored=stored,
     )
+    record = ensure_planning_supplemental_extraction_record(db, row=row)
+    run_document_extraction(db, settings=settings, record=record)
+    return row
 
 
 def create_planning_supplemental_link(
@@ -547,6 +644,8 @@ def get_instructional_package_detail(
 
     artifacts = []
     for artifact in sorted(row.artifacts, key=lambda item: (item.sequence_number, item.title)):
+        metadata = artifact.metadata_json if isinstance(artifact.metadata_json, dict) else {}
+        content = artifact.content_json if isinstance(artifact.content_json, dict) else {}
         entry = {
             "id": str(artifact.id),
             "artifact_type": artifact.artifact_type,
@@ -555,13 +654,57 @@ def get_instructional_package_detail(
             "title": artifact.title,
             "day_label": artifact.day_label,
             "status": artifact.status,
+            "description": metadata.get("description") or content.get("description") or content.get("summary"),
+            "objective_mapping": metadata.get("objective_mapping") or content.get("objective_mapping"),
             "preview_html": artifact.preview_html,
             "export_format": artifact.export_format,
             "download_url": artifact_download_url(artifact, settings=settings),
             "export_available": bool(artifact.storage_key),
+            "additional_downloads": [],
         }
-        if artifact.artifact_type in {"daily_lesson_plan", "subject_slide_deck"}:
-            entry["content_json"] = artifact.content_json if isinstance(artifact.content_json, dict) else {}
+        if content:
+            entry["content_json"] = content
+        if metadata.get("linked_rubric_artifact_id"):
+            entry["linked_rubric_artifact_id"] = metadata["linked_rubric_artifact_id"]
+        elif content.get("linked_rubric_artifact_id"):
+            entry["linked_rubric_artifact_id"] = content["linked_rubric_artifact_id"]
+        if metadata.get("linked_writing_response_artifact_id"):
+            entry["linked_writing_response_artifact_id"] = metadata["linked_writing_response_artifact_id"]
+        if metadata.get("teacher_edited"):
+            entry["teacher_edited"] = True
+        if metadata.get("package_additional"):
+            entry["package_additional"] = True
+        for extra in metadata.get("additional_exports") or []:
+            if not isinstance(extra, dict) or not extra.get("storage_key"):
+                continue
+            export_format = str(extra.get("format") or "html")
+            mime_types = {
+                "json": "application/json",
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "html": "text/html",
+            }
+            url = artifact_download_url(
+                artifact,
+                settings=settings,
+                storage_key=extra["storage_key"],
+                filename=str(
+                    extra.get("original_filename")
+                    or f"{artifact.title} {extra.get('label', 'download')}.{export_format}"
+                ),
+                mime_type=mime_types.get(export_format, "application/octet-stream"),
+            )
+            if url:
+                entry["additional_downloads"].append(
+                    {
+                        "label": str(extra.get("label") or "Download"),
+                        "format": str(extra.get("format") or "html"),
+                        "download_url": url,
+                    }
+                )
+        if artifact.artifact_type == "assignment" and metadata.get("qr_student_packet"):
+            entry["qr_student_packet"] = metadata["qr_student_packet"]
+        if artifact.artifact_type == "quiz":
+            entry["assignment_id"] = str(artifact.assignment_id) if artifact.assignment_id else None
         artifacts.append(entry)
 
     daily_plans = [item for item in artifacts if item["artifact_type"] == "daily_lesson_plan"]
@@ -575,6 +718,12 @@ def get_instructional_package_detail(
         "teaching_order": [str(value) for value in row.teaching_order_json],
         "selected_outputs": list(row.selected_outputs_json),
         "provider_name": row.provider_name,
+        "generation_document_usage": (row.metadata_json or {}).get("generation_document_usage")
+        if isinstance(row.metadata_json, dict)
+        else None,
+        "ai_readiness_summary": (row.metadata_json or {}).get("ai_readiness_summary")
+        if isinstance(row.metadata_json, dict)
+        else None,
         "created_at": row.created_at.isoformat(),
         "artifact_groups": group_artifacts(artifacts),
         "artifacts": artifacts,

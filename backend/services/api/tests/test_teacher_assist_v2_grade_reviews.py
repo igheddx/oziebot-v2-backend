@@ -32,6 +32,21 @@ def _upload_ready_submission(client, headers, assignment_id: str, student_number
     return submission_id
 
 
+def test_v2_submission_review_view_is_idempotent(client, db_session):
+    token = _ready_teacher_token(client, db_session)
+    headers = {"Authorization": f"Bearer {token}"}
+    _generate_week1_package(client, headers)
+    assignment_id = _written_assignment_id(client, headers)
+    submission_id = _upload_ready_submission(client, headers, assignment_id)
+
+    first = client.get(f"/v1/teacher-assist-v2/teacher/submissions/{submission_id}", headers=headers)
+    second = client.get(f"/v1/teacher-assist-v2/teacher/submissions/{submission_id}", headers=headers)
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["teacher_viewed_for_review"] is True
+    assert second.json()["teacher_viewed_for_review"] is True
+
+
 def test_v2_accept_ai_grade_after_viewing_submission(client, db_session):
     token = _ready_teacher_token(client, db_session)
     headers = {"Authorization": f"Bearer {token}"}

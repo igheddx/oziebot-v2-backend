@@ -60,7 +60,6 @@ from oziebot_api.services.teacher_assist.education_catalog import (
     list_schools,
     list_states,
     list_subjects,
-    list_teacher_assignments,
     preview_objectives_import,
     update_curriculum_resource,
     update_district,
