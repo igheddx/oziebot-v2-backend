@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, date, datetime
 from typing import Any
@@ -10,13 +11,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
+from oziebot_api.db.session import make_session_factory
 from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2InstructionalPackage,
     TeacherAssistV2InstructionalPackageArtifact,
     TeacherAssistV2PlanningSupplementalMaterial,
 )
 from oziebot_api.models.user import User
+from oziebot_api.services.teacher_assist.ai_usage import get_effective_daily_cost_limit_cents
 from oziebot_api.services.teacher_assist.ai_mode import is_teacher_assist_real_ai_active
+from oziebot_api.services.teacher_assist.constants import validate_teacher_assist_ai_provider
+from oziebot_api.services.teacher_assist.provider_config import TeacherAssistProviderCircuitBreaker
+from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher_assist_settings
 from oziebot_api.services.teacher_assist_v2.artifact_persistence import (
     attach_qr_student_packet,
     persist_package_artifact,
@@ -58,9 +64,50 @@ _DAILY_FOCUS_ROTATION = [
     "Review, reflect, and prepare for the weekly assessment.",
 ]
 
+logger = logging.getLogger(__name__)
+PACKAGE_PROCESSING_MESSAGE = (
+    "Your instructional package is being processed and will be available soon."
+)
+PACKAGE_FAILURE_PREFIX = "Package generation failed."
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _build_package_metadata(
+    *,
+    context: dict[str, Any],
+    stored_status: str,
+    plan_start_date: date,
+    plan_end_date: date,
+    generation_state: str,
+    status_detail: str | None = None,
+    error_message: str | None = None,
+) -> dict[str, Any]:
+    metadata = {
+        "is_mock": False,
+        "context_weeks": len(context["weeks"]),
+        "effective_status": resolve_effective_package_status(
+            stored_status=stored_status,
+            plan_start_date=plan_start_date,
+            plan_end_date=plan_end_date,
+            today=date.today(),
+        ),
+        "ai_readiness_summary": context.get("ai_readiness_summary"),
+        "generation_document_usage": {
+            "district": context.get("district_document_context"),
+            "teacher": context.get("teacher_document_context"),
+            "district_links": context.get("district_link_context"),
+            "teacher_links": context.get("teacher_link_context"),
+        },
+        "generation_state": generation_state,
+    }
+    if status_detail:
+        metadata["status_detail"] = status_detail
+    if error_message:
+        metadata["generation_error"] = error_message
+    return metadata
 
 
 def _validate_outputs(selected_outputs: list[str]) -> list[str]:
@@ -137,6 +184,102 @@ def _objective_fields(
             if row.get("objective_code")
         ]
     return objective_code, objective_text, objectives_list, objective_ids, teks_ids
+
+
+def _real_ai_requested_but_inactive(db: Session, settings: Settings) -> str | None:
+    effective = resolve_teacher_assist_settings(db, settings)
+    provider_name = validate_teacher_assist_ai_provider(effective.teacher_assist_ai_provider)
+    real_provider_enabled = bool(
+        effective.teacher_assist_real_provider_enabled
+        or effective.teacher_assist_ai_enable_real_provider
+    )
+    if provider_name != "openai" or not real_provider_enabled:
+        return None
+    if is_teacher_assist_real_ai_active(db, settings):
+        return None
+
+    blockers: list[str] = []
+    if not (effective.teacher_assist_openai_api_key or "").strip():
+        blockers.append("TEACHER_ASSIST_OPENAI_API_KEY is missing on the server")
+    if get_effective_daily_cost_limit_cents(db, effective) <= 0:
+        blockers.append("the daily AI cost limit is not set")
+    circuit = TeacherAssistProviderCircuitBreaker().state_for_provider(effective, provider_name)
+    if circuit.state != "closed" and circuit.reason:
+        blockers.append(circuit.reason)
+    if not blockers:
+        blockers.append("real OpenAI mode is not currently executable")
+    return "; ".join(blockers)
+
+
+def _material_excerpt(row: dict[str, Any]) -> str | None:
+    extraction = row.get("extraction") or {}
+    excerpt = (
+        extraction.get("effective_text_excerpt")
+        or extraction.get("teacher_edited_text")
+        or extraction.get("extracted_text_preview")
+        or extraction.get("extracted_text")
+    )
+    if not excerpt:
+        return None
+    title = row.get("title") or row.get("display_name") or row.get("original_filename") or "Source"
+    normalized = " ".join(str(excerpt).split())
+    return f"{title}: {normalized[:700]}"
+
+
+def _link_context_excerpts(context: dict[str, Any]) -> list[str]:
+    excerpts: list[str] = []
+    for key in ("district_link_context", "teacher_link_context"):
+        link_context = context.get(key) or {}
+        for row in link_context.get("used_links") or []:
+            title = row.get("title") or row.get("external_url") or "Reference link"
+            excerpt = row.get("excerpt")
+            if excerpt:
+                excerpts.append(f"{title}: {' '.join(str(excerpt).split())[:700]}")
+    return excerpts
+
+
+def _grounding_fields(
+    week_subject: dict[str, Any] | None,
+) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
+    pacing_context = (week_subject or {}).get("pacing_context") or {}
+    days = pacing_context.get("days") or []
+    source_materials: list[str] = []
+    source_excerpts: list[str] = []
+    daily_topics: list[str] = []
+    daily_objectives: list[str] = []
+    assessment_checks: list[str] = []
+    for day in days:
+        if day.get("materials_needed"):
+            source_materials.append(str(day["materials_needed"]))
+        if day.get("daily_topic"):
+            daily_topics.append(str(day["daily_topic"]))
+        if day.get("objective_focus"):
+            daily_objectives.append(str(day["objective_focus"]))
+        if day.get("assessment_check"):
+            assessment_checks.append(str(day["assessment_check"]))
+        for bucket in ("attached_files", "reference_links", "notes"):
+            for row in day.get(bucket) or []:
+                title = row.get("title") or row.get("display_name") or row.get("original_filename")
+                if title:
+                    source_materials.append(str(title))
+                excerpt = _material_excerpt(row)
+                if excerpt:
+                    source_excerpts.append(excerpt)
+    for bucket in (
+        "guide_level_materials",
+        "week_level_materials",
+        "day_level_materials",
+        "objective_level_materials",
+        "catalog_resources",
+    ):
+        for row in pacing_context.get(bucket) or []:
+            title = row.get("title") or row.get("display_name") or row.get("original_filename")
+            if title:
+                source_materials.append(str(title))
+            excerpt = _material_excerpt(row)
+            if excerpt:
+                source_excerpts.append(excerpt)
+    return source_materials, source_excerpts, daily_topics, daily_objectives, assessment_checks
 
 
 def _link_assessment_rubric(
@@ -329,7 +472,7 @@ def _persist_linked_assignment_rubric(
     )
 
 
-def generate_instructional_package(
+def prepare_instructional_package_generation(
     db: Session,
     *,
     settings: Settings,
@@ -341,7 +484,13 @@ def generate_instructional_package(
     plan_start_date: date | None = None,
     plan_end_date: date | None = None,
     excluded_pacing_material_ids: list[uuid.UUID] | None = None,
-) -> TeacherAssistV2InstructionalPackage:
+) -> tuple[
+    TeacherAssistV2InstructionalPackage,
+    dict[str, Any],
+    list[str],
+    set[str],
+    str,
+]:
     outputs = _validate_outputs(selected_outputs)
     if plan_start_date is None or plan_end_date is None:
         default_start, default_end = resolve_default_plan_dates(
@@ -365,6 +514,13 @@ def generate_instructional_package(
     excluded_ids = {str(value) for value in (excluded_pacing_material_ids or [])}
     base = _assignment_context(db, user=user)
     onboarding = base["onboarding"]
+    inactive_real_ai_reason = _real_ai_requested_but_inactive(db, settings)
+    if inactive_real_ai_reason:
+        raise ValueError(
+            "TeacherAssist is configured for real OpenAI generation, but it cannot run: "
+            f"{inactive_real_ai_reason}. Package generation was stopped to avoid producing "
+            "generic deterministic content."
+        )
     real_ai = is_teacher_assist_real_ai_active(db, settings)
     provider_name = "openai" if real_ai else "deterministic"
     subject_names = [row["subject_name"] for row in context["subjects"]]
@@ -372,7 +528,7 @@ def generate_instructional_package(
         uuid.UUID(context["pacing_guide_ids"][0]) if context["pacing_guide_ids"] else None
     )
     today = date.today()
-    stored_status = "active" if plan_start_date <= today <= plan_end_date else "generated"
+    final_status = "active" if plan_start_date <= today <= plan_end_date else "generated"
 
     now = _now()
     package = TeacherAssistV2InstructionalPackage(
@@ -394,23 +550,16 @@ def generate_instructional_package(
         plan_end_date=plan_end_date,
         teaching_order_json=[str(value) for value in teaching_order],
         selected_outputs_json=outputs,
-        status=stored_status,
+        status="processing",
         provider_name=provider_name,
-        metadata_json={
-            "is_mock": False,
-            "context_weeks": len(context["weeks"]),
-            "effective_status": resolve_effective_package_status(
-                stored_status=stored_status,
-                plan_start_date=plan_start_date,
-                plan_end_date=plan_end_date,
-                today=today,
-            ),
-            "ai_readiness_summary": context.get("ai_readiness_summary"),
-            "generation_document_usage": {
-                "district": context.get("district_document_context"),
-                "teacher": context.get("teacher_document_context"),
-            },
-        },
+        metadata_json=_build_package_metadata(
+            context=context,
+            stored_status="processing",
+            plan_start_date=plan_start_date,
+            plan_end_date=plan_end_date,
+            generation_state="processing",
+            status_detail=PACKAGE_PROCESSING_MESSAGE,
+        ),
         created_at=now,
         updated_at=now,
     )
@@ -429,6 +578,36 @@ def generate_instructional_package(
     for row in supplemental_rows:
         row.package_id = package.id
         row.updated_at = now
+
+    return package, context, outputs, excluded_ids, final_status
+
+
+def _populate_instructional_package(
+    db: Session,
+    *,
+    settings: Settings,
+    user: User,
+    package: TeacherAssistV2InstructionalPackage,
+    context: dict[str, Any],
+    teaching_order: list[str],
+    outputs: list[str],
+    excluded_ids: set[str],
+    final_status: str,
+) -> TeacherAssistV2InstructionalPackage:
+    provider_name = package.provider_name or "deterministic"
+
+    # Guard against silent fallback: if this package was queued for real AI but the
+    # current process (e.g. the background worker) cannot reach OpenAI, fail loudly
+    # rather than producing deterministic content mislabeled as AI-generated.
+    if provider_name == "openai" and not is_teacher_assist_real_ai_active(db, settings):
+        raise RuntimeError(
+            "Package was queued with provider_name='openai' but real AI is not active in this "
+            "process. Ensure TEACHER_ASSIST_OPENAI_API_KEY, TEACHER_ASSIST_REAL_PROVIDER_ENABLED, "
+            "and TEACHER_ASSIST_AI_DAILY_COST_LIMIT_CENTS are set in the worker environment."
+        )
+
+    now = _now()
+    link_excerpts = _link_context_excerpts(context)
 
     sequence = 0
     subject_lookup = {row["subject_id"]: row for row in context["subjects"]}
@@ -539,6 +718,14 @@ def generate_instructional_package(
                 objective_code, objective_text, objectives_list, objective_ids, teks_ids = _objective_fields(
                     week_subject, subject_meta["subject_name"]
                 )
+                (
+                    source_materials,
+                    source_excerpts,
+                    daily_topics,
+                    daily_objectives,
+                    assessment_checks,
+                ) = _grounding_fields(week_subject)
+                source_excerpts = source_excerpts + link_excerpts
                 deterministic = build_deterministic_fallback(
                     "subject_slide_deck",
                     subject_name=subject_meta["subject_name"],
@@ -549,6 +736,11 @@ def generate_instructional_package(
                     objectives_list=objectives_list,
                     objective_ids=objective_ids,
                     teks_ids=teks_ids,
+                    source_materials=source_materials,
+                    source_excerpts=source_excerpts,
+                    daily_topics=daily_topics,
+                    daily_objectives=daily_objectives,
+                    assessment_checks=assessment_checks,
                 )
                 content = _resolve_artifact_content(
                     db,
@@ -589,6 +781,14 @@ def generate_instructional_package(
                 objective_code, objective_text, objectives_list, objective_ids, teks_ids = _objective_fields(
                     week_subject, subject_meta["subject_name"]
                 )
+                (
+                    source_materials,
+                    source_excerpts,
+                    daily_topics,
+                    daily_objectives,
+                    assessment_checks,
+                ) = _grounding_fields(week_subject)
+                source_excerpts = source_excerpts + link_excerpts
                 deterministic = build_deterministic_fallback(
                     output_type,
                     subject_name=subject_meta["subject_name"],
@@ -600,6 +800,11 @@ def generate_instructional_package(
                     objectives_list=objectives_list,
                     objective_ids=objective_ids,
                     teks_ids=teks_ids,
+                    source_materials=source_materials,
+                    source_excerpts=source_excerpts,
+                    daily_topics=daily_topics,
+                    daily_objectives=daily_objectives,
+                    assessment_checks=assessment_checks,
                 )
                 content = _resolve_artifact_content(
                     db,
@@ -720,5 +925,125 @@ def generate_instructional_package(
             assignment_content=assignment_content,
         )
 
+    package.status = final_status
+    package.metadata_json = _build_package_metadata(
+        context=context,
+        stored_status=final_status,
+        plan_start_date=package.plan_start_date,
+        plan_end_date=package.plan_end_date,
+        generation_state="completed",
+    )
+    package.updated_at = _now()
     db.flush()
     return package
+
+
+def mark_instructional_package_generation_failed(
+    db: Session,
+    *,
+    package: TeacherAssistV2InstructionalPackage,
+    context: dict[str, Any],
+    error_message: str,
+) -> None:
+    package.status = "failed"
+    package.metadata_json = _build_package_metadata(
+        context=context,
+        stored_status="failed",
+        plan_start_date=package.plan_start_date,
+        plan_end_date=package.plan_end_date,
+        generation_state="failed",
+        status_detail=f"{PACKAGE_FAILURE_PREFIX} {error_message}",
+        error_message=error_message,
+    )
+    package.updated_at = _now()
+    db.flush()
+
+
+def run_instructional_package_generation_job(
+    *,
+    settings: Settings,
+    user_id: uuid.UUID,
+    package_id: uuid.UUID,
+    context: dict[str, Any],
+    teaching_order: list[str],
+    outputs: list[str],
+    excluded_ids: list[str],
+    final_status: str,
+) -> None:
+    session_factory = make_session_factory(settings)
+    if session_factory is None:
+        return
+    db = session_factory()
+    try:
+        user = db.get(User, user_id)
+        package = db.get(TeacherAssistV2InstructionalPackage, package_id)
+        if user is None or package is None:
+            return
+        _populate_instructional_package(
+            db,
+            settings=settings,
+            user=user,
+            package=package,
+            context=context,
+            teaching_order=teaching_order,
+            outputs=outputs,
+            excluded_ids=set(excluded_ids),
+            final_status=final_status,
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        try:
+            package = db.get(TeacherAssistV2InstructionalPackage, package_id)
+            if package is not None:
+                mark_instructional_package_generation_failed(
+                    db,
+                    package=package,
+                    context=context,
+                    error_message=str(exc),
+                )
+                db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to mark instructional package generation as failed", extra={"package_id": str(package_id)})
+        logger.exception("Instructional package generation failed", extra={"package_id": str(package_id)})
+    finally:
+        db.close()
+
+
+def generate_instructional_package(
+    db: Session,
+    *,
+    settings: Settings,
+    user: User,
+    week_start: int,
+    week_end: int,
+    teaching_order: list[uuid.UUID],
+    selected_outputs: list[str],
+    plan_start_date: date | None = None,
+    plan_end_date: date | None = None,
+    excluded_pacing_material_ids: list[uuid.UUID] | None = None,
+) -> TeacherAssistV2InstructionalPackage:
+    package, context, outputs, excluded_ids, final_status = prepare_instructional_package_generation(
+        db,
+        settings=settings,
+        user=user,
+        week_start=week_start,
+        week_end=week_end,
+        teaching_order=teaching_order,
+        selected_outputs=selected_outputs,
+        plan_start_date=plan_start_date,
+        plan_end_date=plan_end_date,
+        excluded_pacing_material_ids=excluded_pacing_material_ids,
+    )
+    return _populate_instructional_package(
+        db,
+        settings=settings,
+        user=user,
+        package=package,
+        context=context,
+        teaching_order=[str(value) for value in teaching_order],
+        outputs=outputs,
+        excluded_ids=excluded_ids,
+        final_status=final_status,
+    )

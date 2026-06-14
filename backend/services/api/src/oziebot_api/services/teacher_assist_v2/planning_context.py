@@ -12,6 +12,7 @@ from oziebot_api.services.teacher_assist_v2.document_extraction import (
     build_ai_readiness_summary,
     build_document_prompt_context,
 )
+from oziebot_api.services.teacher_assist_v2.link_context import build_link_prompt_context
 from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import flatten_pacing_materials
 from oziebot_api.services.teacher_assist_v2.planning_workflow import (
     _assignment_context,
@@ -75,6 +76,8 @@ def build_teacher_planning_generation_context(
     ]
     district_files = [row for row in pacing_materials if row.get("material_kind") == "file"]
     teacher_files = [row for row in supplemental if row.get("material_kind") == "file"]
+    district_links = [row for row in pacing_materials if row.get("material_kind") == "link"]
+    teacher_links = [row for row in supplemental if row.get("material_kind") == "link"]
     district_document_context = build_document_prompt_context(
         district_files,
         source_label="district_curriculum",
@@ -82,6 +85,14 @@ def build_teacher_planning_generation_context(
     teacher_document_context = build_document_prompt_context(
         teacher_files,
         source_label="teacher_supplemental",
+    )
+    district_link_context = build_link_prompt_context(
+        district_links,
+        source_label="district_reference_link",
+    )
+    teacher_link_context = build_link_prompt_context(
+        teacher_links,
+        source_label="teacher_reference_link",
     )
     readiness_summary = build_ai_readiness_summary(
         district_materials=pacing_materials,
@@ -110,6 +121,8 @@ def build_teacher_planning_generation_context(
         "teacher_supplemental_notes": [row for row in supplemental if row["material_kind"] == "note"],
         "district_document_context": district_document_context,
         "teacher_document_context": teacher_document_context,
+        "district_link_context": district_link_context,
+        "teacher_link_context": teacher_link_context,
         "ai_readiness_summary": readiness_summary,
         "selected_output_types": selected_outputs,
         "teaching_order": [row["subject_id"] for row in ordered_subjects],

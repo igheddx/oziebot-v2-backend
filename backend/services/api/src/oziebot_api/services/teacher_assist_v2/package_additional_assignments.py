@@ -65,6 +65,8 @@ def _get_owned_package(
     ).one_or_none()
     if row is None:
         raise LookupError("Instructional package not found")
+    if require_open and row.status == "processing":
+        raise ValueError("This package is still generating and cannot be modified yet.")
     if require_open and row.status in {"completed", "archived"}:
         raise ValueError("Closed packages cannot receive additional assignments.")
     return row

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from oziebot_api.services.teacher_assist_v2.planning_constants import WEEKDAY_LABELS
@@ -39,6 +40,82 @@ def _with_alignment(content: dict[str, Any], mapping: dict[str, Any]) -> dict[st
     content["teks_ids"] = list(mapping.get("teks_ids") or [])
     content["alignment_summary"] = mapping.get("alignment_summary")
     return content
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
+
+
+def _clean_material_label(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = str(value).strip()
+    if not normalized:
+        return None
+    if " (" in normalized and normalized.endswith(")"):
+        normalized = normalized.split(" (", 1)[0].strip()
+    return normalized or None
+
+
+def _source_texts_from_materials(materials: list[str] | None) -> list[str]:
+    if not materials:
+        return []
+    source_texts: list[str] = []
+    for item in materials:
+        cleaned = _clean_material_label(item)
+        if not cleaned:
+            continue
+        parts = [segment.strip() for segment in re.split(r",|\band\b", cleaned) if segment.strip()]
+        for part in parts:
+            source_texts.append(part)
+    return _unique_strings(source_texts)
+
+
+def _source_excerpts(excerpts: list[str] | None, *, limit: int = 3) -> list[str]:
+    cleaned = [" ".join(str(item).split()) for item in excerpts or [] if str(item).strip()]
+    return [item[:700] for item in _unique_strings(cleaned)[:limit]]
+
+
+def _join_human_list(values: list[str]) -> str:
+    if not values:
+        return ""
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 2:
+        return f"{values[0]} and {values[1]}"
+    return f"{', '.join(values[:-1])}, and {values[-1]}"
+
+
+def _daily_rows(
+    *,
+    daily_topics: list[str] | None = None,
+    daily_objectives: list[str] | None = None,
+    assessment_checks: list[str] | None = None,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    max_len = max(
+        len(daily_topics or []),
+        len(daily_objectives or []),
+        len(assessment_checks or []),
+        0,
+    )
+    for index in range(max_len):
+        rows.append(
+            {
+                "topic": str((daily_topics or [])[index]).strip() if index < len(daily_topics or []) else "",
+                "objective": str((daily_objectives or [])[index]).strip() if index < len(daily_objectives or []) else "",
+                "assessment": str((assessment_checks or [])[index]).strip() if index < len(assessment_checks or []) else "",
+            }
+        )
+    return [row for row in rows if row["topic"] or row["objective"] or row["assessment"]]
 
 
 def _subject_lesson_block(
@@ -209,6 +286,11 @@ def build_subject_slide_deck(
     objectives_list: list[str],
     objective_ids: list[str] | None = None,
     teks_ids: list[str] | None = None,
+    source_materials: list[str] | None = None,
+    source_excerpts: list[str] | None = None,
+    daily_topics: list[str] | None = None,
+    daily_objectives: list[str] | None = None,
+    assessment_checks: list[str] | None = None,
 ) -> dict[str, Any]:
     obj_bullets = objectives_list[:3] if objectives_list else [objective_text]
     mapping = _objective_mapping(
@@ -217,7 +299,14 @@ def build_subject_slide_deck(
         objective_ids=objective_ids,
         teks_ids=teks_ids,
     )
-    slides = add_slide_visual_metadata([
+    source_texts = _source_texts_from_materials(source_materials)
+    excerpts = _source_excerpts(source_excerpts)
+    daily_rows = _daily_rows(
+        daily_topics=daily_topics,
+        daily_objectives=daily_objectives,
+        assessment_checks=assessment_checks,
+    )
+    slides: list[dict[str, Any]] = [
         {
             "id": "title-slide",
             "slideType": "title",
@@ -235,64 +324,77 @@ def build_subject_slide_deck(
             "layout": "concept_map",
             "teacherNotes": "Students restate the objective in student-friendly language.",
         },
-        {
-            "id": "key-vocabulary",
-            "slideType": "vocabulary",
-            "title": "Key Vocabulary",
-            "bullets": ["Review academic vocabulary for this week's topic.", "Use student-friendly definitions."],
-            "layout": "vocabulary_card",
-        },
-        {
-            "id": "concept-introduction",
-            "slideType": "mini_lesson",
-            "title": f"{subject_name} — Concept Introduction",
-            "bullets": ["Introduce the core concept for the week.", "Connect to prior learning."],
-            "layout": "text_left_visual_right",
-            "teacherNotes": "Use the graphic to organize main ideas and supporting details.",
-        },
-        {
-            "id": "teacher-modeling",
-            "slideType": "mini_lesson",
-            "title": "Teacher Modeling",
-            "bullets": ["Model the target skill step by step.", "Think aloud so students see your process."],
-            "layout": "visual_left_text_right",
-        },
-        {
-            "id": "guided-practice",
-            "slideType": "guided_practice",
-            "title": "Guided Practice",
-            "bullets": ["Work through an example together.", "Invite student responses and discussion."],
-            "layout": "guided_practice",
-        },
-        {
-            "id": "independent-practice",
-            "slideType": "independent_practice",
-            "title": "Independent Practice",
-            "bullets": ["Students apply the skill independently.", "Circulate and support as needed."],
-            "layout": "independent_practice",
-        },
-        {
-            "id": "check-understanding",
-            "slideType": "check_for_understanding",
-            "title": "Check for Understanding",
-            "bullets": ["Ask students to explain the learning target.", "Collect a quick formative response."],
-            "layout": "question_prompt",
-        },
-        {
-            "id": "exit-ticket",
-            "slideType": "exit_ticket",
-            "title": "Exit Ticket",
-            "bullets": ["One question aligned to today's objective.", "Use responses to plan tomorrow's lesson."],
-            "layout": "exit_ticket",
-        },
-        {
-            "id": "wrap-up",
-            "slideType": "closing",
-            "title": "Wrap-Up",
-            "bullets": ["Celebrate strong work.", "Preview the next lesson."],
-            "layout": "title_only",
-        },
-    ], objective_text=objective_text, teks_ids=list(mapping.get("teks_ids") or []))
+    ]
+    if source_texts:
+        slides.append(
+            {
+                "id": "texts-materials",
+                "slideType": "vocabulary",
+                "title": "Texts & Materials",
+                "bullets": source_texts[:5],
+                "layout": "vocabulary_card",
+                "teacherNotes": f"Anchor student discussion in these texts: {_join_human_list(source_texts[:3])}.",
+            }
+        )
+    if excerpts:
+        slides.append(
+            {
+                "id": "source-evidence",
+                "slideType": "mini_lesson",
+                "title": "Source Evidence",
+                "bullets": excerpts[:3],
+                "layout": "text_left_visual_right",
+                "teacherNotes": "Use these supplied/extracted excerpts as the anchor text for discussion.",
+            }
+        )
+    for index, row in enumerate(daily_rows[:5], start=1):
+        title = row["topic"] or f"Day {index} Focus"
+        bullets = _unique_strings(
+            [
+                row["objective"],
+                row["assessment"],
+                f"Use evidence from {source_texts[min(index - 1, len(source_texts) - 1)]}."
+                if source_texts
+                else "",
+            ]
+        )
+        slides.append(
+            {
+                "id": f"day-{index}-focus",
+                "slideType": "guided_practice" if index < len(daily_rows) else "independent_practice",
+                "title": title,
+                "bullets": bullets[:3] or ["Discuss the weekly objective with evidence from the lesson text."],
+                "layout": "text_left_visual_right" if index % 2 else "visual_left_text_right",
+                "teacherNotes": row["objective"] or "Guide students to connect the day's text to the objective.",
+            }
+        )
+    weekly_check = next((item for item in reversed(assessment_checks or []) if str(item).strip()), "")
+    slides.extend(
+        [
+            {
+                "id": "check-understanding",
+                "slideType": "check_for_understanding",
+                "title": "Check for Understanding",
+                "bullets": [weekly_check or "Ask students to explain the learning target using evidence from the text."],
+                "layout": "question_prompt",
+            },
+            {
+                "id": "wrap-up",
+                "slideType": "closing",
+                "title": "Wrap-Up",
+                "bullets": [
+                    (
+                        f"Review how {source_texts[0]} supports this week's objective."
+                        if source_texts
+                        else "Review the week's key understanding."
+                    ),
+                    "Preview the next reading or discussion.",
+                ],
+                "layout": "title_only",
+            },
+        ]
+    )
+    slides = add_slide_visual_metadata(slides, objective_text=objective_text, teks_ids=list(mapping.get("teks_ids") or []))
     return _with_alignment({
         "title": f"{subject_name} {week_label} — {package_title}",
         "summary": f"Classroom slide deck for {subject_name}.",
@@ -318,21 +420,37 @@ def build_quiz(
     package_title: str,
     objective_code: str | None,
     objective_text: str,
+    source_materials: list[str] | None = None,
+    source_excerpts: list[str] | None = None,
+    daily_topics: list[str] | None = None,
+    daily_objectives: list[str] | None = None,
+    assessment_checks: list[str] | None = None,
 ) -> dict[str, Any]:
+    source_texts = _source_texts_from_materials(source_materials)
+    excerpts = _source_excerpts(source_excerpts, limit=2)
+    primary_text = source_texts[0] if source_texts else f"{subject_name} class text"
+    secondary_text = source_texts[1] if len(source_texts) > 1 else primary_text
+    weekly_check = next((item for item in reversed(assessment_checks or []) if str(item).strip()), "")
+    first_day_objective = next((item for item in daily_objectives or [] if str(item).strip()), objective_text)
     questions = [
         {
             "number": 1,
             "type": "multiple_choice",
-            "prompt": f"What is the main learning focus for {subject_name} this week?",
-            "choices": [objective_text, "Memorizing unrelated facts", "Copying text without thinking", "Skipping the introduction"],
-            "answer": objective_text,
-            "explanation": "The weekly objective defines what students should understand.",
+            "prompt": f"Which text from this week helped students practice the objective '{first_day_objective}'?",
+            "choices": [
+                primary_text,
+                "A random science article",
+                "An unrelated math worksheet",
+                "A spelling list with no story",
+            ],
+            "answer": primary_text,
+            "explanation": "The assessment should stay grounded in the texts selected for this week.",
             "points": 1,
         },
         {
             "number": 2,
             "type": "multiple_choice",
-            "prompt": "Which action best supports close reading?",
+            "prompt": f"When reading {primary_text}, which action best helps you identify evidence for the objective?",
             "choices": [
                 "Rereading and annotating important ideas",
                 "Ignoring headings and captions",
@@ -346,23 +464,34 @@ def build_quiz(
         {
             "number": 3,
             "type": "short_answer",
-            "prompt": "State the weekly objective in your own words.",
+            "prompt": first_day_objective if first_day_objective.endswith("?") else f"State this objective in your own words: {first_day_objective}",
             "answer": f"Responses should reflect: {objective_text}",
             "explanation": "Accept paraphrases that preserve the learning target.",
             "points": 2,
+            "response_lines": 4,
         },
         {
             "number": 4,
             "type": "evidence_based",
-            "prompt": "Cite one detail that supports the weekly learning goal and explain why.",
-            "answer": "Accept responses that reference the passage or lesson with a clear connection.",
+            "prompt": (
+                f"Use this supplied excerpt from {primary_text}: \"{excerpts[0]}\" "
+                f"Then answer: {assessment_checks[0] if assessment_checks else objective_text}"
+                if excerpts
+                else (
+                f"Use {primary_text} to answer this question: {assessment_checks[0]}"
+                if assessment_checks
+                else f"Cite one detail from {primary_text} that supports the weekly learning goal and explain why."
+                )
+            ),
+            "answer": f"Accept responses that reference {primary_text} with a clear connection to the objective.",
             "explanation": "Evidence must link detail to the objective.",
             "points": 3,
+            "response_lines": 5,
         },
         {
             "number": 5,
             "type": "multiple_choice",
-            "prompt": "Supporting details should —",
+            "prompt": f"When comparing ideas from {primary_text} or {secondary_text}, supporting details should —",
             "choices": [
                 "explain or prove the main learning goal",
                 "replace the learning goal",
@@ -376,14 +505,15 @@ def build_quiz(
         {
             "number": 6,
             "type": "short_answer",
-            "prompt": "Name one strategy you used during {week_label} instruction.",
-            "answer": "Accept annotation, rereading, partner discussion, or graphic organizers.",
+            "prompt": f"Name one strategy you used during {week_label} instruction with {primary_text}.",
+            "answer": f"Accept annotation, rereading, partner discussion, or graphic organizers used with {primary_text}.",
             "points": 2,
+            "response_lines": 3,
         },
         {
             "number": 7,
             "type": "multiple_choice",
-            "prompt": "A strong exit ticket response should —",
+            "prompt": "Which response best shows understanding of the week's reading objective?",
             "choices": [
                 "answer the lesson objective with evidence",
                 "copy the objective without explanation",
@@ -396,9 +526,22 @@ def build_quiz(
         {
             "number": 8,
             "type": "evidence_based",
-            "prompt": "Write one sentence explaining what you learned this week in {subject_name}.",
-            "answer": f"Responses should align with: {objective_text}",
+            "prompt": (
+                f"Compare evidence from the supplied class text excerpts: {excerpts[0]}"
+                if excerpts
+                else (
+                f"Use evidence from {primary_text} and {secondary_text} to respond: {weekly_check}"
+                if weekly_check and source_texts
+                else f"Write one sentence explaining what you learned this week in {subject_name}."
+                )
+            ),
+            "answer": (
+                f"Responses should align with {weekly_check}"
+                if weekly_check
+                else f"Responses should align with: {objective_text}"
+            ),
             "points": 3,
+            "response_lines": 5,
         },
     ]
     title = f"{package_title} — {subject_name} Quiz"
@@ -554,27 +697,71 @@ def build_written_assignment(
     objective_code: str | None,
     objective_text: str,
     daily_topic: str | None,
+    source_materials: list[str] | None = None,
+    source_excerpts: list[str] | None = None,
+    daily_topics: list[str] | None = None,
+    daily_objectives: list[str] | None = None,
+    assessment_checks: list[str] | None = None,
 ) -> dict[str, Any]:
     topic = daily_topic or f"{subject_name} weekly focus"
-    passage_title, passage_text = _default_passage(subject_name, topic)
+    source_texts = _source_texts_from_materials(source_materials)
+    excerpts = _source_excerpts(source_excerpts, limit=4)
+    weekly_check = next((item for item in reversed(assessment_checks or []) if str(item).strip()), "")
+    passage_title = "Source Text Set"
+    if excerpts:
+        passage_text = "\n\n".join(excerpts)
+    elif source_texts:
+        passage_text = (
+            f"Use this week's class texts: {_join_human_list(source_texts[:4])}. "
+            f"Focus on the weekly objective: {objective_text}. "
+            f"{weekly_check or f'Use details from the texts to explain {topic}.'}"
+        )
+    else:
+        passage_title, passage_text = _default_passage(subject_name, topic)
     rubric_title = f"{package_title} — {subject_name} Rubric"
     mapping = _objective_mapping(objective_code, objective_text)
     return _with_alignment({
         "title": f"{package_title} — {subject_name} Written Assignment",
         "summary": "Written response aligned to the weekly objective.",
-        "description": "Students read a passage and write a paragraph with supporting details.",
+        "description": (
+            f"Students use class texts and evidence to respond to {objective_text}."
+            if source_texts
+            else "Students read a passage and write a paragraph with supporting details."
+        ),
         "passage_title": passage_title,
         "passage_text": passage_text,
         "student_instructions": [
-            "Read the passage carefully.",
-            "Write one paragraph explaining the main idea or learning target.",
-            "Include at least two supporting details from the text.",
+            (
+                "Reread the supplied source excerpt(s) and choose evidence that matches the objective."
+                if excerpts
+                else f"Reread {_join_human_list(source_texts[:3])} and choose evidence that matches the objective."
+                if source_texts
+                else "Read the passage carefully."
+            ),
+            (
+                weekly_check
+                if weekly_check
+                else "Write one paragraph explaining the main idea or learning target."
+            ),
+            (
+                "Include at least two supporting details from the supplied source excerpt(s)."
+                if excerpts
+                else f"Include at least two supporting details from {source_texts[0]} or another class text."
+                if source_texts
+                else "Include at least two supporting details from the text."
+            ),
             "Use complete sentences and clear organization.",
         ],
         "success_criteria": [
-            "Clear statement of the learning target",
-            "At least two accurate supporting details",
-            "Evidence connected to the main idea",
+            "Clear statement of the learning target or claim",
+            (
+                "At least two accurate supporting details from the supplied source excerpt(s)"
+                if excerpts
+                else f"At least two accurate supporting details from {_join_human_list(source_texts[:2])}"
+                if source_texts
+                else "At least two accurate supporting details"
+            ),
+            "Evidence clearly connected to the objective",
             "Organized paragraph with conventions",
         ],
         "rubric_reference": rubric_title,
@@ -766,6 +953,11 @@ def build_deterministic_fallback(
     objectives_list: list[str] | None = None,
     objective_ids: list[str] | None = None,
     teks_ids: list[str] | None = None,
+    source_materials: list[str] | None = None,
+    source_excerpts: list[str] | None = None,
+    daily_topics: list[str] | None = None,
+    daily_objectives: list[str] | None = None,
+    assessment_checks: list[str] | None = None,
 ) -> dict[str, Any]:
     objective_text = objective_text or f"Students demonstrate understanding in {subject_name}."
     builders = {
@@ -788,6 +980,11 @@ def build_deterministic_fallback(
             objectives_list=objectives_list or [],
             objective_ids=objective_ids,
             teks_ids=teks_ids,
+            source_materials=source_materials,
+            source_excerpts=source_excerpts,
+            daily_topics=daily_topics,
+            daily_objectives=daily_objectives,
+            assessment_checks=assessment_checks,
         ),
         "quiz": lambda: build_quiz(
             subject_name=subject_name,
@@ -795,6 +992,11 @@ def build_deterministic_fallback(
             package_title=package_title,
             objective_code=objective_code,
             objective_text=objective_text,
+            source_materials=source_materials,
+            source_excerpts=source_excerpts,
+            daily_topics=daily_topics,
+            daily_objectives=daily_objectives,
+            assessment_checks=assessment_checks,
         ),
         "exit_ticket": lambda: build_exit_ticket(
             subject_name=subject_name,
@@ -808,6 +1010,11 @@ def build_deterministic_fallback(
             objective_code=objective_code,
             objective_text=objective_text,
             daily_topic=daily_topic,
+            source_materials=source_materials,
+            source_excerpts=source_excerpts,
+            daily_topics=daily_topics,
+            daily_objectives=daily_objectives,
+            assessment_checks=assessment_checks,
         ),
         "writing_response": lambda: build_writing_response(
             subject_name=subject_name,

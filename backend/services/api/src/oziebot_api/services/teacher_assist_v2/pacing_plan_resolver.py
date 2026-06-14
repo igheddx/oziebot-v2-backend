@@ -204,10 +204,26 @@ def build_subject_lesson_block_from_pacing(
         day_focus=str(day_focus),
         materials=materials or None,
     )
+    primary_material = materials[0] if materials else None
     block["daily_topic"] = str(daily_topic)
+    if primary_material:
+        block["mini_lesson"] = f"Use {primary_material} to teach {objective_text.lower()}."
+        block["teacher_modeling"] = [
+            f"Model the skill using {primary_material}.",
+            "Think aloud so students hear how evidence connects to the objective.",
+        ]
+        block["teacher_actions"] = [
+            f"Read, display, or reference {primary_material} during instruction.",
+            "Guide students to name evidence that matches the daily objective.",
+        ]
+        block["guided_practice"] = [
+            f"Partners discuss evidence from {primary_material}.",
+            "Share responses and clarify misconceptions with teacher support.",
+        ]
     if day_plan and day_plan.get("assessment_check"):
         block["assessment"] = str(day_plan["assessment_check"])
         block["check_for_understanding"] = str(day_plan["assessment_check"])
+        block["independent_practice"] = [str(day_plan["assessment_check"])]
     if day_plan and day_plan.get("teacher_notes"):
         block["notes"] = str(day_plan["teacher_notes"])
     return block

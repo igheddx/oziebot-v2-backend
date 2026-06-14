@@ -54,7 +54,7 @@ def build_google_forms_package_payload(
 
 
 def build_answer_key_json_payload(content: dict[str, Any]) -> dict[str, Any]:
-    mapping = content.get("objective_mapping") or {}
+    mapping = normalize_objective_mapping(content)
     entries = content.get("answer_key") or []
     if not entries:
         entries = [
@@ -114,10 +114,48 @@ def render_answer_key_html(content: dict[str, Any]) -> str:
     return _html_document(title=title, body=body)
 
 
+def normalize_objective_mapping(content: dict[str, Any]) -> dict[str, Any]:
+    mapping = content.get("objective_mapping")
+    if isinstance(mapping, dict):
+        return mapping
+    if isinstance(mapping, list):
+        first = next((item for item in mapping if isinstance(item, dict)), None)
+        return first or {}
+    return {}
+
+
+def objective_mapping_field(content: dict[str, Any], field: str) -> Any:
+    mapping = normalize_objective_mapping(content)
+    return mapping.get(field)
+
+
+def _objective_summary(content: dict[str, Any]) -> tuple[str | None, str | None]:
+    mapping = content.get("objective_mapping")
+    if isinstance(mapping, dict):
+        code = mapping.get("objective_code") or content.get("objective_code")
+        text = (
+            mapping.get("objective_text")
+            or mapping.get("alignment_summary")
+            or content.get("objective_text")
+            or content.get("alignment_summary")
+        )
+        return (str(code) if code else None, str(text) if text else None)
+    if isinstance(mapping, list):
+        first = next((item for item in mapping if isinstance(item, dict)), None)
+        code = (
+            content.get("objective_code")
+            or (first.get("objective_code") if first else None)
+            or (first.get("objective_id") if first else None)
+        )
+        text = content.get("objective_text") or content.get("alignment_summary")
+        return (str(code) if code else None, str(text) if text else None)
+    code = content.get("objective_code")
+    text = content.get("objective_text") or content.get("alignment_summary")
+    return (str(code) if code else None, str(text) if text else None)
+
+
 def _objective_block(content: dict[str, Any]) -> str:
-    mapping = content.get("objective_mapping") or {}
-    code = mapping.get("objective_code") or content.get("objective_code")
-    text = mapping.get("objective_text") or content.get("objective_text")
+    code, text = _objective_summary(content)
     if not code and not text:
         return ""
     return (

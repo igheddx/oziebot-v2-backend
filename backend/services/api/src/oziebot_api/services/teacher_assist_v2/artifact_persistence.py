@@ -18,6 +18,7 @@ from oziebot_api.models.teacher_assist_v2_slide_visual_asset import TeacherAssis
 from oziebot_api.services.teacher_assist_v2.assignment_print_packets import generate_assignment_print_packet
 from oziebot_api.services.teacher_assist_v2.student_packet_content import compute_pages_per_student
 from oziebot_api.services.teacher_assist_v2.package_export import (
+    normalize_objective_mapping,
     render_artifact_preview_html,
     save_artifact_export,
 )
@@ -76,6 +77,7 @@ def persist_package_artifact(
     day_label: str | None = None,
     export_note: str | None = None,
 ) -> TeacherAssistV2InstructionalPackageArtifact:
+    objective_mapping = normalize_objective_mapping(content)
     artifact = TeacherAssistV2InstructionalPackageArtifact(
         id=uuid.uuid4(),
         tenant_id=package.tenant_id,
@@ -94,10 +96,10 @@ def persist_package_artifact(
             "description": content.get("description") or content.get("summary"),
             "objective_mapping": content.get("objective_mapping"),
             "objective_ids": content.get("objective_ids")
-            or (content.get("objective_mapping") or {}).get("objective_ids"),
-            "teks_ids": content.get("teks_ids") or (content.get("objective_mapping") or {}).get("teks_ids"),
+            or objective_mapping.get("objective_ids"),
+            "teks_ids": content.get("teks_ids") or objective_mapping.get("teks_ids"),
             "alignment_summary": content.get("alignment_summary")
-            or (content.get("objective_mapping") or {}).get("alignment_summary"),
+            or objective_mapping.get("alignment_summary"),
             "additional_exports": [],
             **({"export_note": export_note} if export_note else {}),
         },
@@ -130,6 +132,7 @@ def refresh_package_artifact_exports(
     updated_at: datetime,
     export_note: str | None = None,
 ) -> None:
+    objective_mapping = normalize_objective_mapping(content)
     artifact.title = str(content["title"])
     artifact.content_json = content
     artifact.preview_html = render_artifact_preview_html(artifact_type=artifact.artifact_type, content=content)
@@ -141,10 +144,10 @@ def refresh_package_artifact_exports(
             "description": content.get("description") or content.get("summary"),
             "objective_mapping": content.get("objective_mapping"),
             "objective_ids": content.get("objective_ids")
-            or (content.get("objective_mapping") or {}).get("objective_ids"),
-            "teks_ids": content.get("teks_ids") or (content.get("objective_mapping") or {}).get("teks_ids"),
+            or objective_mapping.get("objective_ids"),
+            "teks_ids": content.get("teks_ids") or objective_mapping.get("teks_ids"),
             "alignment_summary": content.get("alignment_summary")
-            or (content.get("objective_mapping") or {}).get("alignment_summary"),
+            or objective_mapping.get("alignment_summary"),
         }
     )
     if export_note:

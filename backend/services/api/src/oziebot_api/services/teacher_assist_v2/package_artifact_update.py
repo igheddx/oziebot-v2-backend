@@ -39,6 +39,8 @@ def _get_owned_package(
     ).one_or_none()
     if row is None:
         raise LookupError("Instructional package not found")
+    if row.status == "processing":
+        raise ValueError("This package is still generating and cannot be edited yet.")
     return row
 
 

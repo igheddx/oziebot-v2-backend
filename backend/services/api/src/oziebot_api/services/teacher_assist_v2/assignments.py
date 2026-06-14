@@ -32,6 +32,7 @@ from oziebot_api.services.teacher_assist_v2.grade_reviews import (
     build_assignment_completion_summary,
     list_assignment_grade_reviews,
 )
+from oziebot_api.services.teacher_assist_v2.grading_drafts import count_assignment_grading_activity
 from oziebot_api.services.teacher_assist_v2.grading_rubric import (
     grading_template_from_package_rubric,
     resolve_assignment_rubric_content,
@@ -288,6 +289,7 @@ def get_teacher_assignment_detail(
         assignment_id=row.id,
         submission_summary=submission_summary,
     )
+    grading_activity = count_assignment_grading_activity(db, assignment_id=row.id)
     submission_summary["teacher_reviewed_count"] = completion_summary["grades_confirmed_count"]
 
     google_form = None
@@ -341,6 +343,7 @@ def get_teacher_assignment_detail(
         "artifacts": artifacts,
         "submission_summary": submission_summary,
         "completion_summary": completion_summary,
+        "grading_activity": grading_activity,
         "grade_reviews": list_assignment_grade_reviews(db, user=user, assignment_id=row.id),
         "gradebook_summary": build_assignment_gradebook_summary(db, user=user, assignment_id=row.id),
         "objective_performance": ObjectivePerformanceService.summarize_assignment_objectives(

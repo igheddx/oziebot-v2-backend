@@ -52,7 +52,8 @@ def execute_openai_json_completion(
                         "instruction": instruction,
                         "prompt_payload": prompt_payload,
                         "required_output_schema": required_output_schema,
-                    }
+                    },
+                    default=str,
                 ),
             },
         ],

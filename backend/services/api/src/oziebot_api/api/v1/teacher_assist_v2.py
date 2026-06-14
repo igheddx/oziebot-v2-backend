@@ -5,8 +5,9 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import RedirectResponse
+from sqlalchemy.engine import make_url
 
 from oziebot_api.config import Settings
 from oziebot_api.deps import DbSession, settings_dep
@@ -125,7 +126,11 @@ from oziebot_api.services.teacher_assist_v2.assignments import (
     list_recent_assignments,
     list_teacher_assignments,
 )
-from oziebot_api.services.teacher_assist_v2.instructional_package_generation import generate_instructional_package
+from oziebot_api.services.teacher_assist_v2.instructional_package_generation import (
+    generate_instructional_package,
+    prepare_instructional_package_generation,
+    run_instructional_package_generation_job,
+)
 from oziebot_api.services.teacher_assist_v2.package_additional_assignments import (
     build_additional_assignment_form,
     generate_additional_package_assignment,
@@ -174,9 +179,11 @@ from oziebot_api.services.teacher_assist_v2.pacing_guide_setup import (
 )
 from oziebot_api.services.teacher_assist_v2.platform_context import resolve_v2_platform_context
 from oziebot_api.services.teacher_assist_v2.grading_drafts import (
-    create_grading_job_for_submission,
     generate_all_grading_drafts,
     get_latest_grading_draft,
+    queue_grading_job_for_submission,
+    run_grading_job_inline,
+    run_grading_job,
 )
 from oziebot_api.services.teacher_assist_v2.document_extraction import (
     ensure_planning_supplemental_extraction_record,
@@ -286,6 +293,15 @@ def _handle(action):
         if exc.args and isinstance(exc.args[0], dict):
             raise HTTPException(status_code=400, detail={"field_errors": exc.args[0]}) from exc
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _should_run_background(settings: Settings) -> bool:
+    if not settings.database_url:
+        return False
+    url = make_url(settings.database_url)
+    if url.drivername.startswith("sqlite") and url.database in {None, "", ":memory:"}:
+        return False
+    return True
 
 
 @router.get("/context")
@@ -1492,12 +1508,31 @@ def generate_teacher_instructional_package(
     body: V2PlanningGenerateIn,
     user: CurrentUser,
     db: DbSession,
+    background_tasks: BackgroundTasks,
     settings: Settings = Depends(settings_dep),
 ) -> dict:
     _require_teacher(db, user)
     _ensure_teacher_route_allowed(db, user, "/planning")
-    package = _handle(
-        lambda: generate_instructional_package(
+    if not _should_run_background(settings):
+        package = _handle(
+            lambda: generate_instructional_package(
+                db,
+                settings=settings,
+                user=user,
+                week_start=body.week_start,
+                week_end=body.week_end,
+                teaching_order=body.teaching_order,
+                selected_outputs=body.selected_outputs,
+                plan_start_date=body.plan_start_date,
+                plan_end_date=body.plan_end_date,
+                excluded_pacing_material_ids=body.excluded_pacing_material_ids,
+            )
+        )
+        return get_instructional_package_detail_enriched(
+            db, user=user, package_id=package.id, settings=settings
+        )
+    package, context, outputs, excluded_ids, final_status = _handle(
+        lambda: prepare_instructional_package_generation(
             db,
             settings=settings,
             user=user,
@@ -1509,6 +1544,18 @@ def generate_teacher_instructional_package(
             plan_end_date=body.plan_end_date,
             excluded_pacing_material_ids=body.excluded_pacing_material_ids,
         )
+    )
+    db.commit()
+    background_tasks.add_task(
+        run_instructional_package_generation_job,
+        settings=settings,
+        user_id=user.id,
+        package_id=package.id,
+        context=context,
+        teaching_order=[str(value) for value in body.teaching_order],
+        outputs=outputs,
+        excluded_ids=sorted(excluded_ids),
+        final_status=final_status,
     )
     return get_instructional_package_detail_enriched(db, user=user, package_id=package.id, settings=settings)
 
@@ -2156,11 +2203,35 @@ def generate_assignment_grading_drafts(
     assignment_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
+    background_tasks: BackgroundTasks,
     settings: Settings = Depends(settings_dep),
 ) -> dict:
     _require_teacher(db, user)
     _ensure_teacher_route_allowed(db, user, "/assignments")
-    return _handle(
+    if not _should_run_background(settings):
+        result = _handle(
+            lambda: generate_all_grading_drafts(
+                db,
+                user=user,
+                assignment_id=assignment_id,
+                settings=settings,
+            )
+        )
+        completed_jobs = []
+        for job_id in result.get("queued_job_ids", []):
+            completed_jobs.append(
+                _handle(
+                    lambda job_id=job_id: run_grading_job_inline(
+                        db,
+                        settings=settings,
+                        user=user,
+                        job_id=uuid.UUID(job_id),
+                    )
+                )
+            )
+        result["jobs"] = completed_jobs
+        return result
+    result = _handle(
         lambda: generate_all_grading_drafts(
             db,
             user=user,
@@ -2168,6 +2239,15 @@ def generate_assignment_grading_drafts(
             settings=settings,
         )
     )
+    db.commit()
+    for job_id in result.get("queued_job_ids", []):
+        background_tasks.add_task(
+            run_grading_job,
+            settings=settings,
+            user_id=user.id,
+            job_id=uuid.UUID(job_id),
+        )
+    return result
 
 
 @router.post("/teacher/submissions/{submission_id}/grading-jobs", status_code=201)
@@ -2175,18 +2255,52 @@ def generate_submission_grading_draft(
     submission_id: uuid.UUID,
     user: CurrentUser,
     db: DbSession,
+    background_tasks: BackgroundTasks,
     settings: Settings = Depends(settings_dep),
 ) -> dict:
     _require_teacher(db, user)
     _ensure_teacher_route_allowed(db, user, "/assignments")
-    return _handle(
-        lambda: create_grading_job_for_submission(
+
+    submission = get_student_submission_or_404(db, user=user, submission_id=submission_id)
+    if submission.status != "READY_FOR_GRADING":
+        raise HTTPException(status_code=400, detail="Submission is not ready for auto-grading.")
+
+    if not _should_run_background(settings):
+        result = _handle(
+            lambda: queue_grading_job_for_submission(
+                db,
+                user=user,
+                submission_id=submission_id,
+                settings=settings,
+            )
+        )
+        if not result.get("already_processing"):
+            return _handle(
+                lambda: run_grading_job_inline(
+                    db,
+                    settings=settings,
+                    user=user,
+                    job_id=uuid.UUID(result["id"]),
+                )
+            )
+        return result
+    result = _handle(
+        lambda: queue_grading_job_for_submission(
             db,
             user=user,
             submission_id=submission_id,
             settings=settings,
         )
     )
+    db.commit()
+    if not result.get("already_processing"):
+        background_tasks.add_task(
+            run_grading_job,
+            settings=settings,
+            user_id=user.id,
+            job_id=uuid.UUID(result["id"]),
+        )
+    return result
 
 
 @router.get("/teacher/submissions/{submission_id}/grading-draft")

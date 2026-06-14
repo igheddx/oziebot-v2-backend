@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.models.user import User
 
-STORED_PACKAGE_STATUSES = ("draft", "generated", "active", "completed", "archived")
+STORED_PACKAGE_STATUSES = ("draft", "processing", "generated", "active", "completed", "archived", "failed")
 
 DISPLAY_PACKAGE_STATUSES = STORED_PACKAGE_STATUSES + ("ending_soon", "expired")
 
@@ -23,7 +23,7 @@ def resolve_effective_package_status(
     reference = today or date.today()
     normalized = stored_status if stored_status in STORED_PACKAGE_STATUSES else "generated"
 
-    if normalized in {"completed", "archived", "draft"}:
+    if normalized in {"completed", "archived", "draft", "processing", "failed"}:
         return normalized
 
     if reference > plan_end_date:
@@ -42,7 +42,11 @@ def resolve_effective_package_status(
     return normalized
 
 
-def package_status_message(effective_status: str) -> str | None:
+def package_status_message(effective_status: str, *, metadata: dict | None = None) -> str | None:
+    if metadata:
+        status_detail = metadata.get("status_detail")
+        if isinstance(status_detail, str) and status_detail.strip():
+            return status_detail.strip()
     if effective_status == "ending_soon":
         return "This plan is ending soon. Review and close it out when teaching is complete."
     if effective_status == "expired":
@@ -51,7 +55,7 @@ def package_status_message(effective_status: str) -> str | None:
 
 
 def can_close_out_package(*, stored_status: str, effective_status: str) -> bool:
-    if stored_status in {"completed", "archived"}:
+    if stored_status in {"completed", "archived", "processing", "failed"}:
         return False
     return effective_status in {"active", "ending_soon", "expired", "generated"}
 

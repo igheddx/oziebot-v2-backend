@@ -89,11 +89,36 @@ NEWSLETTER_SCHEMA: dict[str, Any] = {
     "sections": [{"heading": "string", "body": "string", "bullets": ["string"]}],
 }
 
+ASSIGNMENT_SCHEMA: dict[str, Any] = {
+    "title": "string",
+    "summary": "string",
+    "objective_alignment": "string",
+    "passage_title": "string",
+    "passage_text": "string",
+    "student_instructions": ["string"],
+    "questions": [{"prompt": "string", "type": "string"}],
+    "success_criteria": ["string"],
+    "sections": [{"heading": "string", "body": "string", "bullets": ["string"]}],
+}
+
+WRITING_RESPONSE_SCHEMA: dict[str, Any] = {
+    "title": "string",
+    "summary": "string",
+    "objective_alignment": "string",
+    "writing_prompt": "string",
+    "student_instructions": ["string"],
+    "sentence_starters": ["string"],
+    "success_criteria": ["string"],
+    "sections": [{"heading": "string", "body": "string", "bullets": ["string"]}],
+}
+
 ARTIFACT_SCHEMAS: dict[str, dict[str, Any]] = {
     "daily_lesson_plan": DAILY_LESSON_PLAN_SCHEMA,
     "subject_slide_deck": SLIDE_DECK_SCHEMA,
     "quiz": QUIZ_SCHEMA,
     "rubric": RUBRIC_SCHEMA,
+    "assignment": ASSIGNMENT_SCHEMA,
+    "writing_response": WRITING_RESPONSE_SCHEMA,
     "parent_newsletter_summary": NEWSLETTER_SCHEMA,
 }
 
@@ -102,38 +127,68 @@ def _schema_for_artifact(artifact_type: str) -> dict[str, Any]:
     return ARTIFACT_SCHEMAS.get(artifact_type, GENERIC_ARTIFACT_SCHEMA)
 
 
+_OBJECTIVE_ALIGNMENT_DIRECTIVE = (
+    "REQUIRED: Align ALL content strictly to the pacing guide objectives listed in resolved_objectives. "
+    "Each objective's code and description must be reflected in the generated content. "
+    "If resolved_daily_topics is provided, structure the content around those specific topics in order. "
+    "If resolved_assessment_checks is provided, incorporate those checks into activities or questions. "
+    "Do NOT use generic or invented objectives — only use what is in resolved_objectives."
+)
+
+
 def _instruction_for_artifact(artifact_type: str) -> str:
     instructions = {
         "daily_lesson_plan": (
             "Generate a teacher-usable daily lesson plan with objectives, materials, direct instruction, "
             "guided practice, independent practice, checks for understanding, closure, and teacher notes "
-            "for each subject block. Use the pacing guide day plan in week_subject.pacing_context.days "
-            "that matches day_label. Only reference materials listed in pacing_context, catalog_resources, "
-            "district_materials_summary, district_document_context, and teacher_document_context. "
-            "Use extracted document content below when creating daily teaching plans, slide deck content, "
-            "quiz questions, exit tickets, written assignments, rubrics, and newsletters. "
-            "Do not invent textbook or curriculum names."
+            "for each subject block. Use resolved_day_plan for the specific day's focus, daily_topic, "
+            "objective_focus, and assessment_check. "
+            + _OBJECTIVE_ALIGNMENT_DIRECTIVE + " "
+            "Only reference materials listed in pacing_context, district_document_context, and "
+            "teacher_document_context. Do not invent textbook or curriculum names."
         ),
         "subject_slide_deck": (
             "Generate classroom-ready slide deck content with clear titles and concise bullet points. "
-            "Use extracted district curriculum content and teacher supplemental document content when available."
+            + _OBJECTIVE_ALIGNMENT_DIRECTIVE + " "
+            "Build one slide per daily topic in resolved_daily_topics. "
+            "Use extracted district curriculum content and teacher supplemental document content for slide body text. "
+            "Do not invent textbook or curriculum names."
         ),
         "quiz": (
-            "Generate a quiz with questions, answer key, objective mapping, and teacher-facing sections. "
-            "Use the extracted document content and do not rely on filenames alone."
+            "Generate a quiz whose questions directly test each objective in resolved_objectives. "
+            "Include one or more questions per objective code; map each question to its objective_id. "
+            + _OBJECTIVE_ALIGNMENT_DIRECTIVE + " "
+            "Base questions on the extracted document content — do not rely on filenames alone."
         ),
         "rubric": (
-            "Generate a rubric with criteria, point values, and performance levels aligned to objectives, "
-            "using the extracted district and teacher document content when it clarifies expectations."
+            "Generate a rubric whose criteria map directly to resolved_objectives. "
+            "Name each criterion after the objective it measures. "
+            + _OBJECTIVE_ALIGNMENT_DIRECTIVE + " "
+            "Use the extracted district and teacher document content to clarify performance expectations."
+        ),
+        "assignment": (
+            "Generate a written assignment grounded in the pacing guide objectives and source materials. "
+            "Set passage_text from extracted document content or district curriculum excerpts — do not invent text. "
+            "Set objective_alignment to a clear sentence stating which objective(s) students are practicing. "
+            + _OBJECTIVE_ALIGNMENT_DIRECTIVE + " "
+            "Student instructions and questions must reference the specific objective(s) students are working toward."
+        ),
+        "writing_response": (
+            "Generate a writing response prompt that asks students to demonstrate the pacing guide objective(s). "
+            "Set writing_prompt to a specific, objective-aligned writing task — not a generic prompt. "
+            "Set objective_alignment to a clear sentence naming the objective(s) this addresses. "
+            + _OBJECTIVE_ALIGNMENT_DIRECTIVE + " "
+            "Sentence starters should scaffold the specific objective language."
         ),
         "parent_newsletter_summary": (
-            "Generate a parent-friendly weekly newsletter summary with what students will learn, reminders, "
-            "and upcoming focus. Use the extracted document content only as instructional context; "
-            "keep the final tone family friendly."
+            "Generate a parent-friendly weekly newsletter summary. "
+            "what_students_will_learn must list the actual objectives from resolved_objectives in plain language. "
+            "Use extracted document content only as instructional context; keep the tone family friendly."
         ),
     }
     default = (
-        f"Generate a teacher-usable {artifact_type.replace('_', ' ')} aligned to pacing guide objectives."
+        f"Generate a teacher-usable {artifact_type.replace('_', ' ')}. "
+        + _OBJECTIVE_ALIGNMENT_DIRECTIVE
     )
     return instructions.get(artifact_type, default)
 
@@ -212,6 +267,27 @@ def generate_v2_instructional_artifact(
     model_name = get_teacher_assist_provider_model(effective_settings, provider_name="openai")
     feature = V2_PACKAGE_ARTIFACT_FEATURES.get(artifact_type, V2_INSTRUCTIONAL_PACKAGE_GENERATION_FEATURE)
 
+    # Surface pacing guide objectives and grounding fields at the top level so the AI
+    # instruction directives can reference them by name without the model having to
+    # discover them buried inside week_subject.pacing_context.
+    resolved_objectives = [
+        {"code": obj.get("objective_code"), "description": obj.get("description")}
+        for obj in (week_subject or {}).get("objectives") or []
+        if obj.get("objective_code") or obj.get("description")
+    ]
+    pacing_ctx = (week_subject or {}).get("pacing_context") or {}
+    resolved_daily_topics = [
+        str(day["daily_topic"])
+        for day in pacing_ctx.get("days") or []
+        if day.get("daily_topic")
+    ]
+    resolved_assessment_checks = [
+        str(day["assessment_check"])
+        for day in pacing_ctx.get("days") or []
+        if day.get("assessment_check")
+    ]
+    resolved_day_plan = resolve_pacing_day_plan(week_subject, day_label) if week_subject and day_label else None
+
     prompt_payload = {
         "prompt_version": V2_PACKAGE_PROMPT_VERSION,
         "artifact_type": artifact_type,
@@ -227,14 +303,20 @@ def generate_v2_instructional_artifact(
         "week": week,
         "subject": subject_meta,
         "week_subject": week_subject,
-        "resolved_day_plan": resolve_pacing_day_plan(week_subject, day_label) if week_subject and day_label else None,
+        # Top-level grounding fields — referenced directly by the instruction directives.
+        "resolved_objectives": resolved_objectives,
+        "resolved_daily_topics": resolved_daily_topics,
+        "resolved_assessment_checks": resolved_assessment_checks,
+        "resolved_day_plan": resolved_day_plan,
         "pacing_materials": generation_context.get("pacing_materials"),
         "district_materials_summary": generation_context.get("district_materials_summary"),
         "district_document_context": generation_context.get("district_document_context"),
+        "district_link_context": generation_context.get("district_link_context"),
         "teacher_supplemental_files": generation_context.get("teacher_supplemental_files"),
         "teacher_supplemental_links": generation_context.get("teacher_supplemental_links"),
         "teacher_supplemental_notes": generation_context.get("teacher_supplemental_notes"),
         "teacher_document_context": generation_context.get("teacher_document_context"),
+        "teacher_link_context": generation_context.get("teacher_link_context"),
         "ai_readiness_summary": generation_context.get("ai_readiness_summary"),
         "selected_output_types": generation_context.get("selected_output_types"),
         "teaching_order": generation_context.get("teaching_order"),

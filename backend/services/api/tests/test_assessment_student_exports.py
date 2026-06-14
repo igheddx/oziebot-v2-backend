@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import zipfile
 
+from oziebot_api.services.teacher_assist_v2.package_export import build_answer_key_json_payload
 from oziebot_api.services.teacher_assist_v2.quiz_exports import build_google_forms_readonly_json
 from oziebot_api.services.teacher_assist_v2.student_packet_content import (
     compute_pages_per_student,
@@ -65,3 +66,39 @@ def test_google_forms_json_uses_student_dropdown() -> None:
     assert question is not None
     assert question["type"] == "multiple_choice"
     assert question["choices"] == ["Student #001", "Student #002", "Student #003"]
+
+
+def test_google_forms_json_accepts_list_objective_mapping() -> None:
+    payload = build_google_forms_readonly_json(
+        {
+            "title": "Quiz",
+            "questions": [],
+            "objective_mapping": [
+                {
+                    "objective_code": "5.6E",
+                    "objective_text": "Identify the main idea and supporting details.",
+                }
+            ],
+        }
+    )
+    assert payload["objectiveMappings"]["objective_code"] == "5.6E"
+    assert payload["objectiveMappings"]["objective_text"] == "Identify the main idea and supporting details."
+
+
+def test_answer_key_payload_accepts_list_objective_mapping() -> None:
+    payload = build_answer_key_json_payload(
+        {
+            "title": "Quiz",
+            "questions": [{"number": 1, "answer": "A", "points": 1}],
+            "objective_mapping": [
+                {
+                    "objective_code": "5.6E",
+                    "objective_text": "Identify the main idea and supporting details.",
+                }
+            ],
+        }
+    )
+    assert payload["objective_mapping"]["objective_code"] == "5.6E"
+    assert payload["answers"][0]["objective_mapping"]["objective_text"] == (
+        "Identify the main idea and supporting details."
+    )

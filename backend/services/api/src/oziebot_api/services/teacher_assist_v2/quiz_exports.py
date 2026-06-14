@@ -7,6 +7,8 @@ import io
 import zipfile
 from typing import Any
 
+from oziebot_api.services.teacher_assist_v2.package_export import normalize_objective_mapping
+
 
 def safe_export_filename(title: str, suffix: str, extension: str) -> str:
     cleaned = "".join(ch if ch.isalnum() else "_" for ch in title).strip("_")
@@ -69,7 +71,7 @@ def _meta_lines(export_context: dict[str, Any] | None) -> list[tuple[str, bool]]
         value = export_context.get(key)
         if value:
             lines.append((f"{label}: {value}", False))
-    mapping = export_context.get("objective_mapping") or {}
+    mapping = normalize_objective_mapping({"objective_mapping": export_context.get("objective_mapping")})
     objective_text = mapping.get("objective_text")
     objective_code = mapping.get("objective_code")
     if objective_code or objective_text:
@@ -124,7 +126,9 @@ def render_quiz_answer_key_docx_bytes(
     title = f"{content.get('title') or 'Quiz'} — Answer Key"
     paragraphs: list[tuple[str, bool]] = [(title, True), ("Teacher use only.", False), ("", False)]
     paragraphs.extend(_meta_lines(export_context))
-    mapping = content.get("objective_mapping") or (export_context or {}).get("objective_mapping") or {}
+    mapping = normalize_objective_mapping(
+        {"objective_mapping": content.get("objective_mapping") or (export_context or {}).get("objective_mapping")}
+    )
     if mapping.get("objective_text") or mapping.get("objective_code"):
         paragraphs.append(
             (
@@ -188,7 +192,9 @@ def build_google_forms_readonly_json(
     export_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ctx = export_context or {}
-    mapping = content.get("objective_mapping") or ctx.get("objective_mapping") or {}
+    mapping = normalize_objective_mapping(
+        {"objective_mapping": content.get("objective_mapping") or ctx.get("objective_mapping")}
+    )
     questions = []
     for question in content.get("questions") or []:
         questions.append(

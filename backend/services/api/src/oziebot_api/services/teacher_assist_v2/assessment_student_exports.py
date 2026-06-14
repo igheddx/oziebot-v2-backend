@@ -18,6 +18,7 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
 from oziebot_api.services.teacher_assist_v2.assignment_print_packets import generate_assignment_print_packet
 from oziebot_api.services.teacher_assist_v2.package_export import (
     build_google_forms_package_payload,
+    normalize_objective_mapping,
     render_answer_key_html,
     save_teacher_assist_export_bytes,
 )
@@ -48,7 +49,7 @@ STUDENT_DOCX_LABELS = {
 def _assignment_content_for_packet(*, artifact_type: str, content: dict[str, Any]) -> dict[str, Any]:
     if artifact_type == "assignment":
         return content
-    mapping = content.get("objective_mapping") or {}
+    mapping = normalize_objective_mapping(content)
     return {
         "objective_text": mapping.get("objective_text") or content.get("summary") or content.get("description"),
         "student_instructions": content.get("instructions") or content.get("student_instructions") or [],

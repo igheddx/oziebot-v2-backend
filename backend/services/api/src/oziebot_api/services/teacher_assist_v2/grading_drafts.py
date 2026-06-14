@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -10,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
+from oziebot_api.db.session import make_session_factory
 from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsageEvent
 from oziebot_api.models.teacher_assist_v2_grading_draft import TeacherAssistV2GradingDraft
 from oziebot_api.models.teacher_assist_v2_grading_job import TeacherAssistV2GradingJob
@@ -27,6 +29,8 @@ from oziebot_api.services.teacher_assist_v2.submission_intake import (
     _get_assignment_or_404,
     get_student_submission_or_404,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -123,6 +127,42 @@ def get_latest_grading_draft(
     return serialize_grading_draft(row)
 
 
+def count_assignment_grading_activity(db: Session, *, assignment_id: uuid.UUID) -> dict[str, Any]:
+    queued_count = db.scalar(
+        select(func.count()).select_from(TeacherAssistV2GradingJob).where(
+            TeacherAssistV2GradingJob.assignment_id == assignment_id,
+            TeacherAssistV2GradingJob.status == "QUEUED",
+        )
+    ) or 0
+    running_count = db.scalar(
+        select(func.count()).select_from(TeacherAssistV2GradingJob).where(
+            TeacherAssistV2GradingJob.assignment_id == assignment_id,
+            TeacherAssistV2GradingJob.status == "RUNNING",
+        )
+    ) or 0
+    failed_count = db.scalar(
+        select(func.count()).select_from(TeacherAssistV2GradingJob).where(
+            TeacherAssistV2GradingJob.assignment_id == assignment_id,
+            TeacherAssistV2GradingJob.status == "FAILED",
+        )
+    ) or 0
+    latest_failed = db.scalars(
+        select(TeacherAssistV2GradingJob)
+        .where(
+            TeacherAssistV2GradingJob.assignment_id == assignment_id,
+            TeacherAssistV2GradingJob.status == "FAILED",
+        )
+        .order_by(TeacherAssistV2GradingJob.updated_at.desc())
+    ).first()
+    return {
+        "queued_count": int(queued_count),
+        "running_count": int(running_count),
+        "processing_count": int(queued_count) + int(running_count),
+        "failed_count": int(failed_count),
+        "latest_error_message": latest_failed.error_message if latest_failed else None,
+    }
+
+
 def _require_ready_submission(submission: TeacherAssistV2StudentSubmission) -> None:
     if submission.status not in {"PROCESSING", "READY_FOR_GRADING", "READY_FOR_REVIEW"}:
         raise ValueError("Submission is not ready for auto-grading.")
@@ -130,16 +170,41 @@ def _require_ready_submission(submission: TeacherAssistV2StudentSubmission) -> N
         raise ValueError("Submission must have an assigned student number before grading.")
 
 
-def create_grading_job_for_submission(
+def _active_grading_job_for_submission(
+    db: Session,
+    *,
+    teacher_user_id: uuid.UUID,
+    submission_id: uuid.UUID,
+) -> TeacherAssistV2GradingJob | None:
+    return db.scalars(
+        select(TeacherAssistV2GradingJob)
+        .where(
+            TeacherAssistV2GradingJob.teacher_user_id == teacher_user_id,
+            TeacherAssistV2GradingJob.student_submission_id == submission_id,
+            TeacherAssistV2GradingJob.status.in_(("QUEUED", "RUNNING")),
+        )
+        .order_by(TeacherAssistV2GradingJob.created_at.desc())
+    ).first()
+
+
+def _enqueue_grading_job_for_submission(
     db: Session,
     *,
     user: User,
     submission_id: uuid.UUID,
     settings: Settings,
-) -> dict[str, Any]:
+) -> tuple[TeacherAssistV2GradingJob, bool]:
     submission = get_student_submission_or_404(db, user=user, submission_id=submission_id)
     assignment = _get_assignment_or_404(db, user=user, assignment_id=submission.assignment_id)
     _require_ready_submission(submission)
+
+    existing = _active_grading_job_for_submission(
+        db,
+        teacher_user_id=user.id,
+        submission_id=submission.id,
+    )
+    if existing is not None:
+        return existing, False
 
     effective_settings = resolve_teacher_assist_settings(db, settings)
     provider_name = validate_teacher_assist_ai_provider(effective_settings.teacher_assist_ai_provider)
@@ -161,84 +226,175 @@ def create_grading_job_for_submission(
     )
     db.add(job)
     db.flush()
+    return job, True
 
-    job.status = "RUNNING"
-    job.started_at = _now()
-    job.updated_at = job.started_at
+
+def queue_grading_job_for_submission(
+    db: Session,
+    *,
+    user: User,
+    submission_id: uuid.UUID,
+    settings: Settings,
+) -> dict[str, Any]:
+    job, created = _enqueue_grading_job_for_submission(
+        db,
+        user=user,
+        submission_id=submission_id,
+        settings=settings,
+    )
+    payload = serialize_grading_job(job)
+    payload["already_processing"] = not created
+    return payload
+
+
+def _perform_grading_job(
+    db: Session,
+    *,
+    settings: Settings,
+    user: User,
+    job: TeacherAssistV2GradingJob,
+) -> None:
+    submission = get_student_submission_or_404(db, user=user, submission_id=job.student_submission_id)
+    assignment = _get_assignment_or_404(db, user=user, assignment_id=submission.assignment_id)
+    _require_ready_submission(submission)
+
+    if job.status == "QUEUED":
+        job.status = "RUNNING"
+        job.started_at = _now()
+        job.updated_at = job.started_at
+        db.flush()
+
+    context = build_grading_context(db, assignment=assignment, submission=submission)
+    if is_teacher_assist_real_ai_active(db, settings) and not context["student_submission"].get("response_text"):
+        raise ValueError(
+            "Student work text is required before AI grading. Extract the submission or enter the student response manually."
+        )
+    ai_result = generate_grading_draft_ai_result(settings=settings, context=context, db=db)
+    job.provider = ai_result.provider
+    job.model = ai_result.model
+
+    draft = TeacherAssistV2GradingDraft(
+        id=uuid.uuid4(),
+        tenant_id=assignment.tenant_id,
+        teacher_user_id=user.id,
+        assignment_id=assignment.id,
+        student_submission_id=submission.id,
+        grading_job_id=job.id,
+        score=ai_result.score,
+        max_score=ai_result.max_score,
+        percentage=ai_result.percentage,
+        rubric_json=ai_result.rubric_json,
+        teacher_comment_draft=ai_result.teacher_comment_draft,
+        strengths=ai_result.strengths,
+        improvements=ai_result.improvements,
+        objective_evidence=ai_result.objective_evidence,
+        confidence_score=ai_result.confidence_score,
+        provider=ai_result.provider,
+        model=ai_result.model,
+        created_at=_now(),
+    )
+    db.add(draft)
+
+    usage_event = TeacherAssistAIUsageEvent(
+        tenant_id=assignment.tenant_id,
+        user_id=user.id,
+        workflow_id=None,
+        provider=ai_result.provider,
+        model=ai_result.model,
+        feature=GRADING_DRAFT_GENERATION_FEATURE,
+        input_tokens=ai_result.input_tokens,
+        output_tokens=ai_result.output_tokens,
+        estimated_cost_cents=ai_result.estimated_cost_cents,
+        metadata_json={
+            "grading_job_id": str(job.id),
+            "student_submission_id": str(submission.id),
+            "assignment_id": str(assignment.id),
+            "teacher_review_required": True,
+            "student_response_used": bool(context["student_submission"].get("response_text")),
+            "student_response_status": (
+                (context["student_submission"].get("extraction") or {}).get("status")
+            ),
+        },
+        created_at=_now(),
+    )
+    db.add(usage_event)
+
+    job.status = "COMPLETED"
+    job.completed_at = _now()
+    job.updated_at = job.completed_at
+    job.draft = draft
+    if submission.status in {"PROCESSING", "READY_FOR_GRADING"}:
+        submission.status = "READY_FOR_REVIEW"
+        submission.updated_at = job.completed_at
     db.flush()
 
+
+def create_grading_job_for_submission(
+    db: Session,
+    *,
+    user: User,
+    submission_id: uuid.UUID,
+    settings: Settings,
+) -> dict[str, Any]:
+    job, created = _enqueue_grading_job_for_submission(
+        db,
+        user=user,
+        submission_id=submission_id,
+        settings=settings,
+    )
+    if created:
+        _perform_grading_job(db, settings=settings, user=user, job=job)
+    return serialize_grading_job(job)
+
+
+def run_grading_job_inline(
+    db: Session,
+    *,
+    settings: Settings,
+    user: User,
+    job_id: uuid.UUID,
+) -> dict[str, Any]:
+    job = db.get(TeacherAssistV2GradingJob, job_id)
+    if job is None:
+        raise LookupError("Grading job not found")
+    _perform_grading_job(db, settings=settings, user=user, job=job)
+    return serialize_grading_job(job)
+
+
+def run_grading_job(
+    *,
+    settings: Settings,
+    user_id: uuid.UUID,
+    job_id: uuid.UUID,
+) -> None:
+    session_factory = make_session_factory(settings)
+    if session_factory is None:
+        return
+    db = session_factory()
     try:
-        context = build_grading_context(db, assignment=assignment, submission=submission)
-        if is_teacher_assist_real_ai_active(db, settings) and not context["student_submission"].get("response_text"):
-            raise ValueError(
-                "Student work text is required before AI grading. Extract the submission or enter the student response manually."
-            )
-        ai_result = generate_grading_draft_ai_result(settings=settings, context=context, db=db)
-        job.provider = ai_result.provider
-        job.model = ai_result.model
-
-        draft = TeacherAssistV2GradingDraft(
-            id=uuid.uuid4(),
-            tenant_id=assignment.tenant_id,
-            teacher_user_id=user.id,
-            assignment_id=assignment.id,
-            student_submission_id=submission.id,
-            grading_job_id=job.id,
-            score=ai_result.score,
-            max_score=ai_result.max_score,
-            percentage=ai_result.percentage,
-            rubric_json=ai_result.rubric_json,
-            teacher_comment_draft=ai_result.teacher_comment_draft,
-            strengths=ai_result.strengths,
-            improvements=ai_result.improvements,
-            objective_evidence=ai_result.objective_evidence,
-            confidence_score=ai_result.confidence_score,
-            provider=ai_result.provider,
-            model=ai_result.model,
-            created_at=_now(),
-        )
-        db.add(draft)
-
-        usage_event = TeacherAssistAIUsageEvent(
-            tenant_id=assignment.tenant_id,
-            user_id=user.id,
-            workflow_id=None,
-            provider=ai_result.provider,
-            model=ai_result.model,
-            feature=GRADING_DRAFT_GENERATION_FEATURE,
-            input_tokens=ai_result.input_tokens,
-            output_tokens=ai_result.output_tokens,
-            estimated_cost_cents=ai_result.estimated_cost_cents,
-            metadata_json={
-                "grading_job_id": str(job.id),
-                "student_submission_id": str(submission.id),
-                "assignment_id": str(assignment.id),
-                "teacher_review_required": True,
-                "student_response_used": bool(context["student_submission"].get("response_text")),
-                "student_response_status": (
-                    (context["student_submission"].get("extraction") or {}).get("status")
-                ),
-            },
-            created_at=_now(),
-        )
-        db.add(usage_event)
-
-        job.status = "COMPLETED"
-        job.completed_at = _now()
-        job.updated_at = job.completed_at
-        job.draft = draft
-        if submission.status in {"PROCESSING", "READY_FOR_GRADING"}:
-            submission.status = "READY_FOR_REVIEW"
-            submission.updated_at = job.completed_at
-        db.flush()
-        return serialize_grading_job(job)
+        job = db.get(TeacherAssistV2GradingJob, job_id)
+        user = db.get(User, user_id)
+        if job is None or user is None:
+            return
+        _perform_grading_job(db, settings=settings, user=user, job=job)
+        db.commit()
     except Exception as exc:
-        job.status = "FAILED"
-        job.error_message = str(exc)
-        job.completed_at = _now()
-        job.updated_at = job.completed_at
-        db.flush()
-        raise
+        db.rollback()
+        try:
+            job = db.get(TeacherAssistV2GradingJob, job_id)
+            if job is not None:
+                job.status = "FAILED"
+                job.error_message = str(exc)
+                job.completed_at = _now()
+                job.updated_at = job.completed_at
+                db.flush()
+                db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to persist grading job failure", extra={"job_id": str(job_id)})
+        logger.exception("Grading job failed", extra={"job_id": str(job_id)})
+    finally:
+        db.close()
 
 
 def generate_all_grading_drafts(
@@ -260,28 +416,28 @@ def generate_all_grading_drafts(
         raise ValueError("No submissions are ready for grading.")
 
     results: list[dict[str, Any]] = []
-    errors: list[dict[str, str]] = []
+    queued_job_ids: list[str] = []
+    already_processing_count = 0
     for submission in submissions:
         try:
-            results.append(
-                create_grading_job_for_submission(
-                    db,
-                    user=user,
-                    submission_id=submission.id,
-                    settings=settings,
-                )
+            job, created = _enqueue_grading_job_for_submission(
+                db,
+                user=user,
+                submission_id=submission.id,
+                settings=settings,
             )
+            payload = serialize_grading_job(job)
+            payload["already_processing"] = not created
+            results.append(payload)
+            if created:
+                queued_job_ids.append(str(job.id))
+            else:
+                already_processing_count += 1
         except Exception as exc:
-            errors.append(
-                {
-                    "student_submission_id": str(submission.id),
-                    "student_number": str(submission.student_number),
-                    "error": str(exc),
-                }
-            )
+            raise ValueError(str(exc)) from exc
     return {
-        "generated_count": len(results),
-        "failed_count": len(errors),
+        "generated_count": len(queued_job_ids),
+        "already_processing_count": already_processing_count,
+        "queued_job_ids": queued_job_ids,
         "jobs": results,
-        "errors": errors,
     }
