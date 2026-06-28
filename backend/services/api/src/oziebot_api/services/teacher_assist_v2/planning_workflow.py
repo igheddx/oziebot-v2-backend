@@ -33,7 +33,7 @@ from oziebot_api.services.teacher_assist_v2.pacing_guide_setup import (
     list_teacher_available_pacing_guides,
 )
 from oziebot_api.services.teacher_assist_v2.pacing_guides import ensure_tenant_school_year
-from oziebot_api.services.teacher_assist_v2.planning_constants import WEEK_RANGE_PRESETS
+from oziebot_api.services.teacher_assist_v2.planning_constants import WEEK_RANGE_PRESETS  # noqa: F401 kept for compat
 from oziebot_api.services.teacher_assist_v2.package_lifecycle import resolve_default_plan_dates
 from oziebot_api.services.teacher_assist_v2.platform_context import resolve_instructional_catalog_tenant_id
 from oziebot_api.services.teacher_assist_v2.school_years import get_platform_school_year_or_404
@@ -54,6 +54,9 @@ from oziebot_api.services.teacher_assist_v2.supporting_materials import (
 )
 from oziebot_api.services.teacher_assist_v2.supporting_materials_constants import (
     PACING_SUPPORTING_UPLOAD_EXTENSIONS,
+)
+from oziebot_api.services.teacher_assist_v2.output_recommender import (
+    recommend_outputs_from_guide_detail,
 )
 from oziebot_api.services.teacher_assist_v2.teacher_onboarding import (
     get_v2_onboarding,
@@ -110,6 +113,8 @@ def _assignment_context(db: Session, *, user: User) -> dict:
     assignments = _teacher_assignments(db, user=user)
 
     guides = []
+    loaded_guide_objects = []
+    subject_codes: set[str] = set()
     min_periods = None
     for assignment in assignments:
         subject = subject_by_id.get(assignment.subject_id)
@@ -123,6 +128,8 @@ def _assignment_context(db: Session, *, user: User) -> dict:
         )
         period_count = len(_week_periods(guide))
         min_periods = period_count if min_periods is None else min(min_periods, period_count)
+        loaded_guide_objects.append(guide)
+        subject_codes.add((subject.subject_code or "").strip().upper())
         available = list_teacher_available_pacing_guides(
             db,
             platform_tenant_id=platform_tenant_id,
@@ -156,10 +163,20 @@ def _assignment_context(db: Session, *, user: User) -> dict:
     if not guides:
         raise ValueError("Adopt pacing guides for your subjects before planning.")
 
-    week_ranges = []
-    for start, end, label in WEEK_RANGE_PRESETS:
-        if min_periods is not None and end <= min_periods:
-            week_ranges.append({"week_start": start, "week_end": end, "label": label})
+    n = min_periods or 1
+    week_ranges: list[dict] = []
+    # One option per individual week
+    for i in range(1, n + 1):
+        week_ranges.append({"week_start": i, "week_end": i, "label": f"Week {i}"})
+    # "All weeks" option when the guide is more than one week
+    if n > 1:
+        week_ranges.append({"week_start": 1, "week_end": n, "label": f"All weeks (1–{n})"})
+
+    recommended_outputs = recommend_outputs_from_guide_detail(
+        loaded_guide_objects,
+        total_guide_weeks=n,
+        subject_codes=subject_codes,
+    )
 
     return {
         "ctx": ctx,
@@ -170,17 +187,21 @@ def _assignment_context(db: Session, *, user: User) -> dict:
         "subjects": guides,
         "default_teaching_order": [row["subject_id"] for row in guides],
         "week_ranges": week_ranges,
+        "total_guide_weeks": n,
+        "recommended_outputs": recommended_outputs,
     }
 
 
 def build_planning_form(db: Session, *, user: User) -> dict:
     base = _assignment_context(db, user=user)
     onboarding = base["onboarding"]
+    # Default to "All weeks" (last entry) so teachers generate the full guide at once.
+    default_range = base["week_ranges"][-1] if base["week_ranges"] else None
     default_start, default_end = resolve_default_plan_dates(
         db,
         user=user,
-        week_start=base["week_ranges"][0]["week_start"] if base["week_ranges"] else 1,
-        week_end=base["week_ranges"][0]["week_end"] if base["week_ranges"] else 1,
+        week_start=default_range["week_start"] if default_range else 1,
+        week_end=default_range["week_end"] if default_range else 1,
     )
     return {
         "school_year": {
@@ -205,6 +226,7 @@ def build_planning_form(db: Session, *, user: User) -> dict:
             "study_guide",
             "parent_newsletter_summary",
         ],
+        "recommended_outputs": base["recommended_outputs"],
     }
 
 
@@ -278,6 +300,8 @@ def build_planning_review_context(
                         "education_objective_id": str(mapped.objective_id),
                         "objective_code": getattr(objective, "objective_id", None),
                         "description": getattr(objective, "description", None),
+                        "is_required": bool(mapped.is_required),
+                        "notes": mapped.notes or None,
                     }
                 )
             pacing_context = get_pacing_guide_planning_context(
@@ -345,9 +369,12 @@ def build_planning_review_context(
         for subject in week["subjects"]
         for material in subject["district_materials"]
     ]
+    base_ctx = _assignment_context(db, user=user)
+    total_guide_weeks = base_ctx.get("total_guide_weeks") or min_periods
     return {
         "week_start": week_start,
         "week_end": week_end,
+        "total_guide_weeks": total_guide_weeks,
         "weeks": weeks,
         "teacher_supplemental_materials": supplemental,
         "ai_readiness_summary": build_ai_readiness_summary(
@@ -689,7 +716,7 @@ def get_instructional_package_detail(
                     "suggested_sources": list(asset.suggested_sources_json or []),
                     "created_at": asset.created_at,
                 }
-                for asset in sorted(artifact.slide_visual_assets, key=lambda item: (item.slide_id, item.created_at))
+                for asset in sorted(artifact.slide_visual_assets, key=lambda item: (item.slide_id, item.updated_at))
             ],
         }
         if content:
@@ -704,6 +731,25 @@ def get_instructional_package_detail(
             entry["teacher_edited"] = True
         if metadata.get("package_additional"):
             entry["package_additional"] = True
+        if (
+            settings is not None
+            and artifact.artifact_type in {"quiz", "assignment", "writing_response"}
+            and metadata.get("additional_exports")
+        ):
+            from oziebot_api.services.teacher_assist.storage import teacher_assist_file_exists
+            missing = any(
+                isinstance(extra, dict)
+                and extra.get("storage_key")
+                and not teacher_assist_file_exists(settings, storage_key=extra["storage_key"])
+                for extra in metadata["additional_exports"]
+            )
+            if missing:
+                from oziebot_api.services.teacher_assist_v2.assessment_student_exports import refresh_assessment_student_exports
+                try:
+                    refresh_assessment_student_exports(db, settings=settings, package=row, artifact=artifact)
+                    metadata = dict(artifact.metadata_json or {})
+                except Exception:
+                    pass
         for extra in metadata.get("additional_exports") or []:
             if not isinstance(extra, dict) or not extra.get("storage_key"):
                 continue
@@ -739,6 +785,9 @@ def get_instructional_package_detail(
 
     daily_plans = [item for item in artifacts if item["artifact_type"] == "daily_lesson_plan"]
     subject_decks = [item for item in artifacts if item["artifact_type"] == "subject_slide_deck"]
+    student_decks = [item for item in artifacts if item["artifact_type"] == "student_lesson_deck"]
+    student_daily_decks = [item for item in student_decks if item.get("day_label")]
+    student_subject_decks = [item for item in student_decks if not item.get("day_label")]
 
     return {
         "id": str(row.id),
@@ -757,7 +806,7 @@ def get_instructional_package_detail(
         "created_at": row.created_at.isoformat(),
         "artifact_groups": group_artifacts(artifacts),
         "artifacts": artifacts,
-        "teaching_mode_available": bool(daily_plans or subject_decks),
+        "teaching_mode_available": bool(daily_plans or subject_decks or student_decks),
         "teaching_presentations": {
             "daily_plans": [
                 {
@@ -775,6 +824,23 @@ def get_instructional_package_detail(
                     "title": item["title"],
                 }
                 for item in subject_decks
+            ],
+            "student_daily_decks": [
+                {
+                    "artifact_id": item["id"],
+                    "day_label": item["day_label"],
+                    "title": item["title"],
+                }
+                for item in student_daily_decks
+            ],
+            "student_subject_decks": [
+                {
+                    "artifact_id": item["id"],
+                    "subject_id": item["subject_id"],
+                    "subject_name": item["subject_name"],
+                    "title": item["title"],
+                }
+                for item in student_subject_decks
             ],
         },
     }

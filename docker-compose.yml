@@ -16,6 +16,7 @@ x-teacher-assist-env: &teacher-assist-env
   TEACHER_ASSIST_OPENAI_API_KEY: ${TEACHER_ASSIST_OPENAI_API_KEY:-}
   TEACHER_ASSIST_ALLOWED_MODELS: ${TEACHER_ASSIST_ALLOWED_MODELS:-mock}
   TEACHER_ASSIST_AI_DAILY_COST_LIMIT_CENTS: ${TEACHER_ASSIST_AI_DAILY_COST_LIMIT_CENTS:-0}
+  TEACHER_ASSIST_PIXABAY_API_KEY: ${TEACHER_ASSIST_PIXABAY_API_KEY:-}
 
 services:
   postgres:
@@ -27,7 +28,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - lean_pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oziebot} -d ${POSTGRES_DB:-oziebot}"]
       interval: 5s
@@ -57,6 +58,9 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,https://app.oziebot.com}
       <<: *teacher-assist-env
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      TEACHER_ASSIST_STORAGE_ROOT: /app/teacher-assist-storage
+    volumes:
+      - teacher_assist_storage:/app/teacher-assist-storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -148,4 +152,5 @@ services:
         condition: service_healthy
 
 volumes:
-  pgdata:
+  lean_pgdata:
+  teacher_assist_storage:

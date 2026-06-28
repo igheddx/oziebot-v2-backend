@@ -250,6 +250,11 @@ class Settings(BaseSettings):
         default="http://localhost:3000/teacher-assist-v2/settings/google",
         description="Frontend URL after successful Google OAuth callback.",
     )
+    teacher_assist_pixabay_api_key: str | None = Field(
+        default=None,
+        description="Pixabay API key for fetching royalty-free educational images for slide decks. "
+                    "Get a free key at https://pixabay.com/api/docs/",
+    )
 
 
 def get_settings() -> Settings:

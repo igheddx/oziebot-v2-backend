@@ -113,6 +113,7 @@ def build_teacher_planning_generation_context(
         "pacing_guide_ids": pacing_guide_ids,
         "week_start": week_start,
         "week_end": week_end,
+        "total_guide_weeks": review.get("total_guide_weeks"),
         "weeks": review["weeks"],
         "pacing_materials": pacing_materials,
         "district_materials_summary": pacing_materials,

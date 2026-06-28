@@ -20,10 +20,6 @@ from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
     get_catalog_pacing_guide_detail,
     update_catalog_pacing_guide,
 )
-from oziebot_api.services.teacher_assist_v2.pacing_guide_period_days import (
-    daily_plans_metadata_snapshot,
-    replace_period_days,
-)
 from oziebot_api.services.teacher_assist_v2.school_years import get_platform_school_year_or_404
 
 
@@ -66,45 +62,18 @@ def _validate_objectives_for_guide(
     return validated
 
 
-def _validate_weeks(weeks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if not weeks:
-        raise _field_errors(weeks="Add at least one week with a daily teaching plan.")
-    validated: list[dict[str, Any]] = []
-    for index, week in enumerate(weeks, start=1):
-        daily_plans = week.get("daily_plans") or []
-        if not daily_plans:
-            raise _field_errors(weeks=f"Week {index} needs at least one day in the daily plan.")
-        normalized_days = []
-        for day in daily_plans:
-            day_label = str(day.get("day_label") or "").strip()
-            daily_topic = str(day.get("daily_topic") or "").strip()
-            if not day_label:
-                continue
-            if not daily_topic:
-                raise _field_errors(weeks=f"Week {index} {day_label} needs a daily topic.")
-            normalized_days.append(
-                {
-                    "day_label": day_label,
-                    "daily_topic": daily_topic,
-                    "objective_focus": day.get("objective_focus"),
-                    "teacher_notes": day.get("teacher_notes"),
-                    "materials_needed": day.get("materials_needed"),
-                    "assessment_check": day.get("assessment_check"),
-                }
-            )
-        if not normalized_days:
-            raise _field_errors(weeks=f"Week {index} needs labeled days in the daily plan.")
-        validated.append(
-            {
-                "title": str(week.get("title") or f"Week {index}").strip(),
-                "description": (week.get("description") or None),
-                "sequence_number": int(week.get("sequence_number") or index),
-                "unit_title": (week.get("unit_title") or None),
-                "daily_plans": normalized_days,
-                "objective_ids": [uuid.UUID(str(value)) for value in week.get("objective_ids") or []],
-            }
-        )
-    return validated
+def _weeks_from_duration(estimated_duration_weeks: int) -> list[dict[str, Any]]:
+    n = max(1, int(estimated_duration_weeks or 1))
+    return [
+        {
+            "title": f"Week {i}",
+            "description": None,
+            "sequence_number": i,
+            "unit_title": None,
+            "objective_ids": [],
+        }
+        for i in range(1, n + 1)
+    ]
 
 
 def _apply_scope_metadata(guide: TeacherAssistPacingGuide, *, body: dict[str, Any]) -> None:
@@ -136,7 +105,6 @@ def _replace_guide_structure(
     )
     db.flush()
 
-    default_objectives = objectives
     for week in weeks:
         period = create_pacing_guide_period(
             db,
@@ -149,24 +117,21 @@ def _replace_guide_structure(
             start_date=None,
             end_date=None,
         )
-        day_rows = replace_period_days(db, period=period, daily_plans=week["daily_plans"])
+        # Day-level topics are intentionally empty — AI determines what to teach each day
+        # based on the pacing guide objectives and attached supporting documents at plan time.
         period.metadata_json = {
             "unit_title": week.get("unit_title"),
-            "daily_plans": daily_plans_metadata_snapshot(day_rows),
+            "daily_plans": [],
         }
         period.updated_at = _now()
-        week_objective_ids = week.get("objective_ids") or [row["objective_id"] for row in default_objectives]
-        if not week_objective_ids:
-            week_objective_ids = [row["objective_id"] for row in default_objectives]
-        for objective_id in week_objective_ids:
-            matching = next((row for row in default_objectives if row["objective_id"] == objective_id), None)
+        for obj in objectives:
             add_pacing_guide_objective(
                 db,
                 tenant_id=tenant_id,
                 period_id=period.id,
-                objective_id=objective_id,
-                is_required=matching["is_required"] if matching else True,
-                notes=matching["notes"] if matching else None,
+                objective_id=obj["objective_id"],
+                is_required=obj["is_required"],
+                notes=obj.get("notes"),
             )
     guide.updated_at = _now()
     db.flush()
@@ -205,7 +170,8 @@ def create_v2_pacing_guide_from_builder(
         catalog_subject_id=uuid.UUID(str(body["catalog_subject_id"])),
         objective_rows=body.get("objectives") or [],
     )
-    weeks = _validate_weeks(body.get("weeks") or [])
+    estimated_duration_weeks = int(body.get("estimated_duration_weeks") or 6)
+    weeks = _weeks_from_duration(estimated_duration_weeks)
 
     guide = create_catalog_pacing_guide(
         db,
@@ -272,7 +238,8 @@ def update_v2_pacing_guide_from_builder(
         catalog_subject_id=uuid.UUID(str(body["catalog_subject_id"])),
         objective_rows=body.get("objectives") or [],
     )
-    weeks = _validate_weeks(body.get("weeks") or [])
+    estimated_duration_weeks = int(body.get("estimated_duration_weeks") or 6)
+    weeks = _weeks_from_duration(estimated_duration_weeks)
     _apply_scope_metadata(guide, body=body)
     _replace_guide_structure(db, tenant_id=tenant_id, guide=guide, objectives=objectives, weeks=weeks)
     return get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=guide.id)

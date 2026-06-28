@@ -925,6 +925,250 @@ def build_vocabulary_list(*, subject_name: str, package_title: str, objective_te
     }, mapping)
 
 
+def _student_deck_visual(
+    *,
+    search_terms: list[str],
+    purpose: str,
+    alt_text: str,
+    placement: str = "right",
+    fallback_organizer: str = "concept_map",
+) -> dict[str, Any]:
+    return {
+        "type": "image_search",
+        "placement": placement,
+        "fallback_organizer_type": fallback_organizer,
+        "image_search": {
+            "search_terms": search_terms,
+            "educational_purpose": purpose,
+            "target_grade_band": "elementary",
+            "preferred_image_type": "photo",
+            "image_alt_text": alt_text,
+            "image_rationale": purpose,
+        },
+    }
+
+
+def build_student_lesson_deck(
+    *,
+    subject_name: str,
+    week_label: str,
+    package_title: str,
+    objective_code: str | None,
+    objective_text: str,
+    objectives_list: list[str],
+    day_label: str | None = None,
+    objective_ids: list[str] | None = None,
+    teks_ids: list[str] | None = None,
+    source_materials: list[str] | None = None,
+    daily_topics: list[str] | None = None,
+) -> dict[str, Any]:
+    mapping = _objective_mapping(
+        objective_code,
+        objective_text,
+        objective_ids=objective_ids,
+        teks_ids=teks_ids,
+    )
+    obj_bullets = objectives_list[:3] if objectives_list else [objective_text]
+    source_texts = _source_texts_from_materials(source_materials)
+    day_context = f" — {day_label}" if day_label else ""
+    title_label = f"{subject_name}{day_context}" if subject_name else package_title
+    subj = subject_name or "today's lesson"
+
+    slides: list[dict[str, Any]] = []
+    slide_num = 0
+
+    def next_id() -> str:
+        nonlocal slide_num
+        slide_num += 1
+        return f"slide-{slide_num}"
+
+    # Hook
+    hook_body = f"Today we explore {subj}."
+    if source_texts:
+        hook_body += f" We will work with {source_texts[0]}."
+    hook_body += " Get ready to think and discover!"
+    slides.append({
+        "id": next_id(),
+        "slide_type": "hook",
+        "layout": "hook_full_image",
+        "title": f"Ready to Learn About {subj}?",
+        "body": hook_body,
+        "bullets": [f"Subject: {subj}", f"Week: {week_label}"],
+        "engagement": {
+            "type": "think_pair_share",
+            "prompt": "What do you already know about this topic? Share with a partner!",
+        },
+        "visual": _student_deck_visual(
+            search_terms=[f"{subj} students learning classroom", "elementary students excited classroom", "classroom discovery learning"],
+            purpose=f"Sets an inviting tone and connects {subj} to students' experience.",
+            alt_text=f"Students learning about {subj} in an elementary classroom",
+            placement="full_width",
+            fallback_organizer="concept_map",
+        ),
+    })
+
+    # Today we learn
+    obj_body = objective_text
+    if len(obj_body.split()) > 30:
+        obj_body = " ".join(obj_body.split()[:30]) + "..."
+    slides.append({
+        "id": next_id(),
+        "slide_type": "today_we_learn",
+        "layout": "objective_image",
+        "title": "Today You Will Learn To...",
+        "body": obj_body,
+        "bullets": obj_bullets,
+        "engagement": {
+            "type": "turn_and_talk",
+            "prompt": "Read the learning goal with your partner. Can you say it in your own words?",
+        },
+        "visual": _student_deck_visual(
+            search_terms=["students reading classroom discussion", "learning goal target education elementary", "classroom reading lesson"],
+            purpose="Shows students engaged in learning to connect the objective to real classroom experience.",
+            alt_text="Students engaged in classroom learning activity",
+            placement="right",
+            fallback_organizer="concept_map",
+        ),
+    })
+
+    # Vocabulary
+    if source_texts:
+        vocab_bullets = [f"{text}" for text in source_texts[:4]]
+        slides.append({
+            "id": next_id(),
+            "slide_type": "vocabulary",
+            "layout": "vocabulary_showcase",
+            "title": "Words to Know",
+            "body": f"These key words will help you understand {subj} today.",
+            "bullets": vocab_bullets,
+            "engagement": {
+                "type": "whiteboard",
+                "prompt": "Point to a word you know. Tell your neighbor what it means!",
+            },
+            "visual": _student_deck_visual(
+                search_terms=[f"{subj} vocabulary words elementary", "word wall classroom vocabulary", "vocabulary flashcards students"],
+                purpose="Visual word wall helps students connect vocabulary terms to meaning.",
+                alt_text="Vocabulary word wall with key lesson terms",
+                placement="right",
+                fallback_organizer="vocabulary_card",
+            ),
+        })
+
+    # Concept slides
+    concept_topics = (daily_topics or [])[:3]
+    if concept_topics:
+        for index, topic in enumerate(concept_topics, start=1):
+            slides.append({
+                "id": next_id(),
+                "slide_type": "concept",
+                "layout": "teacher_modeling",
+                "title": topic,
+                "body": f"In {subj}, we focus on: {topic}.",
+                "bullets": [f"Key idea {index}: {topic}", "Look for evidence.", "Ask: How does this connect?"],
+                "engagement": {
+                    "type": "turn_and_talk",
+                    "prompt": f"How does '{topic}' connect to what you already know? Discuss with your partner.",
+                },
+                "visual": _student_deck_visual(
+                    search_terms=[f"{topic} {subj} elementary illustration", f"{topic} classroom visual", f"{subj} students lesson"],
+                    purpose=f"Visual anchor for the concept '{topic}' in {subj}.",
+                    alt_text=f"Educational illustration showing {topic}",
+                    placement="right",
+                    fallback_organizer="concept_map",
+                ),
+            })
+    else:
+        slides.append({
+            "id": next_id(),
+            "slide_type": "concept",
+            "layout": "teacher_modeling",
+            "title": f"The Big Idea in {subj}",
+            "body": f"The main idea: {obj_body}",
+            "bullets": ["Find the main idea.", "Support it with details.", "Connect it to what you know."],
+            "engagement": {
+                "type": "think_pair_share",
+                "prompt": "What is the main idea? Write it in your own words.",
+            },
+            "visual": _student_deck_visual(
+                search_terms=[f"{subj} main idea graphic organizer", f"{subj} concept map students", "main idea supporting details elementary"],
+                purpose=f"Helps students visualize the central concept of {subj}.",
+                alt_text=f"Graphic organizer showing the main idea of {subj}",
+                placement="right",
+                fallback_organizer="concept_map",
+            ),
+        })
+
+    # Your turn
+    slides.append({
+        "id": next_id(),
+        "slide_type": "your_turn",
+        "layout": "guided_practice_image",
+        "title": "Your Turn — Let's Practice!",
+        "body": f"Show what you know about {subj}. Work with a partner to complete the activity.",
+        "bullets": ["Read the prompt carefully.", "Use evidence from the lesson.", "Be ready to share!"],
+        "engagement": {
+            "type": "think_pair_share",
+            "prompt": "Complete the practice activity with your partner. You have 5 minutes — go!",
+        },
+        "visual": _student_deck_visual(
+            search_terms=["students working together classroom elementary", "partner activity collaborative learning", "students discussing classroom"],
+            purpose="Shows collaborative learning to motivate students during practice.",
+            alt_text="Elementary students working together on a classroom activity",
+            placement="right",
+            fallback_organizer="process_flow",
+        ),
+    })
+
+    # Check in
+    slides.append({
+        "id": next_id(),
+        "slide_type": "check_in",
+        "layout": "exit_ticket_image",
+        "title": "Check In — How Are You Doing?",
+        "body": "Let's see how well you understand today's lesson.",
+        "bullets": ["1 finger = I need help", "3 fingers = I'm getting it", "5 fingers = I've got this!"],
+        "engagement": {
+            "type": "show_fingers",
+            "prompt": f"Hold up fingers to show your confidence. Can you explain the main idea of {subj}?",
+        },
+        "visual": _student_deck_visual(
+            search_terms=["student confidence check elementary classroom", "students showing understanding hands", "self assessment elementary"],
+            purpose="Confidence check visual prompts honest student self-reflection.",
+            alt_text="Students showing hand signals for understanding in classroom",
+            placement="right",
+            fallback_organizer="concept_map",
+        ),
+    })
+
+    # Wrap up
+    slides.append({
+        "id": next_id(),
+        "slide_type": "wrap_up",
+        "layout": "title_full",
+        "title": "Great Work Today!",
+        "body": f"You explored {subj} and practiced the key ideas. Keep thinking about this!",
+        "bullets": [f"We explored: {subj}", "You practiced with a partner.", "Next time we go deeper!"],
+        "engagement": {
+            "type": "exit_ticket",
+            "prompt": "Write your exit thought: 'Today I learned...' Share it before you leave!",
+        },
+        "visual": _student_deck_visual(
+            search_terms=["students celebrating learning classroom achievement", "classroom success celebration elementary", "happy students school achievement"],
+            purpose="Celebrates student effort and closes the lesson on a positive note.",
+            alt_text="Students celebrating their learning achievement in classroom",
+            placement="full_width",
+            fallback_organizer="concept_map",
+        ),
+    })
+
+    return _with_alignment({
+        "title": f"{title_label} — Student Lesson",
+        "summary": f"Student-facing lesson presentation for {subject_name}.",
+        "description": "Projected student lesson deck for classroom display.",
+        "slides": slides,
+    }, mapping)
+
+
 def build_study_guide(*, subject_name: str, week_label: str, package_title: str, objective_text: str, objective_code: str | None) -> dict[str, Any]:
     mapping = _objective_mapping(objective_code, objective_text)
     return _with_alignment({
@@ -985,6 +1229,19 @@ def build_deterministic_fallback(
             daily_topics=daily_topics,
             daily_objectives=daily_objectives,
             assessment_checks=assessment_checks,
+        ),
+        "student_lesson_deck": lambda: build_student_lesson_deck(
+            subject_name=subject_name,
+            week_label=week_label,
+            package_title=package_title,
+            objective_code=objective_code,
+            objective_text=objective_text,
+            objectives_list=objectives_list or [],
+            day_label=day_label,
+            objective_ids=objective_ids,
+            teks_ids=teks_ids,
+            source_materials=source_materials,
+            daily_topics=daily_topics,
         ),
         "quiz": lambda: build_quiz(
             subject_name=subject_name,

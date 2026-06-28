@@ -173,6 +173,35 @@ def add_slide_visual_metadata(
 def build_slide_visual_assets(slides: list[dict[str, Any]]) -> list[dict[str, Any]]:
     assets: list[dict[str, Any]] = []
     for slide in slides:
+        slide_id = str(slide.get("id") or "")
+
+        # New schema: slide has a `visual` block with image_search metadata
+        visual_block = slide.get("visual")
+        if isinstance(visual_block, dict) and visual_block.get("type") == "image_search":
+            img_search = visual_block.get("image_search") or {}
+            search_terms = [t for t in (img_search.get("search_terms") or []) if isinstance(t, str)]
+            assets.append(
+                {
+                    "slide_id": slide_id,
+                    "visual_type": "image",
+                    "title": f"{slide.get('title') or slide_id} — Image",
+                    "description": str(img_search.get("image_alt_text") or img_search.get("educational_purpose") or ""),
+                    "source_type": "pixabay",
+                    "source_url": visual_block.get("source_url"),
+                    "attribution": visual_block.get("attribution"),
+                    "local_asset_key": visual_block.get("local_asset_key"),
+                    "prompt_hint": str(img_search.get("image_alt_text") or ""),
+                    "educational_purpose": str(img_search.get("educational_purpose") or ""),
+                    "suggested_placement": str(visual_block.get("placement") or "right"),
+                    "layout_template": str(slide.get("layout") or ""),
+                    "visual_generation_status": "pending",
+                    "search_terms_json": search_terms,
+                    "suggested_sources_json": ["Pixabay"],
+                }
+            )
+            continue
+
+        # Legacy schema: slide has a `visualRecommendation` block
         recommendation = slide.get("visualRecommendation")
         if not isinstance(recommendation, dict):
             continue

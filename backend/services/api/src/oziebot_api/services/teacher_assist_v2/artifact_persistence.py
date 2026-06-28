@@ -32,16 +32,31 @@ def _sync_slide_visual_assets(
     content: dict[str, Any],
     updated_at: datetime,
 ) -> None:
-    for row in list(artifact.slide_visual_assets):
-        db.delete(row)
+    # Query directly so we always see committed fetched rows, not a stale ORM cache.
+    all_rows = (
+        db.query(TeacherAssistV2SlideVisualAsset)
+        .filter(TeacherAssistV2SlideVisualAsset.artifact_id == artifact.id)
+        .all()
+    )
+    fetched_by_slide_id = {
+        row.slide_id: row
+        for row in all_rows
+        if row.visual_generation_status == "fetched" and row.local_asset_key
+    }
+    for row in all_rows:
+        if row.slide_id not in fetched_by_slide_id:
+            db.delete(row)
     slides = content.get("slides")
     if not isinstance(slides, list):
         return
     for asset in build_slide_visual_assets([item for item in slides if isinstance(item, dict)]):
+        slide_id = asset["slide_id"]
+        if slide_id in fetched_by_slide_id:
+            continue
         db.add(
             TeacherAssistV2SlideVisualAsset(
                 artifact_id=artifact.id,
-                slide_id=asset["slide_id"],
+                slide_id=slide_id,
                 visual_type=asset["visual_type"],
                 title=asset["title"],
                 description=asset["description"],
@@ -53,7 +68,7 @@ def _sync_slide_visual_assets(
                 educational_purpose=asset.get("educational_purpose"),
                 suggested_placement=asset.get("suggested_placement"),
                 layout_template=asset.get("layout_template"),
-                visual_generation_status=asset.get("visual_generation_status") or "recommendation_only",
+                visual_generation_status=asset.get("visual_generation_status") or "pending",
                 search_terms_json=list(asset.get("search_terms_json") or []),
                 suggested_sources_json=list(asset.get("suggested_sources_json") or []),
                 created_at=updated_at,

@@ -6,7 +6,7 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.engine import make_url
 
 from oziebot_api.config import Settings
@@ -75,7 +75,12 @@ from oziebot_api.services.teacher_assist.education_catalog import (
     update_subject,
 )
 from oziebot_api.services.teacher_assist.setup import teacher_assist_context_for_user
-from oziebot_api.services.teacher_assist.storage import save_teacher_assist_bytes
+from oziebot_api.services.teacher_assist.storage import open_teacher_assist_stream, save_teacher_assist_bytes
+from oziebot_api.models.teacher_assist_v2_slide_visual_asset import TeacherAssistV2SlideVisualAsset
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackageArtifact,
+)
+from oziebot_api.services.teacher_assist_v2.image_search import fetch_slide_images_for_artifact
 from oziebot_api.services.teacher_assist_v2.catalog_integrity import (
     CatalogArchiveError,
     archive_district,
@@ -289,6 +294,8 @@ def _handle(action):
             status_code=409,
             detail={"message": str(exc), "dependencies": exc.dependencies},
         ) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         if exc.args and isinstance(exc.args[0], dict):
             raise HTTPException(status_code=400, detail={"field_errors": exc.args[0]}) from exc
@@ -1605,6 +1612,100 @@ def read_teacher_instructional_package(
             settings=settings,
         )
     )
+
+
+@router.get("/teacher/artifacts/{artifact_id}/slide-image/{slide_id}")
+def get_slide_image(
+    artifact_id: uuid.UUID,
+    slide_id: str,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> Response:
+    _require_teacher(db, user)
+    asset: TeacherAssistV2SlideVisualAsset | None = (
+        db.query(TeacherAssistV2SlideVisualAsset)
+        .filter_by(artifact_id=artifact_id, slide_id=slide_id)
+        .order_by(TeacherAssistV2SlideVisualAsset.updated_at.desc())
+        .first()
+    )
+    if asset is None or not asset.local_asset_key:
+        raise HTTPException(status_code=404, detail="Slide image not available")
+    try:
+        stream = open_teacher_assist_stream(settings, storage_key=asset.local_asset_key)
+        try:
+            image_bytes = stream.read()
+        finally:
+            stream.close()
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="Slide image file not found") from exc
+    mime_type = "image/jpeg"
+    if asset.local_asset_key.endswith(".png"):
+        mime_type = "image/png"
+    elif asset.local_asset_key.endswith(".webp"):
+        mime_type = "image/webp"
+    elif asset.local_asset_key.endswith(".gif"):
+        mime_type = "image/gif"
+    return Response(
+        content=image_bytes,
+        media_type=mime_type,
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@router.post("/teacher/artifacts/{artifact_id}/fetch-images")
+def trigger_artifact_image_fetch(
+    artifact_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    """Trigger Pixabay image fetch for all pending slides in a student lesson deck."""
+    _require_teacher(db, user)
+
+    if not settings.teacher_assist_pixabay_api_key:
+        raise HTTPException(
+            status_code=422,
+            detail="Pixabay API key is not configured. Images will appear automatically once the key is added.",
+        )
+
+    artifact: TeacherAssistV2InstructionalPackageArtifact | None = (
+        db.query(TeacherAssistV2InstructionalPackageArtifact)
+        .filter_by(id=artifact_id, tenant_id=user.tenant_id)
+        .first()
+    )
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    try:
+        fetch_slide_images_for_artifact(
+            db,
+            artifact=artifact,
+            settings=settings,
+            api_key=settings.teacher_assist_pixabay_api_key,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Image fetch failed") from exc
+
+    db.commit()
+
+    assets = (
+        db.query(TeacherAssistV2SlideVisualAsset)
+        .filter_by(artifact_id=artifact_id)
+        .all()
+    )
+    fetched = sum(1 for a in assets if a.visual_generation_status == "fetched")
+    pending = sum(1 for a in assets if a.visual_generation_status == "pending")
+    failed = sum(1 for a in assets if a.visual_generation_status == "failed")
+    total = len(assets)
+
+    return {
+        "fetched": fetched,
+        "pending": pending,
+        "failed": failed,
+        "total": total,
+        "message": f"{fetched} of {total} slide images ready.",
+    }
 
 
 @router.put("/teacher/planning/packages/{package_id}/artifacts/{artifact_id}/rubric")

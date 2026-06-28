@@ -4,6 +4,7 @@ REQUIRED_PACKAGE_OUTPUTS = ("daily_lesson_plan",)
 
 OPTIONAL_PACKAGE_OUTPUTS = (
     "subject_slide_deck",
+    "student_lesson_deck",
     "assignment",
     "writing_response",
     "quiz",
@@ -22,12 +23,21 @@ PACKAGE_ARTIFACT_TYPES = PACKAGE_OUTPUT_TYPES
 PACKAGE_ARTIFACT_GROUPS = {
     "daily_teaching_plans": ("daily_lesson_plan",),
     "subject_slide_decks": ("subject_slide_deck",),
+    "student_lesson_decks": ("student_lesson_deck",),
     "assessments": ("assignment", "writing_response", "quiz", "rubric", "exit_ticket"),
     "student_materials": ("bell_ringer", "vocabulary_list", "study_guide"),
     "communication": ("parent_newsletter_summary",),
 }
 
 WEEKDAY_LABELS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
+
+# Class period durations in minutes, keyed by subject_code.
+# ELA is split: reading block and writing block taught separately.
+# All other subjects default to a single instructional block.
+SUBJECT_CLASS_MINUTES: dict[str, dict[str, int]] = {
+    "ELA": {"reading": 35, "writing": 30},
+}
+DEFAULT_CLASS_MINUTES = 40
 
 WEEK_RANGE_PRESETS = (
     (1, 1, "Week 1"),

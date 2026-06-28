@@ -226,7 +226,6 @@ class V2PacingGuideBuilderIn(BaseModel):
     start_week: int | None = Field(default=None, ge=1)
     end_week: int | None = Field(default=None, ge=1)
     objectives: list[V2PacingGuideObjectiveSelectionIn] = Field(min_length=1)
-    weeks: list[V2PacingGuideWeekIn] = Field(min_length=1)
 
 
 class V2TeacherAssistAiProviderConfigIn(BaseModel):

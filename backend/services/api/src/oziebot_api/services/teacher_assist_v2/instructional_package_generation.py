@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import logging
+import re
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -27,12 +30,17 @@ from oziebot_api.services.teacher_assist_v2.artifact_persistence import (
     attach_qr_student_packet,
     persist_package_artifact,
 )
+from oziebot_api.services.teacher_assist_v2.image_search import (
+    create_pending_image_assets,
+    fetch_slide_images_for_artifact,
+)
 from oziebot_api.services.teacher_assist_v2.assignments import maybe_create_assignment_for_artifact
 from oziebot_api.services.teacher_assist_v2.deterministic_package_content import (
     build_daily_lesson_plan,
     build_deterministic_fallback,
     build_rubric_for_written_assignment,
     build_rubric_for_writing_response,
+    build_student_lesson_deck,
 )
 from oziebot_api.services.teacher_assist_v2.instructional_package_ai import generate_v2_instructional_artifact
 from oziebot_api.services.teacher_assist_v2.package_export import render_artifact_preview_html
@@ -582,6 +590,96 @@ def prepare_instructional_package_generation(
     return package, context, outputs, excluded_ids, final_status
 
 
+_PARALLEL_MAX_WORKERS = 3
+_RATE_LIMIT_MAX_RETRIES = 4
+_RATE_LIMIT_BASE_DELAY = 6.0  # seconds
+
+
+def _call_ai_for_job(
+    *,
+    session_factory: Any,
+    settings: Settings,
+    user_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    package_id: uuid.UUID,
+    artifact_type: str,
+    generation_context: dict[str, Any],
+    week: dict[str, Any],
+    subject_meta: dict[str, Any] | None,
+    week_subject: dict[str, Any] | None,
+    day_label: str | None,
+    title_hint: str | None,
+    deterministic_content: dict[str, Any],
+) -> dict[str, Any]:
+    """Run one AI artifact call in its own DB session thread. Retries on 429; falls back to deterministic on persistent error."""
+    db = session_factory()
+    try:
+        user = db.get(User, user_id)
+        if user is None:
+            return deterministic_content
+
+        last_exc: Exception | None = None
+        for attempt in range(_RATE_LIMIT_MAX_RETRIES):
+            try:
+                result = generate_v2_instructional_artifact(
+                    db,
+                    settings=settings,
+                    user=user,
+                    tenant_id=tenant_id,
+                    package_id=package_id,
+                    artifact_type=artifact_type,
+                    generation_context=generation_context,
+                    week=week,
+                    subject_meta=subject_meta,
+                    week_subject=week_subject,
+                    day_label=day_label,
+                    title_hint=title_hint,
+                )
+                db.commit()
+                return result if result is not None else deterministic_content
+            except Exception as exc:
+                db.rollback()
+                msg = str(exc)
+                if "429" in msg and attempt < _RATE_LIMIT_MAX_RETRIES - 1:
+                    # Parse the suggested retry delay from the OpenAI error message.
+                    match = re.search(r"try again in ([\d.]+)s", msg)
+                    delay = float(match.group(1)) + 1.0 if match else _RATE_LIMIT_BASE_DELAY * (attempt + 1)
+                    logger.warning(
+                        "Rate limit on attempt %d for artifact_type=%s week=%s day=%s — retrying in %.1fs",
+                        attempt + 1,
+                        artifact_type,
+                        (week or {}).get("sequence_number"),
+                        day_label,
+                        delay,
+                    )
+                    time.sleep(delay)
+                    last_exc = exc
+                else:
+                    last_exc = exc
+                    break
+
+        logger.exception(
+            "Parallel AI call failed after %d attempts — artifact_type=%s week=%s day=%s; using deterministic fallback",
+            _RATE_LIMIT_MAX_RETRIES,
+            artifact_type,
+            (week or {}).get("sequence_number"),
+            day_label,
+            exc_info=last_exc,
+        )
+        return deterministic_content
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Unexpected error in parallel AI call — artifact_type=%s week=%s day=%s; using deterministic fallback",
+            artifact_type,
+            (week or {}).get("sequence_number"),
+            day_label,
+        )
+        return deterministic_content
+    finally:
+        db.close()
+
+
 def _populate_instructional_package(
     db: Session,
     *,
@@ -593,6 +691,7 @@ def _populate_instructional_package(
     outputs: list[str],
     excluded_ids: set[str],
     final_status: str,
+    session_factory: Any = None,
 ) -> TeacherAssistV2InstructionalPackage:
     provider_name = package.provider_name or "deterministic"
 
@@ -606,6 +705,11 @@ def _populate_instructional_package(
             "and TEACHER_ASSIST_AI_DAILY_COST_LIMIT_CENTS are set in the worker environment."
         )
 
+    # Use parallel AI calls when a session factory is available (background worker path).
+    # Parallel execution fires all AI calls for a week concurrently; each thread uses its
+    # own DB session so SQLAlchemy state is never shared across threads.
+    use_parallel = session_factory is not None and provider_name == "openai"
+
     now = _now()
     link_excerpts = _link_context_excerpts(context)
 
@@ -615,9 +719,18 @@ def _populate_instructional_package(
     assignment_artifact = None
     assignment_content: dict[str, Any] | None = None
 
+    total_weeks = len(context["weeks"])
     for week in context["weeks"]:
         week_label = week["title"]
+        week_num = week["sequence_number"]
         week_subjects = {row["subject_id"]: row for row in week["subjects"]}
+
+        # ── PHASE 1: collect all primary artifact jobs for this week ──────────────
+        # Each job carries: deterministic fallback content, AI call params, persist
+        # kwargs, and a post_type tag for side effects. AI calls fire in Phase 2;
+        # DB writes happen in Phase 3 with a commit after each artifact so the
+        # teacher sees progressive results and container restarts are recoverable.
+        week_jobs: list[dict[str, Any]] = []
 
         if "daily_lesson_plan" in outputs:
             for day_index, day_label in enumerate(WEEKDAY_LABELS):
@@ -664,7 +777,6 @@ def _populate_instructional_package(
                     day_label,
                     fallback=week_objective_text,
                 )
-
                 _, _, _, objective_ids, teks_ids = _objective_fields(
                     primary_week_subject,
                     subject_lookup[teaching_order_keys[0]]["subject_name"] if primary_week_subject and teaching_order_keys else "",
@@ -681,35 +793,29 @@ def _populate_instructional_package(
                     summary=plan_summary,
                     daily_topic=daily_topic,
                 )
-                content = _resolve_artifact_content(
-                    db,
-                    settings=settings,
-                    user=user,
-                    package=package,
-                    context=context,
-                    artifact_type="daily_lesson_plan",
-                    deterministic_content=deterministic,
-                    week=week,
-                    week_subject=primary_week_subject,
-                    day_label=day_label,
-                    title_hint=deterministic["title"],
-                )
-                sequence += 1
-                period_id = None
+                _period_id = None
                 if teaching_order_keys and teaching_order_keys[0] in week_subjects:
-                    period_id = uuid.UUID(week_subjects[teaching_order_keys[0]]["period_id"])
-                persist_package_artifact(
-                    db,
-                    settings=settings,
-                    package=package,
-                    artifact_type="daily_lesson_plan",
-                    content=content,
-                    provider_name=provider_name,
-                    sequence_number=sequence,
-                    created_at=now,
-                    period_id=period_id,
-                    day_label=day_label,
-                )
+                    _period_id = uuid.UUID(week_subjects[teaching_order_keys[0]]["period_id"])
+                stored_day_label = f"W{week_num}-{day_label}" if total_weeks > 1 else day_label
+                week_jobs.append({
+                    "ai_params": {
+                        "artifact_type": "daily_lesson_plan",
+                        "week": week,
+                        "subject_meta": None,
+                        "week_subject": primary_week_subject,
+                        "day_label": day_label,
+                        "title_hint": deterministic["title"],
+                    },
+                    "deterministic": deterministic,
+                    "persist_kwargs": {
+                        "artifact_type": "daily_lesson_plan",
+                        "provider_name": provider_name,
+                        "created_at": now,
+                        "period_id": _period_id,
+                        "day_label": stored_day_label,
+                    },
+                    "post_type": None,
+                })
 
         if "subject_slide_deck" in outputs:
             for subject_id in teaching_order_keys:
@@ -742,34 +848,123 @@ def _populate_instructional_package(
                     daily_objectives=daily_objectives,
                     assessment_checks=assessment_checks,
                 )
-                content = _resolve_artifact_content(
-                    db,
-                    settings=settings,
-                    user=user,
-                    package=package,
-                    context=context,
-                    artifact_type="subject_slide_deck",
-                    deterministic_content=deterministic,
-                    week=week,
-                    subject_meta=subject_meta,
-                    week_subject=week_subject,
-                    title_hint=deterministic["title"],
-                )
-                sequence += 1
-                artifact = persist_package_artifact(
-                    db,
-                    settings=settings,
-                    package=package,
-                    artifact_type="subject_slide_deck",
-                    content=content,
-                    provider_name=provider_name,
-                    sequence_number=sequence,
-                    created_at=now,
-                    subject_id=uuid.UUID(subject_id),
-                    period_id=uuid.UUID(week_subject["period_id"]) if week_subject else None,
-                    export_note=SLIDE_DECK_EXPORT_NOTE,
-                )
+                week_jobs.append({
+                    "ai_params": {
+                        "artifact_type": "subject_slide_deck",
+                        "week": week,
+                        "subject_meta": subject_meta,
+                        "week_subject": week_subject,
+                        "day_label": None,
+                        "title_hint": deterministic["title"],
+                    },
+                    "deterministic": deterministic,
+                    "persist_kwargs": {
+                        "artifact_type": "subject_slide_deck",
+                        "provider_name": provider_name,
+                        "created_at": now,
+                        "subject_id": uuid.UUID(subject_id),
+                        "period_id": uuid.UUID(week_subject["period_id"]) if week_subject else None,
+                        "export_note": SLIDE_DECK_EXPORT_NOTE,
+                    },
+                    "post_type": None,
+                })
 
+        # Student lesson decks — daily (one per weekday, primary subject, student-facing)
+        for day_index, day_label in enumerate(WEEKDAY_LABELS):
+            primary_week_subject = (
+                week_subjects.get(teaching_order_keys[0]) if teaching_order_keys else None
+            )
+            primary_subject_meta = (
+                subject_lookup[teaching_order_keys[0]] if teaching_order_keys else None
+            )
+            if not primary_subject_meta:
+                continue
+            objective_code, objective_text, objectives_list, objective_ids, teks_ids = _objective_fields(
+                primary_week_subject, primary_subject_meta["subject_name"]
+            )
+            (source_materials, source_excerpts, daily_topics, daily_objectives, assessment_checks) = _grounding_fields(
+                primary_week_subject
+            )
+            deterministic = build_student_lesson_deck(
+                subject_name=primary_subject_meta["subject_name"],
+                week_label=week_label,
+                package_title=package.title,
+                objective_code=objective_code,
+                objective_text=objective_text,
+                objectives_list=objectives_list,
+                day_label=day_label,
+                objective_ids=objective_ids,
+                teks_ids=teks_ids,
+                source_materials=source_materials,
+                daily_topics=daily_topics,
+            )
+            _period_id = None
+            if teaching_order_keys and teaching_order_keys[0] in week_subjects:
+                _period_id = uuid.UUID(week_subjects[teaching_order_keys[0]]["period_id"])
+            stored_daily_deck_label = f"W{week_num}-{day_label}" if total_weeks > 1 else day_label
+            week_jobs.append({
+                "ai_params": {
+                    "artifact_type": "student_lesson_deck",
+                    "week": week,
+                    "subject_meta": None,
+                    "week_subject": primary_week_subject,
+                    "day_label": day_label,
+                    "title_hint": deterministic["title"],
+                },
+                "deterministic": deterministic,
+                "persist_kwargs": {
+                    "artifact_type": "student_lesson_deck",
+                    "provider_name": provider_name,
+                    "created_at": now,
+                    "period_id": _period_id,
+                    "day_label": stored_daily_deck_label,
+                },
+                "post_type": "image_deck",
+            })
+
+        # Student lesson decks — per subject (one per subject for the week, student-facing)
+        for subject_id in teaching_order_keys:
+            week_subject = week_subjects.get(subject_id)
+            subject_meta = subject_lookup[subject_id]
+            objective_code, objective_text, objectives_list, objective_ids, teks_ids = _objective_fields(
+                week_subject, subject_meta["subject_name"]
+            )
+            (source_materials, source_excerpts, daily_topics, daily_objectives, assessment_checks) = _grounding_fields(
+                week_subject
+            )
+            deterministic = build_student_lesson_deck(
+                subject_name=subject_meta["subject_name"],
+                week_label=week_label,
+                package_title=package.title,
+                objective_code=objective_code,
+                objective_text=objective_text,
+                objectives_list=objectives_list,
+                objective_ids=objective_ids,
+                teks_ids=teks_ids,
+                source_materials=source_materials,
+                daily_topics=daily_topics,
+            )
+            week_jobs.append({
+                "ai_params": {
+                    "artifact_type": "student_lesson_deck",
+                    "week": week,
+                    "subject_meta": subject_meta,
+                    "week_subject": week_subject,
+                    "day_label": None,
+                    "title_hint": deterministic["title"],
+                },
+                "deterministic": deterministic,
+                "persist_kwargs": {
+                    "artifact_type": "student_lesson_deck",
+                    "provider_name": provider_name,
+                    "created_at": now,
+                    "subject_id": uuid.UUID(subject_id),
+                    "period_id": uuid.UUID(week_subject["period_id"]) if week_subject else None,
+                },
+                "post_type": "image_deck",
+            })
+
+        # Other outputs (quiz, assignment, writing_response, rubric, etc.)
         for output_type in outputs:
             if output_type in REQUIRED_PACKAGE_OUTPUTS:
                 continue
@@ -806,36 +1001,123 @@ def _populate_instructional_package(
                     daily_objectives=daily_objectives,
                     assessment_checks=assessment_checks,
                 )
-                content = _resolve_artifact_content(
-                    db,
-                    settings=settings,
-                    user=user,
-                    package=package,
-                    context=context,
-                    artifact_type=output_type,
-                    deterministic_content=deterministic,
-                    week=week,
-                    subject_meta=subject_meta,
-                    week_subject=week_subject,
-                    title_hint=deterministic["title"],
+                week_jobs.append({
+                    "ai_params": {
+                        "artifact_type": output_type,
+                        "week": week,
+                        "subject_meta": subject_meta,
+                        "week_subject": week_subject,
+                        "day_label": None,
+                        "title_hint": deterministic["title"],
+                    },
+                    "deterministic": deterministic,
+                    "persist_kwargs": {
+                        "artifact_type": output_type,
+                        "provider_name": provider_name,
+                        "created_at": now,
+                        "subject_id": uuid.UUID(subject_id),
+                        "period_id": uuid.UUID(week_subject["period_id"])
+                        if week_subject and week_subject.get("period_id")
+                        else None,
+                    },
+                    "post_type": output_type,
+                    "post_week_subject": week_subject,
+                    "post_subject_meta": subject_meta,
+                })
+
+        # ── PHASE 2: resolve AI content (parallel if enabled, sequential fallback) ─
+        if use_parallel and week_jobs:
+            futures: dict[Any, int] = {}
+            with ThreadPoolExecutor(max_workers=_PARALLEL_MAX_WORKERS) as pool:
+                for job_idx, job in enumerate(week_jobs):
+                    ai_p = job["ai_params"]
+                    fut = pool.submit(
+                        _call_ai_for_job,
+                        session_factory=session_factory,
+                        settings=settings,
+                        user_id=user.id,
+                        tenant_id=package.tenant_id,
+                        package_id=package.id,
+                        artifact_type=ai_p["artifact_type"],
+                        generation_context=context,
+                        week=ai_p["week"],
+                        subject_meta=ai_p["subject_meta"],
+                        week_subject=ai_p["week_subject"],
+                        day_label=ai_p["day_label"],
+                        title_hint=ai_p["title_hint"],
+                        deterministic_content=job["deterministic"],
+                    )
+                    futures[fut] = job_idx
+            job_results: list[dict[str, Any]] = [job["deterministic"] for job in week_jobs]
+            for fut, job_idx in futures.items():
+                try:
+                    job_results[job_idx] = fut.result()
+                except Exception:
+                    logger.exception(
+                        "Unexpected future error for job %d — using deterministic fallback",
+                        job_idx,
+                    )
+        else:
+            job_results = []
+            for job in week_jobs:
+                ai_p = job["ai_params"]
+                job_results.append(
+                    _resolve_artifact_content(
+                        db,
+                        settings=settings,
+                        user=user,
+                        package=package,
+                        context=context,
+                        artifact_type=ai_p["artifact_type"],
+                        deterministic_content=job["deterministic"],
+                        week=ai_p["week"],
+                        subject_meta=ai_p.get("subject_meta"),
+                        week_subject=ai_p.get("week_subject"),
+                        day_label=ai_p.get("day_label"),
+                        title_hint=ai_p.get("title_hint"),
+                    )
                 )
-                sequence += 1
-                artifact = persist_package_artifact(
-                    db,
-                    settings=settings,
-                    package=package,
-                    artifact_type=output_type,
-                    content=content,
-                    provider_name=provider_name,
-                    sequence_number=sequence,
-                    created_at=now,
-                    subject_id=uuid.UUID(subject_id),
-                    period_id=uuid.UUID(week_subject["period_id"])
-                    if week_subject and week_subject.get("period_id")
-                    else None,
-                )
+
+        # ── PHASE 3: persist each artifact and run post-persist side effects ───────
+        # Commit after each artifact so the teacher sees results progressively
+        # and container restarts don't lose completed work.
+        for job, content in zip(week_jobs, job_results):
+            sequence += 1
+            artifact = persist_package_artifact(
+                db,
+                settings=settings,
+                package=package,
+                content=content,
+                sequence_number=sequence,
+                **job["persist_kwargs"],
+            )
+            db.commit()
+
+            post_type = job.get("post_type")
+
+            if post_type == "image_deck":
+                try:
+                    create_pending_image_assets(db, artifact=artifact)
+                except Exception:
+                    logger.exception("Pending asset creation failed for artifact %s", artifact.id)
+                if pixabay_key := settings.teacher_assist_pixabay_api_key:
+                    try:
+                        fetch_slide_images_for_artifact(
+                            db,
+                            artifact=artifact,
+                            settings=settings,
+                            api_key=pixabay_key,
+                        )
+                    except Exception:
+                        logger.exception("Pixabay image fetch failed for artifact %s", artifact.id)
+
+            elif post_type is not None:
+                output_type = post_type
+                week_subject = job.get("post_week_subject")
+                subject_meta = job.get("post_subject_meta")
+
                 db.flush()
-                objective_ids = [
+                obj_ids = [
                     uuid.UUID(str(row["education_objective_id"]))
                     for row in (week_subject or {}).get("objectives", [])
                     if row.get("education_objective_id")
@@ -852,13 +1134,12 @@ def _populate_instructional_package(
                     artifact=artifact,
                     week_number=int(week["sequence_number"]),
                     pacing_guide_id=pacing_guide_id,
-                    education_objective_ids=objective_ids,
+                    education_objective_ids=obj_ids,
                 )
                 if output_type in {"quiz", "assignment"}:
                     from oziebot_api.services.teacher_assist_v2.assessment_student_exports import (
                         refresh_assessment_student_exports,
                     )
-
                     refresh_assessment_student_exports(
                         db,
                         settings=settings,
@@ -866,6 +1147,9 @@ def _populate_instructional_package(
                         artifact=artifact,
                     )
                 if output_type == "assignment":
+                    from oziebot_api.services.teacher_assist_v2.assessment_student_exports import (
+                        refresh_assessment_student_exports,
+                    )
                     sequence, _ = _persist_linked_assignment_rubric(
                         db,
                         settings=settings,
@@ -881,6 +1165,7 @@ def _populate_instructional_package(
                         sequence=sequence,
                         now=now,
                     )
+                    db.commit()
                     refresh_assessment_student_exports(
                         db,
                         settings=settings,
@@ -891,7 +1176,6 @@ def _populate_instructional_package(
                     from oziebot_api.services.teacher_assist_v2.assessment_student_exports import (
                         refresh_assessment_student_exports,
                     )
-
                     sequence, _ = _persist_linked_writing_rubric(
                         db,
                         settings=settings,
@@ -907,6 +1191,7 @@ def _populate_instructional_package(
                         sequence=sequence,
                         now=now,
                     )
+                    db.commit()
                     refresh_assessment_student_exports(
                         db,
                         settings=settings,
@@ -989,6 +1274,7 @@ def run_instructional_package_generation_job(
             outputs=outputs,
             excluded_ids=set(excluded_ids),
             final_status=final_status,
+            session_factory=session_factory,
         )
         db.commit()
     except Exception as exc:

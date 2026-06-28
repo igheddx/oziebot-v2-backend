@@ -171,6 +171,8 @@ def render_daily_lesson_plan_html(content: dict[str, Any]) -> str:
     if daily_topic:
         topic_block = f"<section class='meta'><h2>Today's focus</h2><p>{_esc(daily_topic)}</p></section>"
     for subject in content.get("subjects") or []:
+        if not isinstance(subject, dict):
+            continue
         sections = [
             ("Today's topic", subject.get("daily_topic")),
             ("Objective", subject.get("objective")),
@@ -187,7 +189,7 @@ def render_daily_lesson_plan_html(content: dict[str, Any]) -> str:
         for heading, value in sections:
             if isinstance(value, list):
                 body += f"<p><strong>{_esc(heading)}:</strong></p><ul>" + "".join(
-                    f"<li>{_esc(item)}</li>" for item in value
+                    f"<li>{_esc(item)}</li>" for item in value if item
                 ) + "</ul>"
             elif value:
                 body += f"<p><strong>{_esc(heading)}:</strong> {_esc(value)}</p>"
@@ -206,6 +208,8 @@ def render_slide_deck_html(content: dict[str, Any]) -> str:
     slides = content.get("slides") or []
     slide_html = []
     for index, slide in enumerate(slides, start=1):
+        if not isinstance(slide, dict):
+            continue
         bullets = slide.get("bullets") or []
         visual = render_visual_svg(slide.get("visualType"), slide.get("visualData"))
         layout = slide.get("layout") or "text_only"
@@ -242,6 +246,8 @@ def render_quiz_html(content: dict[str, Any], *, include_answers: bool = False) 
     if content.get("student_number_field") and not include_answers:
         blocks.append("<section><p><strong>Student Number:</strong> ________________________________</p></section>")
     for question in questions:
+        if not isinstance(question, dict):
+            continue
         points = question.get("points", 1)
         block = (
             f"<section><h2>Question {_esc(question.get('number'))}"
@@ -277,6 +283,8 @@ def render_quiz_html(content: dict[str, Any], *, include_answers: bool = False) 
 def render_exit_ticket_html(content: dict[str, Any]) -> str:
     blocks = []
     for index, question in enumerate(content.get("questions") or [], start=1):
+        if not isinstance(question, dict):
+            continue
         lines = int(question.get("response_lines") or 3)
         blocks.append(
             f"<section><h2>Question {index}</h2><p>{_esc(question.get('prompt'))}</p>"
@@ -344,6 +352,8 @@ def render_writing_response_html(content: dict[str, Any]) -> str:
 def render_rubric_html(content: dict[str, Any]) -> str:
     rows = []
     for criterion in content.get("criteria") or []:
+        if not isinstance(criterion, dict):
+            continue
         levels = criterion.get("levels") or []
         rows.append(
             f"<tr><td><strong>{_esc(criterion.get('name'))}</strong></td>"
@@ -365,17 +375,21 @@ def render_rubric_html(content: dict[str, Any]) -> str:
 
 def render_newsletter_html(content: dict[str, Any]) -> str:
     sections = content.get("sections") or []
-    body = "".join(
-        f"<section><h2>{_esc(section.get('heading'))}</h2>"
-        f"<p>{_esc(section.get('body'))}</p>"
-        + (
-            "<ul>" + "".join(f"<li>{_esc(item)}</li>" for item in section.get("bullets") or []) + "</ul>"
-            if section.get("bullets")
-            else ""
+    body_parts = []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        body_parts.append(
+            f"<section><h2>{_esc(section.get('heading'))}</h2>"
+            f"<p>{_esc(section.get('body'))}</p>"
+            + (
+                "<ul>" + "".join(f"<li>{_esc(item)}</li>" for item in section.get("bullets") or []) + "</ul>"
+                if section.get("bullets")
+                else ""
+            )
+            + "</section>"
         )
-        + "</section>"
-        for section in sections
-    )
+    body = "".join(body_parts)
     return (
         f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>{_esc(content.get('title'))}</title>"
         f"<style>{_BASE_STYLE}</style></head><body>"
@@ -386,7 +400,9 @@ def render_newsletter_html(content: dict[str, Any]) -> str:
 def render_vocabulary_html(content: dict[str, Any]) -> str:
     terms = content.get("terms") or []
     body = "".join(
-        f"<section><h2>{_esc(item.get('term'))}</h2><p>{_esc(item.get('definition'))}</p></section>" for item in terms
+        f"<section><h2>{_esc(item.get('term'))}</h2><p>{_esc(item.get('definition'))}</p></section>"
+        for item in terms
+        if isinstance(item, dict)
     )
     return (
         f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>{_esc(content.get('title'))}</title>"
@@ -399,17 +415,21 @@ def render_generic_document_html(content: dict[str, Any]) -> str:
     if content.get("terms"):
         return render_vocabulary_html(content)
     sections = content.get("sections") or []
-    body = "".join(
-        f"<section><h2>{_esc(section.get('heading'))}</h2>"
-        f"<p>{_esc(section.get('body'))}</p>"
-        + (
-            "<ul>" + "".join(f"<li>{_esc(item)}</li>" for item in section.get("bullets") or []) + "</ul>"
-            if section.get("bullets")
-            else ""
+    body_parts = []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        body_parts.append(
+            f"<section><h2>{_esc(section.get('heading'))}</h2>"
+            f"<p>{_esc(section.get('body'))}</p>"
+            + (
+                "<ul>" + "".join(f"<li>{_esc(item)}</li>" for item in section.get("bullets") or []) + "</ul>"
+                if section.get("bullets")
+                else ""
+            )
+            + "</section>"
         )
-        + "</section>"
-        for section in sections
-    )
+    body = "".join(body_parts)
     return (
         f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>{_esc(content.get('title'))}</title>"
         f"<style>{_BASE_STYLE}</style></head><body>"
