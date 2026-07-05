@@ -252,6 +252,7 @@ class V2GradeReviewAcceptIn(BaseModel):
     max_score: float | None = Field(default=None, gt=0)
     teacher_comment: str | None = None
     rubric_json: dict[str, Any] | None = None
+    student_facing_feedback: dict[str, str] | None = None
 
 
 class V2GradeReviewModifyIn(BaseModel):
@@ -260,6 +261,7 @@ class V2GradeReviewModifyIn(BaseModel):
     teacher_comment: str = Field(min_length=1)
     rubric_json: dict[str, Any] = Field(default_factory=dict)
     teacher_override_reason: str = Field(min_length=1)
+    student_facing_feedback: dict[str, str] | None = None
 
 
 class V2GradeReviewRejectIn(BaseModel):
@@ -322,3 +324,29 @@ class V2PackageAdditionalAssignmentGenerateIn(BaseModel):
     artifact_type: str = Field(min_length=1, max_length=64)
     teacher_notes: str = Field(min_length=1, max_length=4000)
     title_hint: str | None = Field(default=None, max_length=256)
+
+
+class V2RecoveryQueueCreateIn(BaseModel):
+    recommendation_type: str = Field(min_length=1, max_length=32)
+    reason: str = Field(min_length=1, max_length=2000)
+    students_affected: list[int] = Field(default_factory=list)
+    assignment_id: uuid.UUID | None = None
+    instructional_package_id: uuid.UUID | None = None
+    education_objective_id: uuid.UUID | None = None
+    misconception_text: str | None = Field(default=None, max_length=1000)
+    evidence_snapshot: dict[str, Any] | None = None
+    mastery_snapshot: dict[str, Any] | None = None
+    priority: str | None = Field(default=None, pattern=r"^(LOW|MEDIUM|HIGH|CRITICAL)$")
+
+
+class V2RecoveryQueueUpdateIn(BaseModel):
+    teacher_response: str | None = Field(default=None, max_length=64)
+    teacher_notes: str | None = Field(default=None, max_length=4000)
+    scheduled_for: date | None = None
+    priority: str | None = Field(default=None, pattern=r"^(LOW|MEDIUM|HIGH|CRITICAL)$")
+    status: str | None = Field(default=None, max_length=32)
+    post_recovery_mastery_snapshot: dict[str, Any] | None = None
+
+
+class V2RecoveryArtifactGenerateIn(BaseModel):
+    artifact_type: str = Field(min_length=1, max_length=64)

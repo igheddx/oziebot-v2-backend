@@ -4,6 +4,13 @@ MODEL_PRICING_PER_MILLION_TOKENS: dict[str, tuple[float, float]] = {
     "gpt-4.1-mini": (0.40, 1.60),
     "gpt-4.1": (2.00, 8.00),
     "gpt-4o-mini": (0.15, 0.60),
+    # Gemini models (via Google AI Studio)
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-2.0-flash-001": (0.075, 0.30),
+    "gemini-2.0-flash": (0.075, 0.30),
+    "gemini-2.0-flash-lite": (0.0375, 0.15),
+    "gemini-1.5-flash": (0.075, 0.30),
+    "gemini-1.5-pro": (1.25, 5.00),
 }
 
 

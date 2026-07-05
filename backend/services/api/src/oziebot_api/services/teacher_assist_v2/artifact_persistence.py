@@ -91,6 +91,8 @@ def persist_package_artifact(
     period_id: uuid.UUID | None = None,
     day_label: str | None = None,
     export_note: str | None = None,
+    alignment_metadata: dict[str, Any] | None = None,
+    version_metadata: dict[str, Any] | None = None,
 ) -> TeacherAssistV2InstructionalPackageArtifact:
     objective_mapping = normalize_objective_mapping(content)
     artifact = TeacherAssistV2InstructionalPackageArtifact(
@@ -102,7 +104,7 @@ def persist_package_artifact(
         period_id=period_id,
         day_label=day_label,
         sequence_number=sequence_number,
-        title=str(content["title"]),
+        title=str(content.get("title") or content.get("lesson_title") or artifact_type.replace("_", " ").title()),
         status="ready",
         content_json=content,
         preview_html=render_artifact_preview_html(artifact_type=artifact_type, content=content),
@@ -117,6 +119,8 @@ def persist_package_artifact(
             or objective_mapping.get("alignment_summary"),
             "additional_exports": [],
             **({"export_note": export_note} if export_note else {}),
+            **({"alignment": alignment_metadata} if alignment_metadata is not None else {}),
+            **({"version": version_metadata} if version_metadata is not None else {}),
         },
         created_at=created_at,
         updated_at=created_at,

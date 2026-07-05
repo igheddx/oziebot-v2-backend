@@ -5,6 +5,7 @@ from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Date, DateTime, ForeignKey, Integer, JSON, String, Text, Uuid
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from oziebot_api.db.base import Base
@@ -54,6 +55,38 @@ class TeacherAssistV2InstructionalPackage(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="generated", server_default="generated")
     provider_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)
+    # Backward-designed instructional plan generated once before artifact generation.
+    # Stores unit_mastery_arc, knowledge_dependency_graph, district_anchors, and
+    # AI-generated instructional_design per week × subject. JSONB for queryability.
+    instructional_design_plan_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(), nullable=True
+    )
+    # Set after Phase 0d (validation + revision) completes. The plan is final and
+    # immutable from this point; artifact generation uses the locked, validated plan.
+    instructional_design_plan_locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Validation report produced by Phase 0d. Stores per-subject scores, issue lists
+    # (separated into educational_issues and generation_issues), revision history, and
+    # the overall confidence_label (Excellent/Very Good/Needs Review). JSONB for
+    # future admin analytics queries.
+    instructional_validation_report_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(), nullable=True
+    )
+    # Cross-artifact alignment report produced by Phase 3b (per week, after all artifacts
+    # for that week are committed). Accumulates week-by-week: {"weeks": [{...}, {...}]}.
+    # Each week entry contains five deterministic checks: exit_ticket_stem_compliance,
+    # rubric_criterion_alignment, quiz_objective_coverage, vocabulary_sequence, and
+    # student_prohibition_scan. Each check includes an alignment_explanation.
+    instructional_alignment_report_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(), nullable=True
+    )
+    # Today's Teaching Brief assembled deterministically (Phase 5, zero AI calls) from
+    # the plan, validation report, alignment report, and generated artifacts. Stored
+    # once at the end of package generation. Structure: {"generated_at", "days": [...]}.
+    teacher_coaching_summary_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(), nullable=True
+    )
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True

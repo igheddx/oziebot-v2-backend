@@ -19,8 +19,8 @@ def _cached_engine(database_url: str, slow_query_ms: int):
             engine_kwargs["poolclass"] = StaticPool
             engine_kwargs["connect_args"] = {"check_same_thread": False}
     else:
-        engine_kwargs["pool_size"] = 5
-        engine_kwargs["max_overflow"] = 10
+        engine_kwargs["pool_size"] = 10
+        engine_kwargs["max_overflow"] = 20
     engine = create_engine(database_url, **engine_kwargs)
     register_query_observers(engine, slow_query_ms=slow_query_ms)
     return engine

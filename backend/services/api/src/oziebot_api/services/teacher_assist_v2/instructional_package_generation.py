@@ -42,9 +42,27 @@ from oziebot_api.services.teacher_assist_v2.deterministic_package_content import
     build_rubric_for_writing_response,
     build_student_lesson_deck,
 )
-from oziebot_api.services.teacher_assist_v2.instructional_package_ai import generate_v2_instructional_artifact
+from oziebot_api.services.teacher_assist_v2.instructional_artifact_engine import (
+    ARTIFACT_ENGINE_VERSION,
+    build_vocabulary_registry,
+    enforce_instructional_contract,
+    enforce_student_content_prohibitions,
+    extract_instructional_contract,
+    validate_week_alignment,
+)
+from oziebot_api.services.teacher_assist_v2.instructional_design_plan import (
+    generate_instructional_design_plan,
+)
+from oziebot_api.services.teacher_assist_v2.instructional_validation import (
+    validate_and_revise_instructional_plan,
+)
+from oziebot_api.services.teacher_assist_v2.instructional_package_ai import (
+    generate_curriculum_sequence_plan,
+    generate_v2_instructional_artifact,
+)
 from oziebot_api.services.teacher_assist_v2.package_export import render_artifact_preview_html
 from oziebot_api.services.teacher_assist_v2.package_artifact_refresh import SLIDE_DECK_EXPORT_NOTE
+from oziebot_api.services.teacher_assist_v2.teacher_coaching import assemble_teaching_brief
 from oziebot_api.services.teacher_assist_v2.package_lifecycle import (
     build_package_title,
     resolve_default_plan_dates,
@@ -146,6 +164,7 @@ def _resolve_artifact_content(
     week_subject: dict[str, Any] | None = None,
     day_label: str | None = None,
     title_hint: str | None = None,
+    introduced_vocabulary: list[str] | None = None,
 ) -> dict[str, Any]:
     ai_content = generate_v2_instructional_artifact(
         db,
@@ -160,6 +179,7 @@ def _resolve_artifact_content(
         week_subject=week_subject,
         day_label=day_label,
         title_hint=title_hint,
+        introduced_vocabulary=introduced_vocabulary,
     )
     return ai_content if ai_content is not None else deterministic_content
 
@@ -610,6 +630,7 @@ def _call_ai_for_job(
     day_label: str | None,
     title_hint: str | None,
     deterministic_content: dict[str, Any],
+    introduced_vocabulary: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run one AI artifact call in its own DB session thread. Retries on 429; falls back to deterministic on persistent error."""
     db = session_factory()
@@ -634,6 +655,7 @@ def _call_ai_for_job(
                     week_subject=week_subject,
                     day_label=day_label,
                     title_hint=title_hint,
+                    introduced_vocabulary=introduced_vocabulary,
                 )
                 db.commit()
                 return result if result is not None else deterministic_content
@@ -708,7 +730,21 @@ def _populate_instructional_package(
     # Use parallel AI calls when a session factory is available (background worker path).
     # Parallel execution fires all AI calls for a week concurrently; each thread uses its
     # own DB session so SQLAlchemy state is never shared across threads.
-    use_parallel = session_factory is not None and provider_name == "openai"
+    _real_ai_providers = frozenset({"openai", "gemini"})
+    use_parallel = session_factory is not None and provider_name in _real_ai_providers
+
+    # Resolve the teacher's actual grade code (K, 1–12) for image search and AI prompts.
+    grade_code: str | None = None
+    _grade_display_name: str | None = None
+    if package.catalog_grade_id:
+        from oziebot_api.models.education_catalog import EducationGrade
+        _grade_row = db.get(EducationGrade, package.catalog_grade_id)
+        if _grade_row:
+            grade_code = _grade_row.grade_code
+            _grade_display_name = _grade_row.display_name
+    # Inject into context so every AI prompt knows the exact grade.
+    if grade_code:
+        context = {**context, "grade_code": grade_code, "grade_display_name": _grade_display_name}
 
     now = _now()
     link_excerpts = _link_context_excerpts(context)
@@ -720,10 +756,176 @@ def _populate_instructional_package(
     assignment_content: dict[str, Any] | None = None
 
     total_weeks = len(context["weeks"])
+
+    # ── Phase 0a: Curriculum Sequence Plan ────────────────────────────────────────────
+    # One AI call that reads the full curriculum and returns a fixed week-by-week
+    # teaching plan (themes, TEKS distribution, mentor texts). All artifact prompts
+    # are grounded in this plan so the pedagogical progression is consistent.
+    curriculum_sequence_plan: dict[int, dict[str, Any]] = {}
+    if provider_name in _real_ai_providers:
+        try:
+            curriculum_sequence_plan = generate_curriculum_sequence_plan(
+                db,
+                settings=settings,
+                user=user,
+                tenant_id=uuid.UUID(str(package.tenant_id)),
+                package_id=package.id,
+                generation_context=context,
+            )
+            logger.info(
+                "package=%s: curriculum sequence plan generated for %d weeks",
+                package.id, len(curriculum_sequence_plan),
+            )
+        except Exception:
+            logger.exception("package=%s: curriculum sequence plan failed — proceeding without", package.id)
+
+    # ── Phase 0b + 0c: Instructional Design Plan ──────────────────────────────────────
+    # Backward-designed instructional plan covering all weeks × subjects. Generated once
+    # before any artifact generation begins. Encodes:
+    #   - unit_mastery_arc: terminal mastery + per-week mastery gates (backward design spine)
+    #   - knowledge_dependency_graph: per-objective pre-instructional dependency analysis
+    #   - district_anchors: district-defined data extracted from pacing guide (not AI-generated)
+    #   - instructional_design: AI-generated HOW for each week × subject × day
+    #
+    # Every artifact generator receives a slice of this plan. No artifact independently
+    # invents its instructional sequence — all are grounded in this single design.
+    #
+    # Phase 0b (district_anchors) runs inside generate_instructional_design_plan as
+    # a pure-Python pre-step before any AI call. Phase 0c is the AI call itself.
+    instructional_design_plan: dict[str, Any] = {}
+    if provider_name in _real_ai_providers:
+        try:
+            instructional_design_plan = generate_instructional_design_plan(
+                db,
+                settings=settings,
+                user=user,
+                tenant_id=uuid.UUID(str(package.tenant_id)),
+                package_id=package.id,
+                generation_context=context,
+                curriculum_sequence_plan=curriculum_sequence_plan,
+                excluded_ids=excluded_ids or None,
+            )
+            if instructional_design_plan:
+                package.instructional_design_plan_json = instructional_design_plan
+                package.updated_at = _now()
+                db.flush()
+                logger.info(
+                    "package=%s: instructional design plan stored (%d weeks, schema_version=%s)",
+                    package.id,
+                    len(instructional_design_plan.get("weeks") or []),
+                    (instructional_design_plan.get("plan_meta") or {}).get("schema_version", "?"),
+                )
+        except Exception:
+            logger.exception(
+                "package=%s: instructional design plan failed — proceeding without; "
+                "artifacts will fall back to curriculum_sequence_plan and pacing guide data",
+                package.id,
+            )
+
+    # ── Phase 0d: Curriculum Validation & Instructional Quality Engine ────────────────
+    # Validation is the explicit owner of the plan until it returns the (possibly revised)
+    # final plan and the validation report. The plan lock is set only after this phase
+    # completes so the locked timestamp always reflects the post-validation, post-revision plan.
+    #
+    # The engine runs two tiers:
+    #   Tier 1 — Deterministic rules (R1-R19): structure, district fidelity, assessment
+    #             alignment, cognitive load heuristics. Pure Python. < 1s.
+    #   Tier 2 — AI pedagogical review: one call per subject evaluating learning
+    #             progression, backward design integrity, mastery realism, and engagement.
+    #
+    # Issues are separated into educational_issues (pedagogically unsound) and
+    # generation_issues (AI generation artifacts). Every issue carries an
+    # improvement_source tag (Prompt / Rule / Architecture / Teacher Input) so
+    # TeacherAssist can improve over time.
+    #
+    # On any failure, returns the original plan unchanged and proceeds with generation.
+    # Never blocks artifact generation.
+    if instructional_design_plan and provider_name in _real_ai_providers:
+        try:
+            validated_plan, validation_report = validate_and_revise_instructional_plan(
+                db,
+                settings=settings,
+                user=user,
+                tenant_id=uuid.UUID(str(package.tenant_id)),
+                package_id=package.id,
+                plan=instructional_design_plan,
+                generation_context=context,
+            )
+            # If revision changed the plan, persist the updated version before locking
+            if validated_plan is not instructional_design_plan and validated_plan:
+                instructional_design_plan = validated_plan
+                package.instructional_design_plan_json = instructional_design_plan
+            package.instructional_validation_report_json = validation_report
+            package.updated_at = _now()
+            db.flush()
+            logger.info(
+                "package=%s: validation complete — confidence=%s score=%.1f",
+                package.id,
+                validation_report.get("confidence_label", "?"),
+                float(validation_report.get("overall_score") or 0),
+            )
+        except Exception:
+            logger.exception(
+                "package=%s: Phase 0d validation failed — proceeding with unvalidated plan",
+                package.id,
+            )
+
+    # ── Phase 0e: Vocabulary Registry ────────────────────────────────────────────────
+    # Build the per-(week, subject) vocabulary registry from the KDG and objective
+    # descriptions. Used in Phase 1 to attach introduced_vocabulary to each assessment
+    # artifact's instructional_contract, and in Phase 3b for vocabulary sequence checks.
+    # No AI call. Falls back to empty dict on any failure.
+    vocabulary_registry: dict[tuple[int, str], list[str]] = {}
+    if instructional_design_plan:
+        try:
+            vocabulary_registry = build_vocabulary_registry(instructional_design_plan, context)
+            logger.info(
+                "package=%s: vocabulary registry built — %d week×subject entries",
+                package.id,
+                len(vocabulary_registry),
+            )
+        except Exception:
+            logger.exception(
+                "package=%s: vocabulary registry build failed — proceeding without",
+                package.id,
+            )
+
+    # Build version bundle for per-artifact traceability. Stored in every artifact's
+    # metadata_json["version"] so generation provenance is always inspectable.
+    _plan_meta = (instructional_design_plan or {}).get("plan_meta") or {}
+    _report_meta = (validation_report or {}).get("report_meta") or {}
+    _version_bundle: dict[str, str | None] = {
+        "instructional_plan_version": _plan_meta.get("schema_version"),
+        "validation_version": _report_meta.get("schema_version"),
+        "artifact_generation_version": ARTIFACT_ENGINE_VERSION,
+    }
+
+    # Inject the (validated, possibly revised) plan and version bundle into context so
+    # every artifact call can read them without receiving them as direct arguments.
+    context = {
+        **context,
+        "instructional_design_plan": instructional_design_plan,
+        "version_bundle": _version_bundle,
+    }
+
+    # Lock the plan: validation, revision, and vocabulary registry are complete.
+    # Artifact generation begins now. Any subsequent re-generation of individual
+    # artifacts on this package uses the locked, validated plan.
+    package.instructional_design_plan_locked_at = _now()
+    package.updated_at = _now()
+    db.flush()
+
     for week in context["weeks"]:
         week_label = week["title"]
         week_num = week["sequence_number"]
         week_subjects = {row["subject_id"]: row for row in week["subjects"]}
+
+        # Inject this week's curriculum plan so every artifact knows what to emphasize
+        # and how this week connects to the weeks before and after it.
+        week_context = {
+            **context,
+            "week_curriculum_plan": curriculum_sequence_plan.get(week_num),
+        }
 
         # ── PHASE 1: collect all primary artifact jobs for this week ──────────────
         # Each job carries: deterministic fallback content, AI call params, persist
@@ -731,6 +933,7 @@ def _populate_instructional_package(
         # DB writes happen in Phase 3 with a commit after each artifact so the
         # teacher sees progressive results and container restarts are recoverable.
         week_jobs: list[dict[str, Any]] = []
+        artifacts_this_week: list[Any] = []  # collected in Phase 3 for Phase 3b
 
         if "daily_lesson_plan" in outputs:
             for day_index, day_label in enumerate(WEEKDAY_LABELS):
@@ -797,6 +1000,18 @@ def _populate_instructional_package(
                 if teaching_order_keys and teaching_order_keys[0] in week_subjects:
                     _period_id = uuid.UUID(week_subjects[teaching_order_keys[0]]["period_id"])
                 stored_day_label = f"W{week_num}-{day_label}" if total_weeks > 1 else day_label
+                _dlp_primary_name = (
+                    subject_lookup[teaching_order_keys[0]]["subject_name"]
+                    if teaching_order_keys else ""
+                )
+                _dlp_contract = extract_instructional_contract(
+                    artifact_type="daily_lesson_plan",
+                    plan=instructional_design_plan or {},
+                    week_num=week_num,
+                    subject_name=_dlp_primary_name,
+                    day_label=day_label,
+                    vocabulary_registry=vocabulary_registry,
+                )
                 week_jobs.append({
                     "ai_params": {
                         "artifact_type": "daily_lesson_plan",
@@ -805,6 +1020,7 @@ def _populate_instructional_package(
                         "week_subject": primary_week_subject,
                         "day_label": day_label,
                         "title_hint": deterministic["title"],
+                        "introduced_vocabulary": None,
                     },
                     "deterministic": deterministic,
                     "persist_kwargs": {
@@ -815,6 +1031,7 @@ def _populate_instructional_package(
                         "day_label": stored_day_label,
                     },
                     "post_type": None,
+                    "instructional_contract": _dlp_contract,
                 })
 
         if "subject_slide_deck" in outputs:
@@ -848,6 +1065,14 @@ def _populate_instructional_package(
                     daily_objectives=daily_objectives,
                     assessment_checks=assessment_checks,
                 )
+                _ssd_contract = extract_instructional_contract(
+                    artifact_type="subject_slide_deck",
+                    plan=instructional_design_plan or {},
+                    week_num=week_num,
+                    subject_name=subject_meta["subject_name"],
+                    day_label=None,
+                    vocabulary_registry=vocabulary_registry,
+                )
                 week_jobs.append({
                     "ai_params": {
                         "artifact_type": "subject_slide_deck",
@@ -856,6 +1081,7 @@ def _populate_instructional_package(
                         "week_subject": week_subject,
                         "day_label": None,
                         "title_hint": deterministic["title"],
+                        "introduced_vocabulary": None,
                     },
                     "deterministic": deterministic,
                     "persist_kwargs": {
@@ -867,6 +1093,7 @@ def _populate_instructional_package(
                         "export_note": SLIDE_DECK_EXPORT_NOTE,
                     },
                     "post_type": None,
+                    "instructional_contract": _ssd_contract,
                 })
 
         # Student lesson decks — daily (one per weekday, primary subject, student-facing)
@@ -902,6 +1129,14 @@ def _populate_instructional_package(
             if teaching_order_keys and teaching_order_keys[0] in week_subjects:
                 _period_id = uuid.UUID(week_subjects[teaching_order_keys[0]]["period_id"])
             stored_daily_deck_label = f"W{week_num}-{day_label}" if total_weeks > 1 else day_label
+            _daily_deck_contract = extract_instructional_contract(
+                artifact_type="student_lesson_deck",
+                plan=instructional_design_plan or {},
+                week_num=week_num,
+                subject_name=(primary_subject_meta or {}).get("subject_name") or "",
+                day_label=day_label,
+                vocabulary_registry=vocabulary_registry,
+            )
             week_jobs.append({
                 "ai_params": {
                     "artifact_type": "student_lesson_deck",
@@ -910,6 +1145,7 @@ def _populate_instructional_package(
                     "week_subject": primary_week_subject,
                     "day_label": day_label,
                     "title_hint": deterministic["title"],
+                    "introduced_vocabulary": None,
                 },
                 "deterministic": deterministic,
                 "persist_kwargs": {
@@ -920,6 +1156,7 @@ def _populate_instructional_package(
                     "day_label": stored_daily_deck_label,
                 },
                 "post_type": "image_deck",
+                "instructional_contract": _daily_deck_contract,
             })
 
         # Student lesson decks — per subject (one per subject for the week, student-facing)
@@ -944,6 +1181,14 @@ def _populate_instructional_package(
                 source_materials=source_materials,
                 daily_topics=daily_topics,
             )
+            _subj_deck_contract = extract_instructional_contract(
+                artifact_type="student_lesson_deck",
+                plan=instructional_design_plan or {},
+                week_num=week_num,
+                subject_name=subject_meta["subject_name"],
+                day_label=None,
+                vocabulary_registry=vocabulary_registry,
+            )
             week_jobs.append({
                 "ai_params": {
                     "artifact_type": "student_lesson_deck",
@@ -952,6 +1197,7 @@ def _populate_instructional_package(
                     "week_subject": week_subject,
                     "day_label": None,
                     "title_hint": deterministic["title"],
+                    "introduced_vocabulary": None,
                 },
                 "deterministic": deterministic,
                 "persist_kwargs": {
@@ -962,6 +1208,7 @@ def _populate_instructional_package(
                     "period_id": uuid.UUID(week_subject["period_id"]) if week_subject else None,
                 },
                 "post_type": "image_deck",
+                "instructional_contract": _subj_deck_contract,
             })
 
         # Other outputs (quiz, assignment, writing_response, rubric, etc.)
@@ -1001,6 +1248,19 @@ def _populate_instructional_package(
                     daily_objectives=daily_objectives,
                     assessment_checks=assessment_checks,
                 )
+                _other_contract = extract_instructional_contract(
+                    artifact_type=output_type,
+                    plan=instructional_design_plan or {},
+                    week_num=week_num,
+                    subject_name=subject_meta["subject_name"],
+                    day_label=None,
+                    vocabulary_registry=vocabulary_registry,
+                )
+                _other_vocab = (
+                    _other_contract.get("introduced_vocabulary")
+                    if output_type in {"quiz", "assignment", "writing_response"}
+                    else None
+                )
                 week_jobs.append({
                     "ai_params": {
                         "artifact_type": output_type,
@@ -1009,6 +1269,7 @@ def _populate_instructional_package(
                         "week_subject": week_subject,
                         "day_label": None,
                         "title_hint": deterministic["title"],
+                        "introduced_vocabulary": _other_vocab,
                     },
                     "deterministic": deterministic,
                     "persist_kwargs": {
@@ -1023,6 +1284,7 @@ def _populate_instructional_package(
                     "post_type": output_type,
                     "post_week_subject": week_subject,
                     "post_subject_meta": subject_meta,
+                    "instructional_contract": _other_contract,
                 })
 
         # ── PHASE 2: resolve AI content (parallel if enabled, sequential fallback) ─
@@ -1039,13 +1301,14 @@ def _populate_instructional_package(
                         tenant_id=package.tenant_id,
                         package_id=package.id,
                         artifact_type=ai_p["artifact_type"],
-                        generation_context=context,
+                        generation_context=week_context,
                         week=ai_p["week"],
                         subject_meta=ai_p["subject_meta"],
                         week_subject=ai_p["week_subject"],
                         day_label=ai_p["day_label"],
                         title_hint=ai_p["title_hint"],
                         deterministic_content=job["deterministic"],
+                        introduced_vocabulary=ai_p.get("introduced_vocabulary"),
                     )
                     futures[fut] = job_idx
             job_results: list[dict[str, Any]] = [job["deterministic"] for job in week_jobs]
@@ -1067,7 +1330,7 @@ def _populate_instructional_package(
                         settings=settings,
                         user=user,
                         package=package,
-                        context=context,
+                        context=week_context,
                         artifact_type=ai_p["artifact_type"],
                         deterministic_content=job["deterministic"],
                         week=ai_p["week"],
@@ -1075,13 +1338,38 @@ def _populate_instructional_package(
                         week_subject=ai_p.get("week_subject"),
                         day_label=ai_p.get("day_label"),
                         title_hint=ai_p.get("title_hint"),
+                        introduced_vocabulary=ai_p.get("introduced_vocabulary"),
                     )
                 )
 
         # ── PHASE 3: persist each artifact and run post-persist side effects ───────
-        # Commit after each artifact so the teacher sees results progressively
+        # Contract enforcement and student content prohibition scan run before each
+        # persist. Commit after each artifact so the teacher sees results progressively
         # and container restarts don't lose completed work.
+        _version_bundle = context.get("version_bundle")
         for job, content in zip(week_jobs, job_results):
+            # Enforce instructional contracts (exit ticket stem, quiz objectives, etc.)
+            # and strip internal metadata from student-facing content before persisting.
+            _contract = job.get("instructional_contract") or {}
+            _artifact_type_for_enforce = job["persist_kwargs"]["artifact_type"]
+            try:
+                content, _alignment = enforce_instructional_contract(
+                    artifact_type=_artifact_type_for_enforce,
+                    content=content,
+                    contract=_contract,
+                )
+                content = enforce_student_content_prohibitions(
+                    artifact_type=_artifact_type_for_enforce,
+                    content=content,
+                    alignment_result=_alignment,
+                )
+            except Exception:
+                logger.exception(
+                    "package=%s: contract enforcement failed for artifact_type=%s — persisting unmodified",
+                    package.id, _artifact_type_for_enforce,
+                )
+                _alignment = None
+
             sequence += 1
             artifact = persist_package_artifact(
                 db,
@@ -1089,9 +1377,12 @@ def _populate_instructional_package(
                 package=package,
                 content=content,
                 sequence_number=sequence,
+                alignment_metadata=_alignment,
+                version_metadata=_version_bundle,
                 **job["persist_kwargs"],
             )
             db.commit()
+            artifacts_this_week.append(artifact)
 
             post_type = job.get("post_type")
 
@@ -1107,6 +1398,7 @@ def _populate_instructional_package(
                             artifact=artifact,
                             settings=settings,
                             api_key=pixabay_key,
+                            grade_code=grade_code,
                         )
                     except Exception:
                         logger.exception("Pixabay image fetch failed for artifact %s", artifact.id)
@@ -1150,7 +1442,7 @@ def _populate_instructional_package(
                     from oziebot_api.services.teacher_assist_v2.assessment_student_exports import (
                         refresh_assessment_student_exports,
                     )
-                    sequence, _ = _persist_linked_assignment_rubric(
+                    sequence, _linked_rubric = _persist_linked_assignment_rubric(
                         db,
                         settings=settings,
                         user=user,
@@ -1166,6 +1458,8 @@ def _populate_instructional_package(
                         now=now,
                     )
                     db.commit()
+                    if _linked_rubric is not None:
+                        artifacts_this_week.append(_linked_rubric)
                     refresh_assessment_student_exports(
                         db,
                         settings=settings,
@@ -1176,7 +1470,7 @@ def _populate_instructional_package(
                     from oziebot_api.services.teacher_assist_v2.assessment_student_exports import (
                         refresh_assessment_student_exports,
                     )
-                    sequence, _ = _persist_linked_writing_rubric(
+                    sequence, _linked_rubric = _persist_linked_writing_rubric(
                         db,
                         settings=settings,
                         user=user,
@@ -1192,6 +1486,8 @@ def _populate_instructional_package(
                         now=now,
                     )
                     db.commit()
+                    if _linked_rubric is not None:
+                        artifacts_this_week.append(_linked_rubric)
                     refresh_assessment_student_exports(
                         db,
                         settings=settings,
@@ -1201,6 +1497,39 @@ def _populate_instructional_package(
                 if output_type == "assignment":
                     assignment_artifact = artifact
                     assignment_content = content
+
+        # ── PHASE 3b: cross-artifact alignment validation (per week) ─────────────
+        # Runs after all artifacts for this week are committed. Validates coherence
+        # across artifact pairs (exit ticket ↔ daily plan, quiz ↔ objectives, etc.).
+        # Accumulates into package.instructional_alignment_report_json. No AI calls.
+        if instructional_design_plan and artifacts_this_week:
+            try:
+                week_alignment = validate_week_alignment(
+                    package_id=package.id,
+                    week_num=week_num,
+                    artifacts=artifacts_this_week,
+                    plan=instructional_design_plan,
+                    vocabulary_registry=vocabulary_registry,
+                )
+                _align_report = dict(package.instructional_alignment_report_json or {})
+                _align_weeks = list(_align_report.get("weeks") or [])
+                _align_weeks.append(week_alignment)
+                _align_report["weeks"] = _align_weeks
+                package.instructional_alignment_report_json = _align_report
+                package.updated_at = _now()
+                db.flush()
+                logger.info(
+                    "package=%s week=%d: cross-artifact alignment — %s",
+                    package.id,
+                    week_num,
+                    week_alignment.get("week_alignment_confidence", "?"),
+                )
+            except Exception:
+                logger.exception(
+                    "package=%s week=%d: cross-artifact alignment failed — continuing",
+                    package.id,
+                    week_num,
+                )
 
     if assignment_artifact and assignment_content:
         attach_qr_student_packet(
@@ -1220,6 +1549,16 @@ def _populate_instructional_package(
     )
     package.updated_at = _now()
     db.flush()
+
+    # Phase 5: assemble Today's Teaching Brief from plan + artifacts (zero AI calls).
+    # Non-fatal: a failure here must never block the package from being marked ready.
+    try:
+        package.teacher_coaching_summary_json = assemble_teaching_brief(package)
+        db.flush()
+        logger.info("package=%s: teaching brief assembled — %d day(s)", package.id, len((package.teacher_coaching_summary_json or {}).get("days") or []))
+    except Exception:
+        logger.exception("package=%s: teaching brief assembly failed — non-fatal", package.id)
+
     return package
 
 

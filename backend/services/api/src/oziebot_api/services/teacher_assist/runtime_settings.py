@@ -59,14 +59,18 @@ def save_teacher_assist_ai_admin_config(
     normalized_provider = validate_teacher_assist_ai_provider(ai_provider)
     normalized_model = (real_provider_model or "").strip() or None
 
-    if normalized_provider == "openai" and real_provider_enabled:
-        if not (env_settings.teacher_assist_openai_api_key or "").strip():
+    if normalized_provider in ("openai", "gemini") and real_provider_enabled:
+        if normalized_provider == "openai" and not (env_settings.teacher_assist_openai_api_key or "").strip():
             raise ValueError(
                 "TEACHER_ASSIST_OPENAI_API_KEY must be configured on the server before enabling OpenAI."
             )
+        if normalized_provider == "gemini" and not (env_settings.teacher_assist_gemini_api_key or "").strip():
+            raise ValueError(
+                "TEACHER_ASSIST_GEMINI_API_KEY must be configured on the server before enabling Gemini."
+            )
         resolved_model = normalized_model or (env_settings.teacher_assist_real_provider_model or "").strip()
         if not resolved_model:
-            raise ValueError("A model name is required when OpenAI is enabled.")
+            raise ValueError(f"A model name is required when {normalized_provider} is enabled.")
         from oziebot_api.services.teacher_assist.provider_config import get_teacher_assist_allowed_models
 
         allowed = get_teacher_assist_allowed_models(env_settings)
@@ -82,7 +86,7 @@ def save_teacher_assist_ai_admin_config(
             else:
                 resolved_limit = env_settings.teacher_assist_ai_daily_cost_limit_cents
         if int(resolved_limit or 0) <= 0:
-            raise ValueError("Daily cost limit must be set before enabling real OpenAI mode.")
+            raise ValueError(f"Daily cost limit must be set before enabling real {normalized_provider} mode.")
 
     resolved_daily_limit = (
         daily_cost_limit_cents

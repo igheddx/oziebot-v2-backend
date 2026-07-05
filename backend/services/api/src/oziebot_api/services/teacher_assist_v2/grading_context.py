@@ -15,6 +15,7 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2InstructionalPackageArtifact,
     TeacherAssistV2PlanningSupplementalMaterial,
 )
+from oziebot_api.models.teacher_assist_v2_grading_draft import TeacherAssistV2GradingDraft
 from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssistV2StudentSubmission
 from oziebot_api.services.teacher_assist_v2.document_extraction import (
     load_submission_extractions,
@@ -23,6 +24,10 @@ from oziebot_api.services.teacher_assist_v2.document_extraction import (
 from oziebot_api.services.teacher_assist_v2.grading_rubric import (
     grading_template_from_package_rubric,
     resolve_linked_rubric_content,
+)
+from oziebot_api.services.teacher_assist_v2.mastery_constants import (
+    MASTERY_THRESHOLD_MASTERY,
+    MASTERY_THRESHOLD_DEVELOPING,
 )
 
 
@@ -123,6 +128,45 @@ def build_grading_context(
     )
     student_response_text = (extraction or {}).get("effective_text")
 
+    # Pull instructional contract and observable mastery evidence from the design plan.
+    plan = (package.instructional_design_plan_json or {}) if isinstance(package.instructional_design_plan_json, dict) else {}
+    plan_weeks = plan.get("weeks") or []
+    week_match = next(
+        (w for w in plan_weeks if isinstance(w, dict) and w.get("week_number") == assignment.week_number),
+        None,
+    )
+    instructional_contract: dict[str, Any] | None = None
+    observable_mastery_evidence: str | None = None
+    if week_match:
+        # Contract may sit at week level or inside a subject entry
+        instructional_contract = week_match.get("instructional_contracts")
+        for subj_entry in (week_match.get("subjects") or []):
+            if not isinstance(subj_entry, dict):
+                continue
+            if instructional_contract is None:
+                instructional_contract = subj_entry.get("instructional_contracts")
+            for _day_key, day_data in (subj_entry.get("daily_progression") or {}).items():
+                if isinstance(day_data, dict) and day_data.get("observable_mastery_evidence"):
+                    observable_mastery_evidence = day_data["observable_mastery_evidence"]
+                    break
+            if observable_mastery_evidence:
+                break
+
+    # Check for a prior draft (supports context when teacher re-grades).
+    prior_draft = db.scalars(
+        select(TeacherAssistV2GradingDraft)
+        .where(TeacherAssistV2GradingDraft.student_submission_id == submission.id)
+        .order_by(TeacherAssistV2GradingDraft.created_at.desc())
+    ).first()
+    prior_draft_summary: dict[str, Any] | None = None
+    if prior_draft:
+        prior_draft_summary = {
+            "score": prior_draft.score,
+            "max_score": prior_draft.max_score,
+            "percentage": prior_draft.percentage,
+            "teacher_comment_draft": (prior_draft.teacher_comment_draft or "")[:200],
+        }
+
     return {
         "assignment": {
             "id": str(assignment.id),
@@ -147,6 +191,14 @@ def build_grading_context(
         "rubric_template": rubric_template,
         "rubric_summary": rubric_summary,
         "teacher_notes": teacher_note_bodies,
+        "instructional_contract": instructional_contract,
+        "observable_mastery_evidence": observable_mastery_evidence,
+        "scoring_scale": {
+            "mastery": f">={MASTERY_THRESHOLD_MASTERY}%",
+            "developing": f"{MASTERY_THRESHOLD_DEVELOPING}–{MASTERY_THRESHOLD_MASTERY - 0.1}%",
+            "beginning": f"<{MASTERY_THRESHOLD_DEVELOPING}%",
+        },
+        "prior_grading_draft_summary": prior_draft_summary,
         "student_submission": {
             "id": str(submission.id),
             "student_number": submission.student_number,

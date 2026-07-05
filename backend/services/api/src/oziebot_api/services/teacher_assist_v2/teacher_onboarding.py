@@ -7,8 +7,8 @@ import uuid
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, object_session
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import Session
 
 from oziebot_api.models.education_catalog import EducationGrade, EducationSubject
 from oziebot_api.models.teacher_assist_v2_onboarding import TeacherAssistV2Onboarding
@@ -44,30 +44,25 @@ def get_or_create_v2_onboarding(
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> TeacherAssistV2Onboarding:
-    row = get_v2_onboarding(db, user_id=user_id)
-    if row is not None:
-        return row
+    # Use INSERT ... ON CONFLICT DO NOTHING so the session never sees an
+    # IntegrityError (which poisons the psycopg3 transaction and causes
+    # PendingRollbackError on subsequent queries in the same request).
     now = _now()
-    row = TeacherAssistV2Onboarding(
-        id=uuid.uuid4(),
-        user_id=user_id,
-        tenant_id=tenant_id,
-        selected_subject_ids=[],
-        created_at=now,
-        updated_at=now,
+    stmt = (
+        pg_insert(TeacherAssistV2Onboarding)
+        .values(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            tenant_id=tenant_id,
+            selected_subject_ids=[],
+            created_at=now,
+            updated_at=now,
+        )
+        .on_conflict_do_nothing(index_elements=["user_id"])
     )
-    db.add(row)
-    try:
-        with db.begin_nested():
-            db.flush()
-    except IntegrityError:
-        if object_session(row) is db:
-            db.expunge(row)
-        existing = get_v2_onboarding(db, user_id=user_id)
-        if existing is None:
-            raise
-        return existing
-    return row
+    db.execute(stmt)
+    db.flush()
+    return get_v2_onboarding(db, user_id=user_id)
 
 
 def is_v2_onboarding_complete(row: TeacherAssistV2Onboarding | None) -> bool:

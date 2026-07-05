@@ -14,6 +14,9 @@ from oziebot_api.services.teacher_assist.ai_usage import (
     assert_teacher_assist_ai_cost_available,
     record_teacher_assist_ai_usage,
 )
+from sqlalchemy import select as _sa_select
+
+from oziebot_api.models.teacher_assist_v2_document_extraction import TeacherAssistV2DocumentExtraction
 from oziebot_api.services.teacher_assist.openai_json_client import execute_openai_json_completion
 from oziebot_api.services.teacher_assist.prompt_contracts import (
     V2_INSTRUCTIONAL_PACKAGE_GENERATION_FEATURE,
@@ -21,9 +24,34 @@ from oziebot_api.services.teacher_assist.prompt_contracts import (
 )
 from oziebot_api.services.teacher_assist.provider_config import get_teacher_assist_provider_model
 from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher_assist_settings
+from oziebot_api.services.teacher_assist_v2.instructional_design_plan import (
+    get_plan_district_anchors,
+    get_plan_for_all_subjects_on_day,
+    get_plan_for_day,
+    get_plan_instructional_design_week,
+)
 from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import resolve_pacing_day_plan
 
 V2_PACKAGE_PROMPT_VERSION = "v2-instructional-package-v1"
+
+_REAL_AI_PROVIDERS = frozenset({"openai", "gemini"})
+
+
+def _provider_api_params(settings: Settings) -> tuple[str, str | None, str | None]:
+    """Return (provider_name, api_key, base_url) for the currently configured AI provider."""
+    provider = (settings.teacher_assist_ai_provider or "mock").strip().lower()
+    if provider == "gemini":
+        return (
+            "gemini",
+            (settings.teacher_assist_gemini_api_key or "").strip() or None,
+            (settings.teacher_assist_gemini_base_url or "").strip()
+            or "https://generativelanguage.googleapis.com/v1beta/openai",
+        )
+    return (
+        "openai",
+        None,  # falls back to settings.teacher_assist_openai_api_key inside client
+        None,  # falls back to settings.teacher_assist_openai_base_url inside client
+    )
 
 DAILY_LESSON_PLAN_SCHEMA: dict[str, Any] = {
     "title": "string",
@@ -80,6 +108,9 @@ STUDENT_LESSON_DECK_SCHEMA: dict[str, Any] = {
             "title": "string",
             "body": "string",
             "bullets": ["string"],
+            "student_emotion": "string",
+            "visual_learning_goal": "string",
+            "teacher_notes": "string",
             "engagement": {
                 "type": "string",
                 "prompt": "string",
@@ -232,14 +263,222 @@ _CLASS_TIME_DIRECTIVE = (
     "Do not plan more content than can be delivered in the available time."
 )
 
-_BOOK_GROUNDING_DIRECTIVE = (
-    "NAMED BOOKS AND TEXTS — USE SPECIFICALLY:\n"
-    "If books, texts, articles, or named curriculum resources appear in named_books_and_texts, "
-    "district_document_context, pacing_materials, or resolved_day_plan.materials_needed, draw FULLY on "
-    "your knowledge of those works. Use specific titles, character names, plot events, vocabulary, themes, "
-    "and arguments. Content must be SPECIFIC enough that a student who read those books recognizes it. "
-    "Do NOT write generic content that ignores named materials."
+_WEEK_PLAN_DIRECTIVE = (
+    "WEEK CURRICULUM PLAN — PEDAGOGICAL SEQUENCE (highest priority):\n"
+    "week_curriculum_plan is a pre-generated teaching plan created by analyzing the full curriculum. "
+    "It defines THIS week's specific theme, reading_focus, writing_focus, primary_teks, mentor_texts, "
+    "key_activities, and how this week builds on the previous week and prepares for the next.\n"
+    "FOLLOW THIS PLAN. Do not invent a different focus or re-sequence the content. "
+    "The plan was designed so that every week builds progressively toward the unit's goals:\n"
+    "  - Use the week's theme as the organizing idea for all content this week\n"
+    "  - Center reading activities on reading_focus; center writing on writing_focus\n"
+    "  - Prioritize primary_teks; treat secondary_teks as supporting but not primary\n"
+    "  - Reference mentor_texts by name; use key_activities as the basis for lessons\n"
+    "  - Acknowledge builds_on (what students learned last week) and prepares_for (what comes next)\n"
+    "If week_curriculum_plan is null or missing, fall back to resolved_objectives and curriculum documents."
 )
+
+_BOOK_GROUNDING_DIRECTIVE = (
+    "NAMED BOOKS AND TEXTS — APPROVED RESOURCE POOL:\n"
+    "week_curriculum_plan.mentor_texts, full_curriculum_documents, named_books_and_texts, "
+    "and pacing_materials list books curated by the district because they are relevant to the "
+    "objectives and unit theme. Use these books as your resource pool:\n"
+    "  - SELECT from this list when the lesson calls for a read-aloud, text reference, or example — "
+    "you do NOT need to use every book listed\n"
+    "  - Reference any chosen book by its EXACT title — never say 'a book we are reading' or 'a text'\n"
+    "  - NEVER invent a book title or substitute a book not in the curriculum materials\n"
+    "  - When you do use a book, draw on it specifically: character names, events, vocabulary, themes — "
+    "content specific enough that a student who read it recognizes it\n"
+    "  - If no books are listed, derive titles from district_document_context or resolved_day_plan.materials_needed"
+)
+
+_STUDENT_CONTENT_RULES_DIRECTIVE = (
+    "STUDENT-FACING CONTENT RULES — strictly enforced:\n"
+    "1. NO CURRICULUM DOCUMENT TITLES: Never write 'Essential Unit of Study', 'pacing guide', "
+    "'curriculum document', 'district materials', 'unit of study', or any internal planning document "
+    "name in student-visible content. Students see the book title, unit theme, or week topic — "
+    "never the name of a teacher's planning document.\n"
+    "2. NO TEKS CODES: Never write TEKS codes (e.g. '5.8A', 'TEKS 5.11', '5.6B') or standard IDs "
+    "in any student-visible text — slides, questions, prompts, instructions, or success criteria. "
+    "Students experience and practice the skills; they do not see the labels. "
+    "TEKS references belong only in teacher-facing artifacts (daily lesson plans, rubrics).\n"
+)
+
+_GRADE_RIGOR_DIRECTIVE = (
+    "GRADE LEVEL RIGOR — non-negotiable:\n"
+    "grade_code specifies the exact grade. ALL content — vocabulary, text complexity, activities, "
+    "discussion questions, writing prompts, and assessments — must match that grade level:\n"
+    "  - Grade K–2: foundational phonics, sight words, decodable texts, oral language focus\n"
+    "  - Grade 3–4: transitional chapter books, paragraph writing, basic literary analysis\n"
+    "  - Grade 5 (10–11 year olds): Tier 2/3 academic vocabulary, multi-paragraph analytical writing, "
+    "    close reading of chapter books and nonfiction articles, literary analysis of theme/author's craft/"
+    "point of view/text structure, text-based evidence. Texts should be chapter books or nonfiction — "
+    "NOT picture books. Activities should demand inference and analysis — NOT simple recall.\n"
+    "  - Grade 6–8: middle school close reading, argumentative essays, research integration\n"
+    "  - Grade 9–12: high school literary criticism, AP-level analysis, college-prep writing\n"
+    "NEVER produce K-2 level content (simple phonics, basic sight words, picture-book activities, "
+    "'color in this picture', 'draw a smiley face') for Grade 4+ students. "
+    "If grade_code is '5', every lesson element must reflect 5th-grade Texas TEKS rigor throughout."
+)
+
+
+_INSTRUCTIONAL_DESIGN_DIRECTIVE = (
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "INSTRUCTIONAL DESIGN PLAN — PRIMARY GUIDE (read before generating anything)\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "TeacherAssist operates by one principle:\n"
+    "  The district defines WHAT students learn.\n"
+    "  TeacherAssist determines the most effective instructional HOW\n"
+    "  while remaining faithful to district intent.\n\n"
+
+    "The instructional_design_plan was created by an expert instructional designer\n"
+    "who has already analyzed the full curriculum, TEKS, pacing guide, and all supporting\n"
+    "materials using backward design. It is your primary guide. Artifact generators that\n"
+    "deviate from it produce instructional incoherence across the package.\n\n"
+
+    "DISTRICT ANCHORS (district_anchors field):\n"
+    "  These are district-defined and extracted programmatically from the pacing guide.\n"
+    "  Do not modify, substitute, or reorder any district anchor data.\n"
+    "  primary_objectives → the TEKS being assessed this week\n"
+    "  supporting_objectives → TEKS touched but not assessed this week\n"
+    "  daily_topics → district-defined topic per day; center each day's lesson on this\n"
+    "  assessment_checks → when/how the district assesses; do not move these\n"
+    "  pacing_materials → district-approved materials; reference only these\n\n"
+
+    "UNIT MASTERY ARC (unit_mastery_arc field — package level):\n"
+    "  terminal_mastery → the end-of-unit standard everything in this package builds toward\n"
+    "  mastery_gates → what students must demonstrate after each week to stay on the arc\n"
+    "  Use these to calibrate this artifact — it must advance students toward the gate,\n"
+    "  not merely cover today's topic.\n\n"
+
+    "KNOWLEDGE DEPENDENCY GRAPH (knowledge_dependency_graph field — package level):\n"
+    "  Per-objective dependency analysis. For each dependency entry:\n"
+    "  status 'assumed_mastered'    → activate it (e.g., warm-up), do not reteach it\n"
+    "  status 'develop_this_week'   → build this as part of the week's instruction\n"
+    "  status 'may_need_activation' → brief activation moment; flag for teacher attention\n"
+    "  gap_consequence → what breaks instructionally if a student lacks this dependency;\n"
+    "    use this to design distractor choices (quizzes), rubric misconception criteria,\n"
+    "    and warm-ups that surface dependency gaps before skill instruction begins\n"
+    "  activation_strategy → the specific classroom move; use in bell ringers and warm-ups\n\n"
+
+    "FOR DAY-BASED ARTIFACTS (lesson plans, daily slide decks, exit tickets, bell ringers):\n"
+    "  Use instructional_design_day — the specific day's entry from daily_progression:\n"
+    "  instructional_purpose  → TEACHER NOTES / SPEAKER NOTES ONLY. Never expose to students.\n"
+    "                           Explains why this lesson comes today in the arc.\n"
+    "  student_goal           → use verbatim as the student-facing learning target; no TEKS codes\n"
+    "  teacher_goal           → teacher-facing only; the instructional intent of the lesson\n"
+    "  builds_from_yesterday  → open with this connection (null on Monday)\n"
+    "  prepares_for_tomorrow  → close with this preview (null on Friday)\n"
+    "  teacher_modeling       → follow this specifically for your direct instruction section\n"
+    "  guided_practice        → design the collaborative activity around this structure\n"
+    "  independent_practice   → your student practice section must match this exactly\n"
+    "  discussion_prompt      → use this exact prompt for turn-and-talk or partner discussion\n"
+    "  formative_assessment   → teacher-facing only; align checks_for_understanding here\n"
+    "  exit_ticket            → must reflect instructional_contracts.exit_ticket_stem exactly\n"
+    "  observable_mastery_evidence → use for rubric criteria and success standards\n"
+    "  differentiation.scaffold   → surface in teacher notes only; never in student materials\n"
+    "  differentiation.extension  → surface in teacher notes only\n"
+    "  reteach_if_needed      → surface in teacher notes / speaker notes only\n\n"
+
+    "FOR WEEK-BASED ARTIFACTS (quiz, assignment, rubric, vocabulary, slide decks, newsletter):\n"
+    "  Use instructional_design_week — the full instructional_design block for this week+subject:\n"
+    "  end_of_week_mastery         → the standard this artifact measures or supports\n"
+    "  learning_journey_rationale  → what students have practiced by this point in the week\n"
+    "  instructional_contracts     → NON-NEGOTIABLE cross-artifact alignment:\n"
+    "    exit_ticket_stem            → use verbatim in any exit ticket\n"
+    "    quiz_objectives             → ONLY these TEKS codes may appear in quiz questions\n"
+    "    rubric_primary_criterion    → use verbatim as the primary rubric criterion\n"
+    "    core_activity_name          → use this exact name for the central activity\n"
+    "  daily_progression           → understand what students have practiced vs. what is new\n"
+    "  introduced_vocabulary       → academic terms from this unit's Knowledge Dependency Graph\n"
+    "    and primary objectives that have been taught by this week. Assessment questions\n"
+    "    (quiz, assignment, writing_response) may reference these terms. Do not introduce\n"
+    "    new domain vocabulary in assessments that does not appear in this list.\n\n"
+
+    "STUDENT-FACING ARTIFACTS — HARD PROHIBITIONS (strictly enforced):\n"
+    "  Never expose to students:\n"
+    "    instructional_purpose, teacher_goal, formative_assessment, reteach_if_needed,\n"
+    "    differentiation (any part), instructional_contracts (as a block),\n"
+    "    knowledge_dependency_graph (any field), learning_journey_rationale, district_anchors.\n"
+    "  Never write TEKS codes (e.g. '5.8A', 'TEKS 5.11') in student-visible text.\n"
+    "  Never name district documents ('Essential Unit of Study', 'pacing guide',\n"
+    "    'curriculum map', 'unit of study', 'district materials') in student-visible text.\n\n"
+
+    "TEACHER-FACING ARTIFACTS (daily_lesson_plan, rubric) MAY include:\n"
+    "  teacher_goal, formative_assessment, reteach_if_needed, differentiation,\n"
+    "  TEKS codes, objectives, and instructional_purpose (in the rationale or notes section).\n\n"
+
+    "FALLBACK (when instructional_design_day or instructional_design_week is null):\n"
+    "  Derive equivalent structure from district_anchors, week_curriculum_plan, and\n"
+    "  resolved_objectives. Produce the same artifact quality without the plan slice.\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+)
+
+
+def _build_image_search_directive(
+    grade_code: str | None,
+    grade_display_name: str | None,
+    subject_name: str | None,
+) -> str:
+    """Return the grade-aware image search rules section for student_lesson_deck prompts.
+
+    Replaces the old hardcoded "Grade 5 ELA" section so every grade level gets
+    correctly-aged image search terms rather than defaulting to 5th-grade examples.
+    """
+    grade_label = grade_display_name or (f"Grade {grade_code}" if grade_code else "the assigned grade")
+    _gc = (grade_code or "5").strip().upper()
+
+    if _gc in ("K", "1", "2"):
+        age_desc = "5–7 years old"
+        inject_prefix = "young children kindergarten early elementary"
+        example_prefix = "young children"
+        age_kws = "'children', 'kids', 'young', 'elementary', 'kindergarten'"
+        photo_type = "illustration"
+        grade_band = "elementary"
+    elif _gc in ("3", "4", "5"):
+        age_desc = "8–11 years old"
+        inject_prefix = "elementary school children"
+        example_prefix = "elementary students"
+        age_kws = "'children', 'kids', 'elementary', 'students', 'school'"
+        photo_type = "photo"
+        grade_band = "elementary"
+    elif _gc in ("6", "7", "8"):
+        age_desc = "11–14 years old"
+        inject_prefix = "middle school students"
+        example_prefix = "middle school students"
+        age_kws = "'middle school', 'students', 'tweens', 'school'"
+        photo_type = "photo"
+        grade_band = "middle"
+    else:
+        age_desc = "14–18 years old"
+        inject_prefix = "high school students"
+        example_prefix = "high school students"
+        age_kws = "'high school', 'students', 'teenagers', 'teen'"
+        photo_type = "photo"
+        grade_band = "high"
+
+    return (
+        f"\nIMAGE SEARCH — STRICT RULES for {grade_label} ({age_desc}):\n"
+        f"  RULE 1 — EVERY search term MUST contain at least one of: {age_kws}. "
+        "NO EXCEPTIONS. Abstract terms with no age/grade context return adult stock photos or diagrams.\n"
+        "  RULE 2 — Pair every concept with age context:\n"
+        f"    BAD: 'main idea diagram'  →  GOOD: 'main idea organizer {example_prefix} classroom'\n"
+        f"    BAD: 'students discussing'  →  GOOD: '{grade_label.lower()} students turn and talk partners'\n"
+        f"    BAD: 'reading comprehension'  →  GOOD: '{example_prefix} reading books classroom'\n"
+        "  RULE 3 — NEVER use: 'adult professional', 'business meeting', 'office', "
+        "'generic education stock', 'presentation clipart'.\n"
+        f"- visual.image_search.search_terms: 3–5 terms — EVERY term must follow RULE 1\n"
+        f"- visual.image_search.target_grade_band: '{grade_band}'\n"
+        f"- visual.image_search.preferred_image_type: '{photo_type}'\n"
+        "- visual.image_search.image_alt_text: descriptive alt text for accessibility\n"
+        "- visual.image_search.educational_purpose: one sentence on WHY this image teaches the concept\n"
+        "- visual.organizer_data: ONLY for non-image types:\n"
+        "  concept_map: {center_concept, branches: [{label, items: [string]}]}\n"
+        "  venn: {left_label, right_label, left_items: [], overlap_items: [], right_items: []}\n"
+        "  process_flow: {steps: [{number, label, description}]}\n"
+        "  timeline: {events: [{label, date_or_label, description}]}\n"
+        "  comparison_table: {col_a_label, col_b_label, rows: [{a, b}]}\n"
+    )
 
 
 def _instruction_for_artifact(artifact_type: str) -> str:
@@ -261,93 +500,133 @@ def _instruction_for_artifact(artifact_type: str) -> str:
             "- closure: How the lesson ends — a specific exit prompt or reflection question tied to today's objective.\n"
             "- materials: List actual named materials from pacing_materials and resolved_day_plan.materials_needed.\n"
             "- notes: Differentiation tips, pacing reminders, and key misconceptions to watch for.\n"
+            + _WEEK_PLAN_DIRECTIVE + "\n"
             + _CURRICULUM_DOCUMENT_DIRECTIVE + "\n"
             + _CLASS_TIME_DIRECTIVE + "\n"
             + _BOOK_GROUNDING_DIRECTIVE + "\n"
+            + _GRADE_RIGOR_DIRECTIVE + "\n"
             + _OBJECTIVE_ALIGNMENT_DIRECTIVE
         ),
         "student_lesson_deck": (
             "Generate a STUDENT-FACING lesson presentation projected on a classroom screen. "
-            "This is a VISUAL-FIRST teaching tool — images are first-class teaching elements that must occupy "
-            "30–60% of each slide. Students must be able to understand the concept from the visual alone "
-            "BEFORE the teacher speaks.\n\n"
-            "DESIGN RULES:\n"
-            "- Max 35 words of body text per slide. Never write walls of text.\n"
-            "- Max 3–4 bullets per slide. Each bullet max 12 words.\n"
-            "- Every slide MUST have a `visual` block. Slides without a visual are INVALID.\n"
-            "- Design for the grade level in grade_id. Use grade-appropriate vocabulary and image choices.\n\n"
-            "BEFORE GENERATING EACH SLIDE, ASK: ‘What image would a student in the back row of a classroom "
-            "immediately understand about this concept?’\n\n"
-            "For EACH slide populate ALL fields:\n"
-            "- id: unique slug like ‘slide-1’, ‘slide-2’, etc.\n"
-            "- slide_type: one of: hook|today_we_learn|vocabulary|concept|example|your_turn|check_in|wrap_up\n"
-            "- layout: REQUIRED. Choose the layout that matches the slide type and visual:\n"
-            "  ‘hook_full_image’ — hook/intro slide with dominant image (image = top 60% of screen)\n"
-            "  ‘title_full’ — full-screen background image with overlaid title (hook, wrap_up)\n"
-            "  ‘objective_image’ — today_we_learn: objectives left, image right\n"
-            "  ‘vocabulary_showcase’ — word banner top, image + definition below\n"
-            "  ‘teacher_modeling’ — image left, numbered steps right\n"
-            "  ‘before_after’ — before card / arrow / after card (for example/comparison slides)\n"
-            "  ‘organizer_full’ — graphic organizer fills most of screen (concept map, Venn, timeline)\n"
-            "  ‘guided_practice_image’ — your_turn: title top, image middle, student action strip bottom\n"
-            "  ‘discussion_image’ — large discussion question left, image right\n"
-            "  ‘exit_ticket_image’ — check_in/exit ticket: question left, image right\n"
-            "  ‘text_left_image_right’ — general concept slide with equal text/image split\n"
+            "This is a VISUAL-FIRST teaching tool. Students should grasp the concept from the "
+            "visual before the teacher speaks.\n\n"
+
+            "PRESENTATION DESIGN RULES — every slide must satisfy:\n"
+            "  • One dominant idea: one clear concept per slide; if a slide covers two ideas, split it\n"
+            "  • One dominant visual: exactly one image or organizer per slide; no multi-image layouts\n"
+            "  • Maximum 4 bullets: three or fewer is better — never exceed 4 bullets per slide\n"
+            "  • Maximum 35 words in body: if you need more, create a second slide; do not shrink ideas\n"
+            "  • One student action: every instructional slide has one engagement.type and one "
+            "engagement.prompt (hook and wrap_up slides may have an implicit action)\n"
+            "  • Large readable typography: titles ≤ 10 words, bullets ≤ 12 words each\n"
+            "  • Instructional rhythm: the deck arcs from curiosity → modeling → practice → reflection; "
+            "students should feel the lesson building, not a list of topics\n\n"
+
+            "SLIDE COUNT: Target 6–8 slides. The lesson structure drives the count — "
+            "do not pad slides to reach 8 and do not compress distinct instructional moments into fewer. "
+            "A 5-slide lesson that teaches well is better than a 9-slide lesson that dilutes focus.\n\n"
+
+            "CURRICULUM-FIRST: district_document_context tells you HOW this unit is structured. "
+            "READ the excerpts carefully. If the curriculum describes a Reading Workshop, Writing Workshop, "
+            "Interactive Read Aloud, Reader’s Notebook, or a specific mini-lesson system (e.g. Fountas & Pinnell RML), "
+            "BUILD slides around THAT framework — NOT a generic sequence. "
+            "Name the specific books, text sets, workshop anchors, and notebook activities the curriculum calls for. "
+            "If the curriculum mentions an Interactive Read Aloud text set, a specific read-aloud title, "
+            "or Reader’s Notebook prompts, those MUST appear in the lesson.\n\n"
+
+            "BOOKS — SELECT FROM THE CURRICULUM LIST:\n"
+            "week_curriculum_plan.mentor_texts and full_curriculum_documents contain the district’s "
+            "approved book list for this unit. These books are curated because they are relevant to "
+            "the objectives and unit theme. Rules:\n"
+            "  - You do NOT need to use every book — select the ones that best fit today’s lesson focus\n"
+            "  - When you choose to do a read-aloud, mini-lesson, or text reference, pick a book FROM "
+            "this list — never invent a title or substitute a book not in the curriculum\n"
+            "  - Reference chosen books by their exact title — never say ‘a book we are reading’ or ‘a story’\n"
+            "  - Use the book naturally where it fits: a read_aloud slide, a teaching_point anchor, "
+            "a connection slide — let the day’s workshop format guide when and how\n"
+            "  - The goal is that students hear and engage with real, named curriculum books — "
+            "not generic unnamed texts\n\n"
+
+            "DAY-SPECIFIC LESSON FORMAT — select the format that matches day_label:\n"
+            "Monday   → Reading Workshop: connection to prior reading → read-aloud excerpt or book introduction "
+            "→ teaching point (literary element, strategy) → turn & talk → independent reading prompt → share\n"
+            "Tuesday  → Deep Reading/Analysis: revisit text → analyze literary elements (character, theme, plot) "
+            "→ text evidence activity → partner discussion → Reader’s Notebook response → debrief\n"
+            "Wednesday → Writing Workshop: connection to mentor text or read-aloud → "
+            "teaching point (craft/structure) → teacher models writing → students try it → "
+            "share one example → independent writing link\n"
+            "Thursday → Word Study + Revision: word pattern or vocabulary from the text → "
+            "sort/categorize → use in writing context → revise/edit a sentence → writer’s notebook\n"
+            "Friday   → Celebration & Synthesis: student share (author’s chair / book talk) → "
+            "week recap (what we read, wrote, learned) → reflection → next steps preview\n\n"
+
+            "NEVER produce the same hook→vocabulary→concept→example→your_turn→check_in→wrap_up "
+            "sequence every day. Vary the slide structure to match the day’s workshop format above.\n\n"
+
+            "SLIDE TYPES:\n"
+            "  hook | connection | today_we_learn | teaching_point | read_aloud | vocabulary |\n"
+            "  word_study | concept | example | active_engagement | your_turn | guided_practice |\n"
+            "  independent_practice | discussion | share | check_in | exit_ticket | wrap_up\n"
+            "  slide_type = ‘connection’ for the opening hook/link to prior learning\n"
+            "  slide_type = ‘teaching_point’ for the direct instruction mini-lesson slide\n"
+            "  slide_type = ‘read_aloud’ for a slide displaying a passage, poem, or book excerpt\n"
+            "  slide_type = ‘active_engagement’ for turn & talk, think-pair-share, or quick write\n"
+            "  slide_type = ‘word_study’ for phonics/spelling/word pattern slides\n"
+            "  slide_type = ‘independent_practice’ for the link/send-off to independent work\n"
+            "  slide_type = ‘exit_ticket’ for the final summative exit check\n"
+            "  slide_type = ‘share’ for the closing celebration or debrief\n\n"
+
+            "LAYOUT OPTIONS — choose the best fit for the archetype:\n"
+            "  ‘hook_full_image’        — opening / connection slide; dominant image top 60%\n"
+            "  ‘title_full’             — full-screen background image with overlaid title (wrap_up, share)\n"
+            "  ‘objective_image’        — learning goal left, image right (today_we_learn)\n"
+            "  ‘vocabulary_showcase’    — word banner top, image + definition below (vocabulary, word_study)\n"
+            "  ‘teacher_modeling’       — image left, numbered teaching steps right (teaching_point, concept)\n"
+            "  ‘before_after’           — before card / arrow / after card (example, writing craft revision)\n"
+            "  ‘organizer_full’         — graphic organizer fills screen (concept map, Venn, timeline)\n"
+            "  ‘guided_practice_image’  — title top, image middle, student action strip bottom\n"
+            "  ‘discussion_image’       — discussion question left, image right\n"
+            "  ‘exit_ticket_image’      — exit question left, image right (exit_ticket, check_in)\n"
+            "  ‘text_left_image_right’  — equal text/image split (read_aloud, concept, default)\n\n"
+
+            "FIELD RULES for each slide:\n"
+            "- id: unique slug (‘slide-1’, ‘slide-2’, etc.)\n"
             "- title: Student-friendly heading, max 10 words\n"
-            "- body: Max 35 words, grade-appropriate, connects to named books/texts\n"
-            "- bullets: 3–4 short student-friendly phrases (not objectives), max 12 words each\n"
-            "- engagement.type: one of: think_pair_share|turn_and_talk|show_fingers|whiteboard|quick_draw|exit_ticket\n"
-            "- engagement.prompt: The exact student action (‘Turn to a partner and explain...’, ‘Show me 1–5 fingers...’, etc.)\n"
-            "- visual.type: ALWAYS ‘image_search’ (the backend fetches real Pixabay images). "
-            "ONLY use ‘concept_map’|’venn’|’process_flow’|’timeline’|’comparison_table’ "
-            "for abstract diagrams or organizers students fill in — not for real-world content that a photo conveys better.\n"
-            "- visual.placement: full_width (for hook_full_image/title_full)|right|left\n"
-            "- visual.fallback_organizer_type: organizer type if no image found (concept_map, venn, process_flow, etc.)\n"
-            "- visual.image_search.search_terms: 3–5 SPECIFIC search terms that will retrieve a REAL photo or illustration.\n"
-            "  NEVER search by slide title alone. Build terms from: [grade] + [subject] + [TEKS topic] + [image type].\n"
-            "  BAD: ‘Main Idea’. GOOD: ‘grade 5 students reading classroom discussion informational text’.\n"
-            "  BAD: ‘Vocabulary’. GOOD: ‘grade 5 ELA vocabulary word wall classroom colorful’.\n"
-            "  GRADE-AWARE EXAMPLES:\n"
-            "    Grade K–2: ‘colorful [topic] illustration children friendly cartoon’\n"
-            "    Grade 3–5: ‘[topic] elementary classroom students learning photo’\n"
-            "    Grade 6–8: ‘[topic] middle school historical photo diagram’\n"
-            "    Grade 9–12: ‘[topic] academic photo literary analysis historical’\n"
-            "- visual.image_search.target_grade_band: elementary (K–5)|middle (6–8)|high (9–12)\n"
-            "- visual.image_search.preferred_image_type: illustration (K–3)|photo (4–8)|photo or diagram (9–12)\n"
-            "- visual.image_search.image_alt_text: specific descriptive alt text (e.g., ‘Two students sitting at desks comparing texts’)\n"
-            "- visual.image_search.educational_purpose: one sentence on WHY this specific image teaches the concept\n"
-            "- visual.organizer_data: ONLY for non-image visual types. Populate with actual content:\n"
-            "  concept_map: {center_concept, branches: [{label, items: [string]}]}\n"
-            "  venn: {left_label, right_label, left_items: [], overlap_items: [], right_items: []}\n"
-            "  process_flow: {steps: [{number, label, description}]}\n"
-            "  timeline: {events: [{label, date_or_label, description}]}\n"
-            "  comparison_table: {col_a_label, col_b_label, rows: [{a, b}]}\n\n"
-            "DAY-BY-DAY PROGRESSION — day_label tells you where in the week this lesson falls:\n"
-            "Use day_label AND resolved_day_plan to determine today’s specific focus. "
-            "Each day’s slides must be a DISTINCT step — Monday introduces, Tuesday practices, "
-            "Wednesday applies, Thursday extends, Friday synthesizes. NEVER repeat the same hook, "
-            "vocabulary term, example, or your_turn prompt across different days. "
-            "If resolved_day_plan has a daily_topic, that becomes the lesson’s central thread. "
-            "If resolved_daily_topics lists topics by day, use the one matching today’s day_label.\n\n"
-            "BUILD SLIDES IN ORDER:\n"
-            "1. hook (slide_type=hook) — Attention-grabbing question or connection tied to TODAY’S specific topic. "
-            "Layout: hook_full_image. Image: striking real photo that makes students curious. 1–2 sentences max.\n"
-            "2. today_we_learn (slide_type=today_we_learn) — Objectives in kid language reflecting TODAY’s focus. "
-            "Layout: objective_image. 3–4 bullets: ‘I can...’ statements. Image: students in a learning/discovery context.\n"
-            "3. vocabulary (slide_type=vocabulary, 1–2 slides) — One key term relevant to TODAY’s lesson per slide. "
-            "Layout: vocabulary_showcase. body = definition. bullets = [example sentence, connection to text]. Image: visual of the word.\n"
-            "4. concept slides (slide_type=concept, 2–3 slides) — ONE concept per slide matching TODAY’s step in the week. "
-            "Layout: text_left_image_right or teacher_modeling. 3–4 bullets max. Image: real photo showing the concept.\n"
-            "5. example (slide_type=example) — Before/after or worked example grounded in TODAY’s content. "
-            "Layout: before_after. Use comparisonPairs with actual content. Image search optional.\n"
-            "6. your_turn (slide_type=your_turn) — Student practice that matches TODAY’s depth and concept. "
-            "Layout: guided_practice_image. body = the exact task instruction. Image: students working.\n"
-            "7. check_in (slide_type=check_in) — Exit ticket checking TODAY’s specific learning. "
-            "Layout: exit_ticket_image. body = the question students answer. engagement.type = exit_ticket.\n"
-            "8. wrap_up (slide_type=wrap_up) — Celebrate today’s specific learning. Layout: title_full. "
-            "Image: achievement/celebration. engagement.type = think_pair_share.\n"
-            + _BOOK_GROUNDING_DIRECTIVE + " "
+            "- body: Max 35 words, grade-appropriate, references the specific book/text/activity\n"
+            "- bullets: 3–4 short student-friendly phrases, max 12 words each\n"
+            "- student_emotion: The intended emotional state this slide creates — ONE word from: "
+            "Wonder | Curiosity | Confidence | Collaboration | Reflection | Agency | Celebration. "
+            "Sequence the arc: hook=Wonder → teaching=Curiosity → practice=Confidence → "
+            "discussion=Collaboration → exit=Reflection. This guides engagement pacing for the teacher.\n"
+            "- visual_learning_goal: ONE sentence explaining how this slide’s specific image helps "
+            "students understand today’s learning objective. Connect the image to the concept — "
+            "not a generic description. Example: ‘A photo of children revising notebooks primes students "
+            "to connect revision as a physical, iterative act before the mini-lesson on revision begins.’\n"
+            "- teacher_notes: 2–3 sentences for the teacher only. Include: what to say while this slide "
+            "is displayed, any common misconception to address, one differentiation tip if relevant. "
+            "Reference instructional_purpose or reteach_if_needed from the design plan where useful. "
+            "NEVER shown to students.\n"
+            "- engagement.type: think_pair_share|turn_and_talk|show_fingers|whiteboard|quick_draw|exit_ticket\n"
+            "- engagement.prompt: Exact student action as a sentence (‘Turn to a partner: …’)\n"
+            "- visual.type: Use ‘image_search’ for all real-world content. "
+            "Only use ‘concept_map’|’venn’|’process_flow’|’timeline’|’comparison_table’ "
+            "for abstract diagrams students fill in.\n"
+            "- visual.placement: full_width (hook_full_image/title_full) | right | left\n"
+            "- visual.fallback_organizer_type: organizer type shown if no Pixabay image is found\n\n"
+
+            "DAY-BY-DAY CONTENT RULE: Each day’s lesson must cover DISTINCT content. "
+            "Monday–Friday must NEVER repeat the same hook question, vocabulary term, book excerpt, "
+            "or student activity. Use day_label and resolved_day_plan.daily_topic to anchor today’s thread. "
+            "Build on the previous day without repeating it.\n\n"
+
+            + _STUDENT_CONTENT_RULES_DIRECTIVE + "\n"
+            + _WEEK_PLAN_DIRECTIVE + "\n"
+            + _BOOK_GROUNDING_DIRECTIVE + "\n"
+            + _GRADE_RIGOR_DIRECTIVE + "\n"
             + _OBJECTIVE_ALIGNMENT_DIRECTIVE
+            # NOTE: grade-aware image search rules are appended dynamically in
+            # generate_v2_instructional_artifact() via _build_image_search_directive().
         ),
         "subject_slide_deck": (
             "Generate a classroom-ready slide deck that TEACHES the lesson — these slides are projected to students "
@@ -383,6 +662,7 @@ def _instruction_for_artifact(artifact_type: str) -> str:
             "answer_key must provide complete, specific answers — not 'varies' or 'see rubric'.\n"
             "Each question must map to a specific objective_id from resolved_objectives, "
             "prioritizing is_required=true objectives.\n"
+            + _STUDENT_CONTENT_RULES_DIRECTIVE + "\n"
             + _CURRICULUM_DOCUMENT_DIRECTIVE + "\n"
             + _BOOK_GROUNDING_DIRECTIVE + "\n"
             + _OBJECTIVE_ALIGNMENT_DIRECTIVE
@@ -407,6 +687,7 @@ def _instruction_for_artifact(artifact_type: str) -> str:
             "student_instructions: Clear, grade-appropriate directions.\n"
             "success_criteria: 3-5 specific, observable criteria students use to self-check.\n"
             "objective_alignment: Name exactly which required TEKS this addresses and how.\n"
+            + _STUDENT_CONTENT_RULES_DIRECTIVE + "\n"
             + _CURRICULUM_DOCUMENT_DIRECTIVE + "\n"
             + _BOOK_GROUNDING_DIRECTIVE + "\n"
             + _OBJECTIVE_ALIGNMENT_DIRECTIVE
@@ -418,6 +699,7 @@ def _instruction_for_artifact(artifact_type: str) -> str:
             "student_instructions: Step-by-step directions (plan → draft → revise).\n"
             "sentence_starters: 4-6 frames that scaffold the TEKS language and curriculum vocabulary.\n"
             "success_criteria: 4-5 specific, observable criteria tied to required TEKS.\n"
+            + _STUDENT_CONTENT_RULES_DIRECTIVE + "\n"
             + _CURRICULUM_DOCUMENT_DIRECTIVE + "\n"
             + _BOOK_GROUNDING_DIRECTIVE + "\n"
             + _OBJECTIVE_ALIGNMENT_DIRECTIVE
@@ -435,10 +717,23 @@ def _instruction_for_artifact(artifact_type: str) -> str:
         + _BOOK_GROUNDING_DIRECTIVE + " "
         + _OBJECTIVE_ALIGNMENT_DIRECTIVE
     )
-    return instructions.get(artifact_type, default)
+    base = instructions.get(artifact_type, default)
+    # Prepend the instructional design directive universally to all artifact types.
+    # This is the primary guide for all generation. The directive itself contains
+    # student-facing prohibition rules, so student-facing artifacts receive them too.
+    return _INSTRUCTIONAL_DESIGN_DIRECTIVE + base
 
 
-def _normalize_artifact_content(artifact_type: str, content: dict[str, Any]) -> dict[str, Any]:
+def _normalize_artifact_content(artifact_type: str, content: Any) -> dict[str, Any]:
+    # Gemini 2.5 Flash sometimes returns a bare JSON array instead of an object.
+    # Wrap it into the expected top-level dict shape before normalizing.
+    if isinstance(content, list):
+        if artifact_type == "student_lesson_deck":
+            content = {"slides": content}
+        elif artifact_type in ("subject_slide_deck", "daily_lesson_plan"):
+            content = {"slides": content}
+        else:
+            content = {"items": content}
     normalized = dict(content)
     if artifact_type == "quiz" and not normalized.get("sections"):
         sections = []
@@ -492,6 +787,209 @@ def _normalize_artifact_content(artifact_type: str, content: dict[str, Any]) -> 
     return normalized
 
 
+def generate_curriculum_sequence_plan(
+    db: Session,
+    *,
+    settings: Settings,
+    user: User,
+    tenant_id: uuid.UUID,
+    package_id: uuid.UUID,
+    generation_context: dict[str, Any],
+) -> dict[str, Any]:
+    """One-shot AI call that reads the full curriculum and returns a fixed week-by-week
+    teaching sequence plan. Called ONCE before any artifact generation so every artifact
+    is grounded in a consistent, pedagogically-ordered plan rather than each week
+    independently deciding what to emphasize.
+
+    Returns a dict keyed by week number (int): {1: {...}, 2: {...}, ...}.
+    Falls back to an empty dict on any failure — callers must handle gracefully.
+    """
+    if not is_teacher_assist_real_ai_active(db, settings):
+        return {}
+
+    effective_settings = resolve_teacher_assist_settings(db, settings)
+    provider_name, _api_key, _base_url = _provider_api_params(effective_settings)
+    model_name = get_teacher_assist_provider_model(effective_settings, provider_name=provider_name)
+
+    total_weeks = generation_context.get("total_guide_weeks") or 1
+    grade_code = generation_context.get("grade_code")
+    grade_display_name = generation_context.get("grade_display_name")
+
+    # Load the FULL text of every curriculum file directly from the DB.
+    # This bypasses the DOCUMENT_CONTEXT_ITEM_LIMIT/TOTAL_LIMIT excerpts so the AI
+    # can read the complete Essential Unit of Study and extract week-by-week book lists.
+    _FULL_DOC_CHAR_LIMIT = 60_000
+    full_curriculum_docs: list[dict[str, Any]] = []
+    _pacing_mats = generation_context.get("pacing_materials") or []
+    _file_mat_ids = [
+        uuid.UUID(str(m["id"]))
+        for m in _pacing_mats
+        if m.get("material_kind") == "file" and m.get("id")
+    ]
+    if _file_mat_ids:
+        _ext_rows = db.scalars(
+            _sa_select(TeacherAssistV2DocumentExtraction).where(
+                TeacherAssistV2DocumentExtraction.supporting_material_id.in_(_file_mat_ids)
+            )
+        ).all()
+        _ext_by_mat = {str(row.supporting_material_id): row for row in _ext_rows}
+        for _mat in _pacing_mats:
+            if _mat.get("material_kind") != "file":
+                continue
+            _mid = str(_mat.get("id", ""))
+            _row = _ext_by_mat.get(_mid)
+            if _row is None:
+                continue
+            _text = (_row.teacher_edited_text or _row.extracted_text or "").strip()
+            if _text:
+                full_curriculum_docs.append({
+                    "title": _mat.get("title"),
+                    "filename": _mat.get("original_filename"),
+                    "resource_type": _mat.get("resource_type"),
+                    "text": _text[:_FULL_DOC_CHAR_LIMIT],
+                    "truncated": len(_text) > _FULL_DOC_CHAR_LIMIT,
+                })
+
+    grade_clause = (
+        f" This curriculum is for Grade {grade_code} ({grade_display_name}). "
+        "Calibrate all week themes, mentor text selections, and activity complexity to that grade level."
+        if grade_code else ""
+    )
+
+    instruction = (
+        "You are a curriculum sequencing expert. Analyze the provided pacing guide objectives, "
+        "curriculum documents, and teacher materials to create a FIXED, PEDAGOGICALLY-SEQUENCED "
+        f"week-by-week teaching plan for a {total_weeks}-week instructional package.{grade_clause}\n\n"
+
+        "CRITICAL — READ full_curriculum_documents FIRST:\n"
+        "full_curriculum_documents contains the COMPLETE extracted text of every curriculum file "
+        "uploaded for this pacing guide (e.g. 'Essential Unit of Study' PDFs). Read every document "
+        "fully before producing your plan. These documents contain:\n"
+        "  - Specific mentor texts and read-aloud books assigned to each week\n"
+        "  - Week-by-week instructional sequences, workshop structures, and activities\n"
+        "  - Unit themes, essential questions, and culminating tasks\n"
+        "Use EXACT book titles and activity names from these documents — do NOT substitute or invent.\n\n"
+
+        "TASK: Determine the natural pedagogical progression — "
+        "what concepts must be taught FIRST as a foundation, what builds on those foundations, "
+        "and what synthesis or advanced work comes at the end. Do NOT assign the same emphasis "
+        "every week. Each week must have a DISTINCT primary focus that builds on the prior week.\n\n"
+
+        "For a Reading + Writing curriculum:\n"
+        "- Early weeks: establish reading identity, book selection habits, reading stamina, "
+        "  introduce writing as a response to reading\n"
+        "- Middle weeks: dive into literary analysis (character, theme, author's craft), "
+        "  connect reading to writing craft lessons\n"
+        "- Later weeks: deepen analysis, independent writing, revision, genre study\n"
+        "- Final week: synthesis, celebration, reflection on the learning journey\n\n"
+
+        "GROUNDING RULE: Base your plan on full_curriculum_documents — they are the authoritative "
+        "source. If they name specific books, activities, or workshop structures per week, use those EXACTLY. "
+        "If a book is listed for Week 3, put it in Week 3's mentor_texts — do not move it.\n\n"
+
+        "TEKS FULL-COVERAGE REQUIREMENT — mandatory:\n"
+        "resolved_objectives (in the subjects data) lists every TEKS for this curriculum. "
+        "By Week {total_weeks}, EVERY TEKS must have been the primary focus of at least one week's lessons. "
+        "Rules for primary_teks and secondary_teks in your plan:\n"
+        "  - primary_teks: 1-3 TEKS that are the main teaching focus this week — students are introduced, "
+        "    practice deeply, and are assessed on these\n"
+        "  - secondary_teks: TEKS that are touched on or reinforced this week but not the primary focus\n"
+        "  - No TEKS should appear as primary_teks every single week — distribute coverage deliberately\n"
+        "  - By the final week, every required TEKS must have been primary at least once\n"
+        "  - Optional TEKS (is_required=false) must also be distributed — brief but intentional\n"
+        "Assignments and assessments generated each week will test the primary_teks for that week, "
+        "so your distribution here directly determines what students are graded on each week.\n\n"
+
+        f"Return a JSON object with exactly {total_weeks} entries, one per week, in this schema:\n"
+        "{\n"
+        '  "teaching_sequence": [\n'
+        "    {\n"
+        '      "week": 1,\n'
+        '      "theme": "Short memorable theme title for the week",\n'
+        '      "reading_focus": "What specific reading skill/concept students practice this week",\n'
+        '      "writing_focus": "What specific writing skill/activity students do this week",\n'
+        '      "primary_teks": ["code1", "code2"],\n'
+        '      "secondary_teks": ["code3"],\n'
+        '      "mentor_texts": ["Exact book/text title from curriculum documents"],\n'
+        '      "key_activities": ["specific activity 1", "specific activity 2"],\n'
+        '      "builds_on": null,\n'
+        '      "prepares_for": "Brief description of what Week 2 will build toward"\n'
+        "    }\n"
+        "  ]\n"
+        "}\n"
+    )
+
+    prompt_payload = {
+        "total_guide_weeks": total_weeks,
+        "grade_code": grade_code,
+        "grade_display_name": grade_display_name,
+        "subjects": generation_context.get("subjects"),
+        "weeks": generation_context.get("weeks"),
+        "resolved_objectives": generation_context.get("resolved_objectives"),
+        "full_curriculum_documents": full_curriculum_docs,
+        "pacing_materials": generation_context.get("pacing_materials"),
+        "district_document_context": generation_context.get("district_document_context"),
+        "district_materials_summary": generation_context.get("district_materials_summary"),
+        "teacher_supplemental_files": generation_context.get("teacher_supplemental_files"),
+        "teacher_document_context": generation_context.get("teacher_document_context"),
+        "teacher_supplemental_notes": generation_context.get("teacher_supplemental_notes"),
+    }
+
+    schema = {
+        "teaching_sequence": [
+            {
+                "week": 1,
+                "theme": "string",
+                "reading_focus": "string",
+                "writing_focus": "string",
+                "primary_teks": ["string"],
+                "secondary_teks": ["string"],
+                "mentor_texts": ["string"],
+                "key_activities": ["string"],
+                "builds_on": "string or null",
+                "prepares_for": "string or null",
+            }
+        ]
+    }
+
+    try:
+        result = execute_openai_json_completion(
+            effective_settings,
+            model_name=model_name,
+            instruction=instruction,
+            prompt_payload=prompt_payload,
+            required_output_schema=schema,
+            _api_key=_api_key,
+            _base_url=_base_url,
+            _provider=provider_name,
+        )
+        record_teacher_assist_ai_usage(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            feature=V2_INSTRUCTIONAL_PACKAGE_GENERATION_FEATURE,
+            provider=result.provider,
+            model=result.model,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            estimated_cost_cents=result.estimated_cost_cents,
+            metadata={
+                "operation_type": "curriculum_sequence_plan",
+                "package_id": str(package_id),
+                "related_entity_type": "instructional_package",
+                "related_entity_id": str(package_id),
+            },
+        )
+        sequence = result.content_json.get("teaching_sequence") or []
+        return {int(entry["week"]): entry for entry in sequence if "week" in entry}
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Curriculum sequence plan failed for package %s — proceeding without plan", package_id
+        )
+        return {}
+
+
 def generate_v2_instructional_artifact(
     db: Session,
     *,
@@ -506,13 +1004,15 @@ def generate_v2_instructional_artifact(
     week_subject: dict[str, Any] | None = None,
     day_label: str | None = None,
     title_hint: str | None = None,
+    introduced_vocabulary: list[str] | None = None,
 ) -> dict[str, Any] | None:
     if not is_teacher_assist_real_ai_active(db, settings):
         return None
 
     effective_settings = resolve_teacher_assist_settings(db, settings)
     assert_teacher_assist_ai_cost_available(db, effective_settings)
-    model_name = get_teacher_assist_provider_model(effective_settings, provider_name="openai")
+    provider_name, _api_key, _base_url = _provider_api_params(effective_settings)
+    model_name = get_teacher_assist_provider_model(effective_settings, provider_name=provider_name)
     feature = V2_PACKAGE_ARTIFACT_FEATURES.get(artifact_type, V2_INSTRUCTIONAL_PACKAGE_GENERATION_FEATURE)
 
     # Surface pacing guide objectives and grounding fields at the top level so the AI
@@ -569,6 +1069,56 @@ def generate_v2_instructional_artifact(
 
     total_guide_weeks = generation_context.get("total_guide_weeks")
     current_week_number = (week or {}).get("sequence_number")
+
+    # ── Instructional Design Plan — slice for this artifact ───────────────────────────
+    # The plan was generated once before any artifact generation began and stored on
+    # the generation_context. Each artifact receives only the slice it needs so prompt
+    # size stays bounded while alignment is maintained across the package.
+    _idp = generation_context.get("instructional_design_plan") or {}
+    _unit_mastery_arc = _idp.get("unit_mastery_arc")
+    _kdg = _idp.get("knowledge_dependency_graph") or []
+    _subj_name = (subject_meta or {}).get("subject_name") or ""
+
+    _instructional_design_week: dict[str, Any] | None = None
+    _instructional_contracts: dict[str, Any] | None = None
+    _district_anchors_slice: dict[str, Any] | None = None
+    _instructional_design_day: Any = None  # dict for single-subject; dict[str,dict] for daily_lesson_plan
+
+    if current_week_number:
+        if artifact_type == "daily_lesson_plan":
+            # daily_lesson_plan covers all subjects for one day. Build a map so the AI
+            # can see each subject's instructional intent for this specific day.
+            _subject_names = [
+                s.get("subject_name") or ""
+                for s in (generation_context.get("subjects") or [])
+                if s.get("subject_name")
+            ]
+            _instructional_design_day = get_plan_for_all_subjects_on_day(
+                _idp, current_week_number, _subject_names, day_label or ""
+            ) if day_label else None
+            # For the daily lesson plan, week-level design comes from the primary subject
+            if _subject_names:
+                _instructional_design_week = get_plan_instructional_design_week(
+                    _idp, current_week_number, _subject_names[0]
+                )
+                _district_anchors_slice = get_plan_district_anchors(
+                    _idp, current_week_number, _subject_names[0]
+                )
+        elif _subj_name:
+            _instructional_design_week = get_plan_instructional_design_week(
+                _idp, current_week_number, _subj_name
+            )
+            _district_anchors_slice = get_plan_district_anchors(
+                _idp, current_week_number, _subj_name
+            )
+            _instructional_design_day = (
+                get_plan_for_day(_idp, current_week_number, _subj_name, day_label)
+                if day_label else None
+            )
+
+        if _instructional_design_week:
+            _instructional_contracts = _instructional_design_week.get("instructional_contracts")
+
     prompt_payload = {
         "prompt_version": V2_PACKAGE_PROMPT_VERSION,
         "artifact_type": artifact_type,
@@ -580,6 +1130,8 @@ def generate_v2_instructional_artifact(
         "district_id": generation_context.get("district_id"),
         "school_id": generation_context.get("school_id"),
         "grade_id": generation_context.get("grade_id"),
+        "grade_code": generation_context.get("grade_code"),
+        "grade_display_name": generation_context.get("grade_display_name"),
         "subjects": generation_context.get("subjects"),
         "pacing_guide_ids": generation_context.get("pacing_guide_ids"),
         # Pacing guide duration context — tells AI where we are in the learning arc.
@@ -605,13 +1157,36 @@ def generate_v2_instructional_artifact(
         "ai_readiness_summary": generation_context.get("ai_readiness_summary"),
         "selected_output_types": generation_context.get("selected_output_types"),
         "teaching_order": generation_context.get("teaching_order"),
+        "week_curriculum_plan": generation_context.get("week_curriculum_plan"),
         "generation_mode": generation_context.get("generation_mode"),
         "teacher_generation_notes": generation_context.get("teacher_generation_notes"),
         "existing_package_assignments": generation_context.get("existing_package_assignments"),
         "require_distinct_from_existing": generation_context.get("require_distinct_from_existing"),
+        # ── Instructional Design Plan slices ──────────────────────────────────────────
+        # unit_mastery_arc and knowledge_dependency_graph are package-level; every
+        # artifact receives them to maintain unit coherence and address misconceptions.
+        # district_anchors, instructional_design_week, and instructional_design_day
+        # are the specific slices for this artifact's week + subject + day.
+        "unit_mastery_arc": _unit_mastery_arc,
+        "knowledge_dependency_graph": _kdg,
+        "district_anchors": _district_anchors_slice,
+        "instructional_design_week": _instructional_design_week,
+        "instructional_design_day": _instructional_design_day,
+        # instructional_contracts extracted as a top-level field so the AI can reference
+        # it directly without navigating the full instructional_design_week structure.
+        "instructional_contracts": _instructional_contracts,
+        # Academic vocabulary introduced by this point in the unit (Phase 0e registry).
+        # Only populated for assessment artifact types; None for others.
+        "introduced_vocabulary": introduced_vocabulary or [],
     }
 
     instruction = _instruction_for_artifact(artifact_type)
+    if artifact_type == "student_lesson_deck":
+        instruction += _build_image_search_directive(
+            grade_code=generation_context.get("grade_code"),
+            grade_display_name=generation_context.get("grade_display_name"),
+            subject_name=(subject_meta or {}).get("subject_name"),
+        )
     if generation_context.get("generation_mode") == "package_additional_assignment":
         instruction += (
             " This is an ADDITIONAL assignment for an existing instructional package. "
@@ -624,6 +1199,9 @@ def generate_v2_instructional_artifact(
         instruction=instruction,
         prompt_payload=prompt_payload,
         required_output_schema=_schema_for_artifact(artifact_type),
+        _api_key=_api_key,
+        _base_url=_base_url,
+        _provider=provider_name,
     )
     record_teacher_assist_ai_usage(
         db,

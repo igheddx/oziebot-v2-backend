@@ -132,6 +132,19 @@ def get_teacher_assist_ai_provider(
             effective_settings,
             model_name=get_teacher_assist_provider_model(effective_settings, provider_name=provider_name),
         )
+    elif provider_name == "gemini":
+        if not effective_settings.teacher_assist_gemini_api_key:
+            raise RuntimeError("TeacherAssist Gemini API key is not configured")
+        # Gemini exposes an OpenAI-compatible endpoint; re-use the OpenAI provider
+        # with Gemini's key and base URL substituted into the openai slots.
+        gemini_settings = effective_settings.model_copy(update={
+            "teacher_assist_openai_api_key": effective_settings.teacher_assist_gemini_api_key,
+            "teacher_assist_openai_base_url": effective_settings.teacher_assist_gemini_base_url,
+        })
+        provider = OpenAITeacherAssistAIProvider(
+            gemini_settings,
+            model_name=get_teacher_assist_provider_model(effective_settings, provider_name=provider_name),
+        )
     else:
         raise NotImplementedError(f"TeacherAssist AI provider '{provider_name}' is not implemented")
 

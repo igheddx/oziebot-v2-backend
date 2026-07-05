@@ -50,6 +50,12 @@ class GradingDraftAIResult:
     input_tokens: int
     output_tokens: int
     estimated_cost_cents: int
+    student_facing_feedback: dict[str, str]
+    teacher_facing_explanation: str
+    suspected_misconception: str | None
+    recommended_next_step: str
+    uncertainty_flags: list[str]
+    evidence_used: str
 
 
 GRADING_OUTPUT_SCHEMA: dict[str, Any] = {
@@ -73,6 +79,44 @@ GRADING_OUTPUT_SCHEMA: dict[str, Any] = {
         }
     ],
     "confidence_score": "number between 0 and 1",
+    "student_facing_feedback": {
+        "celebrate": (
+            "string — one sentence, no TEKS codes, no jargon. Start with 'You'. "
+            "Name something specific the student did well in their response."
+        ),
+        "correct": (
+            "string — one sentence, no TEKS codes. The single most important thing to improve, "
+            "phrased constructively. Be specific to the rubric criterion missed."
+        ),
+        "encourage": (
+            "string — one sentence, no TEKS codes. Forward-looking motivation tied to the next step. "
+            "Make it feel achievable."
+        ),
+    },
+    "teacher_facing_explanation": (
+        "string — 3–5 sentences for the teacher. Explain the score rationale: which rubric "
+        "criteria were met or missed and why. Reference specific language or evidence from the "
+        "student response. Note any extraction or OCR concerns that affected confidence."
+    ),
+    "suspected_misconception": (
+        "string or null — Name the specific learning gap or pattern if detectable. "
+        "Examples: 'Summarizing instead of analyzing', 'Missing text evidence to support claim', "
+        "'Confusing topic sentence with thesis'. Null if no clear misconception is evident."
+    ),
+    "recommended_next_step": (
+        "string — One concrete instructional suggestion for this specific student. "
+        "Example: 'Brief conference on using direct quotes as evidence' or "
+        "'Try the sentence frame: The author shows this when...'."
+    ),
+    "uncertainty_flags": [
+        "string — Specific concern. Examples: 'Response text appears truncated', "
+        "'OCR quality uncertain — handwriting may have been misread', "
+        "'Student may have written outside the response box'. Empty list if none."
+    ],
+    "evidence_used": (
+        "string — Summarize the 2–3 most specific pieces of evidence from the student's actual "
+        "response text that most influenced the score. Quote or closely paraphrase student language."
+    ),
 }
 
 
@@ -123,6 +167,10 @@ def generate_mock_grading_draft(*, context: dict[str, Any]) -> GradingDraftAIRes
     teacher_notes = context.get("teacher_notes") or []
     note_suffix = f" Teacher notes considered: {teacher_notes[0][:120]}" if teacher_notes else ""
 
+    confidence = _confidence_from_context(
+        student_number=student_number,
+        assignment_title=str(assignment["title"]),
+    )
     return GradingDraftAIResult(
         score=score,
         max_score=max_score,
@@ -150,15 +198,27 @@ def generate_mock_grading_draft(*, context: dict[str, Any]) -> GradingDraftAIRes
                 ),
             }
         ],
-        confidence_score=_confidence_from_context(
-            student_number=student_number,
-            assignment_title=str(assignment["title"]),
-        ),
+        confidence_score=confidence,
         provider="mock",
         model="mock",
         input_tokens=0,
         output_tokens=0,
         estimated_cost_cents=0,
+        student_facing_feedback={
+            "celebrate": f"You showed effort in responding to the assignment prompt.",
+            "correct": "Add specific details or evidence from the text to support your main idea.",
+            "encourage": "With one more round of revision, your response will be much stronger!",
+        },
+        teacher_facing_explanation=(
+            f"[MOCK AI] Student #{student_number} scored {round(score, 1)}/{round(max_score, 1)} "
+            f"({round(percentage, 1)}%) on '{assignment['title']}'. The rubric criteria were scored "
+            "based on the mock response pattern. Teacher review is required before committing any "
+            f"grade. Estimated AI confidence: {confidence}."
+        ),
+        suspected_misconception=None,
+        recommended_next_step="Review the rubric criteria with the student and identify the area to target next.",
+        uncertainty_flags=["[MOCK AI] This is a mock draft — no actual student text was analyzed."],
+        evidence_used="[MOCK AI] No real student response was analyzed. Evidence fields populated with placeholder text.",
     )
 
 def generate_openai_grading_draft(
@@ -183,7 +243,10 @@ def generate_openai_grading_draft(
                 "content": (
                     "You are a teacher grading assistant. Return JSON only. "
                     "Produce draft grading suggestions — never final grades. "
-                    "Do not include student names or other PII."
+                    "Do not include student names, TEKS codes, or other PII in any student-facing field. "
+                    "student_facing_feedback fields (celebrate, correct, encourage) must be written "
+                    "directly to the student in plain, encouraging language appropriate for the grade level. "
+                    "teacher_facing_explanation is for the teacher's eyes only and may reference rubric criteria."
                 ),
             },
             {
@@ -197,7 +260,14 @@ def generate_openai_grading_draft(
                             "Do not infer missing student work from filenames or metadata. Return rubric_sections "
                             "with one entry per criterion, matching criterion names and max_score from rubric_template. "
                             "Sum section scores for score. If extraction quality appears weak or incomplete, lower "
-                            "confidence_score and mention the uncertainty in teacher_comment_draft."
+                            "confidence_score and mention the uncertainty in teacher_comment_draft. "
+                            "For student_facing_feedback: write celebrate (what the student did well, cite specific "
+                            "evidence), correct (the single most important improvement), and encourage (one "
+                            "forward-looking motivational sentence). Never include TEKS codes or standard numbers "
+                            "in student_facing_feedback. "
+                            "For evidence_used: quote or closely paraphrase the 2–3 most specific pieces of student "
+                            "response text that drove your score. "
+                            "For suspected_misconception: name the learning gap if clearly detectable, else null."
                         ),
                         "grading_context": context,
                         "required_output_schema": GRADING_OUTPUT_SCHEMA,
@@ -276,6 +346,12 @@ def generate_openai_grading_draft(
     input_tokens = int(usage.get("prompt_tokens") or 0)
     output_tokens = int(usage.get("completion_tokens") or 0)
 
+    raw_feedback = content.get("student_facing_feedback") or {}
+    student_facing_feedback = {
+        "celebrate": str(raw_feedback.get("celebrate") or ""),
+        "correct": str(raw_feedback.get("correct") or ""),
+        "encourage": str(raw_feedback.get("encourage") or ""),
+    }
     return GradingDraftAIResult(
         score=score,
         max_score=max_score,
@@ -291,6 +367,12 @@ def generate_openai_grading_draft(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         estimated_cost_cents=estimate_openai_cost_cents(model_name, input_tokens=input_tokens, output_tokens=output_tokens),
+        student_facing_feedback=student_facing_feedback,
+        teacher_facing_explanation=str(content.get("teacher_facing_explanation") or ""),
+        suspected_misconception=content.get("suspected_misconception") or None,
+        recommended_next_step=str(content.get("recommended_next_step") or ""),
+        uncertainty_flags=[str(f) for f in (content.get("uncertainty_flags") or [])],
+        evidence_used=str(content.get("evidence_used") or ""),
     )
 
 

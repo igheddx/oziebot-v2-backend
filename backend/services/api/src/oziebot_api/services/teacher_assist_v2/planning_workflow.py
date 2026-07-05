@@ -84,7 +84,7 @@ def _teacher_assignments(db: Session, *, user: User) -> list[TeacherAssistV2Paci
         select(TeacherAssistV2PacingGuideAssignment).where(
             TeacherAssistV2PacingGuideAssignment.user_id == user.id,
             TeacherAssistV2PacingGuideAssignment.active.is_(True),
-        )
+        ).order_by(TeacherAssistV2PacingGuideAssignment.created_at.asc())
     ).all()
 
 
@@ -185,7 +185,13 @@ def _assignment_context(db: Session, *, user: User) -> dict:
         "tenant_year": tenant_year,
         "platform_tenant_id": platform_tenant_id,
         "subjects": guides,
-        "default_teaching_order": [row["subject_id"] for row in guides],
+        "default_teaching_order": [row["subject_id"] for row in sorted(
+            guides,
+            key=lambda g: next(
+                (i for i, sid in enumerate(subject_ids) if str(sid) == g["subject_id"]),
+                999,
+            ),
+        )],
         "week_ranges": week_ranges,
         "total_guide_weeks": n,
         "recommended_outputs": recommended_outputs,
@@ -789,6 +795,45 @@ def get_instructional_package_detail(
     student_daily_decks = [item for item in student_decks if item.get("day_label")]
     student_subject_decks = [item for item in student_decks if not item.get("day_label")]
 
+    # Derive the teacher-facing confidence indicator from the validation report.
+    # Teachers see only the label and a single plain-language note (if Needs Review).
+    # The full report is accessible to root admins via the admin endpoint only.
+    _validation_report = row.instructional_validation_report_json or {}
+    _confidence_label = _validation_report.get("confidence_label") or None
+    _confidence_note: str | None = None
+    if _confidence_label == "Needs Review":
+        # Surface the highest-severity issue's recommendation as the teacher note.
+        _severity_rank = {"critical": 4, "severe": 3, "moderate": 2, "warning": 1, "info": 0}
+        _all_issues = [
+            i
+            for entry in (_validation_report.get("subjects") or [])
+            for i in (entry.get("issues") or [])
+        ]
+        _top_issue = max(
+            _all_issues,
+            key=lambda i: _severity_rank.get(i.get("severity") or "info", 0),
+            default=None,
+        )
+        if _top_issue:
+            _week = _top_issue.get("week")
+            _rec = _top_issue.get("recommendation") or ""
+            _confidence_note = (
+                f"Week {_week}: {_rec}" if _week and _rec
+                else _rec or _validation_report.get("teacher_summary") or None
+            )
+
+    # Derive artifact alignment confidence from the cross-artifact alignment report.
+    # Teachers see only Ready/Needs Review. The full report is for root admins only.
+    _alignment_report = row.instructional_alignment_report_json or {}
+    _alignment_weeks = _alignment_report.get("weeks") or []
+    _alignment_confidence: str | None = None
+    if _alignment_weeks:
+        _alignment_confidence = (
+            "Needs Review"
+            if any(w.get("week_alignment_confidence") == "Needs Review" for w in _alignment_weeks)
+            else "Ready"
+        )
+
     return {
         "id": str(row.id),
         "status": row.status,
@@ -797,6 +842,9 @@ def get_instructional_package_detail(
         "teaching_order": [str(value) for value in row.teaching_order_json],
         "selected_outputs": list(row.selected_outputs_json),
         "provider_name": row.provider_name,
+        "instructional_confidence": _confidence_label,
+        "instructional_confidence_note": _confidence_note,
+        "instructional_alignment_confidence": _alignment_confidence,
         "generation_document_usage": (row.metadata_json or {}).get("generation_document_usage")
         if isinstance(row.metadata_json, dict)
         else None,
@@ -806,6 +854,7 @@ def get_instructional_package_detail(
         "created_at": row.created_at.isoformat(),
         "artifact_groups": group_artifacts(artifacts),
         "artifacts": artifacts,
+        "teacher_teaching_brief": row.teacher_coaching_summary_json or None,
         "teaching_mode_available": bool(daily_plans or subject_decks or student_decks),
         "teaching_presentations": {
             "daily_plans": [

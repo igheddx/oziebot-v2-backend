@@ -166,6 +166,14 @@ class Settings(BaseSettings):
         default="https://api.openai.com/v1",
         description="Base URL for the guarded TeacherAssist OpenAI-compatible provider.",
     )
+    teacher_assist_gemini_api_key: str | None = Field(
+        default=None,
+        description="API key for Gemini (Google AI Studio) provider execution.",
+    )
+    teacher_assist_gemini_base_url: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta/openai",
+        description="Base URL for Gemini's OpenAI-compatible endpoint.",
+    )
     teacher_assist_ai_fixture_mode: str = Field(
         default="off",
         description="TeacherAssist AI fixture mode: off, record, or replay.",

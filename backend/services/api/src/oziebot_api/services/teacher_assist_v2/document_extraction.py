@@ -33,8 +33,8 @@ from oziebot_api.services.teacher_assist.ocr_provider_config import (
 from oziebot_api.services.teacher_assist.storage import open_teacher_assist_stream
 
 DOCUMENT_EXTRACTION_PREVIEW_LIMIT = 280
-DOCUMENT_CONTEXT_ITEM_LIMIT = 1600
-DOCUMENT_CONTEXT_TOTAL_LIMIT = 8000
+DOCUMENT_CONTEXT_ITEM_LIMIT = 20000
+DOCUMENT_CONTEXT_TOTAL_LIMIT = 80000
 DOCUMENT_EXTRACTION_STATUSES = {
     "not_started",
     "queued",

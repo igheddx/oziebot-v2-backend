@@ -253,12 +253,17 @@ def get_instructional_package_detail_enriched(
         db, user=user, week_start=row.week_start, week_end=row.week_end
     )
 
-    district_materials = [
-        material
-        for week in review["weeks"]
-        for subject in week["subjects"]
-        for material in subject["district_materials"]
-    ]
+    _seen_material_ids: set[str] = set()
+    district_materials = []
+    for week in review["weeks"]:
+        for subject in week["subjects"]:
+            for material in subject["district_materials"]:
+                mid = str(material.get("id") or "")
+                if mid and mid in _seen_material_ids:
+                    continue
+                if mid:
+                    _seen_material_ids.add(mid)
+                district_materials.append(material)
 
     detail.update(
         {

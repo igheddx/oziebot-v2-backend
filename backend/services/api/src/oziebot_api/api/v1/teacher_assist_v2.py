@@ -56,6 +56,9 @@ from oziebot_api.schemas.teacher_assist_v2 import (
     V2SupportingNoteCreate,
     V2TeacherOnboardingSaveIn,
     V2TeacherProvisionIn,
+    V2RecoveryQueueCreateIn,
+    V2RecoveryQueueUpdateIn,
+    V2RecoveryArtifactGenerateIn,
 )
 from oziebot_api.services.teacher_assist.education_catalog import (
     create_district,
@@ -225,6 +228,19 @@ from oziebot_api.services.teacher_assist_v2.grade_reviews import (
     record_submission_review_view,
     reject_grading_draft,
     save_grade_review_draft,
+)
+from oziebot_api.services.teacher_assist_v2.grading_class_insight import build_assignment_class_insight
+from oziebot_api.services.teacher_assist_v2.recovery_artifacts import (
+    generate_recovery_artifact,
+    list_recovery_artifacts,
+)
+from oziebot_api.services.teacher_assist_v2.recovery_budget import compute_recovery_budget
+from oziebot_api.services.teacher_assist_v2.recovery_decision import build_recovery_decision
+from oziebot_api.services.teacher_assist_v2.today_classroom import build_today_classroom
+from oziebot_api.services.teacher_assist_v2.recovery_queue import (
+    create_queue_item,
+    list_queue_items,
+    update_queue_item,
 )
 from oziebot_api.services.teacher_assist_v2.rubric_score_exports import (
     RUBRIC_SCORE_REPORT_DOCX_MIME,
@@ -1306,6 +1322,12 @@ def save_pacing_guide_setup_route(
     }
 
 
+@router.get("/teacher/today")
+def read_teacher_today(user: CurrentUser, db: DbSession) -> dict:
+    _require_teacher(db, user)
+    return _handle(lambda: build_today_classroom(db, user=user))
+
+
 @router.get("/teacher/home")
 def read_teacher_home(user: CurrentUser, db: DbSession, settings: Settings = Depends(settings_dep)) -> dict:
     _require_teacher(db, user)
@@ -1768,6 +1790,92 @@ def generate_package_additional_assignment(
     )
     db.commit()
     return get_instructional_package_detail_enriched(db, user=user, package_id=package_id, settings=settings)
+
+
+@router.get("/admin/packages/{package_id}/validation-report")
+def admin_get_package_validation_report(
+    package_id: uuid.UUID,
+    user: RootAdminUser,
+    db: DbSession,
+) -> dict:
+    """Return the full instructional validation report for a package.
+
+    Teachers receive only confidence_label and confidence_note via the package detail
+    endpoint. Root admins receive the complete report here: per-subject scores,
+    all issues separated by educational_issues vs generation_issues, improvement_source
+    tags, revision history, and the report_meta with model and prompt version.
+    """
+    _require_root_admin(db, user)
+    package = db.scalars(
+        select(TeacherAssistV2InstructionalPackage)
+        .where(TeacherAssistV2InstructionalPackage.id == package_id)
+    ).one_or_none()
+    if package is None:
+        raise HTTPException(status_code=404, detail="Instructional package not found")
+    report = package.instructional_validation_report_json
+    if report is None:
+        return {
+            "package_id": str(package_id),
+            "validation_report": None,
+            "message": "No validation report available for this package. "
+                       "Validation runs during package generation for AI-generated packages.",
+        }
+    return {
+        "package_id": str(package_id),
+        "instructional_design_plan_locked_at": (
+            package.instructional_design_plan_locked_at.isoformat()
+            if package.instructional_design_plan_locked_at
+            else None
+        ),
+        "validation_report": report,
+    }
+
+
+@router.get("/admin/packages/{package_id}/alignment-report")
+def admin_get_package_alignment_report(
+    package_id: uuid.UUID,
+    user: RootAdminUser,
+    db: DbSession,
+) -> dict:
+    """Return the full cross-artifact alignment report for a package.
+
+    Provides per-week alignment checks — exit_ticket_stem_compliance,
+    rubric_criterion_alignment, quiz_objective_coverage, vocabulary_sequence,
+    and student_prohibition_scan — each with an alignment_explanation and
+    week_alignment_confidence. Also includes per-artifact version metadata
+    (instructional_plan_version, validation_version, artifact_generation_version)
+    accessible via individual artifact metadata_json["version"].
+
+    Root admin only. Teachers see only instructional_alignment_confidence via
+    the package detail endpoint.
+    """
+    _require_root_admin(db, user)
+    package = db.scalars(
+        select(TeacherAssistV2InstructionalPackage)
+        .where(TeacherAssistV2InstructionalPackage.id == package_id)
+    ).one_or_none()
+    if package is None:
+        raise HTTPException(status_code=404, detail="Instructional package not found")
+    report = package.instructional_alignment_report_json
+    if report is None:
+        return {
+            "package_id": str(package_id),
+            "alignment_report": None,
+            "message": (
+                "No alignment report available for this package. "
+                "Cross-artifact alignment validation runs during package generation "
+                "for AI-generated packages."
+            ),
+        }
+    return {
+        "package_id": str(package_id),
+        "instructional_design_plan_locked_at": (
+            package.instructional_design_plan_locked_at.isoformat()
+            if package.instructional_design_plan_locked_at
+            else None
+        ),
+        "alignment_report": report,
+    }
 
 
 @router.post("/admin/packages/{package_id}/regenerate-artifacts")
@@ -2657,6 +2765,7 @@ def accept_submission_grade_review(
             max_score=payload.max_score,
             teacher_comment=payload.teacher_comment,
             rubric_json=payload.rubric_json,
+            student_facing_feedback=payload.student_facing_feedback,
         )
     )
 
@@ -2680,6 +2789,7 @@ def modify_submission_grade_review(
             teacher_comment=body.teacher_comment,
             rubric_json=body.rubric_json,
             teacher_override_reason=body.teacher_override_reason,
+            student_facing_feedback=body.student_facing_feedback,
         )
     )
 
@@ -2728,6 +2838,140 @@ def save_submission_grade_review(
             teacher_override_reason=body.teacher_override_reason,
         )
     )
+
+
+@router.get("/teacher/assignments/{assignment_id}/class-insight")
+def read_assignment_class_insight(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    _require_teacher(db, user)
+    _ensure_teacher_route_allowed(db, user, "/assignments")
+    return _handle(lambda: build_assignment_class_insight(db, user=user, assignment_id=assignment_id))
+
+
+# ── Recovery Queue ─────────────────────────────────────────────────────────────
+
+@router.post("/teacher/recovery-queue")
+def create_recovery_queue_item(
+    payload: V2RecoveryQueueCreateIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    _require_teacher(db, user)
+    return _handle(
+        lambda: create_queue_item(
+            db,
+            user=user,
+            recommendation_type=payload.recommendation_type,
+            reason=payload.reason,
+            students_affected=payload.students_affected,
+            assignment_id=payload.assignment_id,
+            instructional_package_id=payload.instructional_package_id,
+            education_objective_id=payload.education_objective_id,
+            misconception_text=payload.misconception_text,
+            evidence_snapshot=payload.evidence_snapshot,
+            mastery_snapshot=payload.mastery_snapshot,
+            priority=payload.priority,
+        )
+    )
+
+
+@router.get("/teacher/recovery-queue")
+def read_recovery_queue(
+    user: CurrentUser,
+    db: DbSession,
+    assignment_id: uuid.UUID | None = None,
+    instructional_package_id: uuid.UUID | None = None,
+    status: str | None = None,
+) -> list:
+    _require_teacher(db, user)
+    statuses = [s.strip() for s in status.split(",")] if status else None
+    return _handle(
+        lambda: list_queue_items(
+            db,
+            user=user,
+            statuses=statuses,
+            assignment_id=assignment_id,
+            instructional_package_id=instructional_package_id,
+        )
+    )
+
+
+@router.patch("/teacher/recovery-queue/{item_id}")
+def update_recovery_queue_item(
+    item_id: uuid.UUID,
+    payload: V2RecoveryQueueUpdateIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    _require_teacher(db, user)
+    return _handle(
+        lambda: update_queue_item(
+            db,
+            user=user,
+            item_id=item_id,
+            teacher_response=payload.teacher_response,
+            teacher_notes=payload.teacher_notes,
+            scheduled_for=payload.scheduled_for,
+            priority=payload.priority,
+            status=payload.status,
+            post_recovery_mastery_snapshot=payload.post_recovery_mastery_snapshot,
+        )
+    )
+
+
+@router.get("/teacher/packages/{package_id}/recovery-budget")
+def read_recovery_budget(
+    package_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    _require_teacher(db, user)
+    return _handle(lambda: compute_recovery_budget(db, user=user, package_id=package_id))
+
+
+# ── Learning Recovery Planner — Phase 8 ───────────────────────────────────────
+
+@router.get("/teacher/assignments/{assignment_id}/recovery-decision")
+def get_recovery_decision(
+    assignment_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    _require_teacher(db, user)
+    return _handle(lambda: build_recovery_decision(db, user=user, assignment_id=assignment_id))
+
+
+@router.post("/teacher/recovery-queue/{item_id}/artifacts")
+def create_recovery_artifact(
+    item_id: uuid.UUID,
+    payload: V2RecoveryArtifactGenerateIn,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    _require_teacher(db, user)
+    return _handle(
+        lambda: generate_recovery_artifact(
+            db,
+            settings=settings,
+            user=user,
+            queue_item_id=item_id,
+            artifact_type=payload.artifact_type,
+        )
+    )
+
+
+@router.get("/teacher/recovery-queue/{item_id}/artifacts")
+def read_recovery_artifacts(
+    item_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> list:
+    _require_teacher(db, user)
+    return _handle(lambda: list_recovery_artifacts(db, user=user, queue_item_id=item_id))
 
 
 @router.post("/teacher/assignments/{assignment_id}/grade-review/accept-all-viewed")

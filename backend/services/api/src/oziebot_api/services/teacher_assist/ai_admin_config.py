@@ -49,17 +49,20 @@ def _build_admin_config_payload(*, env_settings: Settings, effective_settings: S
         or effective_settings.teacher_assist_ai_enable_real_provider
     )
     openai_key_configured = bool((env_settings.teacher_assist_openai_api_key or "").strip())
+    gemini_key_configured = bool((env_settings.teacher_assist_gemini_api_key or "").strip())
     circuit = TeacherAssistProviderCircuitBreaker().state_for_provider(effective_settings, provider_name)
     real_active = is_teacher_assist_real_ai_active(db, env_settings)
-    effective_mode = "real_openai" if real_active else "mock"
+    effective_mode = f"real_{provider_name}" if real_active else "mock"
     daily_cost_limit_cents = get_effective_daily_cost_limit_cents(db, env_settings)
     blockers: list[str] = []
-    if provider_name == "openai" and not real_provider_enabled:
+    if provider_name in ("openai", "gemini") and not real_provider_enabled:
         blockers.append("Real provider is disabled in admin settings.")
     if provider_name == "openai" and not openai_key_configured:
         blockers.append("TEACHER_ASSIST_OPENAI_API_KEY is not set on the server.")
-    if provider_name == "openai" and real_provider_enabled and daily_cost_limit_cents <= 0:
-        blockers.append("Daily cost limit must be set before enabling real OpenAI mode.")
+    if provider_name == "gemini" and not gemini_key_configured:
+        blockers.append("TEACHER_ASSIST_GEMINI_API_KEY is not set on the server.")
+    if provider_name in ("openai", "gemini") and real_provider_enabled and daily_cost_limit_cents <= 0:
+        blockers.append(f"Daily cost limit must be set before enabling real {provider_name} mode.")
     if circuit.state != "closed" and circuit.reason:
         blockers.append(circuit.reason)
 
@@ -75,10 +78,12 @@ def _build_admin_config_payload(*, env_settings: Settings, effective_settings: S
     return {
         "ai_mode": effective_mode,
         "configured_provider": provider_name,
-        "effective_mode": "openai" if real_active else "mock",
+        "effective_mode": provider_name if real_active else "mock",
         "real_provider_enabled": real_provider_enabled,
         "openai_api_key_configured": openai_key_configured,
         "openai_api_key_status": "configured" if openai_key_configured else "missing",
+        "gemini_api_key_configured": gemini_key_configured,
+        "gemini_api_key_status": "configured" if gemini_key_configured else "missing",
         "real_provider_model": effective_settings.teacher_assist_real_provider_model,
         "allowed_models": list_teacher_assist_allowed_models_for_admin(env_settings),
         "daily_cost_limit_cents": daily_cost_limit_cents,

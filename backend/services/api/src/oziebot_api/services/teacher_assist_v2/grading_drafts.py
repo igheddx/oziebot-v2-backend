@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
+
+_TEKS_CODE_RE = re.compile(r"\b\d+\.\d+[A-Z]\b")
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -37,6 +40,12 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _strip_teks_codes(text: str | None) -> str | None:
+    if not text:
+        return text
+    return _TEKS_CODE_RE.sub("", text).strip() or text
+
+
 def _validate_job_status(status: str) -> str:
     normalized = status.strip().upper()
     if normalized not in GRADING_JOB_STATUSES:
@@ -45,6 +54,7 @@ def _validate_job_status(status: str) -> str:
 
 
 def serialize_grading_draft(row: TeacherAssistV2GradingDraft) -> dict[str, Any]:
+    rubric = row.rubric_json if isinstance(row.rubric_json, dict) else {}
     payload = {
         "id": str(row.id),
         "assignment_id": str(row.assignment_id),
@@ -63,6 +73,13 @@ def serialize_grading_draft(row: TeacherAssistV2GradingDraft) -> dict[str, Any]:
         "model": row.model,
         "created_at": row.created_at.isoformat(),
         "teacher_review_required": True,
+        "student_facing_feedback": rubric.get("student_facing_feedback"),
+        "ai_student_facing_feedback": rubric.get("ai_student_facing_feedback"),
+        "teacher_facing_explanation": rubric.get("teacher_facing_explanation"),
+        "suspected_misconception": rubric.get("suspected_misconception"),
+        "recommended_next_step": rubric.get("recommended_next_step"),
+        "uncertainty_flags": rubric.get("uncertainty_flags") or [],
+        "evidence_used": rubric.get("evidence_used"),
     }
     payload.update(serialize_mastery_level_fields(percentage=row.percentage))
     return payload
@@ -273,6 +290,28 @@ def _perform_grading_job(
     job.provider = ai_result.provider
     job.model = ai_result.model
 
+    # Apply TEKS code strip to student-facing fields before storage.
+    raw_feedback = ai_result.student_facing_feedback or {}
+    stripped_feedback: dict[str, str] = {
+        "celebrate": _strip_teks_codes(raw_feedback.get("celebrate") or "") or "",
+        "correct": _strip_teks_codes(raw_feedback.get("correct") or "") or "",
+        "encourage": _strip_teks_codes(raw_feedback.get("encourage") or "") or "",
+    }
+
+    # Enrich rubric_json with new intelligence fields.  The AI's original feedback
+    # is preserved separately so future analytics can measure teacher edit frequency.
+    enriched_rubric_json: dict[str, Any] = {
+        **(ai_result.rubric_json if isinstance(ai_result.rubric_json, dict) else {}),
+        "objective_evidence": ai_result.objective_evidence,
+        "student_facing_feedback": stripped_feedback,
+        "ai_student_facing_feedback": raw_feedback,
+        "teacher_facing_explanation": ai_result.teacher_facing_explanation,
+        "suspected_misconception": ai_result.suspected_misconception,
+        "recommended_next_step": ai_result.recommended_next_step,
+        "uncertainty_flags": ai_result.uncertainty_flags,
+        "evidence_used": ai_result.evidence_used,
+    }
+
     draft = TeacherAssistV2GradingDraft(
         id=uuid.uuid4(),
         tenant_id=assignment.tenant_id,
@@ -283,7 +322,7 @@ def _perform_grading_job(
         score=ai_result.score,
         max_score=ai_result.max_score,
         percentage=ai_result.percentage,
-        rubric_json=ai_result.rubric_json,
+        rubric_json=enriched_rubric_json,
         teacher_comment_draft=ai_result.teacher_comment_draft,
         strengths=ai_result.strengths,
         improvements=ai_result.improvements,

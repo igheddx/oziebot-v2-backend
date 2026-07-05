@@ -89,6 +89,21 @@ def _render_rubric_sections_table(sections: list[dict[str, Any]]) -> str:
     )
 
 
+_STUDENT_MASTERY_LANGUAGE = {
+    "mastery": "You demonstrated strong understanding of this assignment.",
+    "developing": "You're building this skill — keep going!",
+    "beginning": "You're working on the foundations of this skill.",
+    "missing": "This assignment was not submitted.",
+}
+
+_MASTERY_BADGE_COLOR = {
+    "mastery": "background:#d1fae5;color:#065f46",
+    "developing": "background:#fef3c7;color:#92400e",
+    "beginning": "background:#fee2e2;color:#991b1b",
+    "missing": "background:#f1f5f9;color:#64748b",
+}
+
+
 def render_student_rubric_scorecard_html(
     *,
     assignment: TeacherAssistV2Assignment,
@@ -97,19 +112,54 @@ def render_student_rubric_scorecard_html(
     rubric_content: dict[str, Any] | None,
 ) -> str:
     template = grading_template_from_package_rubric(rubric_content)
-    sections = (grade.rubric_json or {}).get("sections") if isinstance(grade.rubric_json, dict) else None
+    rubric = grade.rubric_json if isinstance(grade.rubric_json, dict) else {}
+    sections = rubric.get("sections")
     if not isinstance(sections, list) or not sections:
         sections = template.get("sections") or []
     mastery = serialize_mastery_level_fields(percentage=grade.percentage)
+    mastery_level = mastery.get("mastery_level") or "beginning"
+    mastery_label = mastery.get("mastery_level_label") or mastery_level.title()
+    student_language = _STUDENT_MASTERY_LANGUAGE.get(mastery_level, "Keep working toward the goal!")
+    badge_style = _MASTERY_BADGE_COLOR.get(mastery_level, "background:#f1f5f9;color:#334155")
+
+    student_feedback = rubric.get("student_facing_feedback") or {}
+    celebrate = student_feedback.get("celebrate") or ""
+    correct = student_feedback.get("correct") or ""
+    encourage = student_feedback.get("encourage") or ""
+    has_student_feedback = bool(celebrate or correct or encourage)
+    next_step = rubric.get("recommended_next_step") or ""
+
+    confirmed_at = grade.confirmed_at.strftime("%B %-d, %Y") if grade.confirmed_at else "Confirmed"
+
+    feedback_html = ""
+    if has_student_feedback:
+        feedback_html = (
+            "<h2>Feedback for you</h2>"
+            "<div style='border-left:4px solid #6366f1;padding:.75rem 1rem;margin-bottom:1rem;background:#f5f3ff'>"
+        )
+        if celebrate:
+            feedback_html += f"<p style='margin:.25rem 0'><strong>&#127881;</strong> {_esc(celebrate)}</p>"
+        if correct:
+            feedback_html += f"<p style='margin:.25rem 0'><strong>&#128161;</strong> {_esc(correct)}</p>"
+        if encourage:
+            feedback_html += f"<p style='margin:.25rem 0'><strong>&#127775;</strong> {_esc(encourage)}</p>"
+        feedback_html += "</div>"
+    if next_step:
+        feedback_html += f"<p><strong>Your next step:</strong> {_esc(next_step)}</p>"
+
     return (
-        f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>{_esc(assignment.title)} — Student #{submission.student_number}</title>"
+        f"<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        f"<title>{_esc(assignment.title)} — Student #{submission.student_number}</title>"
         f"<style>{_BASE_STYLE} table{{width:100%;border-collapse:collapse;margin-top:1rem}}"
         f" td,th{{border:1px solid #cbd5e1;padding:.5rem;text-align:left}}</style></head><body>"
         f"{_print_button()}"
         f"<h1>{_esc(assignment.title)}</h1>"
         f"<p><strong>Student #:</strong> {_esc(submission.student_number)}</p>"
         f"<p><strong>Total score:</strong> {_esc(grade.score)} / {_esc(grade.max_score)} ({_esc(grade.percentage)}%)</p>"
-        f"<p><strong>Mastery:</strong> {_esc(mastery.get('mastery_level_label'))}</p>"
+        f"<p><span style='display:inline-block;padding:.25rem .75rem;border-radius:9999px;{badge_style};font-weight:600;font-size:.85rem'>"
+        f"{_esc(mastery_label)}</span>&nbsp; {_esc(student_language)}</p>"
+        f"<p style='font-size:.8rem;color:#64748b'>Teacher-confirmed &middot; {_esc(confirmed_at)}</p>"
+        f"{feedback_html}"
         f"<h2>{_esc(template.get('title') or 'Rubric score card')}</h2>"
         f"{_render_rubric_sections_table(sections)}"
         f"<h2>Teacher comment</h2><p>{_esc(grade.teacher_comment)}</p>"

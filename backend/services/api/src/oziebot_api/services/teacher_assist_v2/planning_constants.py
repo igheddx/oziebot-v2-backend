@@ -44,3 +44,21 @@ WEEK_RANGE_PRESETS = (
     (1, 2, "Weeks 1–2"),
     (1, 4, "Weeks 1–4"),
 )
+
+# ── Learning Recovery Planner ──────────────────────────────────────────────────
+
+RECOVERY_ARTIFACT_TYPES = (
+    "recovery_bell_ringer",
+    "recovery_mini_lesson",
+    "recovery_small_group_packet",
+    "recovery_conference_guide",
+    "recovery_exit_ticket",
+    "recovery_guided_practice",
+    "recovery_assignment",
+    "recovery_homework",
+    "recovery_assessment",
+    "recovery_spiral_review",
+    "recovery_presentation",
+)
+
+RECOVERY_INTENT_TYPES = ("understanding", "skill", "vocabulary", "fluency", "confidence")

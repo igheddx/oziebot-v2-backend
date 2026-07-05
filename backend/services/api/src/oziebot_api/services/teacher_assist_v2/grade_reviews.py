@@ -160,6 +160,7 @@ def resolve_review_queue_status(
 
 
 def serialize_assignment_grade(row: TeacherAssistV2AssignmentGrade) -> dict[str, Any]:
+    rubric = row.rubric_json if isinstance(row.rubric_json, dict) else {}
     payload = {
         "id": str(row.id),
         "assignment_id": str(row.assignment_id),
@@ -179,6 +180,11 @@ def serialize_assignment_grade(row: TeacherAssistV2AssignmentGrade) -> dict[str,
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
         "is_official": row.status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES,
+        "student_facing_feedback": rubric.get("student_facing_feedback"),
+        "ai_student_facing_feedback": rubric.get("ai_student_facing_feedback"),
+        "suspected_misconception": rubric.get("suspected_misconception"),
+        "recommended_next_step": rubric.get("recommended_next_step"),
+        "evidence_used": rubric.get("evidence_used"),
     }
     payload.update(
         serialize_mastery_level_fields(percentage=row.percentage, mastery_level=row.mastery_level)
@@ -394,6 +400,7 @@ def accept_grading_draft(
     max_score: float | None = None,
     teacher_comment: str | None = None,
     rubric_json: dict[str, Any] | None = None,
+    student_facing_feedback: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     submission = get_student_submission_or_404(db, user=user, submission_id=submission_id)
     draft = _get_latest_grading_draft_row(db, user=user, submission_id=submission.id)
@@ -402,14 +409,25 @@ def accept_grading_draft(
     if _get_latest_active_grade(db, submission_id=submission.id, statuses=OFFICIAL_ASSIGNMENT_GRADE_STATUSES):
         raise ValueError("An official grade already exists for this submission.")
 
-    final_rubric = rubric_json if rubric_json is not None else draft.rubric_json
+    base_rubric = rubric_json if rubric_json is not None else (draft.rubric_json or {})
     final_score, final_max, final_rubric = resolve_final_grade_values(
         draft_score=draft.score,
         draft_max_score=draft.max_score,
-        rubric_json=final_rubric if isinstance(final_rubric, dict) else {},
+        rubric_json=base_rubric if isinstance(base_rubric, dict) else {},
         score=score,
         max_score=max_score,
     )
+    # Carry intelligence fields from draft rubric_json into the grade's rubric_json.
+    draft_rubric = draft.rubric_json if isinstance(draft.rubric_json, dict) else {}
+    for key in ("student_facing_feedback", "ai_student_facing_feedback", "teacher_facing_explanation",
+                "suspected_misconception", "recommended_next_step", "uncertainty_flags",
+                "evidence_used", "objective_evidence"):
+        if key in draft_rubric and key not in final_rubric:
+            final_rubric = {**final_rubric, key: draft_rubric[key]}
+    # Teacher's edited student-facing feedback overwrites AI version (AI original preserved).
+    if student_facing_feedback is not None:
+        final_rubric = {**final_rubric, "student_facing_feedback": student_facing_feedback}
+
     final_comment = teacher_comment if teacher_comment is not None else draft.teacher_comment_draft
 
     grade = _persist_grade(
@@ -438,6 +456,7 @@ def modify_grading_draft(
     teacher_comment: str,
     rubric_json: dict[str, Any],
     teacher_override_reason: str,
+    student_facing_feedback: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     submission = get_student_submission_or_404(db, user=user, submission_id=submission_id)
     draft = _get_latest_grading_draft_row(db, user=user, submission_id=submission.id)
@@ -453,6 +472,15 @@ def modify_grading_draft(
         score=score,
         max_score=max_score,
     )
+    # Carry intelligence fields from draft rubric_json.
+    draft_rubric = draft.rubric_json if isinstance(draft.rubric_json, dict) else {}
+    for key in ("student_facing_feedback", "ai_student_facing_feedback", "teacher_facing_explanation",
+                "suspected_misconception", "recommended_next_step", "uncertainty_flags",
+                "evidence_used", "objective_evidence"):
+        if key in draft_rubric and key not in final_rubric:
+            final_rubric = {**final_rubric, key: draft_rubric[key]}
+    if student_facing_feedback is not None:
+        final_rubric = {**final_rubric, "student_facing_feedback": student_facing_feedback}
 
     grade = _persist_grade(
         db,
