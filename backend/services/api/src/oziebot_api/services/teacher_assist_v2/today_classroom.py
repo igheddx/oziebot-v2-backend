@@ -270,6 +270,7 @@ def _recovery_today_items(db: Session, *, user: User, today: date) -> list[dict]
         {
             "queue_item_id": str(r.id),
             "package_id": str(r.instructional_package_id) if r.instructional_package_id else None,
+            "assignment_id": str(r.assignment_id) if r.assignment_id else None,
             "objective_code": r.objective_code,
             "priority": r.priority,
             "recommendation_type": r.recommendation_type,
