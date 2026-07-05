@@ -284,7 +284,7 @@ def build_v2_context(db: Session, *, user: User) -> dict[str, Any]:
     elif not pacing_guide_setup_complete:
         landing_route = "/teacher-assist-v2/pacing-guide-setup"
     else:
-        landing_route = "/teacher-assist-v2/planning"
+        landing_route = "/teacher-assist-v2/today"
 
     allowed_routes = ["/teacher-assist-v2/access-denied"]
     if requires_password_change:
@@ -294,6 +294,7 @@ def build_v2_context(db: Session, *, user: User) -> dict[str, Any]:
         if onboarding_complete:
             allowed_routes.append("/teacher-assist-v2/pacing-guide-setup")
         if pacing_guide_setup_complete:
+            allowed_routes.append("/teacher-assist-v2/today")
             allowed_routes.append("/teacher-assist-v2/home")
             allowed_routes.append("/teacher-assist-v2/pacing-guide-setup")
             allowed_routes.append("/teacher-assist-v2/planning")
