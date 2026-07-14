@@ -2123,57 +2123,73 @@ def _populate_instructional_package(
     except Exception:
         logger.exception("package=%s: teaching brief assembly failed — non-fatal", package.id)
 
-    # Phase 6: back-fill any slide images that failed during parallel generation
-    # (Pixabay 429 rate-limit hits during the parallel artifact phase leave assets
-    # in "pending" status). Walk them once sequentially with a short delay between
-    # artifacts so we stay under the rate limit. Non-fatal.
+    # Phase 6: back-fill pending slide images in a background thread so generation
+    # time is not extended. Pixabay 429s during parallel artifact generation leave
+    # some assets in "pending"; this pass retries them after the package is active.
     if pixabay_key := settings.teacher_assist_pixabay_api_key:
-        try:
-            _pending_artifact_ids = (
-                db.query(TeacherAssistV2SlideVisualAsset.artifact_id)
-                .join(
-                    TeacherAssistV2InstructionalPackageArtifact,
-                    TeacherAssistV2InstructionalPackageArtifact.id
-                    == TeacherAssistV2SlideVisualAsset.artifact_id,
-                )
-                .filter(
-                    TeacherAssistV2InstructionalPackageArtifact.package_id == package.id,
-                    TeacherAssistV2SlideVisualAsset.visual_generation_status == "pending",
-                )
-                .distinct()
-                .all()
-            )
-            _pending_ids = [row[0] for row in _pending_artifact_ids]
-            if _pending_ids:
-                logger.info(
-                    "package=%s: Phase 6 back-fill — %d artifact(s) have pending images",
-                    package.id,
-                    len(_pending_ids),
-                )
-                for _idx, _art_id in enumerate(_pending_ids):
-                    _art = db.get(TeacherAssistV2InstructionalPackageArtifact, _art_id)
-                    if _art is None:
-                        continue
-                    try:
-                        fetch_slide_images_for_artifact(
-                            db,
-                            artifact=_art,
-                            settings=settings,
-                            api_key=pixabay_key,
-                            grade_code=grade_code,
+        _backfill_package_id = package.id
+        _backfill_grade_code = grade_code
+
+        def _backfill_images() -> None:
+            _time_module.sleep(5)  # brief pause so Pixabay rate window resets
+            try:
+                from sqlalchemy.orm import Session as _Session
+                with _Session(db.get_bind()) as _bg_db:
+                    _pending_ids = [
+                        row[0]
+                        for row in _bg_db.query(TeacherAssistV2SlideVisualAsset.artifact_id)
+                        .join(
+                            TeacherAssistV2InstructionalPackageArtifact,
+                            TeacherAssistV2InstructionalPackageArtifact.id
+                            == TeacherAssistV2SlideVisualAsset.artifact_id,
                         )
-                        db.flush()
-                    except Exception:
-                        logger.exception(
-                            "package=%s: Phase 6 image back-fill failed for artifact %s — skipping",
-                            package.id,
-                            _art_id,
+                        .filter(
+                            TeacherAssistV2InstructionalPackageArtifact.package_id
+                            == _backfill_package_id,
+                            TeacherAssistV2SlideVisualAsset.visual_generation_status == "pending",
                         )
-                    if _idx < len(_pending_ids) - 1:
-                        _time_module.sleep(2)
-                logger.info("package=%s: Phase 6 image back-fill complete", package.id)
-        except Exception:
-            logger.exception("package=%s: Phase 6 image back-fill error — non-fatal", package.id)
+                        .distinct()
+                        .all()
+                    ]
+                    if not _pending_ids:
+                        return
+                    logger.info(
+                        "package=%s: Phase 6 back-fill (bg) — %d artifact(s) with pending images",
+                        _backfill_package_id,
+                        len(_pending_ids),
+                    )
+                    for _idx, _art_id in enumerate(_pending_ids):
+                        _art = _bg_db.get(TeacherAssistV2InstructionalPackageArtifact, _art_id)
+                        if _art is None:
+                            continue
+                        try:
+                            fetch_slide_images_for_artifact(
+                                _bg_db,
+                                artifact=_art,
+                                settings=settings,
+                                api_key=pixabay_key,
+                                grade_code=_backfill_grade_code,
+                            )
+                            _bg_db.flush()
+                            _bg_db.commit()
+                        except Exception:
+                            logger.exception(
+                                "package=%s: Phase 6 back-fill failed for artifact %s",
+                                _backfill_package_id,
+                                _art_id,
+                            )
+                        if _idx < len(_pending_ids) - 1:
+                            _time_module.sleep(2)
+                    logger.info(
+                        "package=%s: Phase 6 back-fill complete", _backfill_package_id
+                    )
+            except Exception:
+                logger.exception(
+                    "package=%s: Phase 6 back-fill thread error", _backfill_package_id
+                )
+
+        import threading as _threading
+        _threading.Thread(target=_backfill_images, daemon=True, name="img-backfill").start()
 
     return package
 
