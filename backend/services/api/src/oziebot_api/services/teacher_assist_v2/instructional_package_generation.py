@@ -253,9 +253,9 @@ def _objective_fields(
         objective_code = first.get("objective_code")
         objective_text = first.get("description") or objective_text
         objectives_list = [
-            str(row.get("objective_code") or row.get("description"))
+            str(row.get("description") or row.get("objective_code"))
             for row in week_subject["objectives"]
-            if row.get("objective_code") or row.get("description")
+            if row.get("description") or row.get("objective_code")
         ]
         objective_ids = [
             str(row.get("education_objective_id"))
