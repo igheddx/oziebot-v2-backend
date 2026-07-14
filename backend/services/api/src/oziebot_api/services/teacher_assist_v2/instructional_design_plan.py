@@ -619,11 +619,31 @@ def get_plan_for_week_subject(
 
 
 _DAY_CANONICAL: dict[str, str] = {
-    "monday": "Monday", "mon": "Monday", "day 1": "Monday", "day1": "Monday", "1": "Monday",
-    "tuesday": "Tuesday", "tue": "Tuesday", "day 2": "Tuesday", "day2": "Tuesday", "2": "Tuesday",
-    "wednesday": "Wednesday", "wed": "Wednesday", "day 3": "Wednesday", "day3": "Wednesday", "3": "Wednesday",
-    "thursday": "Thursday", "thu": "Thursday", "day 4": "Thursday", "day4": "Thursday", "4": "Thursday",
-    "friday": "Friday", "fri": "Friday", "day 5": "Friday", "day5": "Friday", "5": "Friday",
+    "monday": "Monday",
+    "mon": "Monday",
+    "day 1": "Monday",
+    "day1": "Monday",
+    "1": "Monday",
+    "tuesday": "Tuesday",
+    "tue": "Tuesday",
+    "day 2": "Tuesday",
+    "day2": "Tuesday",
+    "2": "Tuesday",
+    "wednesday": "Wednesday",
+    "wed": "Wednesday",
+    "day 3": "Wednesday",
+    "day3": "Wednesday",
+    "3": "Wednesday",
+    "thursday": "Thursday",
+    "thu": "Thursday",
+    "day 4": "Thursday",
+    "day4": "Thursday",
+    "4": "Thursday",
+    "friday": "Friday",
+    "fri": "Friday",
+    "day 5": "Friday",
+    "day5": "Friday",
+    "5": "Friday",
 }
 _DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 

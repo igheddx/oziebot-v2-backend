@@ -2134,6 +2134,7 @@ def _populate_instructional_package(
             _time_module.sleep(5)  # brief pause so Pixabay rate window resets
             try:
                 from sqlalchemy.orm import Session as _Session
+
                 with _Session(db.get_bind()) as _bg_db:
                     _pending_ids = [
                         row[0]
@@ -2180,15 +2181,12 @@ def _populate_instructional_package(
                             )
                         if _idx < len(_pending_ids) - 1:
                             _time_module.sleep(2)
-                    logger.info(
-                        "package=%s: Phase 6 back-fill complete", _backfill_package_id
-                    )
+                    logger.info("package=%s: Phase 6 back-fill complete", _backfill_package_id)
             except Exception:
-                logger.exception(
-                    "package=%s: Phase 6 back-fill thread error", _backfill_package_id
-                )
+                logger.exception("package=%s: Phase 6 back-fill thread error", _backfill_package_id)
 
         import threading as _threading
+
         _threading.Thread(target=_backfill_images, daemon=True, name="img-backfill").start()
 
     return package

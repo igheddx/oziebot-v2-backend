@@ -1228,7 +1228,9 @@ def build_student_lesson_deck(
 
     # Concept slides — use day-specific topic first, then remaining weekly topics
     _remaining_topics = [t for t in (daily_topics or []) if t != _primary_topic]
-    concept_topics = ([_primary_topic] + _remaining_topics[:2]) if _primary_topic else (daily_topics or [])[:3]
+    concept_topics = (
+        ([_primary_topic] + _remaining_topics[:2]) if _primary_topic else (daily_topics or [])[:3]
+    )
     if concept_topics:
         for index, topic in enumerate(concept_topics, start=1):
             slides.append(
