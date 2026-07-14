@@ -618,6 +618,20 @@ def get_plan_for_week_subject(
     return None
 
 
+_DAY_CANONICAL: dict[str, str] = {
+    "monday": "Monday", "mon": "Monday", "day 1": "Monday", "day1": "Monday", "1": "Monday",
+    "tuesday": "Tuesday", "tue": "Tuesday", "day 2": "Tuesday", "day2": "Tuesday", "2": "Tuesday",
+    "wednesday": "Wednesday", "wed": "Wednesday", "day 3": "Wednesday", "day3": "Wednesday", "3": "Wednesday",
+    "thursday": "Thursday", "thu": "Thursday", "day 4": "Thursday", "day4": "Thursday", "4": "Thursday",
+    "friday": "Friday", "fri": "Friday", "day 5": "Friday", "day5": "Friday", "5": "Friday",
+}
+_DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+
+
+def _canonical_day(raw: str) -> str:
+    return _DAY_CANONICAL.get(raw.strip().lower(), raw.strip().title())
+
+
 def get_plan_for_day(
     plan: dict[str, Any] | None,
     week_num: int,
@@ -633,9 +647,15 @@ def get_plan_for_day(
     if not week_subj:
         return None
     design = week_subj.get("instructional_design") or {}
-    for day in design.get("daily_progression") or []:
-        if (day.get("day") or "").lower() == day_label.lower():
+    progression = design.get("daily_progression") or []
+    canonical_target = _canonical_day(day_label)
+    # First pass: exact canonical match (handles "Mon", "Day 1", "1", "monday", etc.)
+    for day in progression:
+        if _canonical_day(day.get("day") or "") == canonical_target:
             return day
+    # Second pass: positional fallback — if the IDP has 5 entries, use index
+    if canonical_target in _DAY_ORDER and len(progression) >= len(_DAY_ORDER):
+        return progression[_DAY_ORDER.index(canonical_target)]
     return None
 
 

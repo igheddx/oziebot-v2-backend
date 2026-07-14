@@ -88,6 +88,7 @@ from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import (
     build_subject_lesson_block_from_pacing,
     resolve_daily_plan_objective_text,
     resolve_daily_plan_summary,
+    resolve_pacing_day_plan,
     resolve_subject_daily_topic,
 )
 from oziebot_api.services.teacher_assist_v2.planning_constants import (
@@ -1502,6 +1503,8 @@ def _populate_instructional_package(
                 daily_objectives,
                 assessment_checks,
             ) = _grounding_fields(primary_week_subject)
+            _day_plan = resolve_pacing_day_plan(primary_week_subject, day_label)
+            _day_topic = (_day_plan or {}).get("daily_topic") if _day_plan else None
             deterministic = build_student_lesson_deck(
                 subject_name=primary_subject_meta["subject_name"],
                 week_label=week_label,
@@ -1510,6 +1513,7 @@ def _populate_instructional_package(
                 objective_text=objective_text,
                 objectives_list=objectives_list,
                 day_label=day_label,
+                day_topic=_day_topic,
                 objective_ids=objective_ids,
                 teks_ids=teks_ids,
                 source_materials=source_materials,

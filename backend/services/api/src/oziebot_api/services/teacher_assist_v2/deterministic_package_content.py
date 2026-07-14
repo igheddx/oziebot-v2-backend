@@ -1098,6 +1098,7 @@ def build_student_lesson_deck(
     objective_text: str,
     objectives_list: list[str],
     day_label: str | None = None,
+    day_topic: str | None = None,
     objective_ids: list[str] | None = None,
     teks_ids: list[str] | None = None,
     source_materials: list[str] | None = None,
@@ -1114,6 +1115,8 @@ def build_student_lesson_deck(
     day_context = f" — {day_label}" if day_label else ""
     title_label = f"{subject_name}{day_context}" if subject_name else package_title
     subj = subject_name or "today's lesson"
+    # Use day-specific topic when available; fall back to first weekly topic.
+    _primary_topic = day_topic or (daily_topics[0] if daily_topics else None)
 
     slides: list[dict[str, Any]] = []
     slide_num = 0
@@ -1124,7 +1127,7 @@ def build_student_lesson_deck(
         return f"slide-{slide_num}"
 
     # Hook
-    hook_body = f"Today we explore {subj}."
+    hook_body = f"Today we explore {_primary_topic or subj}."
     if source_texts:
         hook_body += f" We will work with {source_texts[0]}."
     hook_body += " Get ready to think and discover!"
@@ -1133,9 +1136,9 @@ def build_student_lesson_deck(
             "id": next_id(),
             "slide_type": "hook",
             "layout": "hook_full_image",
-            "title": f"Ready to Learn About {subj}?",
+            "title": f"Ready to Learn: {_primary_topic or subj}",
             "body": hook_body,
-            "bullets": [f"Subject: {subj}", f"Week: {week_label}"],
+            "bullets": [f"Today: {_primary_topic or subj}", f"Week: {week_label}"],
             "engagement": {
                 "type": "think_pair_share",
                 "prompt": "What do you already know about this topic? Share with a partner!",
@@ -1213,8 +1216,9 @@ def build_student_lesson_deck(
             }
         )
 
-    # Concept slides
-    concept_topics = (daily_topics or [])[:3]
+    # Concept slides — use day-specific topic first, then remaining weekly topics
+    _remaining_topics = [t for t in (daily_topics or []) if t != _primary_topic]
+    concept_topics = ([_primary_topic] + _remaining_topics[:2]) if _primary_topic else (daily_topics or [])[:3]
     if concept_topics:
         for index, topic in enumerate(concept_topics, start=1):
             slides.append(
