@@ -5,7 +5,6 @@ from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Date, DateTime, ForeignKey, Integer, JSON, String, Text, Uuid
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from oziebot_api.db.base import Base
@@ -65,7 +64,7 @@ class TeacherAssistV2InstructionalPackage(Base):
     # Stores unit_mastery_arc, knowledge_dependency_graph, district_anchors, and
     # AI-generated instructional_design per week × subject. JSONB for queryability.
     instructional_design_plan_json: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB(), nullable=True
+        JSON(), nullable=True
     )
     # Set after Phase 0d (validation + revision) completes. The plan is final and
     # immutable from this point; artifact generation uses the locked, validated plan.
@@ -77,14 +76,14 @@ class TeacherAssistV2InstructionalPackage(Base):
     # the overall confidence_label (Excellent/Very Good/Needs Review). JSONB for
     # future admin analytics queries.
     instructional_validation_report_json: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB(), nullable=True
+        JSON(), nullable=True
     )
     # Structured index of every curriculum resource extracted from attached PDFs, pacing
     # guide structured fields, and Phase 0a AI-confirmed mentor texts. Persisted here so
     # single-artifact regeneration can reference the same bank without re-running Phase 0a.
     # Schema: {"version": 2, "entries": [...], "extraction_summary": {...}}
     instructional_resource_bank_json: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB(), nullable=True
+        JSON(), nullable=True
     )
     # Classroom delivery constraint — controls how instructional strands are distributed
     # across available time. Separates "how instruction is delivered" from "what students
@@ -92,7 +91,7 @@ class TeacherAssistV2InstructionalPackage(Base):
     # Set at package creation; consumed by Phase 0c and all artifact generators.
     # Structure: {"mode": str, "strands": [{"strand_name", "minutes_per_day", "days"}]}
     instructional_delivery_profile: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB(), nullable=True
+        JSON(), nullable=True
     )
     # Cross-artifact alignment report produced by Phase 3b (per week, after all artifacts
     # for that week are committed). Accumulates week-by-week: {"weeks": [{...}, {...}]}.
@@ -100,13 +99,13 @@ class TeacherAssistV2InstructionalPackage(Base):
     # rubric_criterion_alignment, quiz_objective_coverage, vocabulary_sequence, and
     # student_prohibition_scan. Each check includes an alignment_explanation.
     instructional_alignment_report_json: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB(), nullable=True
+        JSON(), nullable=True
     )
     # Today's Teaching Brief assembled deterministically (Phase 5, zero AI calls) from
     # the plan, validation report, alignment report, and generated artifacts. Stored
     # once at the end of package generation. Structure: {"generated_at", "days": [...]}.
     teacher_coaching_summary_json: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB(), nullable=True
+        JSON(), nullable=True
     )
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
