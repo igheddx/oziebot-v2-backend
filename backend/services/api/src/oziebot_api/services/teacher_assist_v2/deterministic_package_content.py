@@ -1099,6 +1099,7 @@ def build_student_lesson_deck(
     objectives_list: list[str],
     day_label: str | None = None,
     day_topic: str | None = None,
+    student_goal: str | None = None,
     objective_ids: list[str] | None = None,
     teks_ids: list[str] | None = None,
     source_materials: list[str] | None = None,
@@ -1110,13 +1111,25 @@ def build_student_lesson_deck(
         objective_ids=objective_ids,
         teks_ids=teks_ids,
     )
-    obj_bullets = objectives_list[:3] if objectives_list else [objective_text]
     source_texts = _source_texts_from_materials(source_materials)
     day_context = f" — {day_label}" if day_label else ""
     title_label = f"{subject_name}{day_context}" if subject_name else package_title
-    subj = subject_name or "today's lesson"
     # Use day-specific topic when available; fall back to first weekly topic.
     _primary_topic = day_topic or (daily_topics[0] if daily_topics else None)
+    # Use day topic as the student-facing subject label so "ELA" never appears verbatim.
+    subj = _primary_topic or subject_name or "today's lesson"
+
+    # "Today You Will Learn To..." slide content.
+    # Prefer IDP student_goal ("I can..." ≤10 words) — it's student-friendly.
+    # Fall back to truncated objective_text only when IDP hasn't run yet.
+    if student_goal:
+        obj_body = student_goal
+        obj_bullets = [student_goal]
+    else:
+        obj_body = objective_text
+        if len(obj_body.split()) > 20:
+            obj_body = " ".join(obj_body.split()[:20]) + "..."
+        obj_bullets = [obj_body]
 
     slides: list[dict[str, Any]] = []
     slide_num = 0
@@ -1127,7 +1140,7 @@ def build_student_lesson_deck(
         return f"slide-{slide_num}"
 
     # Hook
-    hook_body = f"Today we explore {_primary_topic or subj}."
+    hook_body = f"Today we explore {_primary_topic or subject_name or 'this topic'}."
     if source_texts:
         hook_body += f" We will work with {source_texts[0]}."
     hook_body += " Get ready to think and discover!"
@@ -1136,9 +1149,9 @@ def build_student_lesson_deck(
             "id": next_id(),
             "slide_type": "hook",
             "layout": "hook_full_image",
-            "title": f"Ready to Learn: {_primary_topic or subj}",
+            "title": f"Ready to Learn: {_primary_topic or subject_name}",
             "body": hook_body,
-            "bullets": [f"Today: {_primary_topic or subj}", f"Week: {week_label}"],
+            "bullets": [f"Today: {_primary_topic or subject_name}", f"Week: {week_label}"],
             "engagement": {
                 "type": "think_pair_share",
                 "prompt": "What do you already know about this topic? Share with a partner!",
@@ -1158,9 +1171,6 @@ def build_student_lesson_deck(
     )
 
     # Today we learn
-    obj_body = objective_text
-    if len(obj_body.split()) > 30:
-        obj_body = " ".join(obj_body.split()[:30]) + "..."
     slides.append(
         {
             "id": next_id(),

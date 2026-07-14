@@ -60,6 +60,7 @@ from oziebot_api.services.teacher_assist_v2.instructional_delivery_profile impor
 )
 from oziebot_api.services.teacher_assist_v2.instructional_design_plan import (
     generate_instructional_design_plan,
+    get_plan_for_day,
 )
 from oziebot_api.services.teacher_assist_v2.instructional_validation import (
     validate_and_revise_instructional_plan,
@@ -1505,6 +1506,13 @@ def _populate_instructional_package(
             ) = _grounding_fields(primary_week_subject)
             _day_plan = resolve_pacing_day_plan(primary_week_subject, day_label)
             _day_topic = (_day_plan or {}).get("daily_topic") if _day_plan else None
+            _idp_day = get_plan_for_day(
+                instructional_design_plan,
+                week_num,
+                primary_subject_meta["subject_name"],
+                day_label,
+            )
+            _student_goal = (_idp_day or {}).get("student_goal") or None
             deterministic = build_student_lesson_deck(
                 subject_name=primary_subject_meta["subject_name"],
                 week_label=week_label,
@@ -1514,6 +1522,7 @@ def _populate_instructional_package(
                 objectives_list=objectives_list,
                 day_label=day_label,
                 day_topic=_day_topic,
+                student_goal=_student_goal,
                 objective_ids=objective_ids,
                 teks_ids=teks_ids,
                 source_materials=source_materials,
