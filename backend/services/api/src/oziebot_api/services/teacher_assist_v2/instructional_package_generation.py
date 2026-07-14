@@ -2123,6 +2123,58 @@ def _populate_instructional_package(
     except Exception:
         logger.exception("package=%s: teaching brief assembly failed — non-fatal", package.id)
 
+    # Phase 6: back-fill any slide images that failed during parallel generation
+    # (Pixabay 429 rate-limit hits during the parallel artifact phase leave assets
+    # in "pending" status). Walk them once sequentially with a short delay between
+    # artifacts so we stay under the rate limit. Non-fatal.
+    if pixabay_key := settings.teacher_assist_pixabay_api_key:
+        try:
+            _pending_artifact_ids = (
+                db.query(TeacherAssistV2SlideVisualAsset.artifact_id)
+                .join(
+                    TeacherAssistV2InstructionalPackageArtifact,
+                    TeacherAssistV2InstructionalPackageArtifact.id
+                    == TeacherAssistV2SlideVisualAsset.artifact_id,
+                )
+                .filter(
+                    TeacherAssistV2InstructionalPackageArtifact.package_id == package.id,
+                    TeacherAssistV2SlideVisualAsset.visual_generation_status == "pending",
+                )
+                .distinct()
+                .all()
+            )
+            _pending_ids = [row[0] for row in _pending_artifact_ids]
+            if _pending_ids:
+                logger.info(
+                    "package=%s: Phase 6 back-fill — %d artifact(s) have pending images",
+                    package.id,
+                    len(_pending_ids),
+                )
+                for _idx, _art_id in enumerate(_pending_ids):
+                    _art = db.get(TeacherAssistV2InstructionalPackageArtifact, _art_id)
+                    if _art is None:
+                        continue
+                    try:
+                        fetch_slide_images_for_artifact(
+                            db,
+                            artifact=_art,
+                            settings=settings,
+                            api_key=pixabay_key,
+                            grade_code=grade_code,
+                        )
+                        db.flush()
+                    except Exception:
+                        logger.exception(
+                            "package=%s: Phase 6 image back-fill failed for artifact %s — skipping",
+                            package.id,
+                            _art_id,
+                        )
+                    if _idx < len(_pending_ids) - 1:
+                        _time_module.sleep(2)
+                logger.info("package=%s: Phase 6 image back-fill complete", package.id)
+        except Exception:
+            logger.exception("package=%s: Phase 6 image back-fill error — non-fatal", package.id)
+
     return package
 
 
