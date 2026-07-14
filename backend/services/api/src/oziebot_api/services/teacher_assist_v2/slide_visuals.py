@@ -7,7 +7,13 @@ from typing import Any
 PUBLIC_VISUAL_SOURCES = ["Openverse", "Wikimedia Commons", "Unsplash", "Pixabay"]
 
 
+_NO_VISUAL_SLIDE_TYPES = {"strand_separator", "separator", "transition"}
+
+
 def _visual_profile(slide_type: str, title: str) -> dict[str, Any]:
+    if slide_type in _NO_VISUAL_SLIDE_TYPES:
+        return {"visual_type": "none", "layout": "title_full", "placement": "none",
+                "description": "", "purpose": "", "search_terms": [], "sources": []}
     key = f"{slide_type} {title}".lower()
     if "vocab" in key:
         return {
@@ -153,6 +159,12 @@ def add_slide_visual_metadata(
     for index, slide in enumerate(slides, start=1):
         slide_id = str(slide.get("id") or f"slide-{index}")
         slide_type = str(slide.get("slideType") or slide.get("slide_type") or "content")
+        if slide_type in _NO_VISUAL_SLIDE_TYPES:
+            merged = dict(slide)
+            merged["id"] = slide_id
+            merged["slideType"] = slide_type
+            enriched.append(merged)
+            continue
         recommendation = build_visual_recommendation(
             slide_id=slide_id,
             slide_type=slide_type,
@@ -174,12 +186,21 @@ def build_slide_visual_assets(slides: list[dict[str, Any]]) -> list[dict[str, An
     assets: list[dict[str, Any]] = []
     for slide in slides:
         slide_id = str(slide.get("id") or "")
+        _stype = str(slide.get("slideType") or slide.get("slide_type") or "")
+        if _stype in _NO_VISUAL_SLIDE_TYPES:
+            continue
 
         # New schema: slide has a `visual` block with image_search metadata
         visual_block = slide.get("visual")
         if isinstance(visual_block, dict) and visual_block.get("type") == "image_search":
-            img_search = visual_block.get("image_search") or {}
-            search_terms = [t for t in (img_search.get("search_terms") or []) if isinstance(t, str)]
+            _img_search_raw = visual_block.get("image_search")
+            # AI sometimes returns image_search as a flat list of search terms instead of a dict
+            if isinstance(_img_search_raw, list):
+                img_search: dict[str, Any] = {}
+                search_terms = [t for t in _img_search_raw if isinstance(t, str)]
+            else:
+                img_search = _img_search_raw if isinstance(_img_search_raw, dict) else {}
+                search_terms = [t for t in (img_search.get("search_terms") or []) if isinstance(t, str)]
             assets.append(
                 {
                     "slide_id": slide_id,

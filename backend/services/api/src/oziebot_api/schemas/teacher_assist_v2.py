@@ -164,11 +164,24 @@ class V2PlanningGenerateIn(BaseModel):
     plan_start_date: date | None = None
     plan_end_date: date | None = None
     excluded_pacing_material_ids: list[uuid.UUID] = Field(default_factory=list)
+    instructional_delivery_profile: dict | None = None
+    lost_instructional_days: int = Field(default=0, ge=0)
+    quality_review_enabled: bool = Field(default=True)
 
 
 class V2PackageCloseOutIn(BaseModel):
     close_out_notes: str | None = None
     completed_date: date | None = None
+
+
+class V2PackageRegenIn(BaseModel):
+    scope: str = Field(default="full", pattern="^(full|dirty|artifact_types|quality_review|images)$")
+    artifact_types: list[str] = Field(default_factory=list)
+    force: bool = False
+
+
+class V2ArtifactDevLockIn(BaseModel):
+    locked: bool
 
 
 class V2PlanningSupplementalLinkCreate(BaseModel):

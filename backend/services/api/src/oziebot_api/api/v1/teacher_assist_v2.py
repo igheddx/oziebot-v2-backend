@@ -49,6 +49,8 @@ from oziebot_api.schemas.teacher_assist_v2 import (
     V2StudentSubmissionResponseTextIn,
     V2StudentSubmissionStatusIn,
     V2PackageCloseOutIn,
+    V2ArtifactDevLockIn,
+    V2PackageRegenIn,
     V2PackageRubricUpdateIn,
     V2PackageAdditionalAssignmentGenerateIn,
     V2SupportingLinkCreate,
@@ -84,6 +86,7 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2InstructionalPackageArtifact,
 )
 from oziebot_api.services.teacher_assist_v2.image_search import fetch_slide_images_for_artifact
+from oziebot_api.services.teacher_assist_v2.package_export import render_slide_deck_html
 from oziebot_api.services.teacher_assist_v2.catalog_integrity import (
     CatalogArchiveError,
     archive_district,
@@ -137,7 +140,7 @@ from oziebot_api.services.teacher_assist_v2.assignments import (
 from oziebot_api.services.teacher_assist_v2.instructional_package_generation import (
     generate_instructional_package,
     prepare_instructional_package_generation,
-    run_instructional_package_generation_job,
+    queue_package_partial_regen,
 )
 from oziebot_api.services.teacher_assist_v2.package_additional_assignments import (
     build_additional_assignment_form,
@@ -1246,7 +1249,7 @@ def read_v2_pacing_guide_planning_context(
 
 def _require_teacher(db: DbSession, user: CurrentUser):
     role = _require_v2_access(db, user)
-    if role != "teacher":
+    if role not in ("teacher", "root_admin"):
         raise HTTPException(status_code=403, detail="Teacher access required")
     return role
 
@@ -1330,8 +1333,11 @@ def read_teacher_today(user: CurrentUser, db: DbSession) -> dict:
 
 @router.get("/teacher/home")
 def read_teacher_home(user: CurrentUser, db: DbSession, settings: Settings = Depends(settings_dep)) -> dict:
-    _require_teacher(db, user)
+    role = _require_teacher(db, user)
     _ensure_teacher_route_allowed(db, user, "/home")
+
+    if role == "root_admin":
+        return {"active_pacing_guides": [], "package_dashboard": {}, "recent_assignments": []}
 
     def _payload() -> dict:
         summary = build_teacher_home_summary(db, user=user)
@@ -1537,7 +1543,6 @@ def generate_teacher_instructional_package(
     body: V2PlanningGenerateIn,
     user: CurrentUser,
     db: DbSession,
-    background_tasks: BackgroundTasks,
     settings: Settings = Depends(settings_dep),
 ) -> dict:
     _require_teacher(db, user)
@@ -1555,12 +1560,14 @@ def generate_teacher_instructional_package(
                 plan_start_date=body.plan_start_date,
                 plan_end_date=body.plan_end_date,
                 excluded_pacing_material_ids=body.excluded_pacing_material_ids,
+                instructional_delivery_profile=body.instructional_delivery_profile,
+                lost_instructional_days=body.lost_instructional_days,
             )
         )
         return get_instructional_package_detail_enriched(
             db, user=user, package_id=package.id, settings=settings
         )
-    package, context, outputs, excluded_ids, final_status = _handle(
+    package, _context, _outputs, _excluded_ids, _final_status = _handle(
         lambda: prepare_instructional_package_generation(
             db,
             settings=settings,
@@ -1572,21 +1579,86 @@ def generate_teacher_instructional_package(
             plan_start_date=body.plan_start_date,
             plan_end_date=body.plan_end_date,
             excluded_pacing_material_ids=body.excluded_pacing_material_ids,
+            instructional_delivery_profile=body.instructional_delivery_profile,
+            lost_instructional_days=body.lost_instructional_days,
+            quality_review_enabled=body.quality_review_enabled,
         )
     )
     db.commit()
-    background_tasks.add_task(
-        run_instructional_package_generation_job,
-        settings=settings,
-        user_id=user.id,
-        package_id=package.id,
-        context=context,
-        teaching_order=[str(value) for value in body.teaching_order],
-        outputs=outputs,
-        excluded_ids=sorted(excluded_ids),
-        final_status=final_status,
-    )
+    # Job is now picked up by the teacher-assist-worker (claim_and_run_next_queued_v2_package).
+    # No BackgroundTask here — the worker process is separate and survives API restarts.
     return get_instructional_package_detail_enriched(db, user=user, package_id=package.id, settings=settings)
+
+
+@router.post("/teacher/planning/packages/{package_id}/actions/regenerate", status_code=200)
+def queue_teacher_package_regen(
+    package_id: uuid.UUID,
+    body: V2PackageRegenIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """Queue a partial or full regeneration of an existing instructional package.
+
+    The package is marked processing/queued immediately; the teacher-assist-worker
+    picks it up and regenerates only the requested artifact types (or everything for
+    scope='full').  The package ID stays the same — the teacher's URL does not change.
+    """
+    _require_teacher(db, user)
+    from oziebot_api.models.teacher_assist_v2_instructional_package import (
+        TeacherAssistV2InstructionalPackage as _Pkg,
+    )
+    pkg = db.get(_Pkg, package_id)
+    if pkg is None or str(pkg.teacher_user_id) != str(user.id):
+        from fastapi import HTTPException as _HTTPException
+        raise _HTTPException(404, "Package not found")
+
+    current_state = (pkg.metadata_json or {}).get("generation_state")
+    if current_state in ("queued", "running"):
+        from fastapi import HTTPException as _HTTPException
+        raise _HTTPException(409, "Package is already being processed")
+
+    _handle(
+        lambda: queue_package_partial_regen(
+            db,
+            package=pkg,
+            regen_scope=body.scope,
+            regen_artifact_types=body.artifact_types or None,
+        )
+    )
+    db.commit()
+    return {"status": "queued", "package_id": str(package_id), "scope": body.scope}
+
+
+@router.put("/teacher/planning/artifacts/{artifact_id}/dev-lock", status_code=200)
+def set_artifact_dev_lock(
+    artifact_id: uuid.UUID,
+    body: V2ArtifactDevLockIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """Toggle the developer lock on a single artifact.
+
+    Only root_admin users may lock/unlock artifacts.  Locked artifacts are excluded
+    from regeneration even when their type appears in regen_artifact_types — they
+    must be explicitly unlocked before they can be regenerated.
+    """
+    if getattr(user, "role", None) != "root_admin":
+        raise HTTPException(403, "Developer lock requires root_admin role")
+
+    artifact = db.get(TeacherAssistV2InstructionalPackageArtifact, artifact_id)
+    if artifact is None:
+        raise HTTPException(404, "Artifact not found")
+
+    # Verify the artifact belongs to a package owned by this user (or any for root_admin).
+    existing_meta = dict(artifact.metadata_json or {})
+    existing_meta["dev_locked"] = body.locked
+    artifact.metadata_json = existing_meta
+    db.commit()
+    return {
+        "artifact_id": str(artifact_id),
+        "artifact_type": artifact.artifact_type,
+        "locked": body.locked,
+    }
 
 
 @router.get("/teacher/packages")
@@ -1634,6 +1706,32 @@ def read_teacher_instructional_package(
             settings=settings,
         )
     )
+
+
+@router.delete("/teacher/planning/packages/{package_id}", status_code=204)
+@router.delete("/teacher/packages/{package_id}", status_code=204)
+def delete_teacher_instructional_package(
+    package_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> None:
+    """Permanently delete a package and all its artifacts. Cache is preserved."""
+    _require_teacher(db, user)
+    def _delete():
+        package: TeacherAssistV2InstructionalPackage | None = (
+            db.query(TeacherAssistV2InstructionalPackage)
+            .filter_by(id=package_id)
+            .first()
+        )
+        if package is None:
+            raise LookupError("Instructional package not found.")
+        if package.teacher_user_id != user.id and not user.is_root_admin:
+            raise PermissionError("You do not have permission to delete this package.")
+        if package.status in ("processing", "queued"):
+            raise ValueError("Cannot delete a package that is currently being generated. Wait for it to complete or fail first.")
+        db.delete(package)
+        db.commit()
+    return _handle(_delete)
 
 
 @router.get("/teacher/artifacts/{artifact_id}/slide-image/{slide_id}")
@@ -1709,8 +1807,6 @@ def trigger_artifact_image_fetch(
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Image fetch failed") from exc
 
-    db.commit()
-
     assets = (
         db.query(TeacherAssistV2SlideVisualAsset)
         .filter_by(artifact_id=artifact_id)
@@ -1721,6 +1817,12 @@ def trigger_artifact_image_fetch(
     failed = sum(1 for a in assets if a.visual_generation_status == "failed")
     total = len(assets)
 
+    _image_map = {a.slide_id: a.source_url for a in assets if a.source_url and a.visual_generation_status == "fetched"}
+    if _image_map:
+        artifact.preview_html = render_slide_deck_html(artifact.content_json or {}, image_map=_image_map)
+
+    db.commit()
+
     return {
         "fetched": fetched,
         "pending": pending,
@@ -1728,6 +1830,66 @@ def trigger_artifact_image_fetch(
         "total": total,
         "message": f"{fetched} of {total} slide images ready.",
     }
+
+
+@router.post("/teacher/planning/packages/{package_id}/fetch-images", status_code=200)
+def trigger_package_image_fetch(
+    package_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    settings: Settings = Depends(settings_dep),
+) -> dict:
+    """Re-fetch Pixabay images for all slide visual assets across a package."""
+    _require_teacher(db, user)
+
+    if not settings.teacher_assist_pixabay_api_key:
+        raise HTTPException(
+            status_code=422,
+            detail="Pixabay API key is not configured.",
+        )
+
+    _is_root_admin = bool(getattr(user, "is_root_admin", False))
+    _pkg_filter = [TeacherAssistV2InstructionalPackage.id == package_id]
+    if not _is_root_admin:
+        _pkg_filter.append(TeacherAssistV2InstructionalPackage.teacher_user_id == user.id)
+
+    pkg = db.scalars(select(TeacherAssistV2InstructionalPackage).where(*_pkg_filter)).one_or_none()
+    if pkg is None:
+        raise HTTPException(status_code=404, detail="Package not found")
+
+    artifacts = db.scalars(
+        select(TeacherAssistV2InstructionalPackageArtifact).where(
+            TeacherAssistV2InstructionalPackageArtifact.package_id == package_id
+        )
+    ).all()
+
+    total_fetched = 0
+    total_failed = 0
+    for artifact in artifacts:
+        if not artifact.slide_visual_assets:
+            continue
+        try:
+            fetch_slide_images_for_artifact(
+                db,
+                artifact=artifact,
+                settings=settings,
+                api_key=settings.teacher_assist_pixabay_api_key,
+            )
+            _fetched_assets = (
+                db.query(TeacherAssistV2SlideVisualAsset)
+                .filter_by(artifact_id=artifact.id)
+                .filter(TeacherAssistV2SlideVisualAsset.visual_generation_status == "fetched")
+                .all()
+            )
+            _image_map = {a.slide_id: a.source_url for a in _fetched_assets if a.source_url}
+            if _image_map:
+                artifact.preview_html = render_slide_deck_html(artifact.content_json or {}, image_map=_image_map)
+            db.commit()
+            total_fetched += 1
+        except Exception:
+            total_failed += 1
+
+    return {"artifacts_processed": total_fetched, "artifacts_failed": total_failed}
 
 
 @router.put("/teacher/planning/packages/{package_id}/artifacts/{artifact_id}/rubric")

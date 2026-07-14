@@ -56,6 +56,10 @@ from oziebot_api.services.teacher_assist.prompt_contracts import (
 )
 from oziebot_api.services.teacher_assist.provider_config import get_teacher_assist_provider_model
 from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher_assist_settings
+from oziebot_api.services.teacher_assist_v2.instructional_delivery_profile import (
+    build_planning_constraint,
+    resolve_profile,
+)
 from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import (
     material_labels_from_pacing,
     resolve_pacing_day_plan,
@@ -314,6 +318,7 @@ def _build_instruction(
     grade_code: str | None,
     grade_display_name: str | None,
     subject_filter: str | None = None,
+    delivery_profile: dict[str, Any] | None = None,
 ) -> str:
     """Build the generation instruction for the instructional design plan.
 
@@ -409,7 +414,11 @@ def _build_instruction(
         "  - builds_from_yesterday is null on Monday; references specific yesterday content on Tue-Fri.\n"
         "  - prepares_for_tomorrow is null on Friday; previews specific tomorrow content on Mon-Thu.\n\n"
 
-        f"Return exactly {total_weeks} week entries, one per district week in order.{target_subject_clause}"
+        + (
+            build_planning_constraint(delivery_profile) + "\n\n"
+            if build_planning_constraint(delivery_profile) else ""
+        )
+        + f"Return exactly {total_weeks} week entries, one per district week in order.{target_subject_clause}"
     )
 
 
@@ -431,6 +440,7 @@ def _call_ai_for_plan(
     full_curriculum_docs: list[dict[str, Any]],
     district_anchors: dict[tuple[int, str], dict[str, Any]],
     subject_filter: str | None = None,
+    delivery_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Single AI call for the full plan (or a single subject subset)."""
     subjects = generation_context.get("subjects") or []
@@ -444,6 +454,7 @@ def _call_ai_for_plan(
         grade_code=grade_code,
         grade_display_name=grade_display_name,
         subject_filter=subject_filter,
+        delivery_profile=delivery_profile,
     )
 
     # Build a serializable view of district_anchors keyed by "W{week}-{Subject}"
@@ -479,6 +490,9 @@ def _call_ai_for_plan(
         "teacher_supplemental_notes": generation_context.get("teacher_supplemental_notes"),
         "teacher_document_context": generation_context.get("teacher_document_context"),
         "pacing_materials": generation_context.get("pacing_materials"),
+        # Delivery profile included so the AI can cross-reference the constraint text
+        # in the instruction with the structured profile data.
+        "instructional_delivery_profile": delivery_profile,
     }
 
     result = execute_openai_json_completion(
@@ -657,6 +671,86 @@ def get_plan_for_all_subjects_on_day(
     return result
 
 
+_PREV_DAY_MAP: dict[str, str | None] = {
+    "Monday": None,
+    "Tuesday": "Monday",
+    "Wednesday": "Tuesday",
+    "Thursday": "Wednesday",
+    "Friday": "Thursday",
+}
+
+
+def resolve_verified_previous_learning(
+    plan: dict[str, Any] | None,
+    week_num: int,
+    subject_names: list[str],
+    current_day_label: str,
+) -> dict[str, Any] | None:
+    """Return deterministic prior-day learning context from the IDP.
+
+    Returns None when current_day_label is Monday (no prior day within the week).
+    Returns None when the plan is empty.
+
+    Shape: {
+      "day": "W<N>-<PreviousDay>",
+      "per_subject": {
+        "<SubjectName>": {
+          "student_goal": str | None,
+          "teacher_modeling": str | None,
+          "exit_ticket": str | None,
+          "observable_mastery_evidence": str | None,
+          "topic": str | None,
+          "objective_descriptions": [str],
+        }
+      }
+    }
+
+    This is injected into prompt_payload as "verified_previous_learning".
+    The AI must only reference prior learning that appears here — never invent it.
+    """
+    if not plan or not subject_names or not current_day_label:
+        return None
+
+    prev_day = _PREV_DAY_MAP.get(current_day_label.strip().capitalize())
+    if not prev_day:
+        return None  # Monday — no prior day this week
+
+    per_subject: dict[str, dict[str, Any]] = {}
+
+    for subj_name in subject_names:
+        if not subj_name:
+            continue
+
+        day_entry = get_plan_for_day(plan, week_num, subj_name, prev_day) or {}
+        anchors = get_plan_district_anchors(plan, week_num, subj_name) or {}
+
+        # Extract objective descriptions only (no TEKS codes — those are teacher-only).
+        obj_descriptions = [
+            obj["description"]
+            for obj in (anchors.get("primary_objectives") or [])
+            if obj.get("description")
+        ]
+
+        topic = (anchors.get("daily_topics") or {}).get(prev_day)
+
+        per_subject[subj_name] = {
+            "student_goal": day_entry.get("student_goal"),
+            "teacher_modeling": day_entry.get("teacher_modeling"),
+            "exit_ticket": day_entry.get("exit_ticket"),
+            "observable_mastery_evidence": day_entry.get("observable_mastery_evidence"),
+            "topic": topic,
+            "objective_descriptions": obj_descriptions,
+        }
+
+    if not per_subject:
+        return None
+
+    return {
+        "day": f"W{week_num}-{prev_day}",
+        "per_subject": per_subject,
+    }
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────────────────
 
 def generate_instructional_design_plan(
@@ -669,6 +763,7 @@ def generate_instructional_design_plan(
     generation_context: dict[str, Any],
     curriculum_sequence_plan: dict[int, dict[str, Any]],
     excluded_ids: set[str] | None = None,
+    delivery_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Generate the Instructional Design Plan for a package.
 
@@ -704,6 +799,7 @@ def generate_instructional_design_plan(
     # Phase 0c-prep: load full curriculum documents once for all AI calls
     full_curriculum_docs = _load_full_curriculum_docs(db, generation_context)
 
+    resolved_profile = resolve_profile(delivery_profile)
     common_call_kwargs = dict(
         effective_settings=effective_settings,
         model_name=model_name,
@@ -718,6 +814,7 @@ def generate_instructional_design_plan(
         curriculum_sequence_plan=curriculum_sequence_plan,
         full_curriculum_docs=full_curriculum_docs,
         district_anchors=district_anchors,
+        delivery_profile=resolved_profile,
     )
 
     if total_pairs <= _SINGLE_CALL_MAX_SUBJECT_WEEK_PAIRS or len(subjects) <= 1:

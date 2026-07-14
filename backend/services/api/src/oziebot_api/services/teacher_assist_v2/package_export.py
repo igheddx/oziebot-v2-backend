@@ -204,14 +204,38 @@ def render_daily_lesson_plan_html(content: dict[str, Any]) -> str:
     )
 
 
-def render_slide_deck_html(content: dict[str, Any]) -> str:
+def render_slide_deck_html(
+    content: dict[str, Any],
+    *,
+    image_map: dict[str, str] | None = None,
+) -> str:
+    """Render slide deck content as HTML.
+
+    image_map: optional {slide_id: pixabay_url} — when provided, real images are embedded
+    as <img> tags instead of SVG placeholders.
+    """
     slides = content.get("slides") or []
     slide_html = []
+    _imap = image_map or {}
     for index, slide in enumerate(slides, start=1):
         if not isinstance(slide, dict):
             continue
+        slide_id = str(slide.get("id") or "")
         bullets = slide.get("bullets") or []
-        visual = render_visual_svg(slide.get("visualType"), slide.get("visualData"))
+        _slide_type = slide.get("slide_type") or slide.get("slideType") or ""
+        fetched_url = _imap.get(slide_id) if slide_id else None
+        if fetched_url:
+            _alt = _esc(slide.get("title") or "")
+            visual = (
+                f"<img src='{html.escape(fetched_url)}' "
+                f"style='max-width:100%;max-height:220px;border-radius:8px;margin:.5rem 0;object-fit:cover' "
+                f"alt='{_alt}' loading='lazy'>"
+            )
+        elif _slide_type == "strand_separator" or isinstance(slide.get("visual"), dict):
+            # strand_separator: text-only; image_search schema: Pixabay not fetched yet, show nothing
+            visual = ""
+        else:
+            visual = render_visual_svg(slide.get("visualType"), slide.get("visualData"))
         layout = slide.get("layout") or "text_only"
         body = f"<h2>{_esc(slide.get('title'))}</h2>"
         if slide.get("subtitle"):
@@ -441,7 +465,7 @@ def render_generic_document_html(content: dict[str, Any]) -> str:
 def render_artifact_preview_html(*, artifact_type: str, content: dict[str, Any]) -> str:
     if artifact_type == "daily_lesson_plan":
         return render_daily_lesson_plan_html(content)
-    if artifact_type == "subject_slide_deck":
+    if artifact_type in {"subject_slide_deck", "student_lesson_deck"}:
         return render_slide_deck_html(content)
     if artifact_type == "quiz":
         return render_quiz_html(content)

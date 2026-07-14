@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any
 
@@ -29,8 +30,20 @@ from oziebot_api.services.teacher_assist_v2.instructional_design_plan import (
     get_plan_for_all_subjects_on_day,
     get_plan_for_day,
     get_plan_instructional_design_week,
+    resolve_verified_previous_learning,
 )
 from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import resolve_pacing_day_plan
+from oziebot_api.services.teacher_assist_v2.instructional_delivery_profile import (
+    build_artifact_delivery_context,
+    check_curriculum_text_access_violations,
+)
+from oziebot_api.services.teacher_assist_v2.instructional_variety import STRATEGY_LIBRARY
+from oziebot_api.services.teacher_assist_v2.instructional_resource_bank import (
+    build_instructional_resource_bank,
+    check_resource_sufficiency,
+    select_instructional_resource,
+    named_books_from_bank,
+)
 
 V2_PACKAGE_PROMPT_VERSION = "v2-instructional-package-v1"
 
@@ -59,8 +72,33 @@ DAILY_LESSON_PLAN_SCHEMA: dict[str, Any] = {
     "subjects": [
         {
             "subject_name": "string",
-            "objective": "string",
-            "mini_lesson": "string",
+            # ── TEKS visibility (teacher-facing only) ─────────────────────────
+            "teks_alignment": [{"code": "string", "description": "string"}],
+            "learning_target": "string",          # student-facing LT — primary goal (no TEKS codes)
+            "learning_goals": ["string"],         # 1–2 'I can...' statements — MAX 2 per block
+            "curriculum_resource": "string",      # exact title of the selected resource
+            "resource_rationale": "string",       # why this resource serves today's objective
+            # ── Step 1–2: Activation → Preteach ──────────────────────────────
+            "preteach": {
+                "activate_prior_knowledge": "string",   # how to surface what students already know
+                "vocabulary_preview": "string",          # 1–2 key terms with student-friendly defs
+                "student_friendly_explanation": "string", # concept explained without jargon
+                "why_this_matters": "string",            # real-world relevance in student language
+                "engagement_question": "string",         # quick question to spark curiosity
+            },
+            # ── Step 3: Learning Target ───────────────────────────────────────
+            # (rendered from learning_target above — no separate field needed)
+            # ── Step 4: Teacher Modeling ──────────────────────────────────────
+            "teacher_modeling_script": {
+                "teacher_says": "string",                # exact teacher script for the model
+                "students_do": "string",                 # what students do while teacher models
+                "teacher_questions": ["string"],         # questions teacher asks mid-model
+                "expected_student_thinking": "string",  # what correct thinking sounds like
+                "common_misconceptions": ["string"],     # what students typically get wrong + how to redirect
+            },
+            # ── Steps 5–8: Practice → CFU → Closure ──────────────────────────
+            "objective": "string",                # teacher-facing objective (may include TEKS ref)
+            "mini_lesson": "string",              # retained: legacy field, still populated
             "teacher_actions": ["string"],
             "student_activity": ["string"],
             "materials": ["string"],
@@ -71,6 +109,8 @@ DAILY_LESSON_PLAN_SCHEMA: dict[str, Any] = {
             "independent_practice": "string",
             "checks_for_understanding": ["string"],
             "closure": "string",
+            # ── Step 9: Transition ────────────────────────────────────────────
+            "transition": "string",               # how this block hands off to the next subject/strand
         }
     ],
 }
@@ -111,6 +151,11 @@ STUDENT_LESSON_DECK_SCHEMA: dict[str, Any] = {
             "student_emotion": "string",
             "visual_learning_goal": "string",
             "teacher_notes": "string",
+            # Strand metadata — populated when instructional_delivery_context is present.
+            # strand_separator slides use slide_type="strand_separator" and no engagement/visual.
+            "strand_name": "string or null",
+            "strand_minutes": "number or null",
+            "instructional_block_order": "number or null",
             "engagement": {
                 "type": "string",
                 "prompt": "string",
@@ -126,6 +171,7 @@ STUDENT_LESSON_DECK_SCHEMA: dict[str, Any] = {
                     "preferred_image_type": "string",
                     "image_alt_text": "string",
                     "image_rationale": "string",
+                    "instructional_activity": "string",
                 },
                 "organizer_data": {
                     "type": "string",
@@ -279,18 +325,506 @@ _WEEK_PLAN_DIRECTIVE = (
 )
 
 _BOOK_GROUNDING_DIRECTIVE = (
-    "NAMED BOOKS AND TEXTS — APPROVED RESOURCE POOL:\n"
-    "week_curriculum_plan.mentor_texts, full_curriculum_documents, named_books_and_texts, "
-    "and pacing_materials list books curated by the district because they are relevant to the "
-    "objectives and unit theme. Use these books as your resource pool:\n"
-    "  - SELECT from this list when the lesson calls for a read-aloud, text reference, or example — "
-    "you do NOT need to use every book listed\n"
-    "  - Reference any chosen book by its EXACT title — never say 'a book we are reading' or 'a text'\n"
-    "  - NEVER invent a book title or substitute a book not in the curriculum materials\n"
-    "  - When you do use a book, draw on it specifically: character names, events, vocabulary, themes — "
-    "content specific enough that a student who read it recognizes it\n"
-    "  - If no books are listed, derive titles from district_document_context or resolved_day_plan.materials_needed"
+    "INSTRUCTIONAL RESOURCE — AUTHORITATIVE SELECTION:\n"
+    "selected_instructional_resource (when present) is the district-assigned resource for this specific "
+    "lesson, deterministically selected from the instructional resource bank. Treat it as authoritative:\n"
+    "  - Use this resource. Do NOT substitute a different title, author, or material.\n"
+    "  - Reference it by its EXACT title field — never say 'a book' or 'a text' when a title is provided.\n"
+    "  - When it is a text/book: draw on it specifically — character names, events, vocabulary, themes — "
+    "content specific enough that a student who read it recognizes it.\n"
+    "  - When it is a non-text resource (anchor_chart, graphic_organizer, video, diagram, manipulative): "
+    "reference it by name and describe how students will interact with it during the lesson.\n"
+    "  - If resource_adaptation_note is present: the selected resource may not be the ideal type for "
+    "this lesson, but you MUST still use it as the instructional anchor. Follow the adaptation_note "
+    "guidance rather than substituting generic placeholder language.\n"
+    "  - If selected_instructional_resource is null: derive from named_books_and_texts, "
+    "week_curriculum_plan.mentor_texts, district_document_context, or resolved_day_plan.materials_needed. "
+    "NEVER invent a resource not present in any curriculum field.\n\n"
+    "STRAND-SPECIFIC RESOURCES (strand_instructional_resources field):\n"
+    "When strand_instructional_resources is present and non-empty, each strand has its own resource.\n"
+    "  - Reading strand: use strand_instructional_resources['Reading'] as the primary text\n"
+    "  - Writing strand: use strand_instructional_resources['Writing'] as the mentor text\n"
+    "  - Other strands: follow the same pattern using their key in strand_instructional_resources\n"
+    "When a strand has no entry in strand_instructional_resources, fall back to selected_instructional_resource.\n\n"
+    "NAMED RESOURCE POOL (secondary reference only — use selected_instructional_resource first):\n"
+    "named_books_and_texts lists all curriculum-assigned texts for the current week. "
+    "You may reference additional texts from this list to supplement the selected resource, "
+    "but the selected resource must remain the primary instructional anchor.\n\n"
+    "PLACEHOLDER LANGUAGE IS A CURRICULUM FIDELITY FAILURE — see _CURRICULUM_FIDELITY_DIRECTIVE."
 )
+
+
+_CURRICULUM_FIDELITY_DIRECTIVE = (
+    "\n\nCURRICULUM RESOURCE ALIGNMENT — AUTHORITATIVE RULES:\n"
+    "The district curriculum has already selected the instructional resource for this lesson.\n"
+    "TeacherAssist enriches instruction AROUND the selected resource. It never replaces it.\n\n"
+
+    "RESOURCE FIELDS IN PROMPT PAYLOAD:\n"
+    "  selected_instructional_resource — the pre-committed, district-authorized resource for today.\n"
+    "    .title        — use this exact name in all activities\n"
+    "    .resource_type — read_aloud | mentor_text | shared_reading | passage | poem | article | ...\n"
+    "    .theme        — the weekly instructional theme (reference this in framing and discussion)\n"
+    "    .topic        — the strand-level reading/writing focus\n"
+    "    .allowed_uses — the list of classroom activities valid for this resource type.\n"
+    "                    ONLY generate activities that appear in this list.\n"
+    "  named_books_and_texts — secondary pool; all curriculum texts for this week.\n\n"
+
+    "ALLOWED_USES ENFORCEMENT:\n"
+    "  selected_instructional_resource.allowed_uses tells you HOW the resource can be used.\n"
+    "  If allowed_uses includes 'teacher_read_aloud' but NOT 'independent_reading',\n"
+    "  you MUST NOT tell students to 'read [title] independently'.\n"
+    "  Design ONLY the activities listed in allowed_uses for this resource.\n"
+    "  If allowed_uses is empty or absent: use best judgment based on resource_type.\n\n"
+
+    "PLANNING RULE — match resource to objective:\n"
+    "  The question is 'What resource best supports today's objective?' — not 'What book?'\n"
+    "  The same resource may support multiple objectives across multiple days. Do NOT rotate\n"
+    "  resources for variety. Use the pre-committed resource for the day.\n\n"
+
+    "FORBIDDEN PLACEHOLDER PHRASES (any variation = generation failure):\n"
+    "  'choose a story', 'choose a chapter', 'choose a text', 'choose a book',\n"
+    "  'pick a book', 'pick a story', 'pick a text',\n"
+    "  'select an article', 'select a passage', 'select a story',\n"
+    "  'find a poem', 'find a passage', 'read any text', 'read any book', 'read any story',\n"
+    "  'any article', 'any text', 'any story', 'a text of your choice', 'a book of your choice'\n\n"
+
+    "REQUIRED BEHAVIOR when a curriculum resource exists:\n"
+    "  Independent practice: 'Read pages ___ in [EXACT TITLE]' — not 'Read a chapter.'\n"
+    "  Analysis activities: 'Find evidence in [EXACT TITLE]' — not 'Choose a text.'\n"
+    "  Writing responses: 'Using [EXACT TITLE] as evidence' — not 'Using any story.'\n"
+    "  Student slides: Name the book, chapter, or passage directly.\n\n"
+
+    "Only omit the resource name if: (1) the curriculum explicitly provides student choice, OR\n"
+    "(2) selected_instructional_resource and named_books_and_texts are both null/empty."
+)
+
+
+_CURRICULUM_FIDELITY_RETRY_ADDENDUM = (
+    "\n\nCRITICAL REGENERATION ALERT — PLACEHOLDER LANGUAGE WAS DETECTED IN PREVIOUS OUTPUT:\n"
+    "The previous generation contained generic placeholder language such as 'choose a story', "
+    "'pick a book', or 'select a chapter'. This is a curriculum fidelity failure.\n"
+    "selected_instructional_resource and named_books_and_texts contain the district-assigned texts. "
+    "You MUST reference them by exact title in every activity that involves reading, analyzing, "
+    "or responding to a text. Do NOT produce any placeholder language in this regeneration. "
+    "Every independent practice, guided activity, and student prompt must name the specific book, "
+    "passage, or material provided — never a generic stand-in."
+)
+
+
+_PLACEHOLDER_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(
+        r"\b(choose|pick)\s+(a\s+)?(short\s+)?"
+        r"(story|book|chapter|text|passage|poem|article|novel|event|chapter\s+book)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bselect\s+(a|an)\s+(story|book|chapter|text|passage|poem|article|novel|event)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bfind\s+(a|an)\s+(story|book|chapter|text|passage|poem|article|event)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bread\s+(any|a)\s+(short\s+)?(story|book|chapter|text|passage|poem|article|novel)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bany\s+(story|article|text|book|passage|poem|novel)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(a|some)\s+(text|story|passage|book|article|poem|novel)\s+of\s+(your|their)\s+choice\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bchoose\s+a\s+specific\s+\w+\b", re.IGNORECASE),
+]
+
+
+def _count_ican_statements(text: str) -> int:
+    """Count the number of 'I can' statements in a string."""
+    import re
+    return len(re.findall(r"\bI can\b", text, re.IGNORECASE))
+
+
+def _goals_look_like_writing(goals: list[str]) -> bool:
+    """Return True if any goal contains writing-composition keywords."""
+    writing_keywords = ("write", "writing", "sentence", "paragraph", "compose", "draft",
+                        "revise", "edit", "respond in writing", "written response")
+    combined = " ".join(goals).lower()
+    return any(kw in combined for kw in writing_keywords)
+
+
+def _goals_look_like_reading(goals: list[str]) -> bool:
+    """Return True if any goal contains reading-comprehension keywords."""
+    reading_keywords = ("read", "reading", "identify", "main idea", "detail", "text evidence",
+                        "comprehend", "analyze", "infer", "summarize", "character", "theme",
+                        "compare", "author", "literary")
+    combined = " ".join(goals).lower()
+    return any(kw in combined for kw in reading_keywords)
+
+
+def _check_lesson_plan_completeness(content: Any) -> list[str]:
+    """Check that a daily_lesson_plan has all required rhythm steps populated.
+
+    Returns a list of missing-field descriptions. Empty list means complete.
+    Checks each subject block for the 9-step rhythm fields and learning goal discipline.
+    """
+    missing: list[str] = []
+    subjects = content.get("subjects") if isinstance(content, dict) else None
+    if not subjects:
+        return ["no subject blocks found"]
+
+    # ── Cross-block: Reading/Writing separation analysis ─────────────────────
+    reading_blocks = [b for b in subjects if "reading" in (b.get("subject_name") or "").lower()]
+    writing_blocks = [b for b in subjects if "writing" in (b.get("subject_name") or "").lower()]
+
+    for i, block in enumerate(subjects):
+        label = block.get("subject_name") or f"block {i+1}"
+        label_lower = label.lower()
+        preteach = block.get("preteach") or {}
+        modeling = block.get("teacher_modeling_script") or {}
+
+        # TEKS visibility
+        if not (block.get("teks_alignment") or block.get("objective")):
+            missing.append(f"{label}: missing teks_alignment")
+        if not block.get("learning_target"):
+            missing.append(f"{label}: missing learning_target")
+        if not block.get("curriculum_resource"):
+            missing.append(f"{label}: missing curriculum_resource")
+        if not block.get("resource_rationale"):
+            missing.append(f"{label}: missing resource_rationale")
+
+        # ── Learning goal discipline checks ──────────────────────────────────
+        raw_goals = block.get("learning_goals")
+        goals_list: list[str] = []
+        if isinstance(raw_goals, list):
+            goals_list = [str(g) for g in raw_goals if g]
+        elif not raw_goals and block.get("learning_target"):
+            # Fallback: count "I can" occurrences in learning_target string
+            target_str = str(block.get("learning_target") or "")
+            if _count_ican_statements(target_str) > 2:
+                missing.append(
+                    f"{label}: learning_target contains more than 2 'I can' statements — "
+                    "use learning_goals array with max 2 entries"
+                )
+
+        if goals_list:
+            if len(goals_list) > 2:
+                missing.append(
+                    f"{label}: learning_goals has {len(goals_list)} entries — maximum is 2 per block"
+                )
+            if len(goals_list) == 0:
+                missing.append(f"{label}: learning_goals is empty — must have 1–2 'I can' statements")
+
+            # Reading block must not contain writing goals
+            if "reading" in label_lower and _goals_look_like_writing(goals_list):
+                missing.append(
+                    f"{label}: Reading block learning_goals appear to include writing/composition goals — "
+                    "Reading goals must focus on comprehension; Writing goals belong in the Writing block"
+                )
+
+            # Writing block must not contain only reading goals (must have at least one composition goal)
+            if "writing" in label_lower and not _goals_look_like_writing(goals_list):
+                missing.append(
+                    f"{label}: Writing block learning_goals do not appear to include a writing/composition goal — "
+                    "Writing blocks must have at least one 'I can write/compose/draft...' goal"
+                )
+
+        # ── Closure alignment check ───────────────────────────────────────────
+        closure = (block.get("closure") or "").lower()
+        if goals_list and closure:
+            # Check whether the closure references the subject domain of the block's goals
+            if "reading" in label_lower:
+                # Reading closure should NOT be about writing/composition
+                if _goals_look_like_writing([closure]) and not _goals_look_like_reading([closure]):
+                    missing.append(
+                        f"{label}: Reading closure appears to assess writing skill rather than the Reading learning goal"
+                    )
+            if "writing" in label_lower:
+                # Writing closure should NOT be purely about reading comprehension
+                if _goals_look_like_reading([closure]) and not _goals_look_like_writing([closure]):
+                    missing.append(
+                        f"{label}: Writing closure appears to assess reading comprehension rather than the Writing learning goal"
+                    )
+
+        # Preteach steps
+        for field in ("activate_prior_knowledge", "vocabulary_preview",
+                      "student_friendly_explanation", "why_this_matters", "engagement_question"):
+            if not (preteach.get(field) or "").strip():
+                missing.append(f"{label}: preteach.{field} is empty")
+
+        # Teacher modeling
+        for field in ("teacher_says", "students_do", "expected_student_thinking"):
+            if not (modeling.get(field) or "").strip():
+                missing.append(f"{label}: teacher_modeling_script.{field} is empty")
+        if not (modeling.get("teacher_questions") or []):
+            missing.append(f"{label}: teacher_modeling_script.teacher_questions is empty")
+        if not (modeling.get("common_misconceptions") or []):
+            missing.append(f"{label}: teacher_modeling_script.common_misconceptions is empty")
+
+        # CFU
+        cfu = block.get("checks_for_understanding") or []
+        if len(cfu) < 3:
+            missing.append(f"{label}: checks_for_understanding needs 3 questions (has {len(cfu)})")
+
+        # Closure and transition
+        if not (block.get("closure") or "").strip():
+            missing.append(f"{label}: closure is empty")
+        if not (block.get("transition") or "").strip():
+            missing.append(f"{label}: transition is empty")
+
+    # ── Cross-block: detect merged goals between Reading and Writing ─────────
+    if reading_blocks and writing_blocks:
+        for r_block in reading_blocks:
+            r_goals = r_block.get("learning_goals") or []
+            if isinstance(r_goals, list):
+                r_goals = [str(g) for g in r_goals]
+            for w_block in writing_blocks:
+                w_goals = w_block.get("learning_goals") or []
+                if isinstance(w_goals, list):
+                    w_goals = [str(g) for g in w_goals]
+                # Detect if the same goal text appears in both blocks
+                r_set = {g.strip().lower() for g in r_goals}
+                w_set = {g.strip().lower() for g in w_goals}
+                overlap = r_set & w_set
+                if overlap:
+                    missing.append(
+                        f"Reading and Writing blocks share identical learning goals — "
+                        "each block must have its own distinct goals"
+                    )
+                    break
+
+    # ── Validate Writing block exists when lesson spans both Reading+Writing ──
+    # When the lesson has reading blocks but no writing blocks, check whether the
+    # reading blocks have absorbed writing goals (a common merge failure mode).
+    if reading_blocks and not writing_blocks:
+        all_r_goals = []
+        for rb in reading_blocks:
+            rg = rb.get("learning_goals") or []
+            if isinstance(rg, list):
+                all_r_goals.extend(str(g) for g in rg)
+        if _goals_look_like_writing(all_r_goals):
+            missing.append(
+                "Reading block(s) appear to include Writing goals but no Writing block exists — "
+                "Writing should have its own block with its own goals"
+            )
+
+    return missing
+
+
+def _check_student_deck_completeness(content: Any) -> list[str]:
+    """Check that a student_lesson_deck has the required preteach slide."""
+    missing: list[str] = []
+    slides = (content or {}).get("slides") or []
+    if not slides:
+        return ["no slides found"]
+    slide_types = [s.get("slide_type", "") for s in slides]
+    if "preteach" not in slide_types:
+        missing.append("missing preteach slide (slide_type='preteach' required as slide 2)")
+    return missing
+
+
+def _has_placeholder_language(content: Any) -> bool:
+    """Recursively scan all string values in the artifact JSON for forbidden placeholder patterns."""
+    if isinstance(content, str):
+        return any(p.search(content) for p in _PLACEHOLDER_PATTERNS)
+    if isinstance(content, dict):
+        return any(_has_placeholder_language(v) for v in content.values())
+    if isinstance(content, list):
+        return any(_has_placeholder_language(item) for item in content)
+    return False
+
+_LEARNING_GOAL_DISCIPLINE_DIRECTIVE = (
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "LEARNING GOAL DISCIPLINE — NON-NEGOTIABLE (enforced by validation)\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    "RULE 1 — MAXIMUM 2 LEARNING GOALS PER BLOCK:\n"
+    "  Each subject block (Reading, Writing, Math, etc.) may have at most 2 'I can...' statements.\n"
+    "  Do NOT write 3 or more goals in a single block. If a block has one clear objective, write 1 goal.\n"
+    "  If a block serves two closely related skills, write exactly 2 goals.\n"
+    "  NEVER combine 3+ skills into a single block's goals — split into separate blocks instead.\n\n"
+    "  OUTPUT: populate learning_goals as a JSON array of 1–2 strings (never 0, never 3+).\n"
+    "  Also populate learning_target (the first/primary goal, or a one-sentence summary).\n\n"
+
+    "  Example — Reading block:\n"
+    "    learning_goals: [\n"
+    "      'I can identify the main idea of the read-aloud text.',\n"
+    "      'I can support my thinking with one detail from the text.'\n"
+    "    ]\n\n"
+    "  Example — Writing block:\n"
+    "    learning_goals: [\n"
+    "      'I can write a response using a complete sentence.',\n"
+    "      'I can include one detail from the text in my response.'\n"
+    "    ]\n\n"
+
+    "RULE 2 — READING AND WRITING MUST HAVE SEPARATE GOALS:\n"
+    "  Reading goals → about comprehension, analysis, evidence, literary elements.\n"
+    "  Writing goals → about composing, crafting, structuring, producing written text.\n"
+    "  NEVER merge Reading and Writing goals into one shared list.\n"
+    "  If the lesson has both Reading and Writing, each MUST have its own independent learning_goals.\n"
+    "  WRONG: Reading block lists both a comprehension goal AND a writing goal.\n"
+    "  RIGHT: Reading block lists comprehension goals. Writing block lists writing composition goals.\n\n"
+
+    "RULE 3 — WRITING HAS ITS OWN LEARNING JOURNEY:\n"
+    "  Writing is NOT merely a follow-up activity to Reading unless the curriculum explicitly connects them.\n"
+    "  Writing may reference the Reading text as a source of ideas — but the WRITING skill being taught\n"
+    "  must be independent: 'I can write a paragraph with a topic sentence' is a Writing goal,\n"
+    "  regardless of what the content source is.\n"
+    "  Do not treat Writing as 'respond to what you read.' Writing is a skill strand with its own arc.\n\n"
+
+    "RULE 4 — ALIGNMENT: EVERY BLOCK COMPONENT MUST ALIGN TO THAT BLOCK'S GOALS:\n"
+    "  The following must all point to the SAME learning goals for the block:\n"
+    "    → teacher modeling (models the goal skill)\n"
+    "    → guided practice (practices the goal skill)\n"
+    "    → independent practice (applies the goal skill independently)\n"
+    "    → checks_for_understanding (assesses the goal skill at each phase)\n"
+    "    → closure / exit ticket (final check of the goal skill)\n\n"
+    "  If the Reading goal is 'identify main idea' → the Reading exit ticket must assess main idea.\n"
+    "  If the Writing goal is 'write a response with evidence' → the Writing closure must assess that.\n"
+    "  DO NOT use a combined exit ticket that mixes Reading and Writing objectives unless\n"
+    "    the curriculum explicitly designs a cross-strand culminating task.\n\n"
+
+    "RULE 5 — EXIT TICKET / CLOSURE IS BLOCK-SPECIFIC:\n"
+    "  Each block's closure field must directly reflect that block's learning_goals.\n"
+    "  A Reading block closure asks students to demonstrate Reading understanding.\n"
+    "  A Writing block closure asks students to demonstrate Writing skill.\n"
+    "  Combined closures that blend unrelated objectives are FORBIDDEN unless explicitly configured.\n\n"
+
+    "VALIDATION NOTE: The system checks these rules after generation and marks the artifact\n"
+    "'needs_review' if any block has >2 goals, if Writing has no goal, if goals are merged,\n"
+    "or if the closure/exit ticket does not reference the block's learning goals.\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+)
+
+_CLASSROOM_AUTHENTICITY_DIRECTIVE = (
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "CLASSROOM AUTHENTICITY — THE 9-STEP INSTRUCTIONAL RHYTHM\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "Every instructional subject block in the daily lesson plan MUST include all 9 steps.\n"
+    "A teacher should be able to say 'I could teach this tomorrow' without editing.\n\n"
+
+    "STEP 1 — ACTIVATION (preteach.activate_prior_knowledge):\n"
+    "  Surface what students already know about today's concept or skill.\n"
+    "  Derive from knowledge_dependency_graph.activation_strategy for 'assumed_mastered' entries.\n"
+    "  Must be SPECIFIC to the curriculum: name the book, concept, or prior lesson — never generic.\n"
+    "  Examples: 'Think about when Esperanza arrived at the labor camp — what did she feel?' NOT 'Think about a time...'\n\n"
+
+    "STEP 2 — PRETEACH (preteach fields — all five must be populated):\n"
+    "  activate_prior_knowledge — see Step 1.\n"
+    "  vocabulary_preview — 1–2 key terms with student-friendly definitions (no TEKS jargon).\n"
+    "    Derive from knowledge_dependency_graph.introduced_vocabulary for 'develop_this_week' entries.\n"
+    "  student_friendly_explanation — explain the concept in one sentence a 10-year-old understands.\n"
+    "  why_this_matters — real-world relevance in student language. Why do readers/writers need this?\n"
+    "  engagement_question — one quick question that sparks curiosity before instruction begins.\n\n"
+
+    "STEP 3 — LEARNING TARGET (learning_target field):\n"
+    "  Student-facing 'I can...' statement. NO TEKS codes. NO internal planning language.\n"
+    "  Derived from instructional_design_day.student_goal — use verbatim when available.\n\n"
+
+    "STEP 4 — TEACHER MODELING (teacher_modeling_script — all five sub-fields required):\n"
+    "  teacher_says: The exact script a teacher would say while modeling. First person. "
+    "Specific to the curriculum text. 4–6 sentences minimum.\n"
+    "  students_do: What students do while the teacher models — NOT passive listening.\n"
+    "  teacher_questions: 2–3 specific questions asked during modeling (think-alouds).\n"
+    "    Probe the skill, not just the content. 'What is the author doing here?' not 'What happened?'\n"
+    "  expected_student_thinking: What correct student reasoning sounds like.\n"
+    "    Write it as a student sentence: 'The character changed because...'\n"
+    "  common_misconceptions: The 1–2 most likely errors + the teacher redirect for each.\n"
+    "    Format: 'Students may say X — redirect by Y.'\n\n"
+
+    "STEP 5 — GUIDED PRACTICE (guided_practice field):\n"
+    "  Collaborative application of what was just modeled. Named activity with specific steps.\n"
+    "  Teacher and students work together — not just 'do the same thing independently.'\n"
+    "  Name the exact passage, character, or concept from the curriculum resource.\n\n"
+
+    "STEP 6 — INDEPENDENT PRACTICE (independent_practice field):\n"
+    "  The exact task students complete on their own. Write student-facing instructions.\n"
+    "  Must be achievable in the available time block. Must reference the curriculum resource.\n"
+    "  Respect curriculum_text_access — if teacher_copy_only, IP is notebook-based, NOT text-based.\n\n"
+
+    "STEP 7 — CHECK FOR UNDERSTANDING (checks_for_understanding — 3 questions required):\n"
+    "  Question 1: after modeling (assesses understanding of the concept)\n"
+    "  Question 2: mid-guided-practice (assesses application)\n"
+    "  Question 3: before closure (assesses transfer — 'can students apply this on their own?')\n"
+    "  Derived from instructional_design_day.formative_assessment when available.\n\n"
+
+    "STEP 8 — CLOSURE (closure field):\n"
+    "  Specific exit prompt or reflection tied to today's learning target.\n"
+    "  Must reflect instructional_contracts.exit_ticket_stem if present.\n"
+    "  Never generic ('Share one thing you learned today'). Always curriculum-specific.\n\n"
+
+    "STEP 9 — TRANSITION (transition field):\n"
+    "  How the class moves from this block to the next subject or strand.\n"
+    "  Should be brief (1–2 sentences) and anticipate what comes next in the day.\n"
+    "  If Reading ends before Writing begins: explicitly signal the shift.\n\n"
+
+    "CURRICULUM RESOURCE VISIBILITY (teacher-facing lesson plan only):\n"
+    "  curriculum_resource: exact title of the selected instructional resource.\n"
+    "  resource_rationale: 1–2 sentences explaining WHY this specific resource supports today's TEKS.\n"
+    "    Draw from the resource's theme, topic, and allowed_uses.\n"
+    "    Example: 'The Crane Girl's multi-generational plot provides rich evidence for analyzing how\n"
+    "    character relationships develop over time — directly aligned to TEKS 5.8A.'\n\n"
+
+    "AUTHENTICITY TEST — before finalizing each subject block, verify:\n"
+    "  ✓ A real teacher reading this could deliver the lesson verbatim\n"
+    "  ✓ Every step names a specific book, character, concept, or passage — no generic filler\n"
+    "  ✓ teacher_modeling_script reads as a natural teaching script, not a list of instructions\n"
+    "  ✓ preteach is curriculum-specific, not a generic 'hook'\n"
+    "  ✓ Reading block is complete before Writing block begins\n"
+    "  ✓ learning_goals has 1–2 entries (never 3+) and reflects THIS block's skill only\n"
+    "  ✓ Reading learning_goals are about comprehension — NOT about writing or composition\n"
+    "  ✓ Writing learning_goals are about composing/crafting — NOT about reading comprehension\n"
+    "  ✓ closure/exit ticket asks students to demonstrate THIS block's learning goals — nothing else\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+)
+
+def _build_variety_directive(variety_context: dict[str, Any]) -> str:
+    """Return the instructional variety directive for injection into a prompt.
+
+    Only called when a variety_context with meaningful history is present.
+    """
+    _strategy_library_summary = "\n".join(
+        f"  {meta['display']}: {meta['description']} (best for: {', '.join(meta['best_for'])})"
+        for meta in STRATEGY_LIBRARY.values()
+    )
+    recent_display = ", ".join(variety_context.get("recent_strategies") or []) or "none yet"
+    guidance = variety_context.get("guidance") or "Vary strategies based on today's objective."
+    layout_note = ""
+    recent_layouts = variety_context.get("recent_slide_layouts") or []
+    if recent_layouts:
+        layout_note = f"\nSlide layouts recently used: {', '.join(recent_layouts[-4:])}. Vary layout selection."
+
+    return (
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "INSTRUCTIONAL VARIETY — SELECT BY OBJECTIVE, NOT HABIT\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "This package already includes these strategies (from prior lessons):\n"
+        f"  {recent_display}\n\n"
+        f"VARIETY GUIDANCE: {guidance}\n"
+        f"{layout_note}\n\n"
+        "STRATEGY LIBRARY — choose the strategy that best serves today's objective:\n"
+        f"{_strategy_library_summary}\n\n"
+        "SELECTION RULES:\n"
+        "  1. Match strategy to objective. If today's goal is 'compare two characters', "
+        "a Graphic Organizer or Think-Pair-Share serves better than a Quick Write.\n"
+        "  2. Avoid consecutive same-strategy days. If Turn and Talk was used yesterday, "
+        "choose a different engagement structure today.\n"
+        "  3. Within a single lesson, vary engagement across subject blocks. "
+        "If Reading uses Turn and Talk, Writing should use a different form.\n"
+        "  4. Closures should reflect the objective — not default to 'share one thing you learned.' "
+        "Anchor Chart works for skill closure; Notebook Reflection for synthesis; Quick Write for written response.\n"
+        "  5. Hooks (activate_prior_knowledge) should vary in form: "
+        "sometimes a question, sometimes a prediction, sometimes a vocabulary preview.\n\n"
+        "IMAGE VARIETY RULES:\n"
+        "  Every slide image must support instruction — show students doing the activity being taught.\n"
+        "  If the slide teaches 'Turn and Talk', the image should show students discussing.\n"
+        "  If the slide teaches 'Graphic Organizer', show students filling in a chart.\n"
+        "  NEVER repeat the same image concept twice in the same day or same lesson.\n"
+        "  Add field: visual.image_search.instructional_activity — "
+        "describe what students are DOING in the image (e.g., 'students discussing in pairs', "
+        "'students writing in notebooks', 'teacher modeling at board').\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+
 
 _STUDENT_CONTENT_RULES_DIRECTIVE = (
     "STUDENT-FACING CONTENT RULES — strictly enforced:\n"
@@ -319,6 +853,105 @@ _GRADE_RIGOR_DIRECTIVE = (
     "NEVER produce K-2 level content (simple phonics, basic sight words, picture-book activities, "
     "'color in this picture', 'draw a smiley face') for Grade 4+ students. "
     "If grade_code is '5', every lesson element must reflect 5th-grade Texas TEKS rigor throughout."
+)
+
+
+_CLASSROOM_INSTRUCTION_PROFILE_DIRECTIVE = (
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "CLASSROOM INSTRUCTION PROFILE (CIP) — NON-NEGOTIABLE PHYSICAL CLASSROOM RULES\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "instructional_delivery_context.strand_slots_today carries CIP fields per strand.\n"
+    "These describe PHYSICAL CLASSROOM REALITY. Violating them produces unusable lesson content.\n\n"
+
+    "TWO DISTINCT TEXT REALITIES (read carefully — these are DIFFERENT):\n\n"
+
+    "  1. CURRICULUM TEXT = the district-selected lesson text for today (e.g. 'The Crane Girl').\n"
+    "     curriculum_text_access describes whether students can physically access THIS specific text.\n\n"
+
+    "  2. INDEPENDENT READING BOOKS = student-chosen books from the classroom or school library.\n"
+    "     independent_reading_access describes whether students have books for THEIR OWN reading time.\n"
+    "     These are NEVER the same as the curriculum text.\n\n"
+
+    "Example: curriculum_text_access=teacher_copy_only AND independent_reading_access=classroom_library_available\n"
+    "  → Teacher is the only one with 'The Crane Girl'. Students listen to the read-aloud.\n"
+    "  → BUT during independent reading, students may choose books from the classroom library.\n"
+    "  → CORRECT: 'Choose a book from the classroom library for independent reading.'\n"
+    "  → INCORRECT: 'Continue reading The Crane Girl independently.' ← VIOLATION\n\n"
+
+    "CURRICULUM TEXT ACCESS RULES:\n\n"
+    "  'teacher_copy_only' — ONLY the teacher has the curriculum text. HARD RULES:\n"
+    "    FORBIDDEN (generates a critical error):\n"
+    "    - 'open your copy', 'open to page X', 'in your copy', 'your copy of [title]'\n"
+    "    - 'turn to page', 'flip to page', 'read page X', 'find page X'\n"
+    "    - 'continue reading [curriculum title]', 'read [curriculum title] independently'\n"
+    "    - 'choose a passage from [curriculum title]', 'annotate your copy'\n"
+    "    REQUIRED:\n"
+    "    - 'listen as your teacher reads from [title]'\n"
+    "    - 'follow along as you listen'\n"
+    "    - 'respond in your Reader's Notebook about the section we read together'\n"
+    "    - 'after the read-aloud, turn and talk with a partner about...'\n"
+    "    Students interact with the TEXT only through LISTENING and RESPONDING — not physical access.\n\n"
+    "  'projected_shared_display':\n"
+    "    - Text on projector/smartboard. Reference 'as shown on the screen' — not page numbers.\n"
+    "    - Annotation is a class activity pointing at the screen.\n\n"
+    "  'class_set' / 'digital_student_access':\n"
+    "    - Every student has their own copy or digital access. Page references are fine.\n"
+    "    - Independent close reading, annotation, and evidence-citing tasks are appropriate.\n\n"
+    "  'small_group_sets': copies circulate through small groups. Design for rotation.\n\n"
+    "  'student_choice_text': no single curriculum text. Students work with chosen texts.\n\n"
+
+    "INDEPENDENT READING ACCESS RULES:\n"
+    "  When independent_reading_access is present and not 'none':\n"
+    "    - Independent reading time is appropriate for this strand.\n"
+    "    - Students read from THEIR OWN CHOSEN BOOKS — NOT the curriculum text.\n"
+    "    - Reference the correct source based on the value:\n"
+    "      'classroom_library_available' → 'Choose a book from the classroom library'\n"
+    "      'school_library_available'   → 'Use your library book'\n"
+    "      'student_brought_books'      → 'Use the book you brought from home'\n"
+    "      'digital_library'            → 'Open your book on [Epic/Sora/digital library]'\n"
+    "    - NEVER mix independent reading references with the curriculum text.\n"
+    "  When independent_reading_access = 'none': do NOT include independent reading time.\n\n"
+
+    "DELIVERY MODE RULES:\n"
+    "  'teacher_read_aloud':\n"
+    "    - Teacher reads; students LISTEN, DISCUSS, and RESPOND IN NOTEBOOKS.\n"
+    "    - FORBIDDEN: 'read the passage', 'read independently', 'open your book'.\n"
+    "    - REQUIRED: 'listen as your teacher reads', 'respond in your Reader's Notebook'.\n\n"
+    "  'shared_reading': class reads together on screen or class copies. Choral reads fine.\n"
+    "  'students_have_individual_copies': students may read, annotate, and cite page numbers.\n"
+    "  'small_group_reading': design for rotating teacher-led small groups.\n"
+    "  'independent_reading': student choice books (check independent_reading_access field).\n"
+    "  'guided_writing' / 'shared_writing': teacher models writing first, then students write.\n"
+    "  'independent_writing': brief mini-lesson, then maximize student independent writing time.\n"
+    "  'teacher_choice': use best pedagogical judgment.\n\n"
+
+    "CLOSURE REQUIREMENT:\n"
+    "  When closure_required=true on a strand slot:\n"
+    "    - That strand block MUST end with its own exit ticket or closure — strand-specific.\n"
+    "    - Do NOT merge closures across strands.\n\n"
+
+    "VIOLATION SEVERITY: curriculum_text_access violations (especially teacher_copy_only) are\n"
+    "CRITICAL ERRORS. They produce a lesson plan a teacher CANNOT use in their classroom.\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+)
+
+_VERIFIED_PRIOR_LEARNING_DIRECTIVE = (
+    "VERIFIED PRIOR LEARNING — HARD RULE (no exceptions):\n"
+    "The prompt_payload field 'verified_previous_learning' is the ONLY authoritative record of\n"
+    "what students actually experienced in the previous lesson.\n\n"
+    "  - If verified_previous_learning is null → This is the first day (Monday) or no prior data exists.\n"
+    "    Do NOT write any continuity statement (no 'yesterday we...', 'building on last time',\n"
+    "    'since we explored', etc.). Open the lesson fresh with a hook or direct objective statement.\n\n"
+    "  - If verified_previous_learning is present → You MAY reference prior learning, but ONLY\n"
+    "    using content that appears verbatim in verified_previous_learning (student_goal,\n"
+    "    teacher_modeling, topic, objective_descriptions). Do not paraphrase beyond recognition.\n"
+    "    Do not add content that is not listed there.\n\n"
+    "FABRICATED CONTINUITY IS A CRITICAL DEFECT:\n"
+    "  Never write: 'Yesterday we explored X' if X is not in verified_previous_learning.\n"
+    "  Never infer what was taught from the unit theme, week topic, or your own knowledge.\n"
+    "  If in doubt, make the connection optional or omit it entirely.\n"
+    "  builds_from_yesterday in instructional_design_day is an AI-generated label —\n"
+    "  it describes intent, not verified history. Treat verified_previous_learning as the ground truth."
 )
 
 
@@ -460,18 +1093,32 @@ def _build_image_search_directive(
     return (
         f"\nIMAGE SEARCH — STRICT RULES for {grade_label} ({age_desc}):\n"
         f"  RULE 1 — EVERY search term MUST contain at least one of: {age_kws}. "
-        "NO EXCEPTIONS. Abstract terms with no age/grade context return adult stock photos or diagrams.\n"
-        "  RULE 2 — Pair every concept with age context:\n"
+        "NO EXCEPTIONS. Abstract terms with no age/grade context return adult stock photos or business imagery.\n"
+        "  RULE 2 — Pair every concept with age-and-classroom context:\n"
         f"    BAD: 'main idea diagram'  →  GOOD: 'main idea organizer {example_prefix} classroom'\n"
         f"    BAD: 'students discussing'  →  GOOD: '{grade_label.lower()} students turn and talk partners'\n"
         f"    BAD: 'reading comprehension'  →  GOOD: '{example_prefix} reading books classroom'\n"
-        "  RULE 3 — NEVER use: 'adult professional', 'business meeting', 'office', "
-        "'generic education stock', 'presentation clipart'.\n"
-        f"- visual.image_search.search_terms: 3–5 terms — EVERY term must follow RULE 1\n"
+        f"    BAD: 'collaboration'  →  GOOD: '{example_prefix} working together classroom activity'\n"
+        f"    BAD: 'writing'  →  GOOD: '{example_prefix} writing notebooks classroom'\n"
+        "  RULE 3 — ABSOLUTE PROHIBITED TERMS (any of these = wrong image, guaranteed):\n"
+        "    'adult', 'professional', 'business', 'office', 'meeting', 'corporate',\n"
+        "    'stock photo', 'clipart', 'presentation', 'boardroom', 'laptop professional',\n"
+        "    'coworkers', 'colleagues', 'workplace', 'career', 'job', 'interview',\n"
+        "    'handshake', 'suit', 'tie', 'executive', 'manager', 'team building'.\n"
+        "    These terms will return adult business stock photography — completely wrong for a classroom.\n"
+        "  RULE 4 — Every image must be appropriate for a school setting:\n"
+        f"    All images must show {age_desc} children in educational or age-appropriate contexts.\n"
+        "    Prefer: classroom scenes, school settings, children learning, reading, writing, or discussing.\n"
+        f"- visual.image_search.search_terms: 3–5 terms — EVERY term must follow RULE 1 and avoid RULE 3\n"
         f"- visual.image_search.target_grade_band: '{grade_band}'\n"
         f"- visual.image_search.preferred_image_type: '{photo_type}'\n"
         "- visual.image_search.image_alt_text: descriptive alt text for accessibility\n"
         "- visual.image_search.educational_purpose: one sentence on WHY this image teaches the concept\n"
+        "- visual.image_search.instructional_activity: what students or teacher ARE DOING in this image "
+        "(e.g. 'students discussing in pairs', 'teacher modeling at board', 'students writing in notebooks', "
+        "'students sorting vocabulary cards'). This drives more specific Pixabay searches.\n"
+        "  IMPORTANT: Every slide in a lesson must have a DISTINCT instructional_activity — "
+        "never repeat the same activity description within the same day's slides.\n"
         "- visual.organizer_data: ONLY for non-image types:\n"
         "  concept_map: {center_concept, branches: [{label, items: [string]}]}\n"
         "  venn: {left_label, right_label, left_items: [], overlap_items: [], right_items: []}\n"
@@ -481,25 +1128,206 @@ def _build_image_search_directive(
     )
 
 
+def _build_strand_deck_directive(delivery_ctx: dict[str, Any] | None) -> str | None:
+    """Build a strand-override directive for student_lesson_deck when multiple strands are active.
+
+    Returns None when no delivery context or only one strand — existing behavior preserved.
+    When returned, this string is appended to the student_lesson_deck instruction and
+    SUPERSEDES the hardcoded day-specific format (Monday=Reading Workshop, etc.).
+    """
+    if not delivery_ctx:
+        return None
+    slots = delivery_ctx.get("strand_slots_today") or []
+    if len(slots) < 2:
+        return None
+
+    mode_display = (delivery_ctx.get("mode") or "").replace("_", " ").title()
+
+    # Build per-strand block descriptions with CIP-aware instructional cycles
+    block_lines: list[str] = []
+    total_slides_min = 0
+    total_slides_max = 0
+    for i, slot in enumerate(slots, start=1):
+        name = slot.get("strand_name", f"Strand {i}")
+        mins = slot.get("minutes_per_day")
+        mins_str = f" ({mins} min)" if mins else ""
+        dm = slot.get("delivery_mode", "")
+        cta = slot.get("curriculum_text_access", "")
+        ira = slot.get("independent_reading_access", "")
+        closure_req = slot.get("closure_required", False)
+
+        # Build the per-block instructional cycle based on delivery_mode
+        if dm == "teacher_read_aloud":
+            cycle = (
+                "Activation → Learning Target → Teacher Read Aloud (teacher reads, students listen) → "
+                "Listening/Discussion Response → Guided Practice (notebook or oral) → "
+                "Independent Practice (notebook response, NO student text access) → "
+                "CFU (check for understanding)"
+            )
+        elif dm == "shared_reading":
+            cycle = (
+                "Activation → Learning Target → Shared Reading (class reads together) → "
+                "Text Analysis → Guided Practice (annotate together or discussion) → "
+                "Independent Practice → CFU"
+            )
+        elif dm == "student_individual_copies":
+            cycle = (
+                "Activation → Learning Target → Teacher Modeling (with text) → "
+                "Guided Practice (students follow along in their copy) → "
+                "Independent Practice (students read/annotate their copy) → CFU"
+            )
+        elif dm in ("guided_writing", "shared_writing"):
+            cycle = (
+                "Activation → Learning Target → Teacher Modeling (teacher writes aloud, think-aloud) → "
+                "Guided Practice (students write alongside teacher) → "
+                "Independent Practice (students apply in writer's notebook) → CFU"
+            )
+        elif dm == "independent_writing":
+            cycle = (
+                "Activation → Learning Target → Mini-Lesson (5–8 min max) → "
+                "Independent Writing (majority of block) → Share/Author's Chair → CFU"
+            )
+        else:
+            cycle = (
+                "Activation → Learning Target → Teacher Modeling → "
+                "Guided Practice → Independent Practice → CFU"
+            )
+
+        if closure_req:
+            cycle += " → Closure/Exit Ticket (REQUIRED — strand-specific, not shared with other strands)"
+
+        # Curriculum text access and independent reading notes
+        ta_note = ""
+        if cta == "teacher_copy_only":
+            ta_note = (
+                f"\n    CURRICULUM TEXT HARD RULE for {name}: curriculum_text_access=teacher_copy_only. "
+                "The teacher is the ONLY person with the curriculum text. "
+                "FORBIDDEN: 'open to page X', 'read silently', 'continue reading [title]', "
+                "'open your copy', 'read [title] independently', 'choose a passage from [title]'. "
+                "ALL student activities must be LISTENING-based or NOTEBOOK RESPONSE-based."
+            )
+        elif cta == "projected_shared_display":
+            ta_note = (
+                f"\n    CURRICULUM TEXT for {name}: projected on screen. "
+                "Reference 'as shown on the screen/board' — no page numbers. "
+                "Annotation tasks are whole-class pointing at the screen."
+            )
+        if ira and ira not in ("none", ""):
+            _ira_phrase = {
+                "classroom_library_available": "the classroom library",
+                "school_library_available": "their school library book",
+                "student_brought_books": "the book they brought from home",
+                "digital_library": "their digital library book",
+            }.get(ira, "their independent reading book")
+            ta_note += (
+                f"\n    INDEPENDENT READING for {name}: students have access to {_ira_phrase}. "
+                f"If independent reading time is included, students choose from {_ira_phrase} — "
+                "NEVER from the curriculum text."
+            )
+
+        block_lines.append(
+            f"  Block {i} — {name}{mins_str}: 5–7 slides\n"
+            f"    Instructional Cycle: {cycle}{ta_note}\n"
+            f"    All slides in this block: strand_name={name!r}, instructional_block_order={i}"
+        )
+        total_slides_min += 5
+        total_slides_max += 7
+
+    separator_count = len(slots) - 1
+    total_min = total_slides_min + separator_count
+    total_max = total_slides_max + separator_count
+
+    separator_example = ""
+    if len(slots) >= 2:
+        next_strand = slots[1].get("strand_name", "Strand 2")
+        separator_example = (
+            f'\n\nSEPARATOR SLIDE (between each block):\n'
+            f'  slide_type: "strand_separator"\n'
+            f'  layout: "title_full"\n'
+            f'  title: "{next_strand}" (or the next block\'s strand name)\n'
+            f'  strand_name: "{next_strand}"\n'
+            f'  instructional_block_order: 2 (index of the block that follows)\n'
+            f'  body: brief transition phrase ("Now we move to Writing Workshop.")\n'
+            f'  No engagement or visual required on separator slides.'
+        )
+
+    return (
+        f"\n\n"
+        f"STRAND-BASED DECK OVERRIDE — supersedes the DAY-SPECIFIC LESSON FORMAT above:\n"
+        f"This classroom uses a {mode_display} delivery profile. "
+        f"instructional_delivery_context.strand_slots_today lists {len(slots)} required strands.\n\n"
+        f"DO NOT generate a single-strand deck. "
+        f"DO NOT follow the Monday/Tuesday/Wednesday/etc. day-specific format above — "
+        f"it is overridden by this delivery profile.\n\n"
+        f"REQUIRED DECK STRUCTURE (one block per strand, in order):\n"
+        + "\n\n".join(block_lines)
+        + separator_example
+        + f"\n\nSLIDE METADATA — every slide MUST include:\n"
+        f"  strand_name: the strand this slide belongs to (string, required on every slide)\n"
+        f"  strand_minutes: minutes allocated to this strand (number or null)\n"
+        f"  instructional_block_order: 1-based index of this strand block (number, required)\n\n"
+        f"TOTAL SLIDE COUNT: {total_min}–{total_max} slides "
+        f"({total_slides_min}–{total_slides_max} instructional + {separator_count} separator).\n\n"
+        f"CONTENT RULE: Each strand block must teach distinct, strand-appropriate content. "
+        f"Reading blocks address comprehension, text analysis, and reader response. "
+        f"Writing blocks address craft, drafting, revision, and writer's notebook. "
+        f"Other strands follow their own instructional purpose from district_document_context. "
+        f"Blocks must NOT repeat the same activity, vocabulary, or engagement prompt.\n\n"
+        f"CLOSURE RULE: If closure_required=true on a strand slot, that block MUST have its own "
+        f"exit ticket/closure slide. Do NOT merge closures across strands."
+    )
+
+
 def _instruction_for_artifact(artifact_type: str) -> str:
     instructions = {
         "daily_lesson_plan": (
             "Generate a COMPLETE, teacher-ready daily lesson plan a teacher can follow verbatim in the classroom. "
-            "For EACH subject block write FULL, substantive content in every field — no placeholders, no generic filler:\n"
-            "- direct_instruction: A 4-6 sentence teaching script the teacher reads aloud. Explain the concept "
-            "clearly, give a concrete definition, walk through a specific example drawn from named books or texts, "
-            "and connect it to students' experience.\n"
-            "- mini_lesson: An engaging 2-3 minute hook that activates prior knowledge or sparks curiosity — "
-            "reference the specific book, character, or concept students are studying.\n"
-            "- guided_practice: A specific, step-by-step collaborative activity. Name the activity, describe "
-            "each step, state what the teacher models, and tie it to a specific passage or concept from named materials.\n"
-            "- independent_practice: The exact task students complete on their own. Write the student-facing "
-            "instructions they would read. Reference the named books or objectives specifically.\n"
-            "- checks_for_understanding: 3 specific questions the teacher asks — one after direct instruction, "
-            "one mid-practice, one before closure. Questions must probe the specific objective and named content.\n"
-            "- closure: How the lesson ends — a specific exit prompt or reflection question tied to today's objective.\n"
-            "- materials: List actual named materials from pacing_materials and resolved_day_plan.materials_needed.\n"
-            "- notes: Differentiation tips, pacing reminders, and key misconceptions to watch for.\n"
+            "The test: 'I could teach this tomorrow without editing.'\n\n"
+
+            "REQUIRED FIELDS PER SUBJECT BLOCK — all must be fully populated:\n"
+            "teks_alignment: list the specific TEKS code(s) + full description this lesson addresses.\n"
+            "learning_target: student-facing 'I can...' statement — the PRIMARY goal (NO TEKS codes, NO jargon).\n"
+            "learning_goals: JSON array of 1–2 'I can...' statements — MAXIMUM 2 PER BLOCK. "
+            "Each entry is a single, specific, student-friendly goal. "
+            "NEVER write 3 or more entries. If one goal, write one. If two, write two.\n"
+            "  Reading block example: ['I can identify the main idea.', 'I can support it with one detail.']\n"
+            "  Writing block example: ['I can write a complete sentence response.', 'I can include one text detail.']\n"
+            "  RULE: Reading goals are about COMPREHENSION. Writing goals are about COMPOSITION. "
+            "Never share goals between Reading and Writing blocks.\n\n"
+            "curriculum_resource: exact title of today's selected instructional resource.\n"
+            "resource_rationale: 1–2 sentences explaining why THIS resource serves TODAY's TEKS.\n"
+            "  Example: 'The Crane Girl's multi-generational relationships provide rich evidence for\n"
+            "  analyzing how characters change over time — directly aligned to TEKS 5.8A.'\n\n"
+            "preteach (all 5 sub-fields — derived from knowledge_dependency_graph + curriculum):\n"
+            "  activate_prior_knowledge — specific hook from today's curriculum (name the book/concept)\n"
+            "  vocabulary_preview — 1–2 key terms with student-friendly definitions (no TEKS codes)\n"
+            "  student_friendly_explanation — concept in one sentence any student understands\n"
+            "  why_this_matters — real-world relevance in student language\n"
+            "  engagement_question — one question that sparks curiosity before instruction\n\n"
+            "teacher_modeling_script (all 5 sub-fields — write as a real teaching script):\n"
+            "  teacher_says — exact script teacher reads aloud. 4–6 sentences. First person.\n"
+            "    Reference the curriculum text by name, quote a specific line, or describe a scene.\n"
+            "  students_do — what students do while teacher models (NOT passive listening)\n"
+            "  teacher_questions — 2–3 probing questions asked during the model (think-aloud style)\n"
+            "  expected_student_thinking — correct reasoning written as a student sentence\n"
+            "  common_misconceptions — the 1–2 most common errors + redirect strategy for each\n\n"
+            "direct_instruction: the core teaching point (4–6 sentences, curriculum-specific).\n"
+            "guided_practice: step-by-step collaborative activity; name the steps and curriculum tie.\n"
+            "  Must build toward the SAME learning_goals as this block — not a different skill.\n"
+            "independent_practice: exact student-facing task instructions. Reference curriculum resource.\n"
+            "  Honor curriculum_text_access — teacher_copy_only = notebook-based, not text-access-based.\n"
+            "  Must align to this block's learning_goals — students independently practice what was modeled.\n"
+            "checks_for_understanding: exactly 3 questions — post-model, mid-practice, pre-closure.\n"
+            "  Each question must assess the SAME skill as this block's learning_goals.\n"
+            "closure: specific exit prompt tied to today's learning_target and learning_goals.\n"
+            "  Use exit_ticket_stem verbatim when available.\n"
+            "  RULE: Reading closure assesses the Reading goal. Writing closure assesses the Writing goal.\n"
+            "  Do NOT combine Reading and Writing in a single closure unless the curriculum explicitly requires it.\n"
+            "transition: how this block hands off to the next subject/strand (1–2 sentences).\n"
+            "  Reading MUST be complete before Writing begins.\n"
+            "materials: actual named materials from pacing_materials and resolved_day_plan.\n"
+            "notes: differentiation tips, pacing reminders, misconceptions to watch for.\n"
+            + _LEARNING_GOAL_DISCIPLINE_DIRECTIVE + "\n"
             + _WEEK_PLAN_DIRECTIVE + "\n"
             + _CURRICULUM_DOCUMENT_DIRECTIVE + "\n"
             + _CLASS_TIME_DIRECTIVE + "\n"
@@ -520,12 +1348,26 @@ def _instruction_for_artifact(artifact_type: str) -> str:
             "  • One student action: every instructional slide has one engagement.type and one "
             "engagement.prompt (hook and wrap_up slides may have an implicit action)\n"
             "  • Large readable typography: titles ≤ 10 words, bullets ≤ 12 words each\n"
-            "  • Instructional rhythm: the deck arcs from curiosity → modeling → practice → reflection; "
-            "students should feel the lesson building, not a list of topics\n\n"
+            "  • Instructional rhythm: the deck follows the 9-step classroom rhythm — "
+            "hook → preteach → learning target → modeling → guided practice → independent practice → "
+            "check for understanding → closure → transition. Students should feel the lesson building.\n\n"
 
-            "SLIDE COUNT: Target 6–8 slides. The lesson structure drives the count — "
-            "do not pad slides to reach 8 and do not compress distinct instructional moments into fewer. "
-            "A 5-slide lesson that teaches well is better than a 9-slide lesson that dilutes focus.\n\n"
+            "SLIDE COUNT: Target 7–9 slides (the preteach slide adds one). The lesson structure drives "
+            "the count — do not pad slides to reach 9 and do not compress distinct instructional moments. "
+            "A well-structured 7-slide lesson is better than a padded 10-slide one.\n\n"
+
+            "REQUIRED SLIDE SEQUENCE — every daily deck must include these slides in this order:\n"
+            "  Slide 1 — hook/connection (slide_type='connection', layout='hook_full_image')\n"
+            "  Slide 2 — PRETEACH (slide_type='preteach', layout='vocabulary_showcase'): "
+            "Surface 1–2 key vocabulary words or concepts students need BEFORE the lesson. "
+            "Draw vocabulary_preview and why_this_matters from the lesson plan's preteach fields. "
+            "Use a concrete, student-friendly definition + a real-world connection. "
+            "This slide is NOT optional — it bridges prior knowledge to today's new content.\n"
+            "  Slide 3 — learning target (slide_type='today_we_learn', layout='objective_image')\n"
+            "  Slides 4–6 — instruction (teaching_point, read_aloud, concept, guided_practice, example)\n"
+            "  Slide 7 — independent practice or discussion (your_turn / discussion)\n"
+            "  Slide 8 — check for understanding or exit ticket (check_in / exit_ticket)\n"
+            "  Slide 9 — wrap_up / closure (wrap_up / share)\n\n"
 
             "CURRICULUM-FIRST: district_document_context tells you HOW this unit is structured. "
             "READ the excerpts carefully. If the curriculum describes a Reading Workshop, Writing Workshop, "
@@ -548,27 +1390,33 @@ def _instruction_for_artifact(artifact_type: str) -> str:
             "  - The goal is that students hear and engage with real, named curriculum books — "
             "not generic unnamed texts\n\n"
 
-            "DAY-SPECIFIC LESSON FORMAT — select the format that matches day_label:\n"
-            "Monday   → Reading Workshop: connection to prior reading → read-aloud excerpt or book introduction "
-            "→ teaching point (literary element, strategy) → turn & talk → independent reading prompt → share\n"
-            "Tuesday  → Deep Reading/Analysis: revisit text → analyze literary elements (character, theme, plot) "
-            "→ text evidence activity → partner discussion → Reader’s Notebook response → debrief\n"
-            "Wednesday → Writing Workshop: connection to mentor text or read-aloud → "
-            "teaching point (craft/structure) → teacher models writing → students try it → "
-            "share one example → independent writing link\n"
-            "Thursday → Word Study + Revision: word pattern or vocabulary from the text → "
-            "sort/categorize → use in writing context → revise/edit a sentence → writer’s notebook\n"
-            "Friday   → Celebration & Synthesis: student share (author’s chair / book talk) → "
+            "DAY-SPECIFIC LESSON FORMAT — every day starts with connection → preteach → today_we_learn, "
+            "then follows the format that matches day_label:\n"
+            "Monday   → Reading Workshop: connection → PRETEACH (vocabulary) → learning target → "
+            "read-aloud excerpt or book introduction → teaching point (literary element, strategy) → "
+            "turn & talk → independent reading prompt → share\n"
+            "Tuesday  → Deep Reading/Analysis: connection → PRETEACH (key concept) → learning target → "
+            "revisit text → analyze literary elements (character, theme, plot) → "
+            "text evidence activity → partner discussion → Reader’s Notebook response → debrief\n"
+            "Wednesday → Writing Workshop: connection → PRETEACH (craft vocabulary) → learning target → "
+            "connection to mentor text or read-aloud → teaching point (craft/structure) → "
+            "teacher models writing → students try it → share one example → independent writing link\n"
+            "Thursday → Word Study + Revision: connection → PRETEACH (word pattern or root) → "
+            "learning target → sort/categorize → use in writing context → revise/edit a sentence → writer’s notebook\n"
+            "Friday   → Celebration & Synthesis: connection → PRETEACH (week recap vocabulary) → "
+            "learning target → student share (author’s chair / book talk) → "
             "week recap (what we read, wrote, learned) → reflection → next steps preview\n\n"
 
             "NEVER produce the same hook→vocabulary→concept→example→your_turn→check_in→wrap_up "
-            "sequence every day. Vary the slide structure to match the day’s workshop format above.\n\n"
+            "sequence every day. Vary the slides after preteach to match the day’s workshop format above.\n\n"
 
             "SLIDE TYPES:\n"
-            "  hook | connection | today_we_learn | teaching_point | read_aloud | vocabulary |\n"
+            "  connection | preteach | today_we_learn | teaching_point | read_aloud | vocabulary |\n"
             "  word_study | concept | example | active_engagement | your_turn | guided_practice |\n"
             "  independent_practice | discussion | share | check_in | exit_ticket | wrap_up\n"
-            "  slide_type = ‘connection’ for the opening hook/link to prior learning\n"
+            "  slide_type = ‘connection’ for the opening hook/link to prior learning (Slide 1)\n"
+            "  slide_type = ‘preteach’ for pre-teaching key vocabulary and concepts (Slide 2 — REQUIRED)\n"
+            "  slide_type = ‘today_we_learn’ for the student-facing learning target (Slide 3)\n"
             "  slide_type = ‘teaching_point’ for the direct instruction mini-lesson slide\n"
             "  slide_type = ‘read_aloud’ for a slide displaying a passage, poem, or book excerpt\n"
             "  slide_type = ‘active_engagement’ for turn & talk, think-pair-share, or quick write\n"
@@ -795,17 +1643,19 @@ def generate_curriculum_sequence_plan(
     tenant_id: uuid.UUID,
     package_id: uuid.UUID,
     generation_context: dict[str, Any],
-) -> dict[str, Any]:
+) -> tuple[dict[int, dict[str, Any]], dict[str, Any]]:
     """One-shot AI call that reads the full curriculum and returns a fixed week-by-week
     teaching sequence plan. Called ONCE before any artifact generation so every artifact
     is grounded in a consistent, pedagogically-ordered plan rather than each week
     independently deciding what to emphasize.
 
-    Returns a dict keyed by week number (int): {1: {...}, 2: {...}, ...}.
-    Falls back to an empty dict on any failure — callers must handle gracefully.
+    Returns (curriculum_sequence_plan, instructional_resource_bank):
+      - curriculum_sequence_plan: dict keyed by week number {1: {...}, 2: {...}, ...}
+      - instructional_resource_bank: structured resource entries built from the full docs
+    Falls back to empty dicts on any failure — callers must handle gracefully.
     """
     if not is_teacher_assist_real_ai_active(db, settings):
-        return {}
+        return {}, {}
 
     effective_settings = resolve_teacher_assist_settings(db, settings)
     provider_name, _api_key, _base_url = _provider_api_params(effective_settings)
@@ -981,13 +1831,19 @@ def generate_curriculum_sequence_plan(
             },
         )
         sequence = result.content_json.get("teaching_sequence") or []
-        return {int(entry["week"]): entry for entry in sequence if "week" in entry}
+        sequence_plan = {int(entry["week"]): entry for entry in sequence if "week" in entry}
+        resource_bank = build_instructional_resource_bank(
+            full_curriculum_docs,
+            sequence_plan,
+            generation_context=generation_context,
+        )
+        return sequence_plan, resource_bank
     except Exception:
         import logging
         logging.getLogger(__name__).exception(
             "Curriculum sequence plan failed for package %s — proceeding without plan", package_id
         )
-        return {}
+        return {}, {}
 
 
 def generate_v2_instructional_artifact(
@@ -1005,6 +1861,8 @@ def generate_v2_instructional_artifact(
     day_label: str | None = None,
     title_hint: str | None = None,
     introduced_vocabulary: list[str] | None = None,
+    instructional_day_number: int | None = None,
+    total_planned_days: int | None = None,
 ) -> dict[str, Any] | None:
     if not is_teacher_assist_real_ai_active(db, settings):
         return None
@@ -1040,11 +1898,12 @@ def generate_v2_instructional_artifact(
     ]
     resolved_day_plan = resolve_pacing_day_plan(week_subject, day_label) if week_subject and day_label else None
 
-    # Collect all named books/texts from pacing materials and day plan so they appear
-    # at the top level of the prompt — makes it unambiguous to the model which specific
-    # books it should draw on for grounding.
+    # Build named_books_and_texts from the instructional_resource_bank when available.
+    # The bank contains actual book/text titles extracted from curriculum PDFs (not filenames).
+    # Fall back to pacing material metadata only when the bank is empty.
+    _resource_bank = generation_context.get("instructional_resource_bank") or {}
     _seen_books: set[str] = set()
-    _named_books: list[str] = []
+    _fallback_books: list[str] = []
     for _mat in (generation_context.get("pacing_materials") or []):
         _title = (
             _mat.get("title")
@@ -1053,20 +1912,19 @@ def generate_v2_instructional_artifact(
         )
         if _title and _title not in _seen_books:
             _seen_books.add(_title)
-            _named_books.append(_title)
+            _fallback_books.append(_title)
     if resolved_day_plan:
         _day_mats = resolved_day_plan.get("materials_needed") or ""
         if _day_mats and _day_mats not in _seen_books:
             _seen_books.add(_day_mats)
-            _named_books.append(_day_mats)
+            _fallback_books.append(_day_mats)
     for _subj in (week_subject or {}).get("objectives") or []:
         for _bucket in ("attached_files", "reference_links"):
             for _row in (pacing_ctx.get(_bucket) or []):
                 _t = _row.get("title") or _row.get("display_name")
                 if _t and _t not in _seen_books:
                     _seen_books.add(_t)
-                    _named_books.append(_t)
-
+                    _fallback_books.append(_t)
     total_guide_weeks = generation_context.get("total_guide_weeks")
     current_week_number = (week or {}).get("sequence_number")
 
@@ -1078,6 +1936,64 @@ def generate_v2_instructional_artifact(
     _unit_mastery_arc = _idp.get("unit_mastery_arc")
     _kdg = _idp.get("knowledge_dependency_graph") or []
     _subj_name = (subject_meta or {}).get("subject_name") or ""
+
+    # Resolve named books from the resource bank (now that current_week_number and _subj_name
+    # are defined). Falls back to the pacing material metadata collected above.
+    _named_books = named_books_from_bank(_resource_bank, current_week_number, _fallback_books)
+
+    # ── Strand-aware resource selection ──────────────────────────────────────────────────
+    # When the delivery profile specifies multiple strands (e.g. Reading + Writing), each
+    # strand gets its own resource selection so the AI doesn't anchor a Writing lesson on a
+    # read-aloud resource or vice versa. The primary strand's resource is also exposed as
+    # selected_instructional_resource for backward compatibility.
+    _delivery_profile = generation_context.get("instructional_delivery_profile") or {}
+    _profile_mode = _delivery_profile.get("mode") or "ai_optimized"
+    _strand_slots: list[dict[str, Any]] = []
+    if _profile_mode != "ai_optimized":
+        from oziebot_api.services.teacher_assist_v2.instructional_delivery_profile import (
+            get_strand_slots_for_day,
+        )
+        _strand_slots = get_strand_slots_for_day(_delivery_profile, day_label or "") if day_label else []
+
+    _obj_codes = [o["code"] for o in resolved_objectives if o.get("code")]
+
+    # Per-strand resource map (populated when multiple strands are active)
+    _strand_resources: dict[str, dict[str, Any]] = {}
+    _strand_adaptation_notes: dict[str, str] = {}
+
+    if len(_strand_slots) >= 2:
+        for _slot in _strand_slots:
+            _sn = _slot.get("strand_name") or ""
+            if not _sn:
+                continue
+            _sufficiency = check_resource_sufficiency(
+                _resource_bank,
+                week=current_week_number,
+                day=day_label,
+                subject_name=_subj_name or None,
+                artifact_type=artifact_type,
+                strand_name=_sn,
+                objective_codes=_obj_codes,
+            )
+            if _sufficiency.get("selected"):
+                _strand_resources[_sn] = _sufficiency["selected"]
+            if _sufficiency.get("adaptation_note"):
+                _strand_adaptation_notes[_sn] = _sufficiency["adaptation_note"]
+
+    # Primary resource selection (single-strand or first strand when multi-strand)
+    _primary_strand = (_strand_slots[0].get("strand_name") or None) if _strand_slots else None
+    _primary_sufficiency = check_resource_sufficiency(
+        _resource_bank,
+        week=current_week_number,
+        day=day_label,
+        subject_name=_subj_name or None,
+        artifact_type=artifact_type,
+        strand_name=_primary_strand,
+        objective_codes=_obj_codes,
+    )
+    _selected_resource = _primary_sufficiency.get("selected")
+    _resource_adaptation_note = _primary_sufficiency.get("adaptation_note")
+    _resource_sufficient = _primary_sufficiency.get("sufficient", True)
 
     _instructional_design_week: dict[str, Any] | None = None
     _instructional_contracts: dict[str, Any] | None = None
@@ -1119,11 +2035,44 @@ def generate_v2_instructional_artifact(
         if _instructional_design_week:
             _instructional_contracts = _instructional_design_week.get("instructional_contracts")
 
+    # ── Verified prior learning — deterministic, never inferred ──────────────────────────
+    # For day-based artifacts only. Built from the IDP's stored day entries so the AI
+    # cannot fabricate continuity statements about content that was never actually taught.
+    _DAY_BASED_ARTIFACT_TYPES = frozenset({
+        "daily_lesson_plan", "student_lesson_deck", "exit_ticket", "bell_ringer",
+    })
+    _verified_previous_learning: dict[str, Any] | None = None
+    if artifact_type in _DAY_BASED_ARTIFACT_TYPES and current_week_number and day_label:
+        if artifact_type == "daily_lesson_plan":
+            _vpl_subjects = [
+                s.get("subject_name") or ""
+                for s in (generation_context.get("subjects") or [])
+                if s.get("subject_name")
+            ]
+        else:
+            _vpl_subjects = [_subj_name] if _subj_name else []
+        _verified_previous_learning = resolve_verified_previous_learning(
+            _idp, current_week_number, _vpl_subjects, day_label
+        )
+
     prompt_payload = {
         "prompt_version": V2_PACKAGE_PROMPT_VERSION,
         "artifact_type": artifact_type,
         "title_hint": title_hint,
         "day_label": day_label,
+        # Deterministically selected district resource for this artifact (authoritative).
+        # The AI must teach FROM this resource — enriching instruction around it, never replacing it.
+        # .allowed_uses lists the classroom activities valid for this resource type.
+        # .theme and .topic provide the week's instructional frame for contextual alignment.
+        "selected_instructional_resource": _selected_resource,
+        # Per-strand resources when the delivery profile has multiple strands.
+        # Keys are strand names ("Reading", "Writing"); values are resource entries.
+        # When present, each strand block in student_lesson_deck must use its own resource.
+        "strand_instructional_resources": _strand_resources or None,
+        # Adaptation note when the selected resource type doesn't perfectly match lesson needs.
+        # Instructs AI to use the available resource creatively rather than substituting
+        # placeholder language.
+        "resource_adaptation_note": _resource_adaptation_note,
         "named_books_and_texts": _named_books,
         "school_year": generation_context.get("school_year"),
         "state_id": generation_context.get("state_id"),
@@ -1175,18 +2124,95 @@ def generate_v2_instructional_artifact(
         # instructional_contracts extracted as a top-level field so the AI can reference
         # it directly without navigating the full instructional_design_week structure.
         "instructional_contracts": _instructional_contracts,
+        # Instructional Delivery Profile — classroom strand constraint. When present and
+        # mode is not ai_optimized, the AI must generate all listed strands for today.
+        # The constraint_directive inside this dict states the rule in plain language.
+        "instructional_delivery_context": build_artifact_delivery_context(
+            generation_context.get("instructional_delivery_profile"),
+            day_label,
+        ),
         # Academic vocabulary introduced by this point in the unit (Phase 0e registry).
         # Only populated for assessment artifact types; None for others.
         "introduced_vocabulary": introduced_vocabulary or [],
+        # Deterministic record of prior-day learning from the IDP.
+        # None on Monday or when no prior IDP data exists for the previous day.
+        # The AI MUST use this as the sole source for any "yesterday we..." references.
+        "verified_previous_learning": _verified_previous_learning,
+        # Variety context from the VarietyTracker — instructs AI to avoid repeating
+        # strategies and image concepts already used in prior artifacts.
+        # None on the first artifact in the package (no history yet).
+        "instructional_variety": generation_context.get("variety_context") or None,
+        # Strand learning journey context (Phase 0f). Provides the cross-week arc for each
+        # strand so the AI knows which objective, resource, and mastery gate apply today.
+        # None until Phase 0f completes; artifacts fall back gracefully when absent.
+        "strand_learning_journeys": generation_context.get("strand_learning_journeys") or None,
+        # Instructional day position (v3 pacing engine). Present for daily_lesson_plan artifacts.
+        "instructional_day_number": instructional_day_number,
+        "total_planned_days": total_planned_days or generation_context.get("total_planned_days"),
     }
 
-    instruction = _instruction_for_artifact(artifact_type)
+    instruction = _instruction_for_artifact(artifact_type) + _CURRICULUM_FIDELITY_DIRECTIVE
+    if artifact_type == "daily_lesson_plan":
+        instruction = _CLASSROOM_AUTHENTICITY_DIRECTIVE + instruction
+    if artifact_type in _DAY_BASED_ARTIFACT_TYPES:
+        instruction = _VERIFIED_PRIOR_LEARNING_DIRECTIVE + "\n\n" + instruction
+
+    # Instructional Day header — prepended for day-based artifacts when pacing data is present.
+    if instructional_day_number and (total_planned_days or generation_context.get("total_planned_days")):
+        _total = total_planned_days or generation_context.get("total_planned_days")
+        _id_header = (
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"INSTRUCTIONAL DAY {instructional_day_number} OF {_total}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"This is Instructional Day {instructional_day_number} of {_total} planned instructional days.\n"
+            f"Calendar reference: {day_label} of Week {week.get('sequence_number', '?')} "
+            f"(for teacher reference only — do not use weekday names in generated content).\n"
+            f"Generated artifacts must reference 'Instructional Day {instructional_day_number}' "
+            f"— not 'Monday', 'Tuesday', or any calendar weekday.\n\n"
+        )
+        instruction = _id_header + instruction
+    # Inject CIP directive whenever any strand has a delivery_mode, curriculum_text_access, or
+    # independent_reading_access configured (also check legacy student_text_access for compat)
+    _delivery_ctx = prompt_payload.get("instructional_delivery_context")
+    if _delivery_ctx:
+        _slots_today = _delivery_ctx.get("strand_slots_today") or []
+        _has_cip = any(
+            s.get("delivery_mode") or s.get("curriculum_text_access")
+            or s.get("independent_reading_access") or s.get("student_text_access")
+            or s.get("closure_required")
+            for s in _slots_today
+        )
+        if _has_cip:
+            instruction = _CLASSROOM_INSTRUCTION_PROFILE_DIRECTIVE + instruction
+    # Inject variety directive when strategy history exists (not the first artifact)
+    _variety_ctx = generation_context.get("variety_context")
+    if _variety_ctx and (_variety_ctx.get("recent_strategies") or _variety_ctx.get("recent_slide_layouts")):
+        instruction = _build_variety_directive(_variety_ctx) + instruction
+    # Inject strand learning journey position context for day-based artifacts (Phase 0f)
+    if artifact_type in {"daily_lesson_plan", "student_lesson_deck"}:
+        _slj = generation_context.get("strand_learning_journeys")
+        if _slj:
+            from oziebot_api.services.teacher_assist_v2.strand_learning_journeys import (
+                build_journey_position_context,
+            )
+            _journey_ctx = build_journey_position_context(
+                _slj,
+                week=current_week_number,
+                day_label=day_label,
+                subject_name=_subj_name if artifact_type != "daily_lesson_plan" else None,
+            )
+            if _journey_ctx:
+                instruction = _journey_ctx + "\n\n" + instruction
     if artifact_type == "student_lesson_deck":
         instruction += _build_image_search_directive(
             grade_code=generation_context.get("grade_code"),
             grade_display_name=generation_context.get("grade_display_name"),
             subject_name=(subject_meta or {}).get("subject_name"),
         )
+        _delivery_ctx_for_deck = prompt_payload.get("instructional_delivery_context")
+        _strand_override = _build_strand_deck_directive(_delivery_ctx_for_deck)
+        if _strand_override:
+            instruction += _strand_override
     if generation_context.get("generation_mode") == "package_additional_assignment":
         instruction += (
             " This is an ADDITIONAL assignment for an existing instructional package. "
@@ -1222,4 +2248,138 @@ def generate_v2_instructional_artifact(
             "teacher_review_required": True,
         },
     )
-    return _normalize_artifact_content(artifact_type, result.content_json)
+    content = _normalize_artifact_content(artifact_type, result.content_json)
+
+    # ── Resource sufficiency flag ─────────────────────────────────────────────────────────
+    # When no curriculum resource exists for this lesson, flag for teacher review immediately.
+    # The artifact is still generated (AI has permission to write general content per the
+    # curriculum fidelity directive) but the teacher must verify before using.
+    if not _resource_sufficient:
+        content["_needs_review"] = True
+        content["_review_reason"] = "no_curriculum_resource_for_lesson"
+
+    # ── Curriculum fidelity validation ───────────────────────────────────────────────────
+    # When a curriculum resource exists, generic placeholder language (e.g. "choose a story")
+    # is a generation failure. Retry once with an amplified directive; if it still appears,
+    # flag the artifact for teacher review rather than silently returning bad content.
+    _has_curriculum_resource = bool(
+        _selected_resource or prompt_payload.get("named_books_and_texts")
+    )
+    if _has_curriculum_resource and _has_placeholder_language(content):
+        _retry_result = execute_openai_json_completion(
+            effective_settings,
+            model_name=model_name,
+            instruction=instruction + _CURRICULUM_FIDELITY_RETRY_ADDENDUM,
+            prompt_payload=prompt_payload,
+            required_output_schema=_schema_for_artifact(artifact_type),
+            _api_key=_api_key,
+            _base_url=_base_url,
+            _provider=provider_name,
+        )
+        record_teacher_assist_ai_usage(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            feature=feature,
+            provider=_retry_result.provider,
+            model=_retry_result.model,
+            input_tokens=_retry_result.input_tokens,
+            output_tokens=_retry_result.output_tokens,
+            estimated_cost_cents=_retry_result.estimated_cost_cents,
+            metadata={
+                "operation_type": feature,
+                "artifact_type": artifact_type,
+                "package_id": str(package_id),
+                "related_entity_type": "instructional_package",
+                "related_entity_id": str(package_id),
+                "teacher_review_required": True,
+                "is_fidelity_retry": True,
+            },
+        )
+        retry_content = _normalize_artifact_content(artifact_type, _retry_result.content_json)
+        if not _has_placeholder_language(retry_content):
+            content = retry_content
+        else:
+            # Both attempts produced placeholder language — flag for teacher review.
+            content["_needs_review"] = True
+            content["_review_reason"] = "placeholder_language_detected_after_retry"
+
+    # ── Curriculum text access validation ────────────────────────────────────────────────
+    # When any active strand has curriculum_text_access=teacher_copy_only, scan for
+    # violations that would direct students to independently access the curriculum text.
+    # These are CRITICAL errors — the teacher cannot physically use the artifact.
+    _slots_today = (_delivery_ctx or {}).get("strand_slots_today") or []
+    _teacher_copy_slots = [
+        s for s in _slots_today
+        if s.get("curriculum_text_access") == "teacher_copy_only"
+    ]
+    if _teacher_copy_slots:
+        # Collect curriculum text names from the prompt payload for name-specific pattern matching
+        _curriculum_titles: list[str] = []
+        if _selected_resource:
+            _curriculum_titles.append(_selected_resource.get("title") or "")
+        for _entry in (prompt_payload.get("named_books_and_texts") or []):
+            if isinstance(_entry, dict):
+                _curriculum_titles.append(_entry.get("title") or "")
+            elif isinstance(_entry, str):
+                _curriculum_titles.append(_entry)
+        _curriculum_titles = [t.strip() for t in _curriculum_titles if t and t.strip()]
+
+        _cta_violations = check_curriculum_text_access_violations(
+            content,
+            curriculum_text_names=_curriculum_titles,
+        )
+        if _cta_violations:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "curriculum_text_access=teacher_copy_only violation detected in %s "
+                "(package %s): %d violation(s): %s",
+                artifact_type, package_id, len(_cta_violations), _cta_violations[:3],
+            )
+            content["_needs_review"] = True
+            content["_review_reason"] = "curriculum_text_access_violation"
+            content["_review_detail"] = (
+                f"{len(_cta_violations)} violation(s) detected. "
+                "Students were directed to access the curriculum text, but teacher_copy_only is set."
+            )
+
+    # ── Lesson plan completeness validation ──────────────────────────────────────────────
+    # For daily_lesson_plan artifacts: verify all 9 rhythm steps are populated.
+    # Incomplete lesson plans flag for teacher review but are still returned —
+    # a partial plan is better than nothing when content is present.
+    if artifact_type == "daily_lesson_plan":
+        _missing = _check_lesson_plan_completeness(content)
+        if _missing:
+            logger.warning(
+                "package=%s: lesson plan completeness check found %d missing field(s): %s",
+                package_id, len(_missing), _missing[:5],
+            )
+            # Classify the primary reason — learning goal violations take priority over generic structure issues
+            _goal_violations = [m for m in _missing if any(
+                kw in m for kw in ("learning_goals", "learning goal", "Writing goals", "Reading goals",
+                                   "Writing block", "Reading block", "closure assesses", "separate goals",
+                                   "'I can'", "merged")
+            )]
+            if not content.get("_needs_review"):
+                content["_needs_review"] = True
+                if _goal_violations:
+                    content["_review_reason"] = "learning_goal_discipline_violation"
+                else:
+                    content["_review_reason"] = "incomplete_lesson_structure"
+            elif _goal_violations and content.get("_review_reason") == "incomplete_lesson_structure":
+                content["_review_reason"] = "learning_goal_discipline_violation"
+            content["_completeness_issues"] = _missing[:10]
+
+    if artifact_type == "student_lesson_deck":
+        _missing = _check_student_deck_completeness(content)
+        if _missing:
+            logger.warning(
+                "package=%s: student lesson deck missing preteach slide: %s",
+                package_id, _missing,
+            )
+            if not content.get("_needs_review"):
+                content["_needs_review"] = True
+                content["_review_reason"] = "missing_preteach_slide"
+            content["_completeness_issues"] = _missing[:5]
+
+    return content

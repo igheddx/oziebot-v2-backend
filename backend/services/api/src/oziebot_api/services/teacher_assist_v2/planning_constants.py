@@ -31,14 +31,6 @@ PACKAGE_ARTIFACT_GROUPS = {
 
 WEEKDAY_LABELS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
 
-# Class period durations in minutes, keyed by subject_code.
-# ELA is split: reading block and writing block taught separately.
-# All other subjects default to a single instructional block.
-SUBJECT_CLASS_MINUTES: dict[str, dict[str, int]] = {
-    "ELA": {"reading": 35, "writing": 30},
-}
-DEFAULT_CLASS_MINUTES = 40
-
 WEEK_RANGE_PRESETS = (
     (1, 1, "Week 1"),
     (1, 2, "Weeks 1–2"),
@@ -62,3 +54,32 @@ RECOVERY_ARTIFACT_TYPES = (
 )
 
 RECOVERY_INTENT_TYPES = ("understanding", "skill", "vocabulary", "fluency", "confidence")
+
+# ── Incremental Generation — Prompt Version Registry ──────────────────────────
+# Bump a version string whenever the corresponding prompt template changes.
+# Artifacts store the version that generated them; stale artifacts (version mismatch)
+# are flagged as dirty and regenerated on the next partial regen run.
+ARTIFACT_PROMPT_VERSIONS: dict[str, str] = {
+    # Tier-1 pipeline stages (package-level, very expensive)
+    "curriculum_sequence_plan": "csp-v1",
+    "instructional_design_plan": "idp-v1",
+    "strand_journeys": "sj-v1",
+    "validation": "val-v1",
+    # Per-artifact types
+    "quality_review": "qr-v1",
+    "daily_lesson_plan": "dlp-v1",
+    "subject_slide_deck": "ssd-v1",
+    "student_lesson_deck": "sld-v1",
+    "assignment": "asgn-v1",
+    "writing_response": "wr-v1",
+    "quiz": "quiz-v1",
+    "rubric": "rubric-v1",
+    "exit_ticket": "et-v1",
+    "bell_ringer": "br-v1",
+    "vocabulary_list": "vocab-v1",
+    "study_guide": "sg-v1",
+    "parent_newsletter_summary": "news-v1",
+}
+
+# Valid scopes for a partial regeneration job
+REGEN_SCOPES = frozenset({"full", "dirty", "artifact_types", "quality_review", "images"})

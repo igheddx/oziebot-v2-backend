@@ -78,6 +78,9 @@ services:
       TEACHER_ASSIST_WORKER_ENABLED: ${TEACHER_ASSIST_WORKER_ENABLED:-true}
       TEACHER_ASSIST_WORKER_POLL_INTERVAL_SECONDS: ${TEACHER_ASSIST_WORKER_POLL_INTERVAL_SECONDS:-1.0}
       <<: *teacher-assist-env
+      TEACHER_ASSIST_STORAGE_ROOT: /app/teacher-assist-storage
+    volumes:
+      - teacher_assist_storage:/app/teacher-assist-storage
     depends_on:
       postgres:
         condition: service_healthy

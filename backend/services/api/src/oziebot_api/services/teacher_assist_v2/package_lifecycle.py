@@ -51,6 +51,8 @@ def package_status_message(effective_status: str, *, metadata: dict | None = Non
         return "This plan is ending soon. Review and close it out when teaching is complete."
     if effective_status == "expired":
         return "This plan has passed its end date. Review it and mark it done when complete."
+    if effective_status == "failed":
+        return "Package generation was interrupted (likely a server restart). Partially generated artifacts are shown below. You can generate a new package to replace this one."
     return None
 
 

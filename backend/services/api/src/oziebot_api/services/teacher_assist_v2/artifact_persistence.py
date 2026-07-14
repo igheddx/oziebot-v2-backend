@@ -93,7 +93,16 @@ def persist_package_artifact(
     export_note: str | None = None,
     alignment_metadata: dict[str, Any] | None = None,
     version_metadata: dict[str, Any] | None = None,
+    generation_provenance: dict[str, Any] | None = None,
+    metadata_override: dict[str, Any] | None = None,
 ) -> TeacherAssistV2InstructionalPackageArtifact:
+    # Strip internal validation flags before storing in content_json.
+    # _needs_review / _review_reason are set by the generation layer; they inform
+    # the artifact status but must not appear in the teacher-visible content.
+    _needs_review = bool(content.pop("_needs_review", False))
+    _review_reason = content.pop("_review_reason", None)
+    artifact_status = "needs_review" if _needs_review else "ready"
+
     objective_mapping = normalize_objective_mapping(content)
     artifact = TeacherAssistV2InstructionalPackageArtifact(
         id=uuid.uuid4(),
@@ -105,7 +114,7 @@ def persist_package_artifact(
         day_label=day_label,
         sequence_number=sequence_number,
         title=str(content.get("title") or content.get("lesson_title") or artifact_type.replace("_", " ").title()),
-        status="ready",
+        status=artifact_status,
         content_json=content,
         preview_html=render_artifact_preview_html(artifact_type=artifact_type, content=content),
         metadata_json={
@@ -118,9 +127,12 @@ def persist_package_artifact(
             "alignment_summary": content.get("alignment_summary")
             or objective_mapping.get("alignment_summary"),
             "additional_exports": [],
+            **({"review_reason": _review_reason} if _review_reason else {}),
             **({"export_note": export_note} if export_note else {}),
             **({"alignment": alignment_metadata} if alignment_metadata is not None else {}),
             **({"version": version_metadata} if version_metadata is not None else {}),
+            **({"generation_provenance": generation_provenance} if generation_provenance is not None else {}),
+            **(metadata_override or {}),
         },
         created_at=created_at,
         updated_at=created_at,
@@ -138,6 +150,53 @@ def persist_package_artifact(
     db.flush()
     _sync_slide_visual_assets(db, artifact=artifact, content=content, updated_at=created_at)
     return artifact
+
+
+def attach_quality_report(
+    db: Session,
+    *,
+    artifact: TeacherAssistV2InstructionalPackageArtifact,
+    quality_report: dict[str, Any],
+    review_status: str,
+    revised_content: dict[str, Any] | None = None,
+    settings: Settings | None = None,
+) -> None:
+    """Attach quality review results to a persisted artifact.
+
+    Stores the quality report in metadata_json["quality_review"] and updates
+    the artifact status. If revised_content is provided, replaces content_json
+    and regenerates preview HTML.
+    """
+    from datetime import UTC, datetime as _dt
+
+    metadata = dict(artifact.metadata_json or {})
+    metadata["quality_review"] = quality_report
+    artifact.metadata_json = metadata
+
+    # Only upgrade status when the review is more severe than the current status.
+    # Preserve "needs_review" if it was set by generation-layer validation.
+    _severity = {
+        "ready": 0,
+        "ready_with_notes": 1,
+        "image_review_needed": 2,
+        "continuity_review_needed": 3,
+        "needs_review": 4,
+        "missing_curriculum_resource": 5,
+    }
+    current_severity = _severity.get(artifact.status, 0)
+    new_severity = _severity.get(review_status, 0)
+    if new_severity > current_severity:
+        artifact.status = review_status
+
+    if revised_content and isinstance(revised_content, dict):
+        artifact.content_json = revised_content
+        # Regenerate preview HTML with revised content.
+        if settings is not None:
+            artifact.preview_html = render_artifact_preview_html(
+                artifact_type=artifact.artifact_type, content=revised_content
+            )
+
+    artifact.updated_at = _dt.now(UTC)
 
 
 def refresh_package_artifact_exports(

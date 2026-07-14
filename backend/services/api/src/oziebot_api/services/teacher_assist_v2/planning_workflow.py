@@ -72,6 +72,55 @@ def _field_errors(**errors: str) -> ValueError:
     return ValueError({key: value for key, value in errors.items() if value})
 
 
+def _build_alignment_summary(bank_json: dict | None) -> dict | None:
+    """Build a browser-displayable resource alignment summary from the stored bank.
+
+    Returns a flat list of resource assignments grouped by week and day, suitable
+    for rendering in the package viewer without additional computation.
+    """
+    if not bank_json:
+        return None
+    entries = bank_json.get("entries") or []
+    if not entries:
+        return None
+
+    # Group curriculum-assigned text resources by week → day → strand
+    by_week: dict[str, dict] = {}
+    for entry in entries:
+        if not entry.get("is_curriculum_assigned"):
+            continue
+        rt = entry.get("resource_type") or ""
+        if rt in ("graphic_organizer", "video", "anchor_chart", "manipulative", "diagram", "other"):
+            continue  # display only text-based resources
+        week = entry.get("week")
+        week_key = f"Week {week}" if week is not None else "All Weeks"
+        day = entry.get("day") or "Any Day"
+        strand = entry.get("strand_name") or "General"
+        by_week.setdefault(week_key, {}).setdefault(day, {}).setdefault(strand, [])
+        by_week[week_key][day][strand].append({
+            "title": entry.get("title"),
+            "resource_type": entry.get("resource_type"),
+            "theme": entry.get("theme"),
+            "topic": entry.get("topic"),
+            "allowed_uses": entry.get("allowed_uses") or [],
+            "supported_objectives": entry.get("supported_objectives") or [],
+            "curriculum_grounding": entry.get("curriculum_grounding"),
+            "extraction_source": entry.get("extraction_source"),
+        })
+
+    if not by_week:
+        return None
+
+    total_resources = sum(
+        1 for e in entries if e.get("is_curriculum_assigned") and e.get("resource_type") not in
+        ("graphic_organizer", "video", "anchor_chart", "manipulative", "diagram", "other")
+    )
+    return {
+        "total_resources": total_resources,
+        "weeks": by_week,
+    }
+
+
 def _require_planning_ready(db: Session, *, user: User):
     onboarding = get_v2_onboarding(db, user_id=user.id)
     if onboarding is None or not is_v2_pacing_setup_complete(onboarding):
@@ -649,6 +698,34 @@ def archive_planning_supplemental_material(
     return row
 
 
+def _resolve_generation_manifest(
+    db: Session,
+    row: "TeacherAssistV2InstructionalPackage",
+    package_id: "uuid.UUID",
+) -> dict | None:
+    """Return the stored generation_manifest, or a cost-only fallback from usage events."""
+    stored = (row.metadata_json or {}).get("generation_manifest") if isinstance(row.metadata_json, dict) else None
+    if stored is not None:
+        return stored
+    from oziebot_api.services.teacher_assist.ai_usage import get_package_ai_cost_by_feature
+    cost_by_feature = get_package_ai_cost_by_feature(db, package_id=package_id)
+    if not cost_by_feature:
+        return None
+    return {
+        "pipeline_schema_version": "legacy",
+        "generation_mode": "full",
+        "curriculum_hash": "",
+        "planning_hash": "",
+        "delivery_hash": "",
+        "prompt_versions_used": {},
+        "cost_cents_by_feature": cost_by_feature,
+        "total_generation_cost_cents": sum(cost_by_feature.values()),
+        "artifact_source_counts": {},
+        "cache_layer_hits": {},
+        "built_at": "",
+    }
+
+
 def get_instructional_package_detail(
     db: Session,
     *,
@@ -656,12 +733,13 @@ def get_instructional_package_detail(
     package_id: uuid.UUID,
     settings: Settings | None = None,
 ) -> dict:
+    _is_root_admin = bool(getattr(user, "is_root_admin", False))
+    _pkg_filter = [TeacherAssistV2InstructionalPackage.id == package_id]
+    if not _is_root_admin:
+        _pkg_filter.append(TeacherAssistV2InstructionalPackage.teacher_user_id == user.id)
     row = db.scalars(
         select(TeacherAssistV2InstructionalPackage)
-        .where(
-            TeacherAssistV2InstructionalPackage.id == package_id,
-            TeacherAssistV2InstructionalPackage.teacher_user_id == user.id,
-        )
+        .where(*_pkg_filter)
         .options(
             selectinload(TeacherAssistV2InstructionalPackage.artifacts).selectinload(
                 TeacherAssistV2InstructionalPackageArtifact.slide_visual_assets
@@ -692,6 +770,9 @@ def get_instructional_package_detail(
             "title": artifact.title,
             "day_label": artifact.day_label,
             "status": artifact.status,
+            "quality_review": metadata.get("quality_review") or None,
+            "generation_provenance": metadata.get("generation_provenance") or None,
+            "dev_locked": bool(metadata.get("dev_locked")),
             "description": metadata.get("description") or content.get("description") or content.get("summary"),
             "objective_mapping": metadata.get("objective_mapping") or content.get("objective_mapping"),
             "objective_ids": metadata.get("objective_ids") or content.get("objective_ids") or [],
@@ -855,6 +936,30 @@ def get_instructional_package_detail(
         "artifact_groups": group_artifacts(artifacts),
         "artifacts": artifacts,
         "teacher_teaching_brief": row.teacher_coaching_summary_json or None,
+        "instructional_delivery_profile": row.instructional_delivery_profile,
+        "curriculum_resource_alignment": _build_alignment_summary(row.instructional_resource_bank_json),
+        "strand_learning_journeys": (row.metadata_json or {}).get("strand_learning_journeys")
+        if isinstance(row.metadata_json, dict)
+        else None,
+        "total_curriculum_days": (row.metadata_json or {}).get("total_curriculum_days")
+        if isinstance(row.metadata_json, dict)
+        else None,
+        "lost_instructional_days": (row.metadata_json or {}).get("lost_instructional_days")
+        if isinstance(row.metadata_json, dict)
+        else None,
+        "total_planned_days": (row.metadata_json or {}).get("total_planned_days")
+        if isinstance(row.metadata_json, dict)
+        else None,
+        "generation_started_at": (row.metadata_json or {}).get("generation_started_at")
+        if isinstance(row.metadata_json, dict)
+        else None,
+        "generation_completed_at": (row.metadata_json or {}).get("generation_completed_at")
+        if isinstance(row.metadata_json, dict)
+        else None,
+        "generation_duration_seconds": (row.metadata_json or {}).get("generation_duration_seconds")
+        if isinstance(row.metadata_json, dict)
+        else None,
+        "generation_manifest": _resolve_generation_manifest(db, row, package_id),
         "teaching_mode_available": bool(daily_plans or subject_decks or student_decks),
         "teaching_presentations": {
             "daily_plans": [

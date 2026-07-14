@@ -23,6 +23,10 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
 )
 from oziebot_api.models.teacher_assist_v2_recovery_queue import TeacherAssistV2RecoveryQueue
 from oziebot_api.models.user import User
+from oziebot_api.services.teacher_assist_v2.instructional_delivery_profile import (
+    get_strand_slots_for_day,
+    profile_is_constrained,
+)
 from oziebot_api.services.teacher_assist_v2.instructional_design_plan import get_plan_for_week_subject
 from oziebot_api.services.teacher_assist_v2.planning_constants import WEEKDAY_LABELS
 
@@ -136,6 +140,29 @@ def _timeline(subject_name: str) -> list[dict]:
     return result
 
 
+# ── CIP summary ───────────────────────────────────────────────────────────────
+
+def _build_cip_summary(
+    pkg: TeacherAssistV2InstructionalPackage,
+    day_of_week: str,
+) -> dict[str, Any] | None:
+    """Return the Classroom Instruction Profile summary for the given day.
+
+    Returns None when no constrained delivery profile is set.
+    The returned dict is included in SubjectToday for the today screen display.
+    """
+    profile = pkg.instructional_delivery_profile
+    if not profile_is_constrained(profile):
+        return None
+    slots = get_strand_slots_for_day(profile, day_of_week)
+    if not slots:
+        return None
+    return {
+        "mode": profile.get("mode"),
+        "strand_slots_today": slots,
+    }
+
+
 # ── Subject context ────────────────────────────────────────────────────────────
 
 def _build_subject_context(
@@ -245,6 +272,9 @@ def _build_subject_context(
 
         # Tomorrow preview
         "tomorrow": tomorrow_context,
+
+        # Classroom Instruction Profile — strand-level delivery config for today
+        "classroom_instruction_profile": _build_cip_summary(pkg, day_of_week),
     }
 
 

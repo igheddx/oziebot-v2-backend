@@ -7,8 +7,11 @@ import mimetypes
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from oziebot_api.services.teacher_assist_v2.instructional_variety import VarietyTracker
 
 import httpx
 from sqlalchemy.orm import Session
@@ -43,8 +46,9 @@ def _search_pixabay(
     query: str,
     api_key: str,
     preferred_image_type: str = "photo",
-) -> dict[str, Any] | None:
-    """Try one Pixabay search query; return first hit or None."""
+    per_page: int = 12,
+) -> list[dict[str, Any]]:
+    """Try one Pixabay search query; return list of hits (may be empty)."""
     image_type = preferred_image_type if preferred_image_type in {"photo", "illustration", "vector"} else "photo"
     try:
         response = httpx.get(
@@ -54,7 +58,7 @@ def _search_pixabay(
                 "q": query,
                 "image_type": image_type,
                 "safesearch": "true",
-                "per_page": 5,
+                "per_page": per_page,
                 "min_width": 400,
                 "min_height": 300,
             },
@@ -62,11 +66,10 @@ def _search_pixabay(
         )
         response.raise_for_status()
         data = response.json()
-        hits = data.get("hits") or []
-        return hits[0] if hits else None
+        return data.get("hits") or []
     except Exception:
         logger.exception("Pixabay search failed for query %r", query)
-        return None
+        return []
 
 
 def _download_image(url: str) -> tuple[bytes, str] | None:
@@ -221,11 +224,30 @@ def _fetch_one_slide_image(
     artifact_id: Any,
     settings: Settings,
     tenant_id: uuid.UUID,
+    variety_tracker: "VarietyTracker | None" = None,
 ) -> dict[str, Any] | None:
-    """Pure I/O: search Pixabay, download, store. No DB access — safe to run in threads."""
+    """Pure I/O: search Pixabay, download, store. No DB access — safe to run in threads.
+
+    When variety_tracker is provided, skips Pixabay images already used in this package
+    and claims the chosen ID so parallel threads don't reuse it.
+    """
     hit: dict[str, Any] | None = None
     for term in fallback_chain:
-        hit = _search_pixabay(query=term, api_key=api_key, preferred_image_type=preferred_type)
+        hits = _search_pixabay(query=term, api_key=api_key, preferred_image_type=preferred_type)
+        if not hits:
+            continue
+        if variety_tracker is None:
+            hit = hits[0]
+        else:
+            # Pick first hit whose Pixabay ID is unclaimed.
+            for candidate in hits:
+                pixabay_id = candidate.get("id")
+                if pixabay_id is None:
+                    hit = candidate
+                    break
+                if variety_tracker.claim_pixabay_id(int(pixabay_id)):
+                    hit = candidate
+                    break
         if hit:
             break
 
@@ -274,6 +296,7 @@ def fetch_slide_images_for_artifact(
     settings: Settings,
     api_key: str,
     grade_code: str | None = None,
+    variety_tracker: "VarietyTracker | None" = None,
 ) -> None:
     """
     Fetch Pixabay images for every image_search slide in the artifact, storing
@@ -304,8 +327,14 @@ def fetch_slide_images_for_artifact(
         visual = slide.get("visual")
         if not isinstance(visual, dict) or visual.get("type") != "image_search":
             continue
-        img_search = visual.get("image_search") or {}
-        search_terms = [t for t in (img_search.get("search_terms") or []) if isinstance(t, str) and t.strip()]
+        _img_search_raw = visual.get("image_search")
+        # AI sometimes returns image_search as a flat list of search terms instead of a dict
+        if isinstance(_img_search_raw, list):
+            img_search: dict[str, Any] = {}
+            search_terms = [t for t in _img_search_raw if isinstance(t, str) and t.strip()]
+        else:
+            img_search = _img_search_raw if isinstance(_img_search_raw, dict) else {}
+            search_terms = [t for t in (img_search.get("search_terms") or []) if isinstance(t, str) and t.strip()]
         if not search_terms:
             continue
         preferred_type = str(img_search.get("preferred_image_type") or "photo")
@@ -338,6 +367,7 @@ def fetch_slide_images_for_artifact(
                 artifact_id=artifact.id,
                 settings=settings,
                 tenant_id=tenant_id,
+                variety_tracker=variety_tracker,
             ): t["slide_id"]
             for t in tasks
         }
@@ -452,8 +482,13 @@ def create_pending_image_assets(
         if existing is not None:
             continue
 
-        img_search = visual.get("image_search") or {}
-        search_terms = [t for t in (img_search.get("search_terms") or []) if isinstance(t, str) and t.strip()]
+        _img_search_raw = visual.get("image_search")
+        if isinstance(_img_search_raw, list):
+            img_search: dict[str, Any] = {}
+            search_terms = [t for t in _img_search_raw if isinstance(t, str) and t.strip()]
+        else:
+            img_search = _img_search_raw if isinstance(_img_search_raw, dict) else {}
+            search_terms = [t for t in (img_search.get("search_terms") or []) if isinstance(t, str) and t.strip()]
 
         db.add(
             TeacherAssistV2SlideVisualAsset(

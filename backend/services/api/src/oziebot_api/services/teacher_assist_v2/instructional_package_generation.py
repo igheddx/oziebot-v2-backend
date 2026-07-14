@@ -10,8 +10,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import delete as _sa_delete, select
+from sqlalchemy.orm import Session, sessionmaker
 
 from oziebot_api.config import Settings
 from oziebot_api.db.session import make_session_factory
@@ -20,6 +20,7 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2InstructionalPackageArtifact,
     TeacherAssistV2PlanningSupplementalMaterial,
 )
+from oziebot_api.models.teacher_assist_v2_slide_visual_asset import TeacherAssistV2SlideVisualAsset
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.ai_usage import get_effective_daily_cost_limit_cents
 from oziebot_api.services.teacher_assist.ai_mode import is_teacher_assist_real_ai_active
@@ -28,6 +29,7 @@ from oziebot_api.services.teacher_assist.provider_config import TeacherAssistPro
 from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher_assist_settings
 from oziebot_api.services.teacher_assist_v2.artifact_persistence import (
     attach_qr_student_packet,
+    attach_quality_report,
     persist_package_artifact,
 )
 from oziebot_api.services.teacher_assist_v2.image_search import (
@@ -50,6 +52,12 @@ from oziebot_api.services.teacher_assist_v2.instructional_artifact_engine import
     extract_instructional_contract,
     validate_week_alignment,
 )
+from oziebot_api.services.teacher_assist_v2.instructional_resource_bank import (
+    build_resource_alignment_map,
+)
+from oziebot_api.services.teacher_assist_v2.instructional_delivery_profile import (
+    resolve_profile as resolve_delivery_profile,
+)
 from oziebot_api.services.teacher_assist_v2.instructional_design_plan import (
     generate_instructional_design_plan,
 )
@@ -60,7 +68,15 @@ from oziebot_api.services.teacher_assist_v2.instructional_package_ai import (
     generate_curriculum_sequence_plan,
     generate_v2_instructional_artifact,
 )
-from oziebot_api.services.teacher_assist_v2.package_export import render_artifact_preview_html
+from oziebot_api.services.teacher_assist_v2.instructional_variety import VarietyTracker
+from oziebot_api.services.teacher_assist_v2.instructional_quality_review import (
+    review_artifact,
+    REVIEWABLE_TYPES as _QUALITY_REVIEWABLE_TYPES,
+)
+from oziebot_api.services.teacher_assist_v2.package_export import (
+    render_artifact_preview_html,
+    render_slide_deck_html,
+)
 from oziebot_api.services.teacher_assist_v2.package_artifact_refresh import SLIDE_DECK_EXPORT_NOTE
 from oziebot_api.services.teacher_assist_v2.teacher_coaching import assemble_teaching_brief
 from oziebot_api.services.teacher_assist_v2.package_lifecycle import (
@@ -75,9 +91,22 @@ from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import (
     resolve_subject_daily_topic,
 )
 from oziebot_api.services.teacher_assist_v2.planning_constants import (
+    ARTIFACT_PROMPT_VERSIONS,
     OPTIONAL_PACKAGE_OUTPUTS,
     REQUIRED_PACKAGE_OUTPUTS,
     WEEKDAY_LABELS,
+)
+from oziebot_api.services.teacher_assist_v2.generation_cache import (
+    build_artifact_provenance,
+    build_generation_manifest,
+    compute_curriculum_cache_key,
+    compute_curriculum_hash,
+    compute_delivery_hash,
+    compute_planning_cache_key,
+    compute_planning_hash,
+    is_artifact_stale,
+    lookup_generation_cache,
+    store_generation_cache,
 )
 from oziebot_api.services.teacher_assist_v2.planning_context import build_teacher_planning_generation_context
 from oziebot_api.services.teacher_assist_v2.planning_workflow import _assignment_context
@@ -110,6 +139,10 @@ def _build_package_metadata(
     generation_state: str,
     status_detail: str | None = None,
     error_message: str | None = None,
+    generation_started_at: str | None = None,
+    generation_completed_at: str | None = None,
+    generation_duration_seconds: float | None = None,
+    job_excluded_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     metadata = {
         "is_mock": False,
@@ -133,6 +166,14 @@ def _build_package_metadata(
         metadata["status_detail"] = status_detail
     if error_message:
         metadata["generation_error"] = error_message
+    if generation_started_at:
+        metadata["generation_started_at"] = generation_started_at
+    if generation_completed_at:
+        metadata["generation_completed_at"] = generation_completed_at
+    if generation_duration_seconds is not None:
+        metadata["generation_duration_seconds"] = generation_duration_seconds
+    if job_excluded_ids is not None:
+        metadata["job_excluded_ids"] = job_excluded_ids
     return metadata
 
 
@@ -165,23 +206,37 @@ def _resolve_artifact_content(
     day_label: str | None = None,
     title_hint: str | None = None,
     introduced_vocabulary: list[str] | None = None,
+    instructional_day_number: int | None = None,
+    total_planned_days: int | None = None,
 ) -> dict[str, Any]:
-    ai_content = generate_v2_instructional_artifact(
-        db,
-        settings=settings,
-        user=user,
-        tenant_id=package.tenant_id,
-        package_id=package.id,
-        artifact_type=artifact_type,
-        generation_context=context,
-        week=week,
-        subject_meta=subject_meta,
-        week_subject=week_subject,
-        day_label=day_label,
-        title_hint=title_hint,
-        introduced_vocabulary=introduced_vocabulary,
-    )
-    return ai_content if ai_content is not None else deterministic_content
+    try:
+        ai_content = generate_v2_instructional_artifact(
+            db,
+            settings=settings,
+            user=user,
+            tenant_id=package.tenant_id,
+            package_id=package.id,
+            artifact_type=artifact_type,
+            generation_context=context,
+            week=week,
+            subject_meta=subject_meta,
+            week_subject=week_subject,
+            day_label=day_label,
+            title_hint=title_hint,
+            introduced_vocabulary=introduced_vocabulary,
+            instructional_day_number=instructional_day_number,
+            total_planned_days=total_planned_days,
+        )
+        return ai_content if ai_content is not None else deterministic_content
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Sequential AI call failed — artifact_type=%s week=%s day=%s; using deterministic fallback",
+            artifact_type,
+            (week or {}).get("sequence_number"),
+            day_label,
+        )
+        return deterministic_content
 
 
 def _objective_fields(
@@ -319,7 +374,7 @@ def _link_assessment_rubric(
     assessment_content["rubric_reference"] = rubric_artifact.title
     assessment_content["linked_rubric_artifact_id"] = str(rubric_artifact.id)
     assessment_artifact.content_json = assessment_content
-    assessment_artifact.title = str(assessment_content["title"])
+    assessment_artifact.title = str(assessment_content.get("title") or assessment_artifact.title or "Assessment")
     assessment_metadata = dict(assessment_artifact.metadata_json or {})
     assessment_metadata["linked_rubric_artifact_id"] = str(rubric_artifact.id)
     assessment_artifact.metadata_json = assessment_metadata
@@ -512,6 +567,9 @@ def prepare_instructional_package_generation(
     plan_start_date: date | None = None,
     plan_end_date: date | None = None,
     excluded_pacing_material_ids: list[uuid.UUID] | None = None,
+    instructional_delivery_profile: dict | None = None,
+    lost_instructional_days: int = 0,
+    quality_review_enabled: bool = True,
 ) -> tuple[
     TeacherAssistV2InstructionalPackage,
     dict[str, Any],
@@ -528,6 +586,11 @@ def prepare_instructional_package_generation(
         plan_end_date = plan_end_date or default_end
     if plan_end_date < plan_start_date:
         raise ValueError({"plan_end_date": "End date must be on or after start date."})
+
+    total_weeks = week_end - week_start + 1
+    total_curriculum_days = total_weeks * 5
+    lost_days = max(0, min(int(lost_instructional_days), total_curriculum_days - 1))
+    total_planned_days = total_curriculum_days - lost_days
 
     context = build_teacher_planning_generation_context(
         db,
@@ -559,6 +622,7 @@ def prepare_instructional_package_generation(
     final_status = "active" if plan_start_date <= today <= plan_end_date else "generated"
 
     now = _now()
+    resolved_delivery_profile = resolve_delivery_profile(instructional_delivery_profile)
     package = TeacherAssistV2InstructionalPackage(
         id=uuid.uuid4(),
         tenant_id=base["ctx"].tenant_id,
@@ -580,14 +644,22 @@ def prepare_instructional_package_generation(
         selected_outputs_json=outputs,
         status="processing",
         provider_name=provider_name,
-        metadata_json=_build_package_metadata(
-            context=context,
-            stored_status="processing",
-            plan_start_date=plan_start_date,
-            plan_end_date=plan_end_date,
-            generation_state="processing",
-            status_detail=PACKAGE_PROCESSING_MESSAGE,
-        ),
+        instructional_delivery_profile=resolved_delivery_profile,
+        metadata_json={
+            **_build_package_metadata(
+                context=context,
+                stored_status="processing",
+                plan_start_date=plan_start_date,
+                plan_end_date=plan_end_date,
+                generation_state="queued",
+                status_detail=PACKAGE_PROCESSING_MESSAGE,
+                job_excluded_ids=sorted(excluded_ids),
+            ),
+            "total_curriculum_days": total_curriculum_days,
+            "lost_instructional_days": lost_days,
+            "total_planned_days": total_planned_days,
+            "quality_review_enabled": quality_review_enabled,
+        },
         created_at=now,
         updated_at=now,
     )
@@ -610,9 +682,10 @@ def prepare_instructional_package_generation(
     return package, context, outputs, excluded_ids, final_status
 
 
-_PARALLEL_MAX_WORKERS = 3
-_RATE_LIMIT_MAX_RETRIES = 4
+_PARALLEL_MAX_WORKERS = 10
+_RATE_LIMIT_MAX_RETRIES = 3
 _RATE_LIMIT_BASE_DELAY = 6.0  # seconds
+_RATE_LIMIT_MAX_DELAY = 45.0  # cap: never wait more than 45s regardless of what the API suggests
 
 
 def _call_ai_for_job(
@@ -631,6 +704,8 @@ def _call_ai_for_job(
     title_hint: str | None,
     deterministic_content: dict[str, Any],
     introduced_vocabulary: list[str] | None = None,
+    instructional_day_number: int | None = None,
+    total_planned_days: int | None = None,
 ) -> dict[str, Any]:
     """Run one AI artifact call in its own DB session thread. Retries on 429; falls back to deterministic on persistent error."""
     db = session_factory()
@@ -656,16 +731,26 @@ def _call_ai_for_job(
                     day_label=day_label,
                     title_hint=title_hint,
                     introduced_vocabulary=introduced_vocabulary,
+                    instructional_day_number=instructional_day_number,
+                    total_planned_days=total_planned_days,
                 )
                 db.commit()
                 return result if result is not None else deterministic_content
             except Exception as exc:
                 db.rollback()
                 msg = str(exc)
-                if "429" in msg and attempt < _RATE_LIMIT_MAX_RETRIES - 1:
-                    # Parse the suggested retry delay from the OpenAI error message.
+                _msg_lower = msg.lower()
+                _is_retryable_429 = (
+                    "429" in msg
+                    and "credits are depleted" not in _msg_lower
+                    and "prepayment credits" not in _msg_lower
+                    and attempt < _RATE_LIMIT_MAX_RETRIES - 1
+                )
+                if _is_retryable_429:
+                    # Parse the suggested retry delay from the API error message, but cap it.
                     match = re.search(r"try again in ([\d.]+)s", msg)
-                    delay = float(match.group(1)) + 1.0 if match else _RATE_LIMIT_BASE_DELAY * (attempt + 1)
+                    raw_delay = float(match.group(1)) + 1.0 if match else _RATE_LIMIT_BASE_DELAY * (attempt + 1)
+                    delay = min(raw_delay, _RATE_LIMIT_MAX_DELAY)
                     logger.warning(
                         "Rate limit on attempt %d for artifact_type=%s week=%s day=%s — retrying in %.1fs",
                         attempt + 1,
@@ -714,7 +799,30 @@ def _populate_instructional_package(
     excluded_ids: set[str],
     final_status: str,
     session_factory: Any = None,
+    quality_review_enabled: bool = True,
 ) -> TeacherAssistV2InstructionalPackage:
+    import time as _time_module
+    _generation_start_time = _time_module.monotonic()
+    _generation_started_at = _now().isoformat()
+
+    # ── Incremental generation setup ──────────────────────────────────────────
+    _pkg_regen_options: dict[str, Any] = (package.metadata_json or {}).get("regen_options") or {}
+    _regen_scope: str = _pkg_regen_options.get("regen_scope", "full")
+    _regen_artifact_types: set[str] = set(_pkg_regen_options.get("regen_artifact_types") or [])
+    # Hashes computed once and stored in the manifest; used for dirty-checking on future regens.
+    _curriculum_hash = compute_curriculum_hash(context)
+    _delivery_hash = compute_delivery_hash(package.instructional_delivery_profile)
+    # _planning_hash computed after Phase 0 stages complete (depends on their output)
+    _planning_hash: str = ""
+    # Track generation_source counts per artifact_type for the manifest
+    _artifact_source_counts: dict[str, dict[str, int]] = {}
+    # Track which Layer 1/2 cache entries were hit this run
+    _cache_layer_hits: dict[str, bool] = {"curriculum": False, "planning": False}
+
+    def _record_source(artifact_type: str, source: str) -> None:
+        counts = _artifact_source_counts.setdefault(artifact_type, {"ai": 0, "deterministic": 0, "cached": 0})
+        counts[source] = counts.get(source, 0) + 1
+
     provider_name = package.provider_name or "deterministic"
 
     # Guard against silent fallback: if this package was queued for real AI but the
@@ -757,14 +865,54 @@ def _populate_instructional_package(
 
     total_weeks = len(context["weeks"])
 
-    # ── Phase 0a: Curriculum Sequence Plan ────────────────────────────────────────────
-    # One AI call that reads the full curriculum and returns a fixed week-by-week
-    # teaching plan (themes, TEKS distribution, mentor texts). All artifact prompts
-    # are grounded in this plan so the pedagogical progression is consistent.
+    # Instructional day tracking — read from package metadata set during prepare phase.
+    _pkg_meta = package.metadata_json or {}
+    total_curriculum_days: int = _pkg_meta.get("total_curriculum_days") or total_weeks * 5
+    total_planned_days: int = _pkg_meta.get("total_planned_days") or total_curriculum_days
+    lost_instructional_days: int = _pkg_meta.get("lost_instructional_days") or 0
+    # Counter incremented for each daily lesson plan generated; stops at total_planned_days.
+    instructional_day_counter: int = 0
+
+    # ── Layer 1 cache: curriculum (check before Phase 0a) ─────────────────────────────
+    _curriculum_cache_key = compute_curriculum_cache_key(
+        context,
+        curriculum_prompt_version=ARTIFACT_PROMPT_VERSIONS.get("curriculum_sequence_plan", "v1"),
+    )
+    _curriculum_cache_result: dict[str, Any] | None = (
+        lookup_generation_cache(
+            db,
+            tenant_id=package.tenant_id,
+            cache_layer="curriculum",
+            cache_key=_curriculum_cache_key,
+        )
+        if provider_name in _real_ai_providers
+        else None
+    )
+
+    # ── Phase 0a: Curriculum Sequence Plan + Instructional Resource Bank ─────────────────
+    # One AI call that reads the full curriculum and returns:
+    #   - curriculum_sequence_plan: fixed week-by-week teaching plan (themes, TEKS, mentor texts)
+    #   - instructional_resource_bank: structured entries built via regex scan of full curriculum
+    #     text plus the AI-confirmed mentor_texts per week. No new OCR or AI calls.
+    # Both ground all downstream artifact prompts.
     curriculum_sequence_plan: dict[int, dict[str, Any]] = {}
-    if provider_name in _real_ai_providers:
+    instructional_resource_bank: dict[str, Any] = {}
+    if _curriculum_cache_result is not None:
+        curriculum_sequence_plan = _curriculum_cache_result.get("curriculum_sequence_plan") or {}
+        instructional_resource_bank = _curriculum_cache_result.get("instructional_resource_bank") or {}
+        _cache_layer_hits["curriculum"] = True
+        if instructional_resource_bank:
+            package.instructional_resource_bank_json = instructional_resource_bank
+            package.updated_at = _now()
+            db.flush()
+        logger.info(
+            "package=%s: Layer 1 curriculum cache HIT — skipped Phase 0a (%d weeks)",
+            package.id,
+            len(curriculum_sequence_plan),
+        )
+    elif provider_name in _real_ai_providers:
         try:
-            curriculum_sequence_plan = generate_curriculum_sequence_plan(
+            curriculum_sequence_plan, instructional_resource_bank = generate_curriculum_sequence_plan(
                 db,
                 settings=settings,
                 user=user,
@@ -772,12 +920,51 @@ def _populate_instructional_package(
                 package_id=package.id,
                 generation_context=context,
             )
+            package.instructional_resource_bank_json = instructional_resource_bank
+            package.updated_at = _now()
+            db.flush()
             logger.info(
-                "package=%s: curriculum sequence plan generated for %d weeks",
+                "package=%s: curriculum sequence plan generated for %d weeks; "
+                "resource bank contains %d entries (structured=%d, ai=%d, regex=%d)",
                 package.id, len(curriculum_sequence_plan),
+                (instructional_resource_bank.get("total_entries") or 0),
+                (instructional_resource_bank.get("extraction_summary") or {}).get("structured", 0),
+                (instructional_resource_bank.get("extraction_summary") or {}).get("ai_sequence_plan", 0),
+                (instructional_resource_bank.get("extraction_summary") or {}).get("regex_document", 0),
+            )
+            store_generation_cache(
+                db,
+                tenant_id=package.tenant_id,
+                cache_layer="curriculum",
+                cache_key=_curriculum_cache_key,
+                prompt_version=ARTIFACT_PROMPT_VERSIONS.get("curriculum_sequence_plan", "v1"),
+                model=None,
+                content={
+                    "curriculum_sequence_plan": curriculum_sequence_plan,
+                    "instructional_resource_bank": instructional_resource_bank,
+                },
             )
         except Exception:
             logger.exception("package=%s: curriculum sequence plan failed — proceeding without", package.id)
+
+    # ── Layer 2 cache: planning (check before Phase 0c) ───────────────────────────────
+    _planning_cache_key = compute_planning_cache_key(
+        _curriculum_cache_key,
+        context,
+        package.instructional_delivery_profile,
+        lost_instructional_days,
+        planning_prompt_version=ARTIFACT_PROMPT_VERSIONS.get("instructional_design_plan", "v1"),
+    )
+    _planning_cache_result: dict[str, Any] | None = (
+        lookup_generation_cache(
+            db,
+            tenant_id=package.tenant_id,
+            cache_layer="planning",
+            cache_key=_planning_cache_key,
+        )
+        if provider_name in _real_ai_providers
+        else None
+    )
 
     # ── Phase 0b + 0c: Instructional Design Plan ──────────────────────────────────────
     # Backward-designed instructional plan covering all weeks × subjects. Generated once
@@ -793,88 +980,169 @@ def _populate_instructional_package(
     # Phase 0b (district_anchors) runs inside generate_instructional_design_plan as
     # a pure-Python pre-step before any AI call. Phase 0c is the AI call itself.
     instructional_design_plan: dict[str, Any] = {}
-    if provider_name in _real_ai_providers:
-        try:
-            instructional_design_plan = generate_instructional_design_plan(
-                db,
-                settings=settings,
-                user=user,
-                tenant_id=uuid.UUID(str(package.tenant_id)),
-                package_id=package.id,
-                generation_context=context,
-                curriculum_sequence_plan=curriculum_sequence_plan,
-                excluded_ids=excluded_ids or None,
-            )
-            if instructional_design_plan:
-                package.instructional_design_plan_json = instructional_design_plan
+    validation_report: dict | None = None
+    strand_learning_journeys: dict[str, Any] = {}
+
+    if _planning_cache_result is not None:
+        # Layer 2 cache hit — load design plan + strand journeys, skip Phases 0c/0d/0f
+        instructional_design_plan = _planning_cache_result.get("instructional_design_plan") or {}
+        strand_learning_journeys = _planning_cache_result.get("strand_learning_journeys") or {}
+        _cache_layer_hits["planning"] = True
+        if instructional_design_plan:
+            package.instructional_design_plan_json = instructional_design_plan
+            package.updated_at = _now()
+        if strand_learning_journeys:
+            package.metadata_json = {
+                **(package.metadata_json or {}),
+                "strand_learning_journeys": strand_learning_journeys,
+            }
+            package.updated_at = _now()
+        if instructional_design_plan or strand_learning_journeys:
+            db.flush()
+        logger.info(
+            "package=%s: Layer 2 planning cache HIT — skipped Phases 0c/0d/0f",
+            package.id,
+        )
+    else:
+        # Layer 2 cache miss — run Phases 0c/0d/0f and store result
+        if provider_name in _real_ai_providers:
+            try:
+                instructional_design_plan = generate_instructional_design_plan(
+                    db,
+                    settings=settings,
+                    user=user,
+                    tenant_id=uuid.UUID(str(package.tenant_id)),
+                    package_id=package.id,
+                    generation_context=context,
+                    curriculum_sequence_plan=curriculum_sequence_plan,
+                    excluded_ids=excluded_ids or None,
+                    delivery_profile=package.instructional_delivery_profile,
+                )
+                if instructional_design_plan:
+                    package.instructional_design_plan_json = instructional_design_plan
+                    package.updated_at = _now()
+                    db.flush()
+                    logger.info(
+                        "package=%s: instructional design plan stored (%d weeks, schema_version=%s)",
+                        package.id,
+                        len(instructional_design_plan.get("weeks") or []),
+                        (instructional_design_plan.get("plan_meta") or {}).get("schema_version", "?"),
+                    )
+            except Exception:
+                logger.exception(
+                    "package=%s: instructional design plan failed — proceeding without; "
+                    "artifacts will fall back to curriculum_sequence_plan and pacing guide data",
+                    package.id,
+                )
+
+        # ── Phase 0d: Curriculum Validation & Instructional Quality Engine ────────────────
+        # Validation is the explicit owner of the plan until it returns the (possibly revised)
+        # final plan and the validation report. The plan lock is set only after this phase
+        # completes so the locked timestamp always reflects the post-validation, post-revision plan.
+        #
+        # The engine runs two tiers:
+        #   Tier 1 — Deterministic rules (R1-R19): structure, district fidelity, assessment
+        #             alignment, cognitive load heuristics. Pure Python. < 1s.
+        #   Tier 2 — AI pedagogical review: one call per subject evaluating learning
+        #             progression, backward design integrity, mastery realism, and engagement.
+        #
+        # Issues are separated into educational_issues (pedagogically unsound) and
+        # generation_issues (AI generation artifacts). Every issue carries an
+        # improvement_source tag (Prompt / Rule / Architecture / Teacher Input) so
+        # TeacherAssist can improve over time.
+        #
+        # On any failure, returns the original plan unchanged and proceeds with generation.
+        # Never blocks artifact generation.
+        if instructional_design_plan and provider_name in _real_ai_providers:
+            try:
+                validated_plan, validation_report = validate_and_revise_instructional_plan(
+                    db,
+                    settings=settings,
+                    user=user,
+                    tenant_id=uuid.UUID(str(package.tenant_id)),
+                    package_id=package.id,
+                    plan=instructional_design_plan,
+                    generation_context=context,
+                )
+                # If revision changed the plan, persist the updated version before locking
+                if validated_plan is not instructional_design_plan and validated_plan:
+                    instructional_design_plan = validated_plan
+                    package.instructional_design_plan_json = instructional_design_plan
+                package.instructional_validation_report_json = validation_report
                 package.updated_at = _now()
                 db.flush()
                 logger.info(
-                    "package=%s: instructional design plan stored (%d weeks, schema_version=%s)",
+                    "package=%s: validation complete — confidence=%s score=%.1f",
                     package.id,
-                    len(instructional_design_plan.get("weeks") or []),
-                    (instructional_design_plan.get("plan_meta") or {}).get("schema_version", "?"),
+                    validation_report.get("confidence_label", "?"),
+                    float(validation_report.get("overall_score") or 0),
                 )
-        except Exception:
-            logger.exception(
-                "package=%s: instructional design plan failed — proceeding without; "
-                "artifacts will fall back to curriculum_sequence_plan and pacing guide data",
-                package.id,
-            )
+            except Exception:
+                logger.exception(
+                    "package=%s: Phase 0d validation failed — proceeding with unvalidated plan",
+                    package.id,
+                )
 
-    # ── Phase 0d: Curriculum Validation & Instructional Quality Engine ────────────────
-    # Validation is the explicit owner of the plan until it returns the (possibly revised)
-    # final plan and the validation report. The plan lock is set only after this phase
-    # completes so the locked timestamp always reflects the post-validation, post-revision plan.
-    #
-    # The engine runs two tiers:
-    #   Tier 1 — Deterministic rules (R1-R19): structure, district fidelity, assessment
-    #             alignment, cognitive load heuristics. Pure Python. < 1s.
-    #   Tier 2 — AI pedagogical review: one call per subject evaluating learning
-    #             progression, backward design integrity, mastery realism, and engagement.
-    #
-    # Issues are separated into educational_issues (pedagogically unsound) and
-    # generation_issues (AI generation artifacts). Every issue carries an
-    # improvement_source tag (Prompt / Rule / Architecture / Teacher Input) so
-    # TeacherAssist can improve over time.
-    #
-    # On any failure, returns the original plan unchanged and proceeds with generation.
-    # Never blocks artifact generation.
-    if instructional_design_plan and provider_name in _real_ai_providers:
-        try:
-            validated_plan, validation_report = validate_and_revise_instructional_plan(
+        # ── Phase 0f: Strand Learning Journeys ──────────────────────────────────────────────
+        # Reads the validated design plan and stitches per-week entries into cross-week arcs,
+        # one per instructional strand. Resources are bound to objectives (not days).
+        # Cross-strand connections are only recorded when instructionally genuine.
+        # Stored in metadata_json["strand_learning_journeys"]; injected into every week_context
+        # so artifact generators know the journey position for each strand.
+        if instructional_design_plan and provider_name in _real_ai_providers:
+            try:
+                from oziebot_api.services.teacher_assist_v2.strand_learning_journeys import (
+                    generate_strand_learning_journeys,
+                )
+                strand_learning_journeys = generate_strand_learning_journeys(
+                    db,
+                    settings=settings,
+                    user=user,
+                    tenant_id=uuid.UUID(str(package.tenant_id)),
+                    package_id=package.id,
+                    generation_context=context,
+                    instructional_design_plan=instructional_design_plan,
+                    curriculum_sequence_plan=curriculum_sequence_plan,
+                    total_planned_days=total_planned_days,
+                )
+                if strand_learning_journeys:
+                    package.metadata_json = {
+                        **(package.metadata_json or {}),
+                        "strand_learning_journeys": strand_learning_journeys,
+                    }
+                    package.updated_at = _now()
+                    db.flush()
+                    logger.info(
+                        "package=%s: strand learning journeys generated for %d strand(s)",
+                        package.id,
+                        len((strand_learning_journeys.get("strand_journeys") or {})),
+                    )
+            except Exception:
+                logger.exception(
+                    "package=%s: strand learning journeys (Phase 0f) failed — proceeding without",
+                    package.id,
+                )
+
+        # Store Layer 2 planning cache after Phase 0f (only if we produced a design plan)
+        if instructional_design_plan and provider_name in _real_ai_providers:
+            store_generation_cache(
                 db,
-                settings=settings,
-                user=user,
-                tenant_id=uuid.UUID(str(package.tenant_id)),
-                package_id=package.id,
-                plan=instructional_design_plan,
-                generation_context=context,
-            )
-            # If revision changed the plan, persist the updated version before locking
-            if validated_plan is not instructional_design_plan and validated_plan:
-                instructional_design_plan = validated_plan
-                package.instructional_design_plan_json = instructional_design_plan
-            package.instructional_validation_report_json = validation_report
-            package.updated_at = _now()
-            db.flush()
-            logger.info(
-                "package=%s: validation complete — confidence=%s score=%.1f",
-                package.id,
-                validation_report.get("confidence_label", "?"),
-                float(validation_report.get("overall_score") or 0),
-            )
-        except Exception:
-            logger.exception(
-                "package=%s: Phase 0d validation failed — proceeding with unvalidated plan",
-                package.id,
+                tenant_id=package.tenant_id,
+                cache_layer="planning",
+                cache_key=_planning_cache_key,
+                prompt_version=ARTIFACT_PROMPT_VERSIONS.get("instructional_design_plan", "v1"),
+                model=None,
+                content={
+                    "instructional_design_plan": instructional_design_plan,
+                    "strand_learning_journeys": strand_learning_journeys,
+                },
             )
 
     # ── Phase 0e: Vocabulary Registry ────────────────────────────────────────────────
     # Build the per-(week, subject) vocabulary registry from the KDG and objective
     # descriptions. Used in Phase 1 to attach introduced_vocabulary to each assessment
     # artifact's instructional_contract, and in Phase 3b for vocabulary sequence checks.
-    # No AI call. Falls back to empty dict on any failure.
+    # No AI call. Falls back to empty dict on any failure. Always run — not cached.
     vocabulary_registry: dict[tuple[int, str], list[str]] = {}
     if instructional_design_plan:
         try:
@@ -890,6 +1158,14 @@ def _populate_instructional_package(
                 package.id,
             )
 
+    # Compute planning hash now that all Tier-1 stages are done.
+    # This hash captures the full planning context that Tier-2 artifacts depend on.
+    _planning_hash = compute_planning_hash(
+        curriculum_sequence_plan=curriculum_sequence_plan,
+        instructional_design_plan=instructional_design_plan,
+        strand_learning_journeys=strand_learning_journeys,
+    )
+
     # Build version bundle for per-artifact traceability. Stored in every artifact's
     # metadata_json["version"] so generation provenance is always inspectable.
     _plan_meta = (instructional_design_plan or {}).get("plan_meta") or {}
@@ -900,12 +1176,40 @@ def _populate_instructional_package(
         "artifact_generation_version": ARTIFACT_ENGINE_VERSION,
     }
 
-    # Inject the (validated, possibly revised) plan and version bundle into context so
-    # every artifact call can read them without receiving them as direct arguments.
+    # Inject the (validated, possibly revised) plan, resource bank, delivery profile, and
+    # version bundle into context so every artifact call can read them without direct args.
+    # Load the bank from the package record (in case Phase 0a stored a richer version than
+    # what was built in-memory, or this is a regeneration run where in-memory bank is empty).
+    _final_resource_bank = (
+        (package.instructional_resource_bank_json or {})
+        if (package.instructional_resource_bank_json and
+            (package.instructional_resource_bank_json.get("total_entries") or 0) >=
+            (instructional_resource_bank.get("total_entries") or 0))
+        else instructional_resource_bank
+    )
+    # Build resource alignment map — pre-commits one resource per (week, day, strand) so
+    # all artifacts on the same day always reference the same curriculum resource.
+    _resource_alignment_map: dict[str, Any] = {}
+    try:
+        _resource_alignment_map = build_resource_alignment_map(_final_resource_bank, context)
+        logger.info(
+            "package=%s: resource alignment map built for %d week(s)",
+            package.id,
+            _resource_alignment_map.get("total_weeks", 0),
+        )
+    except Exception:
+        logger.exception("package=%s: resource alignment map build failed — proceeding without", package.id)
+
     context = {
         **context,
         "instructional_design_plan": instructional_design_plan,
+        "instructional_resource_bank": _final_resource_bank,
+        "resource_alignment_map": _resource_alignment_map,
+        "instructional_delivery_profile": package.instructional_delivery_profile,
         "version_bundle": _version_bundle,
+        "total_curriculum_days": total_curriculum_days,
+        "lost_instructional_days": lost_instructional_days,
+        "total_planned_days": total_planned_days,
     }
 
     # Lock the plan: validation, revision, and vocabulary registry are complete.
@@ -915,6 +1219,10 @@ def _populate_instructional_package(
     package.updated_at = _now()
     db.flush()
 
+    # Tracks instructional strategy + image usage across the package to prevent repetition.
+    # Updated after each artifact in the sequential path; carries cross-week history.
+    variety_tracker = VarietyTracker()
+
     for week in context["weeks"]:
         week_label = week["title"]
         week_num = week["sequence_number"]
@@ -922,9 +1230,16 @@ def _populate_instructional_package(
 
         # Inject this week's curriculum plan so every artifact knows what to emphasize
         # and how this week connects to the weeks before and after it.
+        # variety_context reflects strategies already used in ALL prior weeks — gives the
+        # AI cross-week variety awareness. Updated per-artifact in the sequential path below.
         week_context = {
             **context,
             "week_curriculum_plan": curriculum_sequence_plan.get(week_num),
+            "variety_context": variety_tracker.build_variety_context(),
+            "strand_learning_journeys": strand_learning_journeys or None,
+            "total_curriculum_days": total_curriculum_days,
+            "total_planned_days": total_planned_days,
+            "lost_instructional_days": lost_instructional_days,
         }
 
         # ── PHASE 1: collect all primary artifact jobs for this week ──────────────
@@ -935,8 +1250,16 @@ def _populate_instructional_package(
         week_jobs: list[dict[str, Any]] = []
         artifacts_this_week: list[Any] = []  # collected in Phase 3 for Phase 3b
 
+        # Track per-week instructional day assignments so student decks use the same numbering.
+        _week_day_assignments: list[tuple[str, int]] = []  # (weekday_label, instructional_day_number)
+
         if "daily_lesson_plan" in outputs:
             for day_index, day_label in enumerate(WEEKDAY_LABELS):
+                instructional_day_counter += 1
+                if instructional_day_counter > total_planned_days:
+                    break
+                current_instructional_day = instructional_day_counter
+                _week_day_assignments.append((day_label, current_instructional_day))
                 day_focus = _DAILY_FOCUS_ROTATION[day_index % len(_DAILY_FOCUS_ROTATION)]
                 subject_blocks = []
                 objective_code = None
@@ -999,7 +1322,7 @@ def _populate_instructional_package(
                 _period_id = None
                 if teaching_order_keys and teaching_order_keys[0] in week_subjects:
                     _period_id = uuid.UUID(week_subjects[teaching_order_keys[0]]["period_id"])
-                stored_day_label = f"W{week_num}-{day_label}" if total_weeks > 1 else day_label
+                stored_day_label = f"ID-{current_instructional_day}"
                 _dlp_primary_name = (
                     subject_lookup[teaching_order_keys[0]]["subject_name"]
                     if teaching_order_keys else ""
@@ -1021,6 +1344,8 @@ def _populate_instructional_package(
                         "day_label": day_label,
                         "title_hint": deterministic["title"],
                         "introduced_vocabulary": None,
+                        "instructional_day_number": current_instructional_day,
+                        "total_planned_days": total_planned_days,
                     },
                     "deterministic": deterministic,
                     "persist_kwargs": {
@@ -1029,6 +1354,11 @@ def _populate_instructional_package(
                         "created_at": now,
                         "period_id": _period_id,
                         "day_label": stored_day_label,
+                        "metadata_override": {
+                            "instructional_day_number": current_instructional_day,
+                            "total_planned_days": total_planned_days,
+                            "week_reference": f"W{week_num}-{day_label}",
+                        },
                     },
                     "post_type": None,
                     "instructional_contract": _dlp_contract,
@@ -1096,8 +1426,14 @@ def _populate_instructional_package(
                     "instructional_contract": _ssd_contract,
                 })
 
-        # Student lesson decks — daily (one per weekday, primary subject, student-facing)
-        for day_index, day_label in enumerate(WEEKDAY_LABELS):
+        # Student lesson decks — daily (one per weekday, primary subject, student-facing).
+        # Mirrors the days actually generated for daily lesson plans; uses same ID numbering.
+        _daily_deck_day_iter: list[tuple[str, int | None]] = (
+            _week_day_assignments
+            if _week_day_assignments
+            else [(label, None) for label in WEEKDAY_LABELS]
+        )
+        for day_index, (day_label, _deck_id_num) in enumerate(_daily_deck_day_iter):
             primary_week_subject = (
                 week_subjects.get(teaching_order_keys[0]) if teaching_order_keys else None
             )
@@ -1128,7 +1464,7 @@ def _populate_instructional_package(
             _period_id = None
             if teaching_order_keys and teaching_order_keys[0] in week_subjects:
                 _period_id = uuid.UUID(week_subjects[teaching_order_keys[0]]["period_id"])
-            stored_daily_deck_label = f"W{week_num}-{day_label}" if total_weeks > 1 else day_label
+            stored_daily_deck_label = f"ID-{_deck_id_num}" if _deck_id_num else (f"W{week_num}-{day_label}" if total_weeks > 1 else day_label)
             _daily_deck_contract = extract_instructional_contract(
                 artifact_type="student_lesson_deck",
                 plan=instructional_design_plan or {},
@@ -1146,6 +1482,8 @@ def _populate_instructional_package(
                     "day_label": day_label,
                     "title_hint": deterministic["title"],
                     "introduced_vocabulary": None,
+                    "instructional_day_number": _deck_id_num,
+                    "total_planned_days": total_planned_days,
                 },
                 "deterministic": deterministic,
                 "persist_kwargs": {
@@ -1154,6 +1492,7 @@ def _populate_instructional_package(
                     "created_at": now,
                     "period_id": _period_id,
                     "day_label": stored_daily_deck_label,
+                    **({"metadata_override": {"instructional_day_number": _deck_id_num, "total_planned_days": total_planned_days}} if _deck_id_num else {}),
                 },
                 "post_type": "image_deck",
                 "instructional_contract": _daily_deck_contract,
@@ -1309,6 +1648,8 @@ def _populate_instructional_package(
                         title_hint=ai_p["title_hint"],
                         deterministic_content=job["deterministic"],
                         introduced_vocabulary=ai_p.get("introduced_vocabulary"),
+                        instructional_day_number=ai_p.get("instructional_day_number"),
+                        total_planned_days=ai_p.get("total_planned_days"),
                     )
                     futures[fut] = job_idx
             job_results: list[dict[str, Any]] = [job["deterministic"] for job in week_jobs]
@@ -1320,27 +1661,37 @@ def _populate_instructional_package(
                         "Unexpected future error for job %d — using deterministic fallback",
                         job_idx,
                     )
+            # Update tracker with all parallel results for cross-week variety awareness.
+            for job, result in zip(week_jobs, job_results):
+                variety_tracker.record_from_artifact(result, job["ai_params"]["artifact_type"])
         else:
             job_results = []
+            # Sequential path: update variety_context after each artifact so the NEXT
+            # job sees what strategies were just used — within-week variety awareness.
+            _seq_context = dict(week_context)
             for job in week_jobs:
                 ai_p = job["ai_params"]
-                job_results.append(
-                    _resolve_artifact_content(
-                        db,
-                        settings=settings,
-                        user=user,
-                        package=package,
-                        context=week_context,
-                        artifact_type=ai_p["artifact_type"],
-                        deterministic_content=job["deterministic"],
-                        week=ai_p["week"],
-                        subject_meta=ai_p.get("subject_meta"),
-                        week_subject=ai_p.get("week_subject"),
-                        day_label=ai_p.get("day_label"),
-                        title_hint=ai_p.get("title_hint"),
-                        introduced_vocabulary=ai_p.get("introduced_vocabulary"),
-                    )
+                result = _resolve_artifact_content(
+                    db,
+                    settings=settings,
+                    user=user,
+                    package=package,
+                    context=_seq_context,
+                    artifact_type=ai_p["artifact_type"],
+                    deterministic_content=job["deterministic"],
+                    week=ai_p["week"],
+                    subject_meta=ai_p.get("subject_meta"),
+                    week_subject=ai_p.get("week_subject"),
+                    day_label=ai_p.get("day_label"),
+                    title_hint=ai_p.get("title_hint"),
+                    introduced_vocabulary=ai_p.get("introduced_vocabulary"),
+                    instructional_day_number=ai_p.get("instructional_day_number"),
+                    total_planned_days=ai_p.get("total_planned_days"),
                 )
+                job_results.append(result)
+                # Update tracker after each result so next job gets fresh variety context.
+                variety_tracker.record_from_artifact(result, ai_p["artifact_type"])
+                _seq_context = {**_seq_context, "variety_context": variety_tracker.build_variety_context()}
 
         # ── PHASE 3: persist each artifact and run post-persist side effects ───────
         # Contract enforcement and student content prohibition scan run before each
@@ -1348,6 +1699,15 @@ def _populate_instructional_package(
         # and container restarts don't lose completed work.
         _version_bundle = context.get("version_bundle")
         for job, content in zip(week_jobs, job_results):
+            # Determine generation_source: "ai" if the content differs from the
+            # deterministic fallback; "deterministic" if AI was skipped/fell back.
+            _artifact_type_probe = job["persist_kwargs"]["artifact_type"]
+            _is_ai_content = (
+                provider_name in _real_ai_providers
+                and content is not job["deterministic"]
+                and content != job["deterministic"]
+            )
+            _gen_source = "ai" if _is_ai_content else "deterministic"
             # Enforce instructional contracts (exit ticket stem, quiz objectives, etc.)
             # and strip internal metadata from student-facing content before persisting.
             _contract = job.get("instructional_contract") or {}
@@ -1371,6 +1731,13 @@ def _populate_instructional_package(
                 _alignment = None
 
             sequence += 1
+            _provenance = build_artifact_provenance(
+                prompt_version=ARTIFACT_PROMPT_VERSIONS.get(_artifact_type_probe, "unknown"),
+                model=None,  # resolved at the AI call level; unknown here
+                generation_source=_gen_source,
+                dependency_hash=_planning_hash,
+            )
+            _record_source(_artifact_type_probe, _gen_source)
             artifact = persist_package_artifact(
                 db,
                 settings=settings,
@@ -1379,10 +1746,50 @@ def _populate_instructional_package(
                 sequence_number=sequence,
                 alignment_metadata=_alignment,
                 version_metadata=_version_bundle,
+                generation_provenance=_provenance,
                 **job["persist_kwargs"],
             )
             db.commit()
             artifacts_this_week.append(artifact)
+
+            # ── PHASE 3b: Instructional Quality Review ────────────────────────────
+            # AI instructional coach reviews the generated artifact across 8 quality
+            # dimensions and applies targeted auto-revisions to safe-to-change fields.
+            # Runs after persist so the teacher sees progressive results even if review fails.
+            if quality_review_enabled and artifact.artifact_type in _QUALITY_REVIEWABLE_TYPES:
+                try:
+                    _quality_report, _revised_content, _corrections = review_artifact(
+                        db,
+                        settings=settings,
+                        user=user,
+                        tenant_id=package.tenant_id,
+                        package_id=package.id,
+                        artifact_type=artifact.artifact_type,
+                        content=dict(artifact.content_json or {}),
+                        generation_context=week_context,
+                    )
+                    if _quality_report:
+                        attach_quality_report(
+                            db,
+                            artifact=artifact,
+                            quality_report=_quality_report,
+                            review_status=_quality_report.get("review_status", "ready"),
+                            revised_content=_revised_content,
+                            settings=settings,
+                        )
+                        db.commit()
+                        logger.info(
+                            "package=%s: quality review attached to artifact %s (score=%s, status=%s, corrections=%d)",
+                            package.id, artifact.id,
+                            _quality_report.get("overall_score"),
+                            _quality_report.get("review_status"),
+                            len(_corrections),
+                        )
+                except Exception:
+                    logger.exception(
+                        "package=%s: quality review phase failed for artifact %s — continuing without review",
+                        package.id, artifact.id,
+                    )
 
             post_type = job.get("post_type")
 
@@ -1399,7 +1806,22 @@ def _populate_instructional_package(
                             settings=settings,
                             api_key=pixabay_key,
                             grade_code=grade_code,
+                            variety_tracker=variety_tracker,
                         )
+                        # Regenerate preview_html to embed the fetched Pixabay images.
+                        db.flush()
+                        _fetched = (
+                            db.query(TeacherAssistV2SlideVisualAsset)
+                            .filter_by(artifact_id=artifact.id)
+                            .filter(TeacherAssistV2SlideVisualAsset.visual_generation_status == "fetched")
+                            .all()
+                        )
+                        _image_map = {row.slide_id: row.source_url for row in _fetched if row.source_url}
+                        if _image_map:
+                            artifact.preview_html = render_slide_deck_html(
+                                artifact.content_json or {},
+                                image_map=_image_map,
+                            )
                     except Exception:
                         logger.exception("Pixabay image fetch failed for artifact %s", artifact.id)
 
@@ -1539,14 +1961,42 @@ def _populate_instructional_package(
             assignment_content=assignment_content,
         )
 
-    package.status = final_status
-    package.metadata_json = _build_package_metadata(
-        context=context,
-        stored_status=final_status,
-        plan_start_date=package.plan_start_date,
-        plan_end_date=package.plan_end_date,
-        generation_state="completed",
+    _generation_completed_at = _now().isoformat()
+    _generation_duration = round(_time_module.monotonic() - _generation_start_time, 1)
+
+    # Build generation manifest: cost by feature + artifact source counts.
+    from oziebot_api.services.teacher_assist.ai_usage import get_package_ai_cost_by_feature
+    _cost_by_feature = get_package_ai_cost_by_feature(db, package_id=package.id)
+    _generation_manifest = build_generation_manifest(
+        generation_mode=_regen_scope,
+        curriculum_hash=_curriculum_hash,
+        planning_hash=_planning_hash,
+        delivery_hash=_delivery_hash,
+        prompt_versions=ARTIFACT_PROMPT_VERSIONS,
+        cost_cents_by_feature=_cost_by_feature,
+        artifact_source_counts=_artifact_source_counts,
+        cache_layer_hits=_cache_layer_hits,
     )
+
+    package.status = final_status
+    # Preserve fields written by Phase 0f (strand_learning_journeys) plus new manifest.
+    _existing_meta = package.metadata_json or {}
+    package.metadata_json = {
+        **_build_package_metadata(
+            context=context,
+            stored_status=final_status,
+            plan_start_date=package.plan_start_date,
+            plan_end_date=package.plan_end_date,
+            generation_state="completed",
+            generation_started_at=_generation_started_at,
+            generation_completed_at=_generation_completed_at,
+            generation_duration_seconds=_generation_duration,
+        ),
+        # Preserve Phase 0f output written before this call
+        **({"strand_learning_journeys": _existing_meta["strand_learning_journeys"]}
+           if "strand_learning_journeys" in _existing_meta else {}),
+        "generation_manifest": _generation_manifest,
+    }
     package.updated_at = _now()
     db.flush()
 
@@ -1636,6 +2086,369 @@ def run_instructional_package_generation_job(
         db.close()
 
 
+def claim_and_run_next_queued_v2_package(engine: Any, *, settings: "Settings") -> uuid.UUID | None:
+    """Claim one queued v2 package and run its generation. Returns the package ID or None."""
+    from sqlalchemy import text as _text
+
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    db = session_factory()
+    package_id: uuid.UUID | None = None
+    context: dict[str, Any] = {}
+    try:
+        # Claim one queued package atomically (skip locked = don't wait for other workers)
+        row = db.execute(
+            _text(
+                "UPDATE teacher_assist_v2_instructional_packages "
+                "SET metadata_json = jsonb_set(metadata_json::jsonb, '{generation_state}', '\"running\"')::json, "
+                "    updated_at = NOW() "
+                "WHERE id = ("
+                "  SELECT id FROM teacher_assist_v2_instructional_packages "
+                "  WHERE status = 'processing' "
+                "    AND metadata_json->>'generation_state' = 'queued' "
+                "  ORDER BY created_at ASC "
+                "  LIMIT 1 "
+                "  FOR UPDATE SKIP LOCKED "
+                ") "
+                "RETURNING id"
+            )
+        ).fetchone()
+        if row is None:
+            db.rollback()
+            return None
+        package_id = row[0]
+        db.commit()
+    except Exception:
+        db.rollback()
+        db.close()
+        logger.exception("v2-worker: failed to claim queued package")
+        return None
+
+    # Re-open a fresh session to run the job
+    db.close()
+    db = session_factory()
+    try:
+        package = db.get(TeacherAssistV2InstructionalPackage, package_id)
+        if package is None:
+            return None
+        user = db.get(User, package.teacher_user_id)
+        if user is None:
+            return None
+
+        pkg_meta = package.metadata_json or {}
+        excluded_ids = set(pkg_meta.get("job_excluded_ids") or [])
+        final_status = (
+            "active"
+            if package.plan_start_date <= date.today() <= package.plan_end_date
+            else "generated"
+        )
+
+        context = build_teacher_planning_generation_context(
+            db,
+            user=user,
+            week_start=package.week_start,
+            week_end=package.week_end,
+            teaching_order=[uuid.UUID(x) for x in (package.teaching_order_json or [])],
+            selected_outputs=list(package.selected_outputs_json or []),
+            settings=settings,
+        )
+
+        # Dispatch: full generation vs. partial regen
+        _regen_opts = pkg_meta.get("regen_options") or {}
+        _regen_scope = _regen_opts.get("regen_scope", "full")
+        _quality_review_enabled: bool = bool(pkg_meta.get("quality_review_enabled", True))
+
+        if _regen_scope == "quality_review":
+            _run_quality_review_regen(
+                db,
+                settings=settings,
+                user=user,
+                package=package,
+                context=context,
+                artifact_types=_regen_opts.get("regen_artifact_types") or None,
+            )
+        elif _regen_scope == "artifact_types":
+            _run_artifact_type_regen(
+                db,
+                settings=settings,
+                user=user,
+                package=package,
+                context=context,
+                regen_artifact_types=set(_regen_opts.get("regen_artifact_types") or []),
+                session_factory=session_factory,
+            )
+        else:
+            # "full" or "dirty" (dirty falls back to full for now)
+            _populate_instructional_package(
+                db,
+                settings=settings,
+                user=user,
+                package=package,
+                context=context,
+                teaching_order=[str(x) for x in (package.teaching_order_json or [])],
+                outputs=list(package.selected_outputs_json or []),
+                excluded_ids=excluded_ids,
+                final_status=final_status,
+                session_factory=session_factory,
+                quality_review_enabled=_quality_review_enabled,
+            )
+        db.commit()
+        logger.info("v2-worker: package=%s %s complete", package_id, _regen_scope)
+    except Exception as exc:
+        db.rollback()
+        try:
+            package = db.get(TeacherAssistV2InstructionalPackage, package_id)
+            if package is not None:
+                mark_instructional_package_generation_failed(
+                    db,
+                    package=package,
+                    context=context,
+                    error_message=str(exc),
+                )
+                db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("v2-worker: failed to mark package=%s as failed", package_id)
+        logger.exception("v2-worker: package=%s generation failed", package_id)
+    finally:
+        db.close()
+
+    return package_id
+
+
+def recover_stale_v2_running_packages(db: Any) -> None:
+    """Mark any packages stuck in generation_state='running' as failed.
+
+    Called at worker startup: a 'running' package at startup has no live worker behind it.
+    """
+    from sqlalchemy import text as _text
+    try:
+        result = db.execute(
+            _text(
+                "UPDATE teacher_assist_v2_instructional_packages "
+                "SET status = 'failed', updated_at = NOW(), "
+                "    metadata_json = jsonb_set(metadata_json::jsonb, '{generation_state}', '\"abandoned\"')::json "
+                "WHERE status = 'processing' "
+                "  AND metadata_json->>'generation_state' = 'running' "
+                "RETURNING id"
+            )
+        )
+        recovered = result.fetchall()
+        db.commit()
+        if recovered:
+            ids = [str(r[0]) for r in recovered]
+            logger.warning("v2-worker startup: marked %d abandoned package(s) as failed: %s", len(ids), ", ".join(ids))
+    except Exception:
+        db.rollback()
+        logger.exception("v2-worker startup: failed to recover abandoned packages")
+
+
+def queue_package_partial_regen(
+    db: Session,
+    *,
+    package: TeacherAssistV2InstructionalPackage,
+    regen_scope: str,
+    regen_artifact_types: list[str] | None = None,
+) -> None:
+    """Mark an existing completed package for partial regeneration.
+
+    Sets generation_state='queued' so the worker picks it up.  The regen_options
+    dict instructs the worker which artifacts to skip vs. regenerate.
+    """
+    from oziebot_api.services.teacher_assist_v2.planning_constants import REGEN_SCOPES
+    if regen_scope not in REGEN_SCOPES:
+        raise ValueError(f"Invalid regen_scope '{regen_scope}'. Valid: {sorted(REGEN_SCOPES)}")
+
+    # Preserve existing metadata; update only generation control fields.
+    existing_meta = dict(package.metadata_json or {})
+    existing_meta["generation_state"] = "queued"
+    existing_meta["regen_options"] = {
+        "regen_scope": regen_scope,
+        "regen_artifact_types": list(regen_artifact_types or []),
+    }
+    existing_meta["status_detail"] = PACKAGE_PROCESSING_MESSAGE
+    # Clear any previous error
+    existing_meta.pop("generation_error", None)
+
+    package.status = "processing"
+    package.metadata_json = existing_meta
+    package.updated_at = _now()
+    db.flush()
+    logger.info(
+        "package=%s: queued for partial regen — scope=%s artifact_types=%s",
+        package.id, regen_scope, regen_artifact_types,
+    )
+
+
+def _run_quality_review_regen(
+    db: Session,
+    *,
+    settings: Settings,
+    user: User,
+    package: TeacherAssistV2InstructionalPackage,
+    context: dict[str, Any],
+    artifact_types: list[str] | None = None,
+) -> None:
+    """Re-run quality review for all (or specified) artifacts in the package without
+    regenerating the artifact content itself."""
+    artifacts = (
+        db.scalars(
+            select(TeacherAssistV2InstructionalPackageArtifact).where(
+                TeacherAssistV2InstructionalPackageArtifact.package_id == package.id
+            )
+        ).all()
+    )
+    week_context = {**context, "strand_learning_journeys": None}
+    reviewed = 0
+    for artifact in artifacts:
+        if artifact_types and artifact.artifact_type not in artifact_types:
+            continue
+        if artifact.artifact_type not in _QUALITY_REVIEWABLE_TYPES:
+            continue
+        try:
+            _quality_report, _revised_content, _ = review_artifact(
+                db,
+                settings=settings,
+                user=user,
+                tenant_id=package.tenant_id,
+                package_id=package.id,
+                artifact_type=artifact.artifact_type,
+                content=dict(artifact.content_json or {}),
+                generation_context=week_context,
+            )
+            if _quality_report:
+                attach_quality_report(
+                    db,
+                    artifact=artifact,
+                    quality_report=_quality_report,
+                    review_status=_quality_report.get("review_status", "ready"),
+                    revised_content=_revised_content,
+                    settings=settings,
+                )
+                db.commit()
+                reviewed += 1
+        except Exception:
+            logger.exception(
+                "package=%s: quality-review regen failed for artifact %s", package.id, artifact.id
+            )
+
+    final_status = (
+        "active" if package.plan_start_date <= date.today() <= package.plan_end_date else "generated"
+    )
+    from oziebot_api.services.teacher_assist.ai_usage import get_package_ai_cost_by_feature
+    _cost_by_feature = get_package_ai_cost_by_feature(db, package_id=package.id)
+    existing_meta = dict(package.metadata_json or {})
+    existing_manifest = existing_meta.get("generation_manifest") or {}
+    existing_manifest["cost_cents_by_feature"] = _cost_by_feature
+    existing_manifest["total_generation_cost_cents"] = sum(_cost_by_feature.values())
+    existing_meta["generation_manifest"] = existing_manifest
+    existing_meta["generation_state"] = "completed"
+    existing_meta.pop("regen_options", None)
+    package.status = final_status
+    package.metadata_json = existing_meta
+    package.updated_at = _now()
+    db.flush()
+    logger.info("package=%s: quality-review regen complete — reviewed %d artifact(s)", package.id, reviewed)
+
+
+def _run_artifact_type_regen(
+    db: Session,
+    *,
+    settings: Settings,
+    user: User,
+    package: TeacherAssistV2InstructionalPackage,
+    context: dict[str, Any],
+    regen_artifact_types: set[str],
+    session_factory: Any = None,
+) -> None:
+    """Delete existing artifacts of the specified types, then regenerate only those.
+
+    Phase 0 (design plan, resource bank, etc.) is skipped: the existing plan stored
+    in the package record is loaded directly into context.  Only the specified
+    Tier-2 artifact slots are re-generated; everything else is untouched.
+    """
+    if not regen_artifact_types:
+        return
+
+    # Load existing plan from the package record to skip Phase 0 AI calls.
+    _existing_idp = package.instructional_design_plan_json or {}
+    _existing_irb = package.instructional_resource_bank_json or {}
+    _existing_meta = package.metadata_json or {}
+    _existing_slj = _existing_meta.get("strand_learning_journeys") or {}
+
+    # Load locked artifact types upfront. Any type with at least one locked artifact
+    # is entirely excluded from deletion and regeneration — the developer must unlock
+    # individual artifacts before their type can be regenerated.
+    from sqlalchemy import text as _text
+    _locked_type_rows = db.execute(
+        _text(
+            "SELECT DISTINCT artifact_type FROM teacher_assist_v2_instructional_package_artifacts "
+            "WHERE package_id = :pkg_id "
+            "AND COALESCE((metadata_json->>'dev_locked')::boolean, false) = true"
+        ),
+        {"pkg_id": str(package.id)},
+    ).fetchall()
+    _locked_types: set[str] = {str(row[0]) for row in _locked_type_rows}
+    _effective_regen_types = regen_artifact_types - _locked_types
+
+    if _locked_types & regen_artifact_types:
+        logger.info(
+            "package=%s: skipping locked artifact types from regen — locked=%s",
+            package.id, sorted(_locked_types & regen_artifact_types),
+        )
+
+    # Delete unlocked artifacts of the effective (non-locked) types so they get fresh records.
+    for _atype in _effective_regen_types:
+        db.execute(
+            _sa_delete(TeacherAssistV2InstructionalPackageArtifact).where(
+                TeacherAssistV2InstructionalPackageArtifact.package_id == package.id,
+                TeacherAssistV2InstructionalPackageArtifact.artifact_type == _atype,
+            )
+        )
+    db.flush()
+    logger.info(
+        "package=%s: deleted existing artifacts for regen — types=%s",
+        package.id, sorted(_effective_regen_types),
+    )
+
+    # Inject pre-computed plan into context so artifact generators use the same plan.
+    context = {
+        **context,
+        "instructional_design_plan": _existing_idp,
+        "instructional_resource_bank": _existing_irb,
+    }
+
+    # Restrict selected_outputs to the effective (non-locked) types being regenerated.
+    outputs_for_regen = [o for o in (package.selected_outputs_json or []) if o in _effective_regen_types]
+    if not outputs_for_regen:
+        logger.warning("package=%s: no matching outputs for regen_artifact_types=%s", package.id, regen_artifact_types)
+        return
+
+    excluded_ids = set(_existing_meta.get("job_excluded_ids") or [])
+    final_status = (
+        "active" if package.plan_start_date <= date.today() <= package.plan_end_date else "generated"
+    )
+
+    # Override regen_options in package metadata so _populate_instructional_package
+    # records the correct generation_mode in the manifest.
+    _regen_meta = dict(_existing_meta)
+    _regen_meta["regen_options"] = {"regen_scope": "artifact_types", "regen_artifact_types": sorted(regen_artifact_types)}
+    package.metadata_json = _regen_meta
+
+    _populate_instructional_package(
+        db,
+        settings=settings,
+        user=user,
+        package=package,
+        context=context,
+        teaching_order=[str(x) for x in (package.teaching_order_json or [])],
+        outputs=outputs_for_regen,
+        excluded_ids=excluded_ids,
+        final_status=final_status,
+        session_factory=session_factory,
+    )
+    logger.info("package=%s: artifact_type regen complete — types=%s", package.id, sorted(regen_artifact_types))
+
+
 def generate_instructional_package(
     db: Session,
     *,
@@ -1648,6 +2461,8 @@ def generate_instructional_package(
     plan_start_date: date | None = None,
     plan_end_date: date | None = None,
     excluded_pacing_material_ids: list[uuid.UUID] | None = None,
+    instructional_delivery_profile: dict | None = None,
+    lost_instructional_days: int = 0,
 ) -> TeacherAssistV2InstructionalPackage:
     package, context, outputs, excluded_ids, final_status = prepare_instructional_package_generation(
         db,
@@ -1660,6 +2475,8 @@ def generate_instructional_package(
         plan_start_date=plan_start_date,
         plan_end_date=plan_end_date,
         excluded_pacing_material_ids=excluded_pacing_material_ids,
+        instructional_delivery_profile=instructional_delivery_profile,
+        lost_instructional_days=lost_instructional_days,
     )
     return _populate_instructional_package(
         db,

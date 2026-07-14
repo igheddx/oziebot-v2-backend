@@ -280,7 +280,7 @@ def enforce_instructional_contract(
                     if isinstance(s, dict) and (
                         (s.get("slide_type") or "").lower().replace(" ", "_") == "exit_ticket"
                         or "exit" in (s.get("title") or "").lower()
-                        or (s.get("engagement") or {}).get("type", "").lower().replace(" ", "_") == "exit_ticket"
+                        or ((s.get("engagement") or {}).get("type") or "").lower().replace(" ", "_") == "exit_ticket"
                     )
                 ]
                 stem_present = any(

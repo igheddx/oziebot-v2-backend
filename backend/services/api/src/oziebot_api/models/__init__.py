@@ -175,6 +175,7 @@ from oziebot_api.models.teacher_assist_v2_gradebook_record_revision import Teach
 from oziebot_api.models.teacher_assist_v2_gradebook_record import TeacherAssistV2GradebookRecord
 from oziebot_api.models.teacher_assist_v2_document_extraction import TeacherAssistV2DocumentExtraction
 from oziebot_api.models.teacher_assist_v2_slide_visual_asset import TeacherAssistV2SlideVisualAsset
+from oziebot_api.models.teacher_assist_v2_generation_cache import TeacherAssistV2GenerationCache
 from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssistV2StudentSubmission
 from oziebot_api.models.teacher_assist_v2_submission_batch import TeacherAssistV2SubmissionBatch
 from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
@@ -359,6 +360,7 @@ __all__ = [
     "TeacherAssistV2GradebookRecord",
     "TeacherAssistV2DocumentExtraction",
     "TeacherAssistV2SlideVisualAsset",
+    "TeacherAssistV2GenerationCache",
     "TeacherAssistV2StudentSubmission",
     "TeacherAssistV2SubmissionBatch",
     "EducationCurriculumResource",

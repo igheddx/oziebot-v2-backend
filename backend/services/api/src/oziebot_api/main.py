@@ -68,6 +68,49 @@ def create_app() -> FastAPI:
         cached_settings.cache_clear()
         cached_settings()
 
+    @app.on_event("startup")
+    def _recover_stuck_packages() -> None:
+        """Mark any packages stuck in a non-worker generation state as 'failed'.
+
+        Packages with generation_state='queued' are waiting for the teacher-assist-worker
+        and must NOT be failed here — the worker will pick them up. Only fail packages
+        that were actively 'running' inside a previous API process (legacy BackgroundTask
+        pattern) or have an unknown state.
+        """
+        from sqlalchemy import text
+
+        from oziebot_api.db.session import make_session_factory
+
+        try:
+            factory = make_session_factory(settings)
+            if factory is None:
+                return
+            db = factory()
+            try:
+                result = db.execute(
+                    text(
+                        "UPDATE teacher_assist_v2_instructional_packages "
+                        "SET status = 'failed', updated_at = NOW() "
+                        "WHERE status = 'processing' "
+                        "  AND (metadata_json->>'generation_state' IS NULL "
+                        "       OR metadata_json->>'generation_state' NOT IN ('queued', 'running', 'completed')) "
+                        "RETURNING id"
+                    )
+                )
+                recovered = result.fetchall()
+                db.commit()
+                if recovered:
+                    ids = [str(r[0]) for r in recovered]
+                    logger.warning(
+                        "startup_recovery: marked %d stuck package(s) as failed: %s",
+                        len(ids),
+                        ", ".join(ids),
+                    )
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("startup_recovery: failed to recover stuck packages")
+
     @app.middleware("http")
     async def observe_request(request, call_next):
         incoming_request_id = request.headers.get(REQUEST_ID_HEADER)

@@ -97,13 +97,15 @@ def list_teacher_instructional_packages(
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> list[dict[str, Any]]:
-    _require_planning_ready(db, user=user)
+    is_root_admin = bool(getattr(user, "is_root_admin", False))
+    if not is_root_admin:
+        _require_planning_ready(db, user=user)
+    base_filter = [TeacherAssistV2InstructionalPackage.status != "archived"]
+    if not is_root_admin:
+        base_filter.append(TeacherAssistV2InstructionalPackage.teacher_user_id == user.id)
     stmt = (
         select(TeacherAssistV2InstructionalPackage)
-        .where(
-            TeacherAssistV2InstructionalPackage.teacher_user_id == user.id,
-            TeacherAssistV2InstructionalPackage.status != "archived",
-        )
+        .where(*base_filter)
         .options(selectinload(TeacherAssistV2InstructionalPackage.artifacts))
         .order_by(TeacherAssistV2InstructionalPackage.created_at.desc())
     )
@@ -218,11 +220,12 @@ def get_instructional_package_detail_enriched(
     package_id: uuid.UUID,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
+    _is_root_admin = bool(getattr(user, "is_root_admin", False))
+    _pkg_filter = [TeacherAssistV2InstructionalPackage.id == package_id]
+    if not _is_root_admin:
+        _pkg_filter.append(TeacherAssistV2InstructionalPackage.teacher_user_id == user.id)
     row = db.scalars(
-        select(TeacherAssistV2InstructionalPackage).where(
-            TeacherAssistV2InstructionalPackage.id == package_id,
-            TeacherAssistV2InstructionalPackage.teacher_user_id == user.id,
-        )
+        select(TeacherAssistV2InstructionalPackage).where(*_pkg_filter)
     ).one_or_none()
     if row is None:
         raise LookupError("Instructional package not found")
@@ -234,24 +237,30 @@ def get_instructional_package_detail_enriched(
         plan_end_date=row.plan_end_date,
     )
 
-    review = build_planning_review_context(
-        db,
-        user=user,
-        week_start=row.week_start,
-        week_end=row.week_end,
-        settings=settings,
-    )
-    supplemental = list_planning_supplemental_materials(
-        db,
-        user=user,
-        week_start=row.week_start,
-        week_end=row.week_end,
-        settings=settings,
-        package_id=row.id,
-    )
-    plan_start, plan_end = resolve_default_plan_dates(
-        db, user=user, week_start=row.week_start, week_end=row.week_end
-    )
+    if _is_root_admin:
+        review = {"weeks": []}
+        supplemental: list = []
+        plan_start = row.plan_start_date
+        plan_end = row.plan_end_date
+    else:
+        review = build_planning_review_context(
+            db,
+            user=user,
+            week_start=row.week_start,
+            week_end=row.week_end,
+            settings=settings,
+        )
+        supplemental = list_planning_supplemental_materials(
+            db,
+            user=user,
+            week_start=row.week_start,
+            week_end=row.week_end,
+            settings=settings,
+            package_id=row.id,
+        )
+        plan_start, plan_end = resolve_default_plan_dates(
+            db, user=user, week_start=row.week_start, week_end=row.week_end
+        )
 
     _seen_material_ids: set[str] = set()
     district_materials = []

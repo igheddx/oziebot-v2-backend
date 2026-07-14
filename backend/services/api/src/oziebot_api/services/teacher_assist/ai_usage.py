@@ -75,6 +75,27 @@ def record_teacher_assist_ai_usage(
     return event
 
 
+def get_package_ai_cost_by_feature(db: Session, *, package_id: uuid.UUID) -> dict[str, int]:
+    """Return estimated AI cost in cents, grouped by feature, for a specific package.
+
+    Usage events store package_id in metadata_json->>'package_id'. We filter on
+    that JSON path so we only count events produced during this package's generation.
+    """
+    from sqlalchemy import text as _text
+    rows = db.execute(
+        _text(
+            "SELECT feature, estimated_cost_cents "
+            "FROM teacher_assist_ai_usage_events "
+            "WHERE metadata_json->>'package_id' = :pkg_id"
+        ),
+        {"pkg_id": str(package_id)},
+    ).fetchall()
+    by_feature: dict[str, int] = {}
+    for feature, cost in rows:
+        by_feature[feature] = by_feature.get(feature, 0) + int(cost or 0)
+    return by_feature
+
+
 def get_teacher_assist_ai_usage_summary(db: Session, *, hours: int = 24) -> dict[str, Any]:
     since = datetime.now(UTC) - timedelta(hours=max(1, hours))
     rows = db.scalars(

@@ -73,6 +73,21 @@ class TeacherAssistV2InstructionalPackage(Base):
     instructional_validation_report_json: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB(), nullable=True
     )
+    # Structured index of every curriculum resource extracted from attached PDFs, pacing
+    # guide structured fields, and Phase 0a AI-confirmed mentor texts. Persisted here so
+    # single-artifact regeneration can reference the same bank without re-running Phase 0a.
+    # Schema: {"version": 2, "entries": [...], "extraction_summary": {...}}
+    instructional_resource_bank_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(), nullable=True
+    )
+    # Classroom delivery constraint — controls how instructional strands are distributed
+    # across available time. Separates "how instruction is delivered" from "what students
+    # learn". Null → AI Optimized (AI decides distribution; existing behavior preserved).
+    # Set at package creation; consumed by Phase 0c and all artifact generators.
+    # Structure: {"mode": str, "strands": [{"strand_name", "minutes_per_day", "days"}]}
+    instructional_delivery_profile: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(), nullable=True
+    )
     # Cross-artifact alignment report produced by Phase 3b (per week, after all artifacts
     # for that week are committed). Accumulates week-by-week: {"weeks": [{...}, {...}]}.
     # Each week entry contains five deterministic checks: exit_ticket_stem_compliance,

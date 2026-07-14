@@ -17,6 +17,10 @@ from oziebot_api.services.teacher_assist.export_generation import (
 from oziebot_api.services.teacher_assist.workflow_service import (
     process_next_teacher_assist_workflow_with_engine,
 )
+from oziebot_api.services.teacher_assist_v2.instructional_package_generation import (
+    claim_and_run_next_queued_v2_package,
+    recover_stale_v2_running_packages,
+)
 from oziebot_common.health import install_shutdown_handlers, start_health_server
 
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +44,13 @@ def main() -> None:
     poll_seconds = max(0.1, float(settings.teacher_assist_worker_poll_interval_seconds))
     log.info("teacher-assist-worker started poll_interval=%s", poll_seconds)
 
+    # Recover any packages that were mid-generation when the worker last died
+    recovery_session = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)()
+    try:
+        recover_stale_v2_running_packages(recovery_session)
+    finally:
+        recovery_session.close()
+
     while not stop_event.is_set():
         recovery_session = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)()
         try:
@@ -47,11 +58,16 @@ def main() -> None:
             recovery_session.commit()
         finally:
             recovery_session.close()
-        claimed_id = process_next_teacher_assist_extraction_job_with_engine(
-            engine,
-            settings=settings,
-            worker_name="teacher-assist-worker",
-        )
+
+        # V2 package generation takes priority over v1 jobs (long-running, user-facing)
+        claimed_id = claim_and_run_next_queued_v2_package(engine, settings=settings)
+
+        if claimed_id is None:
+            claimed_id = process_next_teacher_assist_extraction_job_with_engine(
+                engine,
+                settings=settings,
+                worker_name="teacher-assist-worker",
+            )
         if claimed_id is None:
             claimed_id = process_next_teacher_assist_export_with_engine(
                 engine,

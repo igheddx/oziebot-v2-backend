@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 import time
 from typing import Any
 
@@ -14,6 +16,42 @@ from oziebot_api.services.teacher_assist.openai_pricing import estimate_openai_c
 
 # Retry delays (seconds) for rate-limit (429) responses.
 _RATE_LIMIT_RETRY_DELAYS = (5.0, 15.0, 30.0)
+
+
+class _TokenBucket:
+    """Thread-safe token bucket that enforces a maximum requests-per-minute rate."""
+
+    def __init__(self, rate_per_minute: float) -> None:
+        self._rate = rate_per_minute / 60.0  # tokens per second
+        self._capacity = rate_per_minute      # max burst = 1 full minute of quota
+        self._tokens = float(rate_per_minute) # start full so first requests aren't delayed
+        self._last = time.monotonic()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        """Block the calling thread until a request token is available."""
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                self._tokens = min(
+                    self._capacity,
+                    self._tokens + (now - self._last) * self._rate,
+                )
+                self._last = now
+                if self._tokens >= 1.0:
+                    self._tokens -= 1.0
+                    return
+                wait = (1.0 - self._tokens) / self._rate
+            time.sleep(min(wait, 1.0))
+
+
+# Proactive rate limiter shared across all threads.
+# Default 500 RPM — well below Gemini paid-tier limit (4000 RPM) but high enough
+# that it never throttles natural throughput (5 workers × 15s/call ≈ 20 RPM).
+# Acts purely as a safety net against runaway bursts.
+# Set TEACHER_ASSIST_AI_RATE_LIMIT_RPM=0 in .env to disable entirely.
+_rpm = float(os.environ.get("TEACHER_ASSIST_AI_RATE_LIMIT_RPM", "500"))
+_proactive_limiter: _TokenBucket | None = _TokenBucket(_rpm) if _rpm > 0 else None
 
 
 def execute_openai_json_completion(
@@ -79,8 +117,14 @@ def execute_openai_json_completion(
             with httpx.Client(timeout=timeout_seconds) as client:
                 # Retry on 429 rate-limit with back-off before giving up.
                 for rate_delay in (*_RATE_LIMIT_RETRY_DELAYS, None):
+                    if _proactive_limiter is not None:
+                        _proactive_limiter.acquire()
                     response = client.post(url, headers=headers, json=request_body)
-                    if response.status_code == 429 and rate_delay is not None:
+                    if response.status_code in (429, 503) and rate_delay is not None:
+                        # Fast-fail for permanent billing errors — retrying will never work.
+                        _body = response.text.lower()
+                        if "credits are depleted" in _body or "prepayment credits" in _body or "billing" in _body:
+                            response.raise_for_status()
                         time.sleep(rate_delay)
                         continue
                     response.raise_for_status()
