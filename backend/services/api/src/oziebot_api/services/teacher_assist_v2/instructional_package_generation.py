@@ -6,7 +6,7 @@ import logging
 import re
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -104,7 +104,6 @@ from oziebot_api.services.teacher_assist_v2.generation_cache import (
     compute_delivery_hash,
     compute_planning_cache_key,
     compute_planning_hash,
-    is_artifact_stale,
     lookup_generation_cache,
     store_generation_cache,
 )

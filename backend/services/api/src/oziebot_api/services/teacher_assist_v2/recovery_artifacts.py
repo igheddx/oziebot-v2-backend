@@ -337,7 +337,7 @@ def _build_deterministic_content(
             "checks_for_understanding": [
                 "After modeling: Who can tell me the first step?",
                 "Mid-practice: Show me your work so far.",
-                f"Before closure: What does success look like?",
+                "Before closure: What does success look like?",
             ],
             "teacher_note": (
                 "This replaces the original guided practice. "

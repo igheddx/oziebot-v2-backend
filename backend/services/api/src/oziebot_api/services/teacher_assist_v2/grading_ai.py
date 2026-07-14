@@ -205,7 +205,7 @@ def generate_mock_grading_draft(*, context: dict[str, Any]) -> GradingDraftAIRes
         output_tokens=0,
         estimated_cost_cents=0,
         student_facing_feedback={
-            "celebrate": f"You showed effort in responding to the assignment prompt.",
+            "celebrate": "You showed effort in responding to the assignment prompt.",
             "correct": "Add specific details or evidence from the text to support your main idea.",
             "encourage": "With one more round of revision, your response will be much stronger!",
         },

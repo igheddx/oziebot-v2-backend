@@ -53,7 +53,6 @@ from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher
 from oziebot_api.services.teacher_assist_v2.instructional_design_plan import (
     get_plan_for_day,
     get_plan_for_week_subject,
-    get_plan_instructional_design_week,
 )
 from oziebot_api.services.teacher_assist_v2.planning_constants import WEEKDAY_LABELS
 
@@ -1208,7 +1207,6 @@ def _apply_plan_revision(
                     if (subj_entry.get("subject") or "").lower() != subject_name.lower():
                         continue
                     # Preserve district_anchors — never touched by revision
-                    existing = subj_entry.get("instructional_design") or {}
                     subj_entry["instructional_design"] = new_design
         revised_issues = [
             {**i, "auto_revised": True, "revision_outcome": "revised"}
@@ -1227,7 +1225,6 @@ def _compute_subject_score(
 ) -> float:
     """Compute a weighted category score for one subject."""
     if ai_review:
-        ai_categories = ai_review.get("categories") or {}
         base_score = float(ai_review.get("overall_subject_score") or 8.0)
 
         # Apply deterministic penalties on top of the AI score

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from typing import Any
@@ -41,9 +42,10 @@ from oziebot_api.services.teacher_assist_v2.instructional_variety import STRATEG
 from oziebot_api.services.teacher_assist_v2.instructional_resource_bank import (
     build_instructional_resource_bank,
     check_resource_sufficiency,
-    select_instructional_resource,
     named_books_from_bank,
 )
+
+logger = logging.getLogger(__name__)
 
 V2_PACKAGE_PROMPT_VERSION = "v2-instructional-package-v1"
 
@@ -587,7 +589,7 @@ def _check_lesson_plan_completeness(content: Any) -> list[str]:
                 overlap = r_set & w_set
                 if overlap:
                     missing.append(
-                        f"Reading and Writing blocks share identical learning goals — "
+                        "Reading and Writing blocks share identical learning goals — "
                         "each block must have its own distinct goals"
                     )
                     break
@@ -1063,28 +1065,24 @@ def _build_image_search_directive(
 
     if _gc in ("K", "1", "2"):
         age_desc = "5–7 years old"
-        inject_prefix = "young children kindergarten early elementary"
         example_prefix = "young children"
         age_kws = "'children', 'kids', 'young', 'elementary', 'kindergarten'"
         photo_type = "illustration"
         grade_band = "elementary"
     elif _gc in ("3", "4", "5"):
         age_desc = "8–11 years old"
-        inject_prefix = "elementary school children"
         example_prefix = "elementary students"
         age_kws = "'children', 'kids', 'elementary', 'students', 'school'"
         photo_type = "photo"
         grade_band = "elementary"
     elif _gc in ("6", "7", "8"):
         age_desc = "11–14 years old"
-        inject_prefix = "middle school students"
         example_prefix = "middle school students"
         age_kws = "'middle school', 'students', 'tweens', 'school'"
         photo_type = "photo"
         grade_band = "middle"
     else:
         age_desc = "14–18 years old"
-        inject_prefix = "high school students"
         example_prefix = "high school students"
         age_kws = "'high school', 'students', 'teenagers', 'teen'"
         photo_type = "photo"

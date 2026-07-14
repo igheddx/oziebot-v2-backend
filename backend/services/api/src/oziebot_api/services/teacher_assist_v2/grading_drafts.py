@@ -8,8 +8,6 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-_TEKS_CODE_RE = re.compile(r"\b\d+\.\d+[A-Z]\b")
-
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -33,6 +31,7 @@ from oziebot_api.services.teacher_assist_v2.submission_intake import (
     get_student_submission_or_404,
 )
 
+_TEKS_CODE_RE = re.compile(r"\b\d+\.\d+[A-Z]\b")
 logger = logging.getLogger(__name__)
 
 

@@ -18,8 +18,6 @@ from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssis
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist_v2.grade_review_constants import OFFICIAL_ASSIGNMENT_GRADE_STATUSES
 from oziebot_api.services.teacher_assist_v2.mastery_constants import (
-    MASTERY_THRESHOLD_MASTERY,
-    MASTERY_THRESHOLD_DEVELOPING,
     serialize_mastery_level_fields,
 )
 from oziebot_api.services.teacher_assist_v2.submission_intake import _get_assignment_or_404

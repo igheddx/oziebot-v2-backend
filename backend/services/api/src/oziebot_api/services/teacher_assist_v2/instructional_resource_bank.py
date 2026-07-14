@@ -793,7 +793,6 @@ def build_resource_alignment_map(
     }
     """
     alignment: dict[str, Any] = {}
-    strands_seen: list[str] = []
 
     for week in (generation_context.get("weeks") or []):
         week_num = week.get("sequence_number")
