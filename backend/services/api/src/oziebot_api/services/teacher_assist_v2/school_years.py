@@ -43,7 +43,9 @@ def list_platform_school_years(
     return db.scalars(stmt).all()
 
 
-def get_platform_school_year_or_404(db: Session, *, school_year_id: uuid.UUID) -> EducationSchoolYear:
+def get_platform_school_year_or_404(
+    db: Session, *, school_year_id: uuid.UUID
+) -> EducationSchoolYear:
     row = db.get(EducationSchoolYear, school_year_id)
     if row is None:
         raise LookupError("School year not found")
@@ -124,7 +126,9 @@ def update_platform_school_year(
     db.flush()
     if active:
         _enforce_single_active_school_year(db, active_id=row.id)
-    elif not db.scalars(select(EducationSchoolYear).where(EducationSchoolYear.active.is_(True))).first():
+    elif not db.scalars(
+        select(EducationSchoolYear).where(EducationSchoolYear.active.is_(True))
+    ).first():
         pass
     return row
 

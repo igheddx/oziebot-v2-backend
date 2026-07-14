@@ -155,7 +155,11 @@ def generate_mock_grading_draft(*, context: dict[str, Any]) -> GradingDraftAIRes
     score_ratio = 0.72 + ((student_number % 5) * 0.04)
     score = round(max_score * min(score_ratio, 0.95), 1)
     percentage = round((score / max_score) * 100, 1) if max_score > 0 else 0.0
-    rubric_json = {"sections": _mock_rubric_sections(score_ratio=score / max_score if max_score else 0, context=context)}
+    rubric_json = {
+        "sections": _mock_rubric_sections(
+            score_ratio=score / max_score if max_score else 0, context=context
+        )
+    }
     score, max_score = totals_from_grading_rubric(rubric_json)
     if max_score <= 0:
         max_score = float(template.get("total_points") or GRADING_DRAFT_MAX_SCORE)
@@ -221,11 +225,14 @@ def generate_mock_grading_draft(*, context: dict[str, Any]) -> GradingDraftAIRes
         evidence_used="[MOCK AI] No real student response was analyzed. Evidence fields populated with placeholder text.",
     )
 
+
 def generate_openai_grading_draft(
     *, settings: Settings, context: dict[str, Any], db: Session | None = None
 ) -> GradingDraftAIResult:
     effective_settings = resolve_teacher_assist_settings(db, settings)
-    provider_name = validate_teacher_assist_ai_provider(effective_settings.teacher_assist_ai_provider)
+    provider_name = validate_teacher_assist_ai_provider(
+        effective_settings.teacher_assist_ai_provider
+    )
     if provider_name != "openai":
         raise RuntimeError("OpenAI grading requires teacher_assist_ai_provider=openai")
     TeacherAssistProviderCircuitBreaker().assert_can_execute(effective_settings, provider_name)
@@ -366,7 +373,9 @@ def generate_openai_grading_draft(
         model=model_name,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        estimated_cost_cents=estimate_openai_cost_cents(model_name, input_tokens=input_tokens, output_tokens=output_tokens),
+        estimated_cost_cents=estimate_openai_cost_cents(
+            model_name, input_tokens=input_tokens, output_tokens=output_tokens
+        ),
         student_facing_feedback=student_facing_feedback,
         teacher_facing_explanation=str(content.get("teacher_facing_explanation") or ""),
         suspected_misconception=content.get("suspected_misconception") or None,
@@ -380,7 +389,9 @@ def generate_grading_draft_ai_result(
     *, settings: Settings, context: dict[str, Any], db: Session | None = None
 ) -> GradingDraftAIResult:
     effective_settings = resolve_teacher_assist_settings(db, settings)
-    provider_name = validate_teacher_assist_ai_provider(effective_settings.teacher_assist_ai_provider)
+    provider_name = validate_teacher_assist_ai_provider(
+        effective_settings.teacher_assist_ai_provider
+    )
     TeacherAssistProviderCircuitBreaker().assert_can_execute(effective_settings, provider_name)
     if provider_name == "mock":
         return generate_mock_grading_draft(context=context)

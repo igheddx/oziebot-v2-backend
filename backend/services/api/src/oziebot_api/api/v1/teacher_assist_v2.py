@@ -5,7 +5,16 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.engine import make_url
 
@@ -24,7 +33,11 @@ from oziebot_api.schemas.education_catalog import (
     EducationSubjectCreate,
     EducationSubjectOut,
 )
-from oziebot_api.schemas.pacing_guide import CatalogPacingGuideDetailOut, CatalogPacingGuideSummaryOut, CatalogPacingGuideUpdate
+from oziebot_api.schemas.pacing_guide import (
+    CatalogPacingGuideDetailOut,
+    CatalogPacingGuideSummaryOut,
+    CatalogPacingGuideUpdate,
+)
 from oziebot_api.schemas.teacher_assist_v2 import (
     EducationObjectiveV2Create,
     EducationObjectiveV2Out,
@@ -80,7 +93,10 @@ from oziebot_api.services.teacher_assist.education_catalog import (
     update_subject,
 )
 from oziebot_api.services.teacher_assist.setup import teacher_assist_context_for_user
-from oziebot_api.services.teacher_assist.storage import open_teacher_assist_stream, save_teacher_assist_bytes
+from oziebot_api.services.teacher_assist.storage import (
+    open_teacher_assist_stream,
+    save_teacher_assist_bytes,
+)
 from oziebot_api.models.teacher_assist_v2_slide_visual_asset import TeacherAssistV2SlideVisualAsset
 from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2InstructionalPackageArtifact,
@@ -146,8 +162,12 @@ from oziebot_api.services.teacher_assist_v2.package_additional_assignments impor
     build_additional_assignment_form,
     generate_additional_package_assignment,
 )
-from oziebot_api.services.teacher_assist_v2.package_artifact_update import update_teacher_package_artifact_content
-from oziebot_api.services.teacher_assist_v2.package_artifact_refresh import regenerate_package_artifacts
+from oziebot_api.services.teacher_assist_v2.package_artifact_update import (
+    update_teacher_package_artifact_content,
+)
+from oziebot_api.services.teacher_assist_v2.package_artifact_refresh import (
+    regenerate_package_artifacts,
+)
 from oziebot_api.services.teacher_assist_v2.google_oauth import (
     build_google_integration_status,
     build_oauth_authorization_url,
@@ -172,7 +192,9 @@ from oziebot_api.services.teacher_assist_v2.package_dashboard import (
     get_instructional_package_detail_enriched,
     list_teacher_instructional_packages,
 )
-from oziebot_api.services.teacher_assist_v2.planning_context import get_pacing_guide_planning_context_for_teacher
+from oziebot_api.services.teacher_assist_v2.planning_context import (
+    get_pacing_guide_planning_context_for_teacher,
+)
 from oziebot_api.services.teacher_assist_v2.planning_workflow import (
     archive_planning_supplemental_material,
     build_planning_form,
@@ -220,7 +242,9 @@ from oziebot_api.services.teacher_assist_v2.manual_assignments import (
     create_teacher_manual_assignment,
     list_manual_assignment_objectives,
 )
-from oziebot_api.services.teacher_assist_v2.assignment_print_packets import generate_assignment_cover_sheets
+from oziebot_api.services.teacher_assist_v2.assignment_print_packets import (
+    generate_assignment_cover_sheets,
+)
 from oziebot_api.services.teacher_assist_v2.grade_reviews import (
     accept_all_viewed_drafts,
     accept_grading_draft,
@@ -232,7 +256,9 @@ from oziebot_api.services.teacher_assist_v2.grade_reviews import (
     reject_grading_draft,
     save_grade_review_draft,
 )
-from oziebot_api.services.teacher_assist_v2.grading_class_insight import build_assignment_class_insight
+from oziebot_api.services.teacher_assist_v2.grading_class_insight import (
+    build_assignment_class_insight,
+)
 from oziebot_api.services.teacher_assist_v2.recovery_artifacts import (
     generate_recovery_artifact,
     list_recovery_artifacts,
@@ -340,7 +366,9 @@ def read_v2_context(user: CurrentUser, db: DbSession) -> dict:
 
 
 @router.get("/admin/hierarchy")
-def read_hierarchy_explorer(user: RootAdminUser, db: DbSession, active_only: bool = True) -> list[dict]:
+def read_hierarchy_explorer(
+    user: RootAdminUser, db: DbSession, active_only: bool = True
+) -> list[dict]:
     _require_root_admin(db, user)
     return build_hierarchy_explorer(db, active_only=active_only)
 
@@ -460,15 +488,23 @@ def read_teacher_ai_readiness(
 
 
 @router.get("/catalog/states", response_model=list[EducationStateOut])
-def read_v2_states(user: RootAdminUser, db: DbSession, active_only: bool = False) -> list[EducationStateOut]:
+def read_v2_states(
+    user: RootAdminUser, db: DbSession, active_only: bool = False
+) -> list[EducationStateOut]:
     _require_root_admin(db, user)
-    return [EducationStateOut.model_validate(row) for row in list_states(db, active_only=active_only)]
+    return [
+        EducationStateOut.model_validate(row) for row in list_states(db, active_only=active_only)
+    ]
 
 
 @router.post("/catalog/states", response_model=EducationStateOut, status_code=201)
-def create_v2_state(body: EducationStateCreate, user: RootAdminUser, db: DbSession) -> EducationStateOut:
+def create_v2_state(
+    body: EducationStateCreate, user: RootAdminUser, db: DbSession
+) -> EducationStateOut:
     _require_root_admin(db, user)
-    row = _handle(lambda: create_state(db, name=body.name, abbreviation=body.abbreviation, active=body.active))
+    row = _handle(
+        lambda: create_state(db, name=body.name, abbreviation=body.abbreviation, active=body.active)
+    )
     return EducationStateOut.model_validate(row)
 
 
@@ -518,7 +554,9 @@ def read_v2_districts(
 
 
 @router.post("/catalog/districts", response_model=EducationDistrictOut, status_code=201)
-def create_v2_district(body: EducationDistrictCreate, user: RootAdminUser, db: DbSession) -> EducationDistrictOut:
+def create_v2_district(
+    body: EducationDistrictCreate, user: RootAdminUser, db: DbSession
+) -> EducationDistrictOut:
     _require_root_admin(db, user)
     row = _handle(
         lambda: create_district(
@@ -551,7 +589,9 @@ def update_v2_district(
 
 
 @router.post("/catalog/districts/{district_id}/archive", response_model=EducationDistrictOut)
-def archive_v2_district(district_id: uuid.UUID, user: RootAdminUser, db: DbSession) -> EducationDistrictOut:
+def archive_v2_district(
+    district_id: uuid.UUID, user: RootAdminUser, db: DbSession
+) -> EducationDistrictOut:
     _require_root_admin(db, user)
     row = _handle(lambda: archive_district(db, district_id=district_id))
     return EducationDistrictOut.model_validate(row)
@@ -579,7 +619,9 @@ def read_v2_schools(
 
 
 @router.post("/catalog/schools", response_model=EducationSchoolOut, status_code=201)
-def create_v2_school(body: EducationSchoolCreate, user: RootAdminUser, db: DbSession) -> EducationSchoolOut:
+def create_v2_school(
+    body: EducationSchoolCreate, user: RootAdminUser, db: DbSession
+) -> EducationSchoolOut:
     _require_root_admin(db, user)
     row = _handle(
         lambda: create_school(
@@ -612,7 +654,9 @@ def update_v2_school(
 
 
 @router.post("/catalog/schools/{school_id}/archive", response_model=EducationSchoolOut)
-def archive_v2_school(school_id: uuid.UUID, user: RootAdminUser, db: DbSession) -> EducationSchoolOut:
+def archive_v2_school(
+    school_id: uuid.UUID, user: RootAdminUser, db: DbSession
+) -> EducationSchoolOut:
     _require_root_admin(db, user)
     row = _handle(lambda: archive_school(db, school_id=school_id))
     return EducationSchoolOut.model_validate(row)
@@ -633,11 +677,16 @@ def read_v2_grades(
     active_only: bool = False,
 ) -> list[EducationGradeOut]:
     _require_root_admin(db, user)
-    return [EducationGradeOut.model_validate(row) for row in list_grades(db, school_id=school_id, active_only=active_only)]
+    return [
+        EducationGradeOut.model_validate(row)
+        for row in list_grades(db, school_id=school_id, active_only=active_only)
+    ]
 
 
 @router.post("/catalog/grades", response_model=EducationGradeOut, status_code=201)
-def create_v2_grade(body: EducationGradeCreate, user: RootAdminUser, db: DbSession) -> EducationGradeOut:
+def create_v2_grade(
+    body: EducationGradeCreate, user: RootAdminUser, db: DbSession
+) -> EducationGradeOut:
     _require_root_admin(db, user)
     if body.school_id is None:
         raise HTTPException(status_code=400, detail="Grade requires a school")
@@ -702,7 +751,9 @@ def read_v2_subjects(
 
 
 @router.post("/catalog/subjects", response_model=EducationSubjectOut, status_code=201)
-def create_v2_subject(body: EducationSubjectCreate, user: RootAdminUser, db: DbSession) -> EducationSubjectOut:
+def create_v2_subject(
+    body: EducationSubjectCreate, user: RootAdminUser, db: DbSession
+) -> EducationSubjectOut:
     _require_root_admin(db, user)
     if body.grade_id is None:
         raise HTTPException(status_code=400, detail="Subject requires a grade")
@@ -739,7 +790,9 @@ def update_v2_subject(
 
 
 @router.post("/catalog/subjects/{subject_id}/archive", response_model=EducationSubjectOut)
-def archive_v2_subject(subject_id: uuid.UUID, user: RootAdminUser, db: DbSession) -> EducationSubjectOut:
+def archive_v2_subject(
+    subject_id: uuid.UUID, user: RootAdminUser, db: DbSession
+) -> EducationSubjectOut:
     _require_root_admin(db, user)
     row = _handle(lambda: archive_subject(db, subject_id=subject_id))
     return EducationSubjectOut.model_validate(row)
@@ -800,7 +853,9 @@ def update_v2_school_year(
     return EducationSchoolYearOut.model_validate(row)
 
 
-@router.post("/instructional/school-years/{school_year_id}/archive", response_model=EducationSchoolYearOut)
+@router.post(
+    "/instructional/school-years/{school_year_id}/archive", response_model=EducationSchoolYearOut
+)
 def archive_v2_school_year(
     school_year_id: uuid.UUID, user: RootAdminUser, db: DbSession
 ) -> EducationSchoolYearOut:
@@ -882,7 +937,9 @@ def update_v2_objective_route(
     return EducationObjectiveV2Out.model_validate(row)
 
 
-@router.post("/instructional/objectives/{objective_id}/archive", response_model=EducationObjectiveV2Out)
+@router.post(
+    "/instructional/objectives/{objective_id}/archive", response_model=EducationObjectiveV2Out
+)
 def archive_v2_objective_route(
     objective_id: uuid.UUID, user: RootAdminUser, db: DbSession
 ) -> EducationObjectiveV2Out:
@@ -909,7 +966,8 @@ def read_v2_pacing_guides(
         active_only=active_only,
     )
     return [
-        serialize_pacing_guide_summary(guide, period_count=len(guide.periods), db=db) for guide in guides
+        serialize_pacing_guide_summary(guide, period_count=len(guide.periods), db=db)
+        for guide in guides
     ]
 
 
@@ -921,7 +979,9 @@ def create_v2_pacing_guide_builder_route(
 ) -> CatalogPacingGuideDetailOut:
     _require_root_admin(db, user)
     tenant_id, actor = resolve_v2_platform_context(db, user=user)
-    from oziebot_api.services.teacher_assist_v2.pacing_guide_builder import create_v2_pacing_guide_from_builder
+    from oziebot_api.services.teacher_assist_v2.pacing_guide_builder import (
+        create_v2_pacing_guide_from_builder,
+    )
 
     guide = _handle(
         lambda: create_v2_pacing_guide_from_builder(
@@ -935,7 +995,10 @@ def create_v2_pacing_guide_builder_route(
     return serialize_pacing_guide_detail(guide, db=db)
 
 
-@router.put("/instructional/pacing-guides/{pacing_guide_id}/builder", response_model=CatalogPacingGuideDetailOut)
+@router.put(
+    "/instructional/pacing-guides/{pacing_guide_id}/builder",
+    response_model=CatalogPacingGuideDetailOut,
+)
 def update_v2_pacing_guide_builder_route(
     pacing_guide_id: uuid.UUID,
     body: V2PacingGuideBuilderIn,
@@ -944,7 +1007,9 @@ def update_v2_pacing_guide_builder_route(
 ) -> CatalogPacingGuideDetailOut:
     _require_root_admin(db, user)
     tenant_id, actor = resolve_v2_platform_context(db, user=user)
-    from oziebot_api.services.teacher_assist_v2.pacing_guide_builder import update_v2_pacing_guide_from_builder
+    from oziebot_api.services.teacher_assist_v2.pacing_guide_builder import (
+        update_v2_pacing_guide_from_builder,
+    )
 
     guide = _handle(
         lambda: update_v2_pacing_guide_from_builder(
@@ -959,17 +1024,23 @@ def update_v2_pacing_guide_builder_route(
     return serialize_pacing_guide_detail(guide, db=db)
 
 
-@router.get("/instructional/pacing-guides/{pacing_guide_id}", response_model=CatalogPacingGuideDetailOut)
+@router.get(
+    "/instructional/pacing-guides/{pacing_guide_id}", response_model=CatalogPacingGuideDetailOut
+)
 def read_v2_pacing_guide_detail(
     pacing_guide_id: uuid.UUID, user: RootAdminUser, db: DbSession
 ) -> CatalogPacingGuideDetailOut:
     _require_root_admin(db, user)
     tenant_id, _ = resolve_v2_platform_context(db, user=user)
-    guide = _handle(lambda: get_v2_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id))
+    guide = _handle(
+        lambda: get_v2_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id)
+    )
     return serialize_pacing_guide_detail(guide, db=db)
 
 
-@router.put("/instructional/pacing-guides/{pacing_guide_id}", response_model=CatalogPacingGuideDetailOut)
+@router.put(
+    "/instructional/pacing-guides/{pacing_guide_id}", response_model=CatalogPacingGuideDetailOut
+)
 def update_v2_pacing_guide_route(
     pacing_guide_id: uuid.UUID,
     body: CatalogPacingGuideUpdate,
@@ -991,7 +1062,10 @@ def update_v2_pacing_guide_route(
     return serialize_pacing_guide_detail(detail, db=db)
 
 
-@router.post("/instructional/pacing-guides/{pacing_guide_id}/clone", response_model=CatalogPacingGuideDetailOut)
+@router.post(
+    "/instructional/pacing-guides/{pacing_guide_id}/clone",
+    response_model=CatalogPacingGuideDetailOut,
+)
 def clone_v2_pacing_guide_route(
     pacing_guide_id: uuid.UUID,
     body: V2PacingGuideCopyIn,
@@ -1020,7 +1094,10 @@ def clone_v2_pacing_guide_route(
     return serialize_pacing_guide_detail(guide, db=db)
 
 
-@router.post("/instructional/pacing-guides/{pacing_guide_id}/archive", response_model=CatalogPacingGuideSummaryOut)
+@router.post(
+    "/instructional/pacing-guides/{pacing_guide_id}/archive",
+    response_model=CatalogPacingGuideSummaryOut,
+)
 def archive_v2_pacing_guide_route(
     pacing_guide_id: uuid.UUID, user: RootAdminUser, db: DbSession
 ) -> CatalogPacingGuideSummaryOut:
@@ -1056,12 +1133,16 @@ def update_v2_pacing_guide_period_route(
             description=body.description,
         )
     )
-    detail = get_v2_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=period.pacing_guide_id)
+    detail = get_v2_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=period.pacing_guide_id
+    )
     return serialize_pacing_guide_detail(detail, db=db)
 
 
 def _material_out(row, settings: Settings) -> V2SupportingMaterialOut:
-    return V2SupportingMaterialOut.model_validate(serialize_supporting_material(row, settings=settings))
+    return V2SupportingMaterialOut.model_validate(
+        serialize_supporting_material(row, settings=settings)
+    )
 
 
 @router.get(
@@ -1259,7 +1340,9 @@ def _ensure_teacher_route_allowed(db: DbSession, user: CurrentUser, route_suffix
     allowed = context.get("allowed_routes") or []
     full_route = f"/teacher-assist-v2{route_suffix}"
     if full_route not in allowed and context.get("feature_locked"):
-        raise HTTPException(status_code=403, detail=context.get("feature_lock_message") or "Access locked")
+        raise HTTPException(
+            status_code=403, detail=context.get("feature_lock_message") or "Access locked"
+        )
 
 
 @router.get("/teacher/onboarding")
@@ -1332,7 +1415,9 @@ def read_teacher_today(user: CurrentUser, db: DbSession) -> dict:
 
 
 @router.get("/teacher/home")
-def read_teacher_home(user: CurrentUser, db: DbSession, settings: Settings = Depends(settings_dep)) -> dict:
+def read_teacher_home(
+    user: CurrentUser, db: DbSession, settings: Settings = Depends(settings_dep)
+) -> dict:
     role = _require_teacher(db, user)
     _ensure_teacher_route_allowed(db, user, "/home")
 
@@ -1506,7 +1591,9 @@ def archive_teacher_planning_supplemental_material(
 ) -> dict:
     _require_teacher(db, user)
     _ensure_teacher_route_allowed(db, user, "/planning")
-    row = _handle(lambda: archive_planning_supplemental_material(db, user=user, material_id=material_id))
+    row = _handle(
+        lambda: archive_planning_supplemental_material(db, user=user, material_id=material_id)
+    )
     return serialize_supplemental_material(row)
 
 
@@ -1587,7 +1674,9 @@ def generate_teacher_instructional_package(
     db.commit()
     # Job is now picked up by the teacher-assist-worker (claim_and_run_next_queued_v2_package).
     # No BackgroundTask here — the worker process is separate and survives API restarts.
-    return get_instructional_package_detail_enriched(db, user=user, package_id=package.id, settings=settings)
+    return get_instructional_package_detail_enriched(
+        db, user=user, package_id=package.id, settings=settings
+    )
 
 
 @router.post("/teacher/planning/packages/{package_id}/actions/regenerate", status_code=200)
@@ -1607,14 +1696,17 @@ def queue_teacher_package_regen(
     from oziebot_api.models.teacher_assist_v2_instructional_package import (
         TeacherAssistV2InstructionalPackage as _Pkg,
     )
+
     pkg = db.get(_Pkg, package_id)
     if pkg is None or str(pkg.teacher_user_id) != str(user.id):
         from fastapi import HTTPException as _HTTPException
+
         raise _HTTPException(404, "Package not found")
 
     current_state = (pkg.metadata_json or {}).get("generation_state")
     if current_state in ("queued", "running"):
         from fastapi import HTTPException as _HTTPException
+
         raise _HTTPException(409, "Package is already being processed")
 
     _handle(
@@ -1717,20 +1809,22 @@ def delete_teacher_instructional_package(
 ) -> None:
     """Permanently delete a package and all its artifacts. Cache is preserved."""
     _require_teacher(db, user)
+
     def _delete():
         package: TeacherAssistV2InstructionalPackage | None = (
-            db.query(TeacherAssistV2InstructionalPackage)
-            .filter_by(id=package_id)
-            .first()
+            db.query(TeacherAssistV2InstructionalPackage).filter_by(id=package_id).first()
         )
         if package is None:
             raise LookupError("Instructional package not found.")
         if package.teacher_user_id != user.id and not user.is_root_admin:
             raise PermissionError("You do not have permission to delete this package.")
         if package.status in ("processing", "queued"):
-            raise ValueError("Cannot delete a package that is currently being generated. Wait for it to complete or fail first.")
+            raise ValueError(
+                "Cannot delete a package that is currently being generated. Wait for it to complete or fail first."
+            )
         db.delete(package)
         db.commit()
+
     return _handle(_delete)
 
 
@@ -1807,19 +1901,21 @@ def trigger_artifact_image_fetch(
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Image fetch failed") from exc
 
-    assets = (
-        db.query(TeacherAssistV2SlideVisualAsset)
-        .filter_by(artifact_id=artifact_id)
-        .all()
-    )
+    assets = db.query(TeacherAssistV2SlideVisualAsset).filter_by(artifact_id=artifact_id).all()
     fetched = sum(1 for a in assets if a.visual_generation_status == "fetched")
     pending = sum(1 for a in assets if a.visual_generation_status == "pending")
     failed = sum(1 for a in assets if a.visual_generation_status == "failed")
     total = len(assets)
 
-    _image_map = {a.slide_id: a.source_url for a in assets if a.source_url and a.visual_generation_status == "fetched"}
+    _image_map = {
+        a.slide_id: a.source_url
+        for a in assets
+        if a.source_url and a.visual_generation_status == "fetched"
+    }
     if _image_map:
-        artifact.preview_html = render_slide_deck_html(artifact.content_json or {}, image_map=_image_map)
+        artifact.preview_html = render_slide_deck_html(
+            artifact.content_json or {}, image_map=_image_map
+        )
 
     db.commit()
 
@@ -1883,7 +1979,9 @@ def trigger_package_image_fetch(
             )
             _image_map = {a.slide_id: a.source_url for a in _fetched_assets if a.source_url}
             if _image_map:
-                artifact.preview_html = render_slide_deck_html(artifact.content_json or {}, image_map=_image_map)
+                artifact.preview_html = render_slide_deck_html(
+                    artifact.content_json or {}, image_map=_image_map
+                )
             db.commit()
             total_fetched += 1
         except Exception:
@@ -1914,7 +2012,9 @@ def update_teacher_package_rubric(
         )
     )
     db.commit()
-    return get_instructional_package_detail_enriched(db, user=user, package_id=package_id, settings=settings)
+    return get_instructional_package_detail_enriched(
+        db, user=user, package_id=package_id, settings=settings
+    )
 
 
 @router.get("/teacher/planning/packages/{package_id}/additional-assignments/form")
@@ -1928,7 +2028,9 @@ def read_package_additional_assignment_form(
     return _handle(lambda: build_additional_assignment_form(db, user=user, package_id=package_id))
 
 
-@router.post("/teacher/planning/packages/{package_id}/additional-assignments/generate", status_code=201)
+@router.post(
+    "/teacher/planning/packages/{package_id}/additional-assignments/generate", status_code=201
+)
 def generate_package_additional_assignment(
     package_id: uuid.UUID,
     body: V2PackageAdditionalAssignmentGenerateIn,
@@ -1951,7 +2053,9 @@ def generate_package_additional_assignment(
         )
     )
     db.commit()
-    return get_instructional_package_detail_enriched(db, user=user, package_id=package_id, settings=settings)
+    return get_instructional_package_detail_enriched(
+        db, user=user, package_id=package_id, settings=settings
+    )
 
 
 @router.get("/admin/packages/{package_id}/validation-report")
@@ -1969,8 +2073,9 @@ def admin_get_package_validation_report(
     """
     _require_root_admin(db, user)
     package = db.scalars(
-        select(TeacherAssistV2InstructionalPackage)
-        .where(TeacherAssistV2InstructionalPackage.id == package_id)
+        select(TeacherAssistV2InstructionalPackage).where(
+            TeacherAssistV2InstructionalPackage.id == package_id
+        )
     ).one_or_none()
     if package is None:
         raise HTTPException(status_code=404, detail="Instructional package not found")
@@ -1980,7 +2085,7 @@ def admin_get_package_validation_report(
             "package_id": str(package_id),
             "validation_report": None,
             "message": "No validation report available for this package. "
-                       "Validation runs during package generation for AI-generated packages.",
+            "Validation runs during package generation for AI-generated packages.",
         }
     return {
         "package_id": str(package_id),
@@ -2013,8 +2118,9 @@ def admin_get_package_alignment_report(
     """
     _require_root_admin(db, user)
     package = db.scalars(
-        select(TeacherAssistV2InstructionalPackage)
-        .where(TeacherAssistV2InstructionalPackage.id == package_id)
+        select(TeacherAssistV2InstructionalPackage).where(
+            TeacherAssistV2InstructionalPackage.id == package_id
+        )
     ).one_or_none()
     if package is None:
         raise HTTPException(status_code=404, detail="Instructional package not found")
@@ -2081,7 +2187,9 @@ def close_out_teacher_instructional_package(
         )
     )
     db.commit()
-    return get_instructional_package_detail_enriched(db, user=user, package_id=package_id, settings=settings)
+    return get_instructional_package_detail_enriched(
+        db, user=user, package_id=package_id, settings=settings
+    )
 
 
 @router.get("/teacher/assignments/manual/form")
@@ -2154,7 +2262,9 @@ def generate_assignment_cover_sheets_route(
     ).one_or_none()
     if assignment is None:
         raise HTTPException(status_code=404, detail="Assignment not found.")
-    return _handle(lambda: generate_assignment_cover_sheets(db, settings=settings, assignment=assignment))
+    return _handle(
+        lambda: generate_assignment_cover_sheets(db, settings=settings, assignment=assignment)
+    )
 
 
 @router.get("/teacher/assignments")
@@ -2177,7 +2287,9 @@ def read_teacher_assignments(
 
 
 @router.get("/admin/google-settings")
-def read_admin_google_settings(user: RootAdminUser, db: DbSession, settings: Settings = Depends(settings_dep)) -> dict:
+def read_admin_google_settings(
+    user: RootAdminUser, db: DbSession, settings: Settings = Depends(settings_dep)
+) -> dict:
     _require_root_admin(db, user)
     return build_google_integration_status(settings)
 
@@ -2682,14 +2794,10 @@ def read_submission_grading_draft(
 ) -> dict:
     _require_teacher(db, user)
     _ensure_teacher_route_allowed(db, user, "/assignments")
-    draft = _handle(
-        lambda: get_latest_grading_draft(db, user=user, submission_id=submission_id)
-    )
+    draft = _handle(lambda: get_latest_grading_draft(db, user=user, submission_id=submission_id))
     if draft is None:
         raise HTTPException(status_code=404, detail="Grading draft not found")
     return draft
-
-
 
 
 @router.get("/teacher/gradebook")
@@ -2838,6 +2946,7 @@ def read_objective_performance(
         )
     )
 
+
 @router.get("/teacher/assignments/{assignment_id}/grade-reviews")
 def read_assignment_grade_reviews(
     assignment_id: uuid.UUID,
@@ -2846,7 +2955,9 @@ def read_assignment_grade_reviews(
 ) -> list[dict]:
     _require_teacher(db, user)
     _ensure_teacher_route_allowed(db, user, "/assignments")
-    return _handle(lambda: list_assignment_grade_reviews(db, user=user, assignment_id=assignment_id))
+    return _handle(
+        lambda: list_assignment_grade_reviews(db, user=user, assignment_id=assignment_id)
+    )
 
 
 @router.get("/teacher/submissions/{submission_id}/assignment-grade")
@@ -2886,7 +2997,9 @@ def read_submission_rubric_scorecard(
 
     _require_teacher(db, user)
     _ensure_teacher_route_allowed(db, user, "/assignments")
-    html = _handle(lambda: build_submission_rubric_scorecard_html(db, user=user, submission_id=submission_id))
+    html = _handle(
+        lambda: build_submission_rubric_scorecard_html(db, user=user, submission_id=submission_id)
+    )
     return HTMLResponse(content=html)
 
 
@@ -2900,7 +3013,11 @@ def read_assignment_rubric_score_report(
 
     _require_teacher(db, user)
     _ensure_teacher_route_allowed(db, user, "/assignments")
-    filename, payload = _handle(lambda: build_assignment_rubric_score_report_docx(db, user=user, assignment_id=assignment_id))
+    filename, payload = _handle(
+        lambda: build_assignment_rubric_score_report_docx(
+            db, user=user, assignment_id=assignment_id
+        )
+    )
     return Response(
         content=payload,
         media_type=RUBRIC_SCORE_REPORT_DOCX_MIME,
@@ -3010,10 +3127,13 @@ def read_assignment_class_insight(
 ) -> dict:
     _require_teacher(db, user)
     _ensure_teacher_route_allowed(db, user, "/assignments")
-    return _handle(lambda: build_assignment_class_insight(db, user=user, assignment_id=assignment_id))
+    return _handle(
+        lambda: build_assignment_class_insight(db, user=user, assignment_id=assignment_id)
+    )
 
 
 # ── Recovery Queue ─────────────────────────────────────────────────────────────
+
 
 @router.post("/teacher/recovery-queue")
 def create_recovery_queue_item(
@@ -3095,6 +3215,7 @@ def read_recovery_budget(
 
 
 # ── Learning Recovery Planner — Phase 8 ───────────────────────────────────────
+
 
 @router.get("/teacher/assignments/{assignment_id}/recovery-decision")
 def get_recovery_decision(

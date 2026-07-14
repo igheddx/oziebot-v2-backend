@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.models.education_catalog import EducationObjective
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
-from oziebot_api.models.teacher_assist_v2_instructional_package import TeacherAssistV2InstructionalPackage
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackage,
+)
 from oziebot_api.models.teacher_assist_v2_recovery_queue import TeacherAssistV2RecoveryQueue
 from oziebot_api.models.user import User
 
@@ -42,9 +44,9 @@ _SUGGESTED_PRIORITY: dict[str, str] = {
 
 # Valid status transitions: current → allowed next statuses
 _STATUS_TRANSITIONS: dict[str, set[str]] = {
-    "pending":   {"scheduled", "deferred", "dismissed"},
+    "pending": {"scheduled", "deferred", "dismissed"},
     "scheduled": {"completed", "deferred", "dismissed"},
-    "deferred":  {"scheduled", "dismissed"},
+    "deferred": {"scheduled", "dismissed"},
     "completed": set(),
     "dismissed": set(),
 }
@@ -53,6 +55,7 @@ ACTIVE_STATUSES = ("pending", "scheduled", "deferred")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
 
 def _infer_best_before(
     db: Session,
@@ -98,8 +101,12 @@ def _serialize_item(item: TeacherAssistV2RecoveryQueue) -> dict[str, Any]:
     return {
         "id": str(item.id),
         "assignment_id": str(item.assignment_id) if item.assignment_id else None,
-        "instructional_package_id": str(item.instructional_package_id) if item.instructional_package_id else None,
-        "education_objective_id": str(item.education_objective_id) if item.education_objective_id else None,
+        "instructional_package_id": str(item.instructional_package_id)
+        if item.instructional_package_id
+        else None,
+        "education_objective_id": str(item.education_objective_id)
+        if item.education_objective_id
+        else None,
         "objective_code": item.objective_code,
         "recommendation_type": item.recommendation_type,
         "students_affected": item.students_affected_json or [],
@@ -131,6 +138,7 @@ def _serialize_item(item: TeacherAssistV2RecoveryQueue) -> dict[str, Any]:
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
+
 
 def create_queue_item(
     db: Session,
@@ -240,7 +248,9 @@ def list_queue_items(
     if assignment_id is not None:
         stmt = stmt.where(TeacherAssistV2RecoveryQueue.assignment_id == assignment_id)
     if instructional_package_id is not None:
-        stmt = stmt.where(TeacherAssistV2RecoveryQueue.instructional_package_id == instructional_package_id)
+        stmt = stmt.where(
+            TeacherAssistV2RecoveryQueue.instructional_package_id == instructional_package_id
+        )
 
     # Sort: CRITICAL first, then by best_before ASC (nulls last), then created_at
     priority_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}

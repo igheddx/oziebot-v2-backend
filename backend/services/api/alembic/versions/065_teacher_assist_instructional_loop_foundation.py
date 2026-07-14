@@ -41,7 +41,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["class_id"], ["classes.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["instructional_week_id"], ["instructional_weeks.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["instructional_week_id"], ["instructional_weeks.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["objective_id"], ["education_objectives.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["owner_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["standard_id"], ["standards.id"], ondelete="SET NULL"),
@@ -85,7 +87,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["class_id"], ["classes.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["instructional_week_id"], ["instructional_weeks.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["instructional_week_id"], ["instructional_weeks.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["objective_id"], ["education_objectives.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["owner_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["standard_id"], ["standards.id"], ondelete="SET NULL"),
@@ -93,7 +97,14 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    for column_name in ("tenant_id", "owner_user_id", "class_id", "subject_id", "instructional_week_id", "status"):
+    for column_name in (
+        "tenant_id",
+        "owner_user_id",
+        "class_id",
+        "subject_id",
+        "instructional_week_id",
+        "status",
+    ):
         op.create_index(
             op.f(f"ix_teacher_assist_student_support_groups_{column_name}"),
             "teacher_assist_student_support_groups",
@@ -115,7 +126,9 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("support_group_id", "student_identifier", name="uq_support_group_student"),
+        sa.UniqueConstraint(
+            "support_group_id", "student_identifier", name="uq_support_group_student"
+        ),
     )
     op.create_index(
         op.f("ix_teacher_assist_student_support_group_members_support_group_id"),
@@ -141,7 +154,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["class_id"], ["classes.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["instructional_week_id"], ["instructional_weeks.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["instructional_week_id"], ["instructional_weeks.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["owner_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["subject_id"], ["subjects.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
@@ -166,7 +181,9 @@ def upgrade() -> None:
         sa.Column("closed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["instructional_week_id"], ["instructional_weeks.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["instructional_week_id"], ["instructional_weeks.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["owner_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -183,7 +200,9 @@ def upgrade() -> None:
         sa.Column("reusable_next_year", sa.Boolean(), nullable=False, server_default="true"),
         sa.Column("generated_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["instructional_week_id"], ["instructional_weeks.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["instructional_week_id"], ["instructional_weeks.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["owner_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -220,7 +239,9 @@ def upgrade() -> None:
         sa.Column("objective_id", sa.Uuid(), nullable=True),
     )
     op.add_column("teacher_assist_reteach_plans", sa.Column("reason", sa.Text(), nullable=True))
-    op.add_column("teacher_assist_reteach_plans", sa.Column("expected_outcome", sa.Text(), nullable=True))
+    op.add_column(
+        "teacher_assist_reteach_plans", sa.Column("expected_outcome", sa.Text(), nullable=True)
+    )
     op.create_foreign_key(
         "fk_reteach_plans_instructional_week_id",
         "teacher_assist_reteach_plans",
@@ -246,9 +267,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_teacher_assist_reteach_plans_instructional_week_id"), table_name="teacher_assist_reteach_plans")
-    op.drop_constraint("fk_reteach_plans_objective_id", "teacher_assist_reteach_plans", type_="foreignkey")
-    op.drop_constraint("fk_reteach_plans_instructional_week_id", "teacher_assist_reteach_plans", type_="foreignkey")
+    op.drop_index(
+        op.f("ix_teacher_assist_reteach_plans_instructional_week_id"),
+        table_name="teacher_assist_reteach_plans",
+    )
+    op.drop_constraint(
+        "fk_reteach_plans_objective_id", "teacher_assist_reteach_plans", type_="foreignkey"
+    )
+    op.drop_constraint(
+        "fk_reteach_plans_instructional_week_id", "teacher_assist_reteach_plans", type_="foreignkey"
+    )
     op.drop_column("teacher_assist_reteach_plans", "expected_outcome")
     op.drop_column("teacher_assist_reteach_plans", "reason")
     op.drop_column("teacher_assist_reteach_plans", "objective_id")

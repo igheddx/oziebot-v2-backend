@@ -44,7 +44,9 @@ def test_v2_generate_ai_grading_draft_for_ready_submission(client, db_session):
     assert payload["draft"]["objective_evidence"]
     assert payload["draft"]["teacher_review_required"] is True
 
-    detail = client.get(f"/v1/teacher-assist-v2/teacher/submissions/{submission_id}", headers=headers)
+    detail = client.get(
+        f"/v1/teacher-assist-v2/teacher/submissions/{submission_id}", headers=headers
+    )
     assert detail.status_code == 200, detail.text
     assert detail.json()["grading_draft"]
 

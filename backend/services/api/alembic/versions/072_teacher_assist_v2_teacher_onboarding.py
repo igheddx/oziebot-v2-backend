@@ -14,7 +14,9 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "users",
-        sa.Column("must_change_password", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column(
+            "must_change_password", sa.Boolean(), nullable=False, server_default=sa.text("false")
+        ),
     )
 
     op.create_table(
@@ -27,7 +29,9 @@ def upgrade() -> None:
         sa.Column("district_id", sa.Uuid(), nullable=True),
         sa.Column("school_id", sa.Uuid(), nullable=True),
         sa.Column("grade_id", sa.Uuid(), nullable=True),
-        sa.Column("selected_subject_ids", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
+        sa.Column(
+            "selected_subject_ids", sa.JSON(), nullable=False, server_default=sa.text("'[]'")
+        ),
         sa.Column("student_count", sa.Integer(), nullable=True),
         sa.Column("onboarding_completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("pacing_guide_setup_completed_at", sa.DateTime(timezone=True), nullable=True),
@@ -36,15 +40,21 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["district_id"], ["education_districts.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["grade_id"], ["education_grades.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["school_id"], ["education_schools.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["school_year_id"], ["education_school_years.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["school_year_id"], ["education_school_years.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["state_id"], ["education_states.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("user_id"),
     )
-    op.create_index("ix_teacher_assist_v2_onboarding_user_id", "teacher_assist_v2_onboarding", ["user_id"])
-    op.create_index("ix_teacher_assist_v2_onboarding_tenant_id", "teacher_assist_v2_onboarding", ["tenant_id"])
+    op.create_index(
+        "ix_teacher_assist_v2_onboarding_user_id", "teacher_assist_v2_onboarding", ["user_id"]
+    )
+    op.create_index(
+        "ix_teacher_assist_v2_onboarding_tenant_id", "teacher_assist_v2_onboarding", ["tenant_id"]
+    )
 
     op.create_table(
         "teacher_assist_v2_pacing_guide_assignments",
@@ -86,7 +96,11 @@ def downgrade() -> None:
         table_name="teacher_assist_v2_pacing_guide_assignments",
     )
     op.drop_table("teacher_assist_v2_pacing_guide_assignments")
-    op.drop_index("ix_teacher_assist_v2_onboarding_tenant_id", table_name="teacher_assist_v2_onboarding")
-    op.drop_index("ix_teacher_assist_v2_onboarding_user_id", table_name="teacher_assist_v2_onboarding")
+    op.drop_index(
+        "ix_teacher_assist_v2_onboarding_tenant_id", table_name="teacher_assist_v2_onboarding"
+    )
+    op.drop_index(
+        "ix_teacher_assist_v2_onboarding_user_id", table_name="teacher_assist_v2_onboarding"
+    )
     op.drop_table("teacher_assist_v2_onboarding")
     op.drop_column("users", "must_change_password")

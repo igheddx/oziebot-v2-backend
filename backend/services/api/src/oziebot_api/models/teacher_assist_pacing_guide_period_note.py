@@ -20,13 +20,18 @@ class TeacherAssistPacingGuidePeriodNote(Base):
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     period_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("pacing_guide_periods.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guide_periods.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     notes: Mapped[str | None] = mapped_column(Text(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    period: Mapped["TeacherAssistPacingGuidePeriod"] = relationship("TeacherAssistPacingGuidePeriod")
+    period: Mapped["TeacherAssistPacingGuidePeriod"] = relationship(
+        "TeacherAssistPacingGuidePeriod"
+    )
 
 
 from typing import TYPE_CHECKING  # noqa: E402

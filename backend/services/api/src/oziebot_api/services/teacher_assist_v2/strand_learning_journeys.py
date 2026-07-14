@@ -40,6 +40,7 @@ _PROMPT_VERSION = "strand-journeys-v1"
 
 # ── Provider resolution (mirrors instructional_design_plan._provider_api_params) ─────────
 
+
 def _provider_api_params(settings: Settings) -> tuple[str, str | None, str | None]:
     provider = (settings.teacher_assist_ai_provider or "mock").strip().lower()
     if provider == "gemini":
@@ -150,15 +151,17 @@ def _build_prompt_payload(
             subj = subj_entry.get("subject") or ""
             idesign = subj_entry.get("instructional_design") or {}
             anchors = subj_entry.get("district_anchors") or {}
-            design_summary.append({
-                "week": week_num,
-                "subject": subj,
-                "end_of_week_mastery": idesign.get("end_of_week_mastery"),
-                "learning_journey_rationale": idesign.get("learning_journey_rationale"),
-                "primary_objectives": anchors.get("primary_objectives") or [],
-                "supporting_objectives": anchors.get("supporting_objectives") or [],
-                "pacing_materials": anchors.get("pacing_materials") or [],
-            })
+            design_summary.append(
+                {
+                    "week": week_num,
+                    "subject": subj,
+                    "end_of_week_mastery": idesign.get("end_of_week_mastery"),
+                    "learning_journey_rationale": idesign.get("learning_journey_rationale"),
+                    "primary_objectives": anchors.get("primary_objectives") or [],
+                    "supporting_objectives": anchors.get("supporting_objectives") or [],
+                    "pacing_materials": anchors.get("pacing_materials") or [],
+                }
+            )
 
     return {
         "total_weeks": total_weeks,
@@ -172,13 +175,15 @@ def _build_prompt_payload(
         "curriculum_sequence_plan": curriculum_sequence_plan,
         "design_plan_summary": design_summary,
         "unit_mastery_arc": instructional_design_plan.get("unit_mastery_arc") or {},
-        "knowledge_dependency_graph": instructional_design_plan.get("knowledge_dependency_graph") or [],
+        "knowledge_dependency_graph": instructional_design_plan.get("knowledge_dependency_graph")
+        or [],
         "instructional_delivery_profile": generation_context.get("instructional_delivery_profile"),
         "district_document_context": generation_context.get("district_document_context"),
     }
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────────────────
+
 
 def generate_strand_learning_journeys(
     db: Session,
@@ -336,7 +341,11 @@ def build_journey_position_context(
 
     for strand_name, journey in strand_journeys.items():
         # If subject_name is given, only include the matching strand
-        if subject_name and subject_name.lower() not in strand_name.lower() and strand_name.lower() not in subject_name.lower():
+        if (
+            subject_name
+            and subject_name.lower() not in strand_name.lower()
+            and strand_name.lower() not in subject_name.lower()
+        ):
             # For daily_lesson_plan (multi-strand), include all; for single-subject, filter
             pass  # We'll include all strands for multi-subject context
 
@@ -351,7 +360,9 @@ def build_journey_position_context(
         resource = current_obj.get("curriculum_resource") or ""
         obj_text = current_obj.get("objective") or ""
         focus = current_obj.get("instructional_focus") or ""
-        preteach_flag = " [NEW CONCEPT — PRETEACH REQUIRED]" if current_obj.get("requires_preteach") else ""
+        preteach_flag = (
+            " [NEW CONCEPT — PRETEACH REQUIRED]" if current_obj.get("requires_preteach") else ""
+        )
 
         resource_part = f" | Resource: {resource}" if resource else ""
         focus_part = f" | Focus: {focus}" if focus else ""

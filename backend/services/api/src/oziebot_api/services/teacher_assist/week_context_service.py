@@ -7,11 +7,19 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from oziebot_api.models.education_catalog import EducationCurriculumResource, EducationGrade, EducationSubject
+from oziebot_api.models.education_catalog import (
+    EducationCurriculumResource,
+    EducationGrade,
+    EducationSubject,
+)
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
-from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
+from oziebot_api.models.teacher_assist_pacing_guide_objective import (
+    TeacherAssistPacingGuideObjective,
+)
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
-from oziebot_api.models.teacher_assist_pacing_guide_period_note import TeacherAssistPacingGuidePeriodNote
+from oziebot_api.models.teacher_assist_pacing_guide_period_note import (
+    TeacherAssistPacingGuidePeriodNote,
+)
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
 from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
 from oziebot_api.models.user import User
@@ -59,7 +67,10 @@ class WeekContextService:
     ) -> WeekContextDTO:
         period = db.scalars(
             select(TeacherAssistPacingGuidePeriod)
-            .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id)
+            .join(
+                TeacherAssistPacingGuide,
+                TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id,
+            )
             .where(
                 TeacherAssistPacingGuidePeriod.id == period_id,
                 TeacherAssistPacingGuide.tenant_id == tenant_id,
@@ -77,7 +88,9 @@ class WeekContextService:
         if guide is None:
             raise LookupError("Pacing guide not found")
 
-        context = CurrentWeekResolver.resolve(db, tenant_id=tenant_id, user_id=user.id, guide_id=guide.id)
+        context = CurrentWeekResolver.resolve(
+            db, tenant_id=tenant_id, user_id=user.id, guide_id=guide.id
+        )
         school_year = db.get(TeacherAssistSchoolYear, guide.school_year_id)
         subject_id = None
         subject_name = None
@@ -139,7 +152,9 @@ class WeekContextService:
             if mapping.catalog_resource_id is not None:
                 catalog_resource = db.get(EducationCurriculumResource, mapping.catalog_resource_id)
             payload = {
-                "catalog_resource_id": str(mapping.catalog_resource_id) if mapping.catalog_resource_id else None,
+                "catalog_resource_id": str(mapping.catalog_resource_id)
+                if mapping.catalog_resource_id
+                else None,
                 "resource_library_item_id": str(mapping.resource_library_item_id)
                 if mapping.resource_library_item_id
                 else None,
@@ -175,7 +190,9 @@ class WeekContextService:
             period_type=period.period_type,
             school_year_id=guide.school_year_id,
             school_year_title=school_year.title if school_year else None,
-            grading_period_id=context.grading_period.id if context and context.grading_period else None,
+            grading_period_id=context.grading_period.id
+            if context and context.grading_period
+            else None,
             subject_id=subject_id,
             subject_name=subject_name,
             grade_level=grade_level,
@@ -234,6 +251,8 @@ class WeekContextService:
         }
 
 
-def week_context_as_of(db: Session, *, tenant_id: uuid.UUID, user: User, period_id: uuid.UUID) -> dict[str, Any]:
+def week_context_as_of(
+    db: Session, *, tenant_id: uuid.UUID, user: User, period_id: uuid.UUID
+) -> dict[str, Any]:
     dto = WeekContextService.build(db, tenant_id=tenant_id, user=user, period_id=period_id)
     return WeekContextService.serialize(dto)

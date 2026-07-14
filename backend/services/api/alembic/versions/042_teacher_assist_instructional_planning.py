@@ -25,10 +25,14 @@ def upgrade() -> None:
         "planning_input_drafts",
         sa.Column("planning_scope", sa.String(length=32), nullable=False, server_default="weekly"),
     )
-    op.add_column("planning_input_drafts", sa.Column("module_title", sa.String(length=160), nullable=True))
+    op.add_column(
+        "planning_input_drafts", sa.Column("module_title", sa.String(length=160), nullable=True)
+    )
     op.add_column("planning_input_drafts", sa.Column("start_date", sa.Date(), nullable=True))
     op.add_column("planning_input_drafts", sa.Column("end_date", sa.Date(), nullable=True))
-    op.add_column("planning_input_drafts", sa.Column("estimated_weeks", sa.Integer(), nullable=True))
+    op.add_column(
+        "planning_input_drafts", sa.Column("estimated_weeks", sa.Integer(), nullable=True)
+    )
     op.add_column(
         "planning_input_drafts", sa.Column("instructional_days_count", sa.Integer(), nullable=True)
     )
@@ -41,31 +45,27 @@ def upgrade() -> None:
     op.add_column("weekly_plans", sa.Column("start_date", sa.Date(), nullable=True))
     op.add_column("weekly_plans", sa.Column("end_date", sa.Date(), nullable=True))
     op.add_column("weekly_plans", sa.Column("estimated_weeks", sa.Integer(), nullable=True))
-    op.add_column("weekly_plans", sa.Column("instructional_days_count", sa.Integer(), nullable=True))
     op.add_column(
-        "weekly_plans", sa.Column("owner_user_id", sa.Uuid(), nullable=True)
+        "weekly_plans", sa.Column("instructional_days_count", sa.Integer(), nullable=True)
     )
-    op.add_column(
-        "weekly_plans", sa.Column("source_plan_id", sa.Uuid(), nullable=True)
-    )
-    op.add_column(
-        "weekly_plans", sa.Column("derived_from_plan_id", sa.Uuid(), nullable=True)
-    )
+    op.add_column("weekly_plans", sa.Column("owner_user_id", sa.Uuid(), nullable=True))
+    op.add_column("weekly_plans", sa.Column("source_plan_id", sa.Uuid(), nullable=True))
+    op.add_column("weekly_plans", sa.Column("derived_from_plan_id", sa.Uuid(), nullable=True))
     op.add_column(
         "weekly_plans",
         sa.Column("is_template", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
     op.add_column(
         "weekly_plans",
-        sa.Column("visibility_scope", sa.String(length=32), nullable=False, server_default="private"),
+        sa.Column(
+            "visibility_scope", sa.String(length=32), nullable=False, server_default="private"
+        ),
     )
     op.add_column(
         "weekly_plans",
         sa.Column("reuse_status", sa.String(length=32), nullable=False, server_default="active"),
     )
-    op.add_column(
-        "weekly_plans", sa.Column("school_year_origin_id", sa.Uuid(), nullable=True)
-    )
+    op.add_column("weekly_plans", sa.Column("school_year_origin_id", sa.Uuid(), nullable=True))
 
     op.execute("UPDATE weekly_plans SET owner_user_id = user_id WHERE owner_user_id IS NULL")
     op.alter_column("weekly_plans", "owner_user_id", nullable=False)
@@ -117,9 +117,15 @@ def downgrade() -> None:
     op.drop_index("ix_weekly_plans_derived_from_plan_id", table_name="weekly_plans")
     op.drop_index("ix_weekly_plans_source_plan_id", table_name="weekly_plans")
     op.drop_index("ix_weekly_plans_owner_user_id", table_name="weekly_plans")
-    op.drop_constraint("fk_weekly_plans_school_year_origin_id_school_years", "weekly_plans", type_="foreignkey")
-    op.drop_constraint("fk_weekly_plans_derived_from_plan_id_weekly_plans", "weekly_plans", type_="foreignkey")
-    op.drop_constraint("fk_weekly_plans_source_plan_id_weekly_plans", "weekly_plans", type_="foreignkey")
+    op.drop_constraint(
+        "fk_weekly_plans_school_year_origin_id_school_years", "weekly_plans", type_="foreignkey"
+    )
+    op.drop_constraint(
+        "fk_weekly_plans_derived_from_plan_id_weekly_plans", "weekly_plans", type_="foreignkey"
+    )
+    op.drop_constraint(
+        "fk_weekly_plans_source_plan_id_weekly_plans", "weekly_plans", type_="foreignkey"
+    )
     op.drop_constraint("fk_weekly_plans_owner_user_id_users", "weekly_plans", type_="foreignkey")
     op.drop_column("weekly_plans", "school_year_origin_id")
     op.drop_column("weekly_plans", "reuse_status")

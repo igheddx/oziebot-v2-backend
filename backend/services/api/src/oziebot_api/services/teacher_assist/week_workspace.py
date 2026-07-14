@@ -17,20 +17,32 @@ from oziebot_api.services.teacher_assist.generated_artifacts import (
     list_generated_artifacts_for_period,
     serialize_generated_artifact,
 )
-from oziebot_api.services.teacher_assist.pacing_guide_foundation import get_catalog_pacing_guide_detail
-from oziebot_api.services.teacher_assist.instructional_weeks import find_instructional_week_for_period
+from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
+    get_catalog_pacing_guide_detail,
+)
+from oziebot_api.services.teacher_assist.instructional_weeks import (
+    find_instructional_week_for_period,
+)
 from oziebot_api.services.teacher_assist.recommendation_service import build_week_recommendations
 from oziebot_api.services.teacher_assist.week_context_service import WeekContextService
 
 
 WEEK_GENERATION_ACTIONS = (
-    {"action_key": "instructional_plan", "artifact_type": "LESSON_PLAN", "label": "Generate Instructional Plan"},
+    {
+        "action_key": "instructional_plan",
+        "artifact_type": "LESSON_PLAN",
+        "label": "Generate Instructional Plan",
+    },
     {"action_key": "lesson_plan", "artifact_type": "LESSON_PLAN", "label": "Generate Lesson Plan"},
     {"action_key": "assignment", "artifact_type": "ASSIGNMENT", "label": "Generate Assignment"},
     {"action_key": "quiz", "artifact_type": "QUIZ", "label": "Generate Quiz"},
     {"action_key": "rubric", "artifact_type": "RUBRIC", "label": "Generate Rubric"},
     {"action_key": "newsletter", "artifact_type": "NEWSLETTER", "label": "Generate Newsletter"},
-    {"action_key": "parent_communication", "artifact_type": "PARENT_COMMUNICATION", "label": "Draft Parent Communication"},
+    {
+        "action_key": "parent_communication",
+        "artifact_type": "PARENT_COMMUNICATION",
+        "label": "Draft Parent Communication",
+    },
 )
 
 
@@ -45,7 +57,9 @@ def build_week_workspace(
     user: User,
     period_id: uuid.UUID,
 ) -> dict[str, Any]:
-    week_context_dto = WeekContextService.build(db, tenant_id=tenant_id, user=user, period_id=period_id)
+    week_context_dto = WeekContextService.build(
+        db, tenant_id=tenant_id, user=user, period_id=period_id
+    )
     week_context = WeekContextService.serialize(week_context_dto)
     detail = get_catalog_pacing_guide_detail(
         db,
@@ -79,7 +93,9 @@ def build_week_workspace(
         user_id=user.id,
         period=selected_period,
     )
-    recommendations = build_week_recommendations(db, tenant_id=tenant_id, user=user, period_id=period_id)
+    recommendations = build_week_recommendations(
+        db, tenant_id=tenant_id, user=user, period_id=period_id
+    )
     instructional_week = find_instructional_week_for_period(
         db, tenant_id=tenant_id, user_id=user.id, pacing_guide_period_id=period_id
     )
@@ -135,13 +151,21 @@ def build_week_workspace(
             },
         ],
         "artifact_library": {
-            "lesson_plans": [row for row in serialized_artifacts if row["artifact_type"] == "LESSON_PLAN"],
-            "assignments": [row for row in serialized_artifacts if row["artifact_type"] == "ASSIGNMENT"],
+            "lesson_plans": [
+                row for row in serialized_artifacts if row["artifact_type"] == "LESSON_PLAN"
+            ],
+            "assignments": [
+                row for row in serialized_artifacts if row["artifact_type"] == "ASSIGNMENT"
+            ],
             "quizzes": [row for row in serialized_artifacts if row["artifact_type"] == "QUIZ"],
             "rubrics": [row for row in serialized_artifacts if row["artifact_type"] == "RUBRIC"],
-            "newsletters": [row for row in serialized_artifacts if row["artifact_type"] == "NEWSLETTER"],
+            "newsletters": [
+                row for row in serialized_artifacts if row["artifact_type"] == "NEWSLETTER"
+            ],
             "parent_communications": [
-                row for row in serialized_artifacts if row["artifact_type"] == "PARENT_COMMUNICATION"
+                row
+                for row in serialized_artifacts
+                if row["artifact_type"] == "PARENT_COMMUNICATION"
             ],
         },
         "recommendations": recommendations,

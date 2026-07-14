@@ -42,7 +42,9 @@ def test_build_pacing_school_year_options_creates_rows(client, db_session):
     from tests.test_teacher_assist_setup import _grant_teacher_assist_access, _register_user
 
     root_token = _root_token(client, db_session)
-    teacher_token = _register_user(client, email="pacing-year-options@example.com", tenant_name="Pacing Year Tenant")
+    teacher_token = _register_user(
+        client, email="pacing-year-options@example.com", tenant_name="Pacing Year Tenant"
+    )
     _grant_teacher_assist_access(db_session, email="pacing-year-options@example.com")
 
     response = client.get(

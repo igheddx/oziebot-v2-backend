@@ -10,12 +10,16 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
-from oziebot_api.models.teacher_assist_v2_assignment_print_page import TeacherAssistV2AssignmentPrintPage
+from oziebot_api.models.teacher_assist_v2_assignment_print_page import (
+    TeacherAssistV2AssignmentPrintPage,
+)
 from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2InstructionalPackage,
     TeacherAssistV2InstructionalPackageArtifact,
 )
-from oziebot_api.services.teacher_assist_v2.assignment_print_packets import generate_assignment_print_packet
+from oziebot_api.services.teacher_assist_v2.assignment_print_packets import (
+    generate_assignment_print_packet,
+)
 from oziebot_api.services.teacher_assist_v2.package_export import (
     build_google_forms_package_payload,
     normalize_objective_mapping,
@@ -46,13 +50,19 @@ STUDENT_DOCX_LABELS = {
 }
 
 
-def _assignment_content_for_packet(*, artifact_type: str, content: dict[str, Any]) -> dict[str, Any]:
+def _assignment_content_for_packet(
+    *, artifact_type: str, content: dict[str, Any]
+) -> dict[str, Any]:
     if artifact_type == "assignment":
         return content
     mapping = normalize_objective_mapping(content)
     return {
-        "objective_text": mapping.get("objective_text") or content.get("summary") or content.get("description"),
-        "student_instructions": content.get("instructions") or content.get("student_instructions") or [],
+        "objective_text": mapping.get("objective_text")
+        or content.get("summary")
+        or content.get("description"),
+        "student_instructions": content.get("instructions")
+        or content.get("student_instructions")
+        or [],
         "passage_title": content.get("passage_title") or content.get("title"),
         "passage_text": content.get("passage_text") or content.get("prompt") or "",
     }
@@ -72,7 +82,9 @@ def build_student_packet_docx_for_artifact(
         db,
         settings=settings,
         assignment=assignment,
-        assignment_content=_assignment_content_for_packet(artifact_type=artifact_type, content=content),
+        assignment_content=_assignment_content_for_packet(
+            artifact_type=artifact_type, content=content
+        ),
         pages_per_student=pages_per_student,
     )
     print_pages = db.scalars(
@@ -127,7 +139,9 @@ def save_assessment_student_exports(
         return []
 
     content = artifact.content_json if isinstance(artifact.content_json, dict) else {}
-    export_context = build_quiz_export_context(db, package=package, artifact=artifact, assignment=assignment_row)
+    export_context = build_quiz_export_context(
+        db, package=package, artifact=artifact, assignment=assignment_row
+    )
     title = str(content.get("title") or artifact.title or "Assessment")
     exports: list[dict[str, str]] = []
 
@@ -152,7 +166,9 @@ def save_assessment_student_exports(
             "format": "docx",
             "storage_key": key,
             "original_filename": student_filename,
-            "pages_per_student": str(compute_pages_per_student(artifact_type=artifact.artifact_type, content=content)),
+            "pages_per_student": str(
+                compute_pages_per_student(artifact_type=artifact.artifact_type, content=content)
+            ),
         }
     )
 

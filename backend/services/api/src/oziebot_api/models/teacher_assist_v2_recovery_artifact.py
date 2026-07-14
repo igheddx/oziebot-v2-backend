@@ -29,7 +29,9 @@ class TeacherAssistV2RecoveryArtifact(Base):
     artifact_type: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     content_json: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)
-    generation_context_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)
+    generation_context_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON(), nullable=True
+    )
     validation_result_json: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)
     provider: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -18,14 +18,21 @@ from oziebot_api.services.teacher_assist.education_catalog import (
     get_grade_or_404,
     get_school_or_404,
 )
-from oziebot_api.services.teacher_assist.setup import get_teacher_profile, teacher_assist_context_for_user, upsert_teacher_profile
+from oziebot_api.services.teacher_assist.setup import (
+    get_teacher_profile,
+    teacher_assist_context_for_user,
+    upsert_teacher_profile,
+)
 from oziebot_api.services.teacher_assist.teacher_classroom import upsert_my_classroom
 from oziebot_api.services.teacher_assist.teacher_school_setup import (
     build_my_school_setup,
     sync_my_teaching_subjects,
 )
 from oziebot_api.services.teacher_assist_v2.pacing_guides import ensure_tenant_school_year
-from oziebot_api.services.teacher_assist_v2.school_years import get_platform_school_year_or_404, list_platform_school_years
+from oziebot_api.services.teacher_assist_v2.school_years import (
+    get_platform_school_year_or_404,
+    list_platform_school_years,
+)
 
 
 def _now() -> datetime:
@@ -73,7 +80,9 @@ def is_v2_pacing_setup_complete(row: TeacherAssistV2Onboarding | None) -> bool:
     return row is not None and row.pacing_guide_setup_completed_at is not None
 
 
-def build_teacher_onboarding_form(db: Session, *, user: User, grade_id: uuid.UUID | None = None) -> dict[str, Any]:
+def build_teacher_onboarding_form(
+    db: Session, *, user: User, grade_id: uuid.UUID | None = None
+) -> dict[str, Any]:
     ctx = teacher_assist_context_for_user(db, user)
     assignment = get_active_teacher_assignment(db, user_id=user.id)
     if assignment is None:
@@ -99,11 +108,17 @@ def build_teacher_onboarding_form(db: Session, *, user: User, grade_id: uuid.UUI
     ).all()
 
     assigned_grade_id = school_setup.get("catalog_grade_id")
-    selected_grade_id = str(grade_id) if grade_id else (str(onboarding.grade_id) if onboarding.grade_id else assigned_grade_id)
+    selected_grade_id = (
+        str(grade_id)
+        if grade_id
+        else (str(onboarding.grade_id) if onboarding.grade_id else assigned_grade_id)
+    )
     if selected_grade_id is None and assigned_grade_id:
         selected_grade_id = assigned_grade_id
 
-    selected_subject_ids = [str(subject_id) for subject_id in (onboarding.selected_subject_ids or [])]
+    selected_subject_ids = [
+        str(subject_id) for subject_id in (onboarding.selected_subject_ids or [])
+    ]
     if not selected_subject_ids:
         selected_subject_ids = school_setup.get("selected_catalog_subject_ids") or []
 
@@ -149,7 +164,9 @@ def build_teacher_onboarding_form(db: Session, *, user: User, grade_id: uuid.UUI
             for row in grades
         ],
         "assigned_grade_id": assigned_grade_id,
-        "selected_school_year_id": str(onboarding.school_year_id) if onboarding.school_year_id else None,
+        "selected_school_year_id": str(onboarding.school_year_id)
+        if onboarding.school_year_id
+        else None,
         "selected_grade_id": selected_grade_id,
         "selected_subject_ids": selected_subject_ids,
         "subjects": [
@@ -271,10 +288,16 @@ def serialize_teacher_onboarding_status(row: TeacherAssistV2Onboarding | None) -
         "pacing_guide_setup_complete": is_v2_pacing_setup_complete(row),
         "school_year_id": str(row.school_year_id) if row.school_year_id else None,
         "grade_id": str(row.grade_id) if row.grade_id else None,
-        "selected_subject_ids": [str(subject_id) for subject_id in (row.selected_subject_ids or [])],
+        "selected_subject_ids": [
+            str(subject_id) for subject_id in (row.selected_subject_ids or [])
+        ],
         "student_count": row.student_count,
-        "onboarding_completed_at": row.onboarding_completed_at.isoformat() if row.onboarding_completed_at else None,
+        "onboarding_completed_at": row.onboarding_completed_at.isoformat()
+        if row.onboarding_completed_at
+        else None,
         "pacing_guide_setup_completed_at": (
-            row.pacing_guide_setup_completed_at.isoformat() if row.pacing_guide_setup_completed_at else None
+            row.pacing_guide_setup_completed_at.isoformat()
+            if row.pacing_guide_setup_completed_at
+            else None
         ),
     }

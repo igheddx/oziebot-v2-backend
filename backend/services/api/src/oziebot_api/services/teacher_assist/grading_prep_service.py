@@ -7,9 +7,13 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_extracted_text_record import TeacherAssistExtractedTextRecord
-from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
+from oziebot_api.models.teacher_assist_student_work_submission import (
+    TeacherAssistStudentWorkSubmission,
+)
 from oziebot_api.services.teacher_assist.assignments import get_assignment_or_404
-from oziebot_api.services.teacher_assist.extraction_jobs import latest_extraction_state_for_submissions
+from oziebot_api.services.teacher_assist.extraction_jobs import (
+    latest_extraction_state_for_submissions,
+)
 from oziebot_api.services.teacher_assist.student_work import (
     get_student_work_submission_or_404,
     list_assignment_student_work_submissions,
@@ -103,7 +107,9 @@ def _submission_grading_prep_item(
         "review_status": record.review_status if record is not None else None,
         "text_source": resolution.text_source if resolution is not None else None,
         "text_char_count": resolution.text_char_count if resolution is not None else None,
-        "extracted_text_record_id": resolution.extracted_text_record_id if resolution is not None else None,
+        "extracted_text_record_id": resolution.extracted_text_record_id
+        if resolution is not None
+        else None,
         "extraction_job_id": resolution.extraction_job_id if resolution is not None else None,
     }
 
@@ -137,11 +143,11 @@ def get_student_work_grading_prep_context(
             "AI grading remains disabled in this phase."
         )
     elif item["blocked_reason"] == "no_extracted_text":
-        message = "Upload and extract student work, then complete teacher review before grading prep."
-    elif item["blocked_reason"] and str(item["blocked_reason"]).startswith("review_status:"):
         message = (
-            "Extracted text is not teacher-approved yet. Approve or mark reviewed before grading prep."
+            "Upload and extract student work, then complete teacher review before grading prep."
         )
+    elif item["blocked_reason"] and str(item["blocked_reason"]).startswith("review_status:"):
+        message = "Extracted text is not teacher-approved yet. Approve or mark reviewed before grading prep."
     else:
         message = "Approved text is not available for grading prep yet."
 

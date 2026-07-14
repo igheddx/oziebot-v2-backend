@@ -11,7 +11,9 @@ from oziebot_api.db.base import Base
 
 class TeacherAssistPacingItemStandard(Base):
     __tablename__ = "pacing_item_standards"
-    __table_args__ = (UniqueConstraint("pacing_item_id", "standard_id", name="uq_pacing_item_standard"),)
+    __table_args__ = (
+        UniqueConstraint("pacing_item_id", "standard_id", name="uq_pacing_item_standard"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     pacing_item_id: Mapped[uuid.UUID] = mapped_column(

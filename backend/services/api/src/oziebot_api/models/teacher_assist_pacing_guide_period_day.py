@@ -14,7 +14,10 @@ class TeacherAssistPacingGuidePeriodDay(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     period_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("pacing_guide_periods.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guide_periods.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     day_label: Mapped[str] = mapped_column(String(32), nullable=False)
     sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)

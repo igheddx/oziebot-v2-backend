@@ -20,7 +20,9 @@ from oziebot_api.models.education_catalog import (
 from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
-from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
+from oziebot_api.models.teacher_assist_pacing_guide_objective import (
+    TeacherAssistPacingGuideObjective,
+)
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
 from oziebot_api.models.user import User
@@ -50,7 +52,9 @@ GOLDEN_PATH_ELA_WEEK1_DESCRIPTION = (
 )
 
 
-def _build_week_schedule(reference: date | None = None, week_count: int = PACING_WEEK_COUNT) -> list[tuple[date, date]]:
+def _build_week_schedule(
+    reference: date | None = None, week_count: int = PACING_WEEK_COUNT
+) -> list[tuple[date, date]]:
     anchor = reference or date.today()
     monday = anchor - timedelta(days=anchor.weekday())
     return [
@@ -225,7 +229,9 @@ def _seed_actor(db: Session) -> tuple[User, uuid.UUID]:
         if user is None:
             continue
         membership = db.scalars(
-            select(TenantMembership).where(TenantMembership.user_id == user.id).order_by(TenantMembership.created_at)
+            select(TenantMembership)
+            .where(TenantMembership.user_id == user.id)
+            .order_by(TenantMembership.created_at)
         ).first()
         if membership is None:
             continue
@@ -253,7 +259,9 @@ def _operational_seed_tenants(db: Session) -> list[tuple[User, uuid.UUID]]:
         if user is None:
             continue
         membership = db.scalars(
-            select(TenantMembership).where(TenantMembership.user_id == user.id).order_by(TenantMembership.created_at)
+            select(TenantMembership)
+            .where(TenantMembership.user_id == user.id)
+            .order_by(TenantMembership.created_at)
         ).first()
         if membership is None:
             continue
@@ -317,7 +325,9 @@ def _ensure_grading_period(
 
 def seed_pacing_guides(db: Session) -> dict[str, int]:
     totals = {"guides": 0, "periods": 0, "objectives": 0, "resources": 0, "tenants": 0}
-    existing_state = db.scalars(select(EducationState).where(EducationState.abbreviation == "TX")).one_or_none()
+    existing_state = db.scalars(
+        select(EducationState).where(EducationState.abbreviation == "TX")
+    ).one_or_none()
     if existing_state is None:
         seed_education_catalog(db)
 
@@ -505,7 +515,9 @@ def _seed_pacing_guides_for_tenant(
     return counts
 
 
-def _week_periods_for_guide(db: Session, *, pacing_guide_id: uuid.UUID) -> list[TeacherAssistPacingGuidePeriod]:
+def _week_periods_for_guide(
+    db: Session, *, pacing_guide_id: uuid.UUID
+) -> list[TeacherAssistPacingGuidePeriod]:
     return list(
         db.scalars(
             select(TeacherAssistPacingGuidePeriod)

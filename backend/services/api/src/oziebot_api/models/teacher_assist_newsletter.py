@@ -89,7 +89,9 @@ class TeacherAssistNewsletter(Base):
     tenant: Mapped["Tenant"] = relationship("Tenant")
     owner_user: Mapped["User"] = relationship("User", foreign_keys=[owner_user_id])
     school_year: Mapped["TeacherAssistSchoolYear"] = relationship("TeacherAssistSchoolYear")
-    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship("TeacherAssistGradingPeriod")
+    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship(
+        "TeacherAssistGradingPeriod"
+    )
     teacher_class: Mapped["TeacherAssistClass"] = relationship("TeacherAssistClass")
     subject: Mapped["TeacherAssistSubject"] = relationship("TeacherAssistSubject")
     current_version: Mapped["TeacherAssistNewsletterVersion | None"] = relationship(

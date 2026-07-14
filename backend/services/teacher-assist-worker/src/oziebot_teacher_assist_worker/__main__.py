@@ -45,14 +45,18 @@ def main() -> None:
     log.info("teacher-assist-worker started poll_interval=%s", poll_seconds)
 
     # Recover any packages that were mid-generation when the worker last died
-    recovery_session = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)()
+    recovery_session = sessionmaker(
+        bind=engine, autoflush=False, autocommit=False, expire_on_commit=False
+    )()
     try:
         recover_stale_v2_running_packages(recovery_session)
     finally:
         recovery_session.close()
 
     while not stop_event.is_set():
-        recovery_session = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)()
+        recovery_session = sessionmaker(
+            bind=engine, autoflush=False, autocommit=False, expire_on_commit=False
+        )()
         try:
             recover_stale_extraction_jobs(recovery_session, settings=settings)
             recovery_session.commit()

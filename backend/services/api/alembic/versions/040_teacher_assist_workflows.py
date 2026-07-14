@@ -38,7 +38,9 @@ def upgrade() -> None:
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["planning_input_draft_id"], ["planning_input_drafts.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["planning_input_draft_id"], ["planning_input_drafts.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -75,7 +77,9 @@ def upgrade() -> None:
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["workflow_id"], ["teacher_assist_workflows.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["workflow_id"], ["teacher_assist_workflows.id"], ondelete="CASCADE"
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -97,10 +101,14 @@ def upgrade() -> None:
         sa.Column("source_context_json", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["planning_input_draft_id"], ["planning_input_drafts.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["planning_input_draft_id"], ["planning_input_drafts.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["workflow_id"], ["teacher_assist_workflows.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["workflow_id"], ["teacher_assist_workflows.id"], ondelete="SET NULL"
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_weekly_plans_tenant_id", "weekly_plans", ["tenant_id"])

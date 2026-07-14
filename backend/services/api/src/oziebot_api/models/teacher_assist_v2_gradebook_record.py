@@ -21,7 +21,9 @@ class TeacherAssistV2GradebookRecord(Base):
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     platform_school_year_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_school_years.id", ondelete="CASCADE"), nullable=False
+        Uuid(as_uuid=True),
+        ForeignKey("education_school_years.id", ondelete="CASCADE"),
+        nullable=False,
     )
     catalog_district_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("education_districts.id", ondelete="CASCADE"), nullable=False
@@ -63,7 +65,9 @@ class TeacherAssistV2GradebookRecord(Base):
     mastery_level: Mapped[str] = mapped_column(String(32), nullable=False)
     teacher_comment: Mapped[str] = mapped_column(Text(), nullable=False)
     confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    sync_status: Mapped[str] = mapped_column(String(32), nullable=False, default="SYNCED", server_default="SYNCED")
+    sync_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="SYNCED", server_default="SYNCED"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

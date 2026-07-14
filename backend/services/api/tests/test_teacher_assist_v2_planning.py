@@ -5,10 +5,19 @@ import uuid
 
 from sqlalchemy import select
 
-from oziebot_api.models.education_catalog import EducationGrade, EducationSchool, EducationSchoolYear, EducationState
-from oziebot_api.models.teacher_assist_v2_instructional_package import TeacherAssistV2InstructionalPackage
+from oziebot_api.models.education_catalog import (
+    EducationGrade,
+    EducationSchool,
+    EducationSchoolYear,
+    EducationState,
+)
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackage,
+)
 from oziebot_api.scripts.seed_teacher_assist_v2 import seed_teacher_assist_v2
-from oziebot_api.services.teacher_assist.teacher_assignment_provisioning import provision_teacher_school_assignment
+from oziebot_api.services.teacher_assist.teacher_assignment_provisioning import (
+    provision_teacher_school_assignment,
+)
 from tests.test_teacher_assist_v2_supporting_materials import _make_root_admin
 
 
@@ -18,10 +27,16 @@ def _ready_teacher_token(client, db_session) -> str:
     db_session.commit()
 
     state = db_session.scalar(select(EducationState).where(EducationState.abbreviation == "TX"))
-    school = db_session.scalar(select(EducationSchool).where(EducationSchool.name == "Mason Elementary"))
-    school_year = db_session.scalar(select(EducationSchoolYear).where(EducationSchoolYear.title == "2026-2027"))
+    school = db_session.scalar(
+        select(EducationSchool).where(EducationSchool.name == "Mason Elementary")
+    )
+    school_year = db_session.scalar(
+        select(EducationSchoolYear).where(EducationSchoolYear.title == "2026-2027")
+    )
     grade = db_session.scalar(
-        select(EducationGrade).where(EducationGrade.school_id == school.id, EducationGrade.grade_code == "5")
+        select(EducationGrade).where(
+            EducationGrade.school_id == school.id, EducationGrade.grade_code == "5"
+        )
     )
     assert state and school and school_year and grade
 
@@ -109,7 +124,12 @@ def test_v2_teacher_planning_form_and_generate(client, db_session):
         "/v1/teacher-assist-v2/teacher/planning/supplemental-materials/upload",
         headers=headers,
         files={"file": ("supplement.txt", io.BytesIO(b"Teacher supplemental"), "text/plain")},
-        data={"week_start": "1", "week_end": "1", "title": "My supplement", "resource_type": "worksheet"},
+        data={
+            "week_start": "1",
+            "week_end": "1",
+            "title": "My supplement",
+            "resource_type": "worksheet",
+        },
     )
     assert upload.status_code == 201, upload.text
 
@@ -160,7 +180,12 @@ def test_v2_planning_supplemental_materials_scoped_to_current_session(client, db
         "/v1/teacher-assist-v2/teacher/planning/supplemental-materials/upload",
         headers=headers,
         files={"file": ("prior-plan.txt", io.BytesIO(b"Prior plan supplement"), "text/plain")},
-        data={"week_start": "1", "week_end": "1", "title": "Prior plan file", "resource_type": "worksheet"},
+        data={
+            "week_start": "1",
+            "week_end": "1",
+            "title": "Prior plan file",
+            "resource_type": "worksheet",
+        },
     )
     assert upload.status_code == 201, upload.text
     prior_material_id = upload.json()["id"]
@@ -196,7 +221,9 @@ def test_v2_planning_supplemental_materials_scoped_to_current_session(client, db
         headers=headers,
     )
     assert package_detail.status_code == 200, package_detail.text
-    linked_titles = {item["title"] for item in package_detail.json()["teacher_supplemental_materials"]}
+    linked_titles = {
+        item["title"] for item in package_detail.json()["teacher_supplemental_materials"]
+    }
     assert linked_titles == {"Prior plan file", "Prior plan link"}
 
     review = client.get(
@@ -217,7 +244,12 @@ def test_v2_planning_supplemental_materials_scoped_to_current_session(client, db
         "/v1/teacher-assist-v2/teacher/planning/supplemental-materials/upload",
         headers=headers,
         files={"file": ("new-plan.txt", io.BytesIO(b"New plan supplement"), "text/plain")},
-        data={"week_start": "1", "week_end": "1", "title": "New plan file", "resource_type": "worksheet"},
+        data={
+            "week_start": "1",
+            "week_end": "1",
+            "title": "New plan file",
+            "resource_type": "worksheet",
+        },
     )
     assert new_upload.status_code == 201, new_upload.text
     assert new_upload.json()["id"] != prior_material_id
@@ -229,10 +261,16 @@ def _teacher_onboarded_without_pacing_setup(client, db_session) -> tuple[str, di
     db_session.commit()
 
     state = db_session.scalar(select(EducationState).where(EducationState.abbreviation == "TX"))
-    school = db_session.scalar(select(EducationSchool).where(EducationSchool.name == "Mason Elementary"))
-    school_year = db_session.scalar(select(EducationSchoolYear).where(EducationSchoolYear.title == "2026-2027"))
+    school = db_session.scalar(
+        select(EducationSchool).where(EducationSchool.name == "Mason Elementary")
+    )
+    school_year = db_session.scalar(
+        select(EducationSchoolYear).where(EducationSchoolYear.title == "2026-2027")
+    )
     grade = db_session.scalar(
-        select(EducationGrade).where(EducationGrade.school_id == school.id, EducationGrade.grade_code == "5")
+        select(EducationGrade).where(
+            EducationGrade.school_id == school.id, EducationGrade.grade_code == "5"
+        )
     )
     assert state and school and school_year and grade
 

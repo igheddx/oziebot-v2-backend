@@ -20,7 +20,9 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
 )
 from oziebot_api.models.teacher_assist_v2_onboarding import TeacherAssistV2PacingGuideAssignment
 from oziebot_api.models.user import User
-from oziebot_api.services.teacher_assist.pacing_guide_foundation import get_catalog_pacing_guide_detail
+from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
+    get_catalog_pacing_guide_detail,
+)
 from oziebot_api.services.teacher_assist.setup import teacher_assist_context_for_user
 from oziebot_api.services.teacher_assist.storage import (
     StoredTeacherAssistUpload,
@@ -35,7 +37,9 @@ from oziebot_api.services.teacher_assist_v2.pacing_guide_setup import (
 from oziebot_api.services.teacher_assist_v2.pacing_guides import ensure_tenant_school_year
 from oziebot_api.services.teacher_assist_v2.planning_constants import WEEK_RANGE_PRESETS  # noqa: F401 kept for compat
 from oziebot_api.services.teacher_assist_v2.package_lifecycle import resolve_default_plan_dates
-from oziebot_api.services.teacher_assist_v2.platform_context import resolve_instructional_catalog_tenant_id
+from oziebot_api.services.teacher_assist_v2.platform_context import (
+    resolve_instructional_catalog_tenant_id,
+)
 from oziebot_api.services.teacher_assist_v2.school_years import get_platform_school_year_or_404
 from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import (
     filter_excluded_pacing_materials,
@@ -97,23 +101,28 @@ def _build_alignment_summary(bank_json: dict | None) -> dict | None:
         day = entry.get("day") or "Any Day"
         strand = entry.get("strand_name") or "General"
         by_week.setdefault(week_key, {}).setdefault(day, {}).setdefault(strand, [])
-        by_week[week_key][day][strand].append({
-            "title": entry.get("title"),
-            "resource_type": entry.get("resource_type"),
-            "theme": entry.get("theme"),
-            "topic": entry.get("topic"),
-            "allowed_uses": entry.get("allowed_uses") or [],
-            "supported_objectives": entry.get("supported_objectives") or [],
-            "curriculum_grounding": entry.get("curriculum_grounding"),
-            "extraction_source": entry.get("extraction_source"),
-        })
+        by_week[week_key][day][strand].append(
+            {
+                "title": entry.get("title"),
+                "resource_type": entry.get("resource_type"),
+                "theme": entry.get("theme"),
+                "topic": entry.get("topic"),
+                "allowed_uses": entry.get("allowed_uses") or [],
+                "supported_objectives": entry.get("supported_objectives") or [],
+                "curriculum_grounding": entry.get("curriculum_grounding"),
+                "extraction_source": entry.get("extraction_source"),
+            }
+        )
 
     if not by_week:
         return None
 
     total_resources = sum(
-        1 for e in entries if e.get("is_curriculum_assigned") and e.get("resource_type") not in
-        ("graphic_organizer", "video", "anchor_chart", "manipulative", "diagram", "other")
+        1
+        for e in entries
+        if e.get("is_curriculum_assigned")
+        and e.get("resource_type")
+        not in ("graphic_organizer", "video", "anchor_chart", "manipulative", "diagram", "other")
     )
     return {
         "total_resources": total_resources,
@@ -130,10 +139,12 @@ def _require_planning_ready(db: Session, *, user: User):
 
 def _teacher_assignments(db: Session, *, user: User) -> list[TeacherAssistV2PacingGuideAssignment]:
     return db.scalars(
-        select(TeacherAssistV2PacingGuideAssignment).where(
+        select(TeacherAssistV2PacingGuideAssignment)
+        .where(
             TeacherAssistV2PacingGuideAssignment.user_id == user.id,
             TeacherAssistV2PacingGuideAssignment.active.is_(True),
-        ).order_by(TeacherAssistV2PacingGuideAssignment.created_at.asc())
+        )
+        .order_by(TeacherAssistV2PacingGuideAssignment.created_at.asc())
     ).all()
 
 
@@ -154,10 +165,14 @@ def _assignment_context(db: Session, *, user: User) -> dict:
 
     platform_year = get_platform_school_year_or_404(db, school_year_id=onboarding.school_year_id)
     platform_tenant_id = resolve_instructional_catalog_tenant_id(db)
-    tenant_year = ensure_tenant_school_year(db, tenant_id=ctx.tenant_id, platform_year=platform_year)
+    tenant_year = ensure_tenant_school_year(
+        db, tenant_id=ctx.tenant_id, platform_year=platform_year
+    )
 
     subject_ids = [uuid.UUID(value) for value in (onboarding.selected_subject_ids or [])]
-    subjects = db.scalars(select(EducationSubject).where(EducationSubject.id.in_(subject_ids))).all()
+    subjects = db.scalars(
+        select(EducationSubject).where(EducationSubject.id.in_(subject_ids))
+    ).all()
     subject_by_id = {row.id: row for row in subjects}
     assignments = _teacher_assignments(db, user=user)
 
@@ -234,13 +249,16 @@ def _assignment_context(db: Session, *, user: User) -> dict:
         "tenant_year": tenant_year,
         "platform_tenant_id": platform_tenant_id,
         "subjects": guides,
-        "default_teaching_order": [row["subject_id"] for row in sorted(
-            guides,
-            key=lambda g: next(
-                (i for i, sid in enumerate(subject_ids) if str(sid) == g["subject_id"]),
-                999,
-            ),
-        )],
+        "default_teaching_order": [
+            row["subject_id"]
+            for row in sorted(
+                guides,
+                key=lambda g: next(
+                    (i for i, sid in enumerate(subject_ids) if str(sid) == g["subject_id"]),
+                    999,
+                ),
+            )
+        ],
         "week_ranges": week_ranges,
         "total_guide_weeks": n,
         "recommended_outputs": recommended_outputs,
@@ -333,7 +351,9 @@ def build_planning_review_context(
             platform_tenant_id=platform_tenant_id,
             assignment=assignment,
         )
-        guide_tenant_id = ctx.tenant_id if assignment.guide_scope == "teacher" else platform_tenant_id
+        guide_tenant_id = (
+            ctx.tenant_id if assignment.guide_scope == "teacher" else platform_tenant_id
+        )
         for week_index, period in enumerate(_week_periods(guide), start=1):
             if week_index < week_start or week_index > week_end:
                 continue
@@ -406,12 +426,16 @@ def build_planning_review_context(
         settings=settings,
         unlinked_only=True,
     )
-    from oziebot_api.services.teacher_assist_v2.package_lifecycle import default_plan_dates_for_week_range
+    from oziebot_api.services.teacher_assist_v2.package_lifecycle import (
+        default_plan_dates_for_week_range,
+    )
 
     period_starts = [
         date.fromisoformat(str(week["start_date"])) for week in weeks if week.get("start_date")
     ]
-    period_ends = [date.fromisoformat(str(week["end_date"])) for week in weeks if week.get("end_date")]
+    period_ends = [
+        date.fromisoformat(str(week["end_date"])) for week in weeks if week.get("end_date")
+    ]
     plan_start, plan_end = default_plan_dates_for_week_range(
         week_start=week_start,
         week_end=week_end,
@@ -514,7 +538,9 @@ def list_planning_supplemental_materials(
         )
         if unlinked_only:
             stmt = stmt.where(TeacherAssistV2PlanningSupplementalMaterial.package_id.is_(None))
-    rows = db.scalars(stmt.order_by(TeacherAssistV2PlanningSupplementalMaterial.created_at.asc())).all()
+    rows = db.scalars(
+        stmt.order_by(TeacherAssistV2PlanningSupplementalMaterial.created_at.asc())
+    ).all()
     if settings is not None:
         for row in rows:
             if row.material_kind != "file" or not row.storage_key:
@@ -522,7 +548,9 @@ def list_planning_supplemental_materials(
             record = ensure_planning_supplemental_extraction_record(db, row=row)
             if record.extraction_status == "not_started":
                 run_document_extraction(db, settings=settings, record=record)
-    extraction_map = load_planning_supplemental_extractions(db, material_ids=[row.id for row in rows])
+    extraction_map = load_planning_supplemental_extractions(
+        db, material_ids=[row.id for row in rows]
+    )
     return [
         serialize_supplemental_material(
             row,
@@ -704,10 +732,15 @@ def _resolve_generation_manifest(
     package_id: "uuid.UUID",
 ) -> dict | None:
     """Return the stored generation_manifest, or a cost-only fallback from usage events."""
-    stored = (row.metadata_json or {}).get("generation_manifest") if isinstance(row.metadata_json, dict) else None
+    stored = (
+        (row.metadata_json or {}).get("generation_manifest")
+        if isinstance(row.metadata_json, dict)
+        else None
+    )
     if stored is not None:
         return stored
     from oziebot_api.services.teacher_assist.ai_usage import get_package_ai_cost_by_feature
+
     cost_by_feature = get_package_ai_cost_by_feature(db, package_id=package_id)
     if not cost_by_feature:
         return None
@@ -750,13 +783,22 @@ def get_instructional_package_detail(
         raise LookupError("Instructional package not found")
 
     from oziebot_api.models.education_catalog import EducationSubject
-    from oziebot_api.services.teacher_assist_v2.package_export import artifact_download_url, group_artifacts
+    from oziebot_api.services.teacher_assist_v2.package_export import (
+        artifact_download_url,
+        group_artifacts,
+    )
 
     subject_ids = {artifact.subject_id for artifact in row.artifacts if artifact.subject_id}
-    subject_names = {
-        item.id: item.display_name
-        for item in db.scalars(select(EducationSubject).where(EducationSubject.id.in_(subject_ids))).all()
-    } if subject_ids else {}
+    subject_names = (
+        {
+            item.id: item.display_name
+            for item in db.scalars(
+                select(EducationSubject).where(EducationSubject.id.in_(subject_ids))
+            ).all()
+        }
+        if subject_ids
+        else {}
+    )
 
     artifacts = []
     for artifact in sorted(row.artifacts, key=lambda item: (item.sequence_number, item.title)):
@@ -773,11 +815,15 @@ def get_instructional_package_detail(
             "quality_review": metadata.get("quality_review") or None,
             "generation_provenance": metadata.get("generation_provenance") or None,
             "dev_locked": bool(metadata.get("dev_locked")),
-            "description": metadata.get("description") or content.get("description") or content.get("summary"),
-            "objective_mapping": metadata.get("objective_mapping") or content.get("objective_mapping"),
+            "description": metadata.get("description")
+            or content.get("description")
+            or content.get("summary"),
+            "objective_mapping": metadata.get("objective_mapping")
+            or content.get("objective_mapping"),
             "objective_ids": metadata.get("objective_ids") or content.get("objective_ids") or [],
             "teks_ids": metadata.get("teks_ids") or content.get("teks_ids") or [],
-            "alignment_summary": metadata.get("alignment_summary") or content.get("alignment_summary"),
+            "alignment_summary": metadata.get("alignment_summary")
+            or content.get("alignment_summary"),
             "preview_html": artifact.preview_html,
             "export_format": artifact.export_format,
             "download_url": artifact_download_url(artifact, settings=settings),
@@ -803,7 +849,9 @@ def get_instructional_package_detail(
                     "suggested_sources": list(asset.suggested_sources_json or []),
                     "created_at": asset.created_at,
                 }
-                for asset in sorted(artifact.slide_visual_assets, key=lambda item: (item.slide_id, item.updated_at))
+                for asset in sorted(
+                    artifact.slide_visual_assets, key=lambda item: (item.slide_id, item.updated_at)
+                )
             ],
         }
         if content:
@@ -813,7 +861,9 @@ def get_instructional_package_detail(
         elif content.get("linked_rubric_artifact_id"):
             entry["linked_rubric_artifact_id"] = content["linked_rubric_artifact_id"]
         if metadata.get("linked_writing_response_artifact_id"):
-            entry["linked_writing_response_artifact_id"] = metadata["linked_writing_response_artifact_id"]
+            entry["linked_writing_response_artifact_id"] = metadata[
+                "linked_writing_response_artifact_id"
+            ]
         if metadata.get("teacher_edited"):
             entry["teacher_edited"] = True
         if metadata.get("package_additional"):
@@ -824,6 +874,7 @@ def get_instructional_package_detail(
             and metadata.get("additional_exports")
         ):
             from oziebot_api.services.teacher_assist.storage import teacher_assist_file_exists
+
             missing = any(
                 isinstance(extra, dict)
                 and extra.get("storage_key")
@@ -831,9 +882,14 @@ def get_instructional_package_detail(
                 for extra in metadata["additional_exports"]
             )
             if missing:
-                from oziebot_api.services.teacher_assist_v2.assessment_student_exports import refresh_assessment_student_exports
+                from oziebot_api.services.teacher_assist_v2.assessment_student_exports import (
+                    refresh_assessment_student_exports,
+                )
+
                 try:
-                    refresh_assessment_student_exports(db, settings=settings, package=row, artifact=artifact)
+                    refresh_assessment_student_exports(
+                        db, settings=settings, package=row, artifact=artifact
+                    )
                     metadata = dict(artifact.metadata_json or {})
                 except Exception:
                     pass
@@ -899,7 +955,8 @@ def get_instructional_package_detail(
             _week = _top_issue.get("week")
             _rec = _top_issue.get("recommendation") or ""
             _confidence_note = (
-                f"Week {_week}: {_rec}" if _week and _rec
+                f"Week {_week}: {_rec}"
+                if _week and _rec
                 else _rec or _validation_report.get("teacher_summary") or None
             )
 
@@ -937,7 +994,9 @@ def get_instructional_package_detail(
         "artifacts": artifacts,
         "teacher_teaching_brief": row.teacher_coaching_summary_json or None,
         "instructional_delivery_profile": row.instructional_delivery_profile,
-        "curriculum_resource_alignment": _build_alignment_summary(row.instructional_resource_bank_json),
+        "curriculum_resource_alignment": _build_alignment_summary(
+            row.instructional_resource_bank_json
+        ),
         "strand_learning_journeys": (row.metadata_json or {}).get("strand_learning_journeys")
         if isinstance(row.metadata_json, dict)
         else None,

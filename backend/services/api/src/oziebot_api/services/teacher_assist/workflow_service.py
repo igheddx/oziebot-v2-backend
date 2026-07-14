@@ -127,7 +127,9 @@ def _snapshot_subject_id(snapshot: dict[str, Any]) -> uuid.UUID | None:
 
 
 def _plan_school_year_id(plan: TeacherAssistWeeklyPlan) -> uuid.UUID | None:
-    return _snapshot_school_year_id(dict(plan.source_context_json or {})) or plan.school_year_origin_id
+    return (
+        _snapshot_school_year_id(dict(plan.source_context_json or {})) or plan.school_year_origin_id
+    )
 
 
 def _plan_grading_period_id(plan: TeacherAssistWeeklyPlan) -> uuid.UUID | None:
@@ -170,7 +172,9 @@ def get_teacher_assist_workflow_or_404(
     return row
 
 
-def list_weekly_plans(db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> list[TeacherAssistWeeklyPlan]:
+def list_weekly_plans(
+    db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUID
+) -> list[TeacherAssistWeeklyPlan]:
     return db.scalars(
         select(TeacherAssistWeeklyPlan)
         .where(
@@ -218,7 +222,9 @@ def get_weekly_plan_or_404(
 def list_weekly_plan_versions(
     db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUID, weekly_plan_id: uuid.UUID
 ) -> list[TeacherAssistWeeklyPlanVersion]:
-    get_visible_weekly_plan_or_404(db, tenant_id=tenant_id, user_id=user_id, weekly_plan_id=weekly_plan_id)
+    get_visible_weekly_plan_or_404(
+        db, tenant_id=tenant_id, user_id=user_id, weekly_plan_id=weekly_plan_id
+    )
     return db.scalars(
         select(TeacherAssistWeeklyPlanVersion)
         .where(TeacherAssistWeeklyPlanVersion.weekly_plan_id == weekly_plan_id)
@@ -234,7 +240,9 @@ def get_weekly_plan_version_or_404(
     weekly_plan_id: uuid.UUID,
     version_id: uuid.UUID,
 ) -> TeacherAssistWeeklyPlanVersion:
-    get_visible_weekly_plan_or_404(db, tenant_id=tenant_id, user_id=user_id, weekly_plan_id=weekly_plan_id)
+    get_visible_weekly_plan_or_404(
+        db, tenant_id=tenant_id, user_id=user_id, weekly_plan_id=weekly_plan_id
+    )
     row = db.scalars(
         select(TeacherAssistWeeklyPlanVersion).where(
             TeacherAssistWeeklyPlanVersion.id == version_id,
@@ -269,11 +277,15 @@ def _normalized_weekly_plan_content(
 ) -> dict[str, Any]:
     normalized = deepcopy(content_json)
     metadata = dict(normalized.get("metadata") or {})
-    resolved_provider_name = provider_name or str(metadata.get("generator") or metadata.get("provider_mode") or "mock")
+    resolved_provider_name = provider_name or str(
+        metadata.get("generator") or metadata.get("provider_mode") or "mock"
+    )
     resolved_provider_mode = "mock" if resolved_provider_name == "mock" else "real"
     metadata.update(
         {
-            "is_mock": is_mock if is_mock is not None else bool(metadata.get("is_mock", resolved_provider_name == "mock")),
+            "is_mock": is_mock
+            if is_mock is not None
+            else bool(metadata.get("is_mock", resolved_provider_name == "mock")),
             "generator": resolved_provider_name,
             "provider_mode": metadata.get("provider_mode") or resolved_provider_mode,
             "provider_model": provider_model or metadata.get("provider_model"),
@@ -299,10 +311,16 @@ def _normalized_weekly_plan_content(
     normalized["teacher_notes_used"] = normalized.get("teacher_notes_used") or ""
     normalized["review_notes"] = normalized.get("review_notes") or ""
     normalized["planning_scope"] = normalized.get("planning_scope") or "weekly"
-    normalized["plan_title"] = normalized.get("plan_title") or normalized.get("title") or "TeacherAssist Instructional Plan"
+    normalized["plan_title"] = (
+        normalized.get("plan_title")
+        or normalized.get("title")
+        or "TeacherAssist Instructional Plan"
+    )
     normalized["module_title"] = normalized.get("module_title")
     metadata["provider_mode"] = metadata.get("provider_mode") or resolved_provider_mode
-    metadata["prompt_version"] = prompt_version or metadata.get("prompt_version") or INSTRUCTIONAL_PLAN_PROMPT_VERSION
+    metadata["prompt_version"] = (
+        prompt_version or metadata.get("prompt_version") or INSTRUCTIONAL_PLAN_PROMPT_VERSION
+    )
     return normalized
 
 
@@ -335,11 +353,11 @@ def _build_quality_review_metadata(
         warnings.append("Start or end date was not fully captured in the planning context.")
 
     if standards:
-        standards_alignment_summary = (
-            f"Aligned to {len(standards)} supplied standard(s) across the {content_json.get('planning_scope', 'weekly')} plan."
-        )
+        standards_alignment_summary = f"Aligned to {len(standards)} supplied standard(s) across the {content_json.get('planning_scope', 'weekly')} plan."
     else:
-        standards_alignment_summary = "No standards were supplied, so standards alignment still needs manual review."
+        standards_alignment_summary = (
+            "No standards were supplied, so standards alignment still needs manual review."
+        )
 
     content_json["review_required"] = True
     content_json["quality_flags"] = quality_flags
@@ -386,7 +404,9 @@ def list_workflow_usage_events(
         )
         .order_by(TeacherAssistAIUsageEvent.created_at.desc())
     ).all()
-    usage_by_workflow: dict[uuid.UUID, list[TeacherAssistAIUsageEvent]] = {workflow_id: [] for workflow_id in workflow_ids}
+    usage_by_workflow: dict[uuid.UUID, list[TeacherAssistAIUsageEvent]] = {
+        workflow_id: [] for workflow_id in workflow_ids
+    }
     for row in rows:
         if row.workflow_id is not None:
             usage_by_workflow.setdefault(row.workflow_id, []).append(row)
@@ -434,7 +454,9 @@ def update_weekly_plan(
         planning_draft_id=weekly_plan.planning_input_draft_id,
         workflow_id=weekly_plan.workflow_id,
         version_number=next_version,
-        generated_at=str((weekly_plan.content_json.get("metadata") or {}).get("generated_at") or now.isoformat()),
+        generated_at=str(
+            (weekly_plan.content_json.get("metadata") or {}).get("generated_at") or now.isoformat()
+        ),
     )
     weekly_plan.updated_at = now
     _create_weekly_plan_version(
@@ -576,7 +598,9 @@ def _resolve_regeneration_target(
         if section_path is None:
             return deepcopy(content_json.get("weekly_segments")), "weekly_segments"
         if not section_path.startswith("weekly_segments."):
-            raise ValueError("Targeted weekly segment regeneration must use a weekly_segments.<index> path")
+            raise ValueError(
+                "Targeted weekly segment regeneration must use a weekly_segments.<index> path"
+            )
         return _get_path_value(content_json, section_path), section_path
 
     if section_key == "daily_breakdown":
@@ -612,8 +636,12 @@ def regenerate_weekly_plan_section(
         section_path=section_path,
     )
     effective_settings = _settings_with_provider_mode(settings, provider_mode)
-    provider = get_teacher_assist_ai_provider(effective_settings, db=db, workflow_type=WEEKLY_PLAN_WORKFLOW_TYPE)
-    _enforce_teacher_assist_model_allowlist(effective_settings, model_name=getattr(provider, "_model_name", "mock"))
+    provider = get_teacher_assist_ai_provider(
+        effective_settings, db=db, workflow_type=WEEKLY_PLAN_WORKFLOW_TYPE
+    )
+    _enforce_teacher_assist_model_allowlist(
+        effective_settings, model_name=getattr(provider, "_model_name", "mock")
+    )
     _enforce_teacher_assist_cost_limit(db, effective_settings)
     circuit_state = TeacherAssistProviderCircuitBreaker().state_for_provider(
         effective_settings,
@@ -640,7 +668,9 @@ def regenerate_weekly_plan_section(
         updated_content = deepcopy(weekly_plan.content_json)
         updated_content[section_key] = regenerated_section
     else:
-        updated_content = _set_path_value(weekly_plan.content_json, resolved_path, regenerated_section)
+        updated_content = _set_path_value(
+            weekly_plan.content_json, resolved_path, regenerated_section
+        )
     updated_content = _normalized_weekly_plan_content(
         content_json=updated_content,
         planning_draft_id=weekly_plan.planning_input_draft_id,
@@ -649,8 +679,13 @@ def regenerate_weekly_plan_section(
         generated_at=now.isoformat(),
         provider_name=provider_result.provider,
         provider_model=provider_result.model,
-        prompt_version=str((provider_result.metadata_json or {}).get("prompt_version") or INSTRUCTIONAL_PLAN_PROMPT_VERSION),
-        is_mock=bool((provider_result.metadata_json or {}).get("is_mock", provider_result.provider == "mock")),
+        prompt_version=str(
+            (provider_result.metadata_json or {}).get("prompt_version")
+            or INSTRUCTIONAL_PLAN_PROMPT_VERSION
+        ),
+        is_mock=bool(
+            (provider_result.metadata_json or {}).get("is_mock", provider_result.provider == "mock")
+        ),
     )
     updated_content["metadata"]["generated_at"] = now.isoformat()
     updated_content = _build_quality_review_metadata(
@@ -689,7 +724,9 @@ def regenerate_weekly_plan_section(
                 "weekly_plan_id": str(weekly_plan.id),
                 "section_key": section_key,
                 "section_path": resolved_path,
-                "teacher_instruction_supplied": bool(teacher_instruction and teacher_instruction.strip()),
+                "teacher_instruction_supplied": bool(
+                    teacher_instruction and teacher_instruction.strip()
+                ),
                 "preserve_existing_context": preserve_existing_context,
                 "circuit_state": circuit_state.state,
             },
@@ -767,9 +804,9 @@ def _plan_source_metadata(plan: TeacherAssistWeeklyPlan) -> dict[str, Any]:
     class_context = dict(source_context.get("class") or {})
     subjects = list(source_context.get("subjects") or [])
     return {
-        "source_school_year_id": school_year.get("id") or draft.get("school_year_id") or (
-            str(plan.school_year_origin_id) if plan.school_year_origin_id else None
-        ),
+        "source_school_year_id": school_year.get("id")
+        or draft.get("school_year_id")
+        or (str(plan.school_year_origin_id) if plan.school_year_origin_id else None),
         "source_school_year_title": school_year.get("title"),
         "subject_ids": [subject.get("id") for subject in subjects if subject.get("id")],
         "subject_names": [subject.get("name") for subject in subjects if subject.get("name")],
@@ -790,7 +827,10 @@ def _plan_matches_library_filters(
     metadata = _plan_source_metadata(plan)
     if school_year_id is not None:
         source_school_year_id = metadata.get("source_school_year_id")
-        if source_school_year_id != str(school_year_id) and plan.school_year_origin_id != school_year_id:
+        if (
+            source_school_year_id != str(school_year_id)
+            and plan.school_year_origin_id != school_year_id
+        ):
             return False
     if subject_id is not None and str(subject_id) not in metadata.get("subject_ids", []):
         return False
@@ -965,7 +1005,9 @@ def copy_weekly_plan(
         else None
     )
     target_grading_period = (
-        get_grading_period_or_404(db, tenant_id=tenant_id, grading_period_id=target_grading_period_id)
+        get_grading_period_or_404(
+            db, tenant_id=tenant_id, grading_period_id=target_grading_period_id
+        )
         if target_grading_period_id is not None
         else None
     )
@@ -990,7 +1032,9 @@ def copy_weekly_plan(
         target_school_year_id=target_school_year_id,
     )
     if copy_mode == "rollover_copy" and existing_target_copy is not None:
-        raise ValueError("A rollover copy for this plan already exists in the selected target school year")
+        raise ValueError(
+            "A rollover copy for this plan already exists in the selected target school year"
+        )
 
     patched_source_context_json = _patch_copy_source_context(
         source_context_json=source_plan.source_context_json,
@@ -1030,7 +1074,10 @@ def copy_weekly_plan(
             planning_draft_id=source_plan.planning_input_draft_id,
             workflow_id=None,
             version_number=1,
-            generated_at=str((source_plan.content_json.get("metadata") or {}).get("generated_at") or now.isoformat()),
+            generated_at=str(
+                (source_plan.content_json.get("metadata") or {}).get("generated_at")
+                or now.isoformat()
+            ),
         ),
         source_context_json=patched_source_context_json,
         created_at=now,
@@ -1312,9 +1359,7 @@ def _enforce_teacher_assist_cost_limit(db: Session, settings: Settings) -> None:
     assert_teacher_assist_ai_cost_available(db, settings)
 
 
-def _enforce_teacher_assist_model_allowlist(
-    settings: Settings, *, model_name: str | None
-) -> None:
+def _enforce_teacher_assist_model_allowlist(settings: Settings, *, model_name: str | None) -> None:
     normalized_model = (model_name or "").strip() or "mock"
     if normalized_model not in get_teacher_assist_allowed_models(settings):
         raise RuntimeError(f"TeacherAssist model '{normalized_model}' is not allowed")
@@ -1413,10 +1458,14 @@ def claim_next_teacher_assist_workflow(
         return None
 
     provider_name = settings.teacher_assist_ai_provider.strip() or "mock"
-    _set_workflow_status(workflow, status="running", progress_percent=max(workflow.progress_percent, 1))
+    _set_workflow_status(
+        workflow, status="running", progress_percent=max(workflow.progress_percent, 1)
+    )
     workflow.max_retries = max(0, settings.teacher_assist_worker_max_retries)
     workflow.provider_name = provider_name
-    workflow.provider_model = "mock" if provider_name == "mock" else settings.teacher_assist_real_provider_model
+    workflow.provider_model = (
+        "mock" if provider_name == "mock" else settings.teacher_assist_real_provider_model
+    )
     workflow.prompt_version = INSTRUCTIONAL_PLAN_PROMPT_VERSION
     workflow.last_error_code = None
     workflow.error_message = None
@@ -1506,7 +1555,9 @@ def create_weekly_plan_workflow(
         max_retries=max(0, settings.teacher_assist_worker_max_retries),
         timeout_at=None,
         provider_name=settings.teacher_assist_ai_provider.strip() or "mock",
-        provider_model="mock" if (settings.teacher_assist_ai_provider.strip() or "mock") == "mock" else settings.teacher_assist_real_provider_model,
+        provider_model="mock"
+        if (settings.teacher_assist_ai_provider.strip() or "mock") == "mock"
+        else settings.teacher_assist_real_provider_model,
         prompt_version=INSTRUCTIONAL_PLAN_PROMPT_VERSION,
         input_tokens_total=0,
         output_tokens_total=0,
@@ -1681,7 +1732,9 @@ def _persist_teacher_assist_workflow_success(
         progress_percent=35,
     )
     _enforce_teacher_assist_cost_limit(session, settings)
-    provider = get_teacher_assist_ai_provider(settings, db=session, workflow_type=workflow.workflow_type)
+    provider = get_teacher_assist_ai_provider(
+        settings, db=session, workflow_type=workflow.workflow_type
+    )
     effective_settings = resolve_teacher_assist_settings(session, settings)
     circuit_state = TeacherAssistProviderCircuitBreaker().state_for_provider(
         effective_settings, provider.provider_name
@@ -1700,8 +1753,12 @@ def _persist_teacher_assist_workflow_success(
         generated_at=datetime.now(UTC).isoformat(),
         provider_name=provider_result.provider,
         provider_model=provider_result.model,
-        prompt_version=str((provider_result.metadata_json or {}).get("prompt_version") or workflow.prompt_version),
-        is_mock=bool((provider_result.metadata_json or {}).get("is_mock", provider_result.provider == "mock")),
+        prompt_version=str(
+            (provider_result.metadata_json or {}).get("prompt_version") or workflow.prompt_version
+        ),
+        is_mock=bool(
+            (provider_result.metadata_json or {}).get("is_mock", provider_result.provider == "mock")
+        ),
     )
     content = _build_quality_review_metadata(
         snapshot=snapshot,
@@ -1710,8 +1767,8 @@ def _persist_teacher_assist_workflow_success(
     )
     workflow.provider_name = provider_result.provider
     workflow.provider_model = provider_result.model
-    workflow.prompt_version = (
-        str((provider_result.metadata_json or {}).get("prompt_version") or workflow.prompt_version)
+    workflow.prompt_version = str(
+        (provider_result.metadata_json or {}).get("prompt_version") or workflow.prompt_version
     )
     workflow.input_tokens_total = int(provider_result.input_tokens or 0)
     workflow.output_tokens_total = int(provider_result.output_tokens or 0)
@@ -1778,16 +1835,22 @@ def _persist_teacher_assist_workflow_success(
         period_row = session.get(TeacherAssistPacingGuidePeriod, pacing_period_id)
         pacing_guide_id = period_row.pacing_guide_id if period_row else None
     plan_title = (
-        draft_context.get("plan_title") or draft_context.get("title") or "TeacherAssist Instructional Plan"
+        draft_context.get("plan_title")
+        or draft_context.get("title")
+        or "TeacherAssist Instructional Plan"
     )
-    artifact_title_prefix = "Mock Instructional Plan" if provider_result.provider == "mock" else "Instructional Plan"
+    artifact_title_prefix = (
+        "Mock Instructional Plan" if provider_result.provider == "mock" else "Instructional Plan"
+    )
     weekly_plan = TeacherAssistWeeklyPlan(
         tenant_id=workflow.tenant_id,
         user_id=workflow.user_id,
         owner_user_id=workflow.user_id,
         planning_input_draft_id=workflow.planning_input_draft_id,
         workflow_id=workflow.id,
-        planning_scope=draft_context.get("planning_scope") or content.get("planning_scope") or "weekly",
+        planning_scope=draft_context.get("planning_scope")
+        or content.get("planning_scope")
+        or "weekly",
         title=f"{artifact_title_prefix} - {plan_title}",
         module_title=draft_context.get("module_title"),
         start_date=_parse_snapshot_date(draft_context.get("start_date")),
@@ -1924,7 +1987,10 @@ def _persist_teacher_assist_workflow_success(
     _set_workflow_step_status(
         finalize_step,
         status="completed",
-        metadata_json={"output_ref_type": workflow.output_ref_type, "output_ref_id": str(weekly_plan.id)},
+        metadata_json={
+            "output_ref_type": workflow.output_ref_type,
+            "output_ref_id": str(weekly_plan.id),
+        },
     )
     _append_workflow_log(
         workflow,
@@ -1946,7 +2012,10 @@ def _persist_teacher_assist_workflow_success(
         class_id=_snapshot_class_id(workflow.input_snapshot_json),
         subject_id=_snapshot_subject_id(workflow.input_snapshot_json),
         summary_text="Completed TeacherAssist instructional-plan workflow.",
-        details_json={"output_ref_id": str(weekly_plan.id), "workflow_type": workflow.workflow_type},
+        details_json={
+            "output_ref_id": str(weekly_plan.id),
+            "workflow_type": workflow.workflow_type,
+        },
     )
     session.commit()
 
@@ -2001,7 +2070,9 @@ def _persist_teacher_assist_workflow_cancelled(
     try:
         workflow = _refresh_workflow_for_execution(cancel_session, workflow_id)
         _clear_workflow_lease(workflow)
-        current_running_step = next((step for step in workflow.steps if step.status == "running"), None)
+        current_running_step = next(
+            (step for step in workflow.steps if step.status == "running"), None
+        )
         if current_running_step is not None:
             _set_workflow_step_status(
                 current_running_step,

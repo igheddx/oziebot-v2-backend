@@ -41,7 +41,9 @@ def build_assignment_description(
     grade_label: str,
     objectives: list[str],
 ) -> str:
-    objective_lines = "\n".join(f"- {item}" for item in objectives[:5]) or "- See TeacherAssist package"
+    objective_lines = (
+        "\n".join(f"- {item}" for item in objectives[:5]) or "- See TeacherAssist package"
+    )
     return (
         f"TeacherAssist Assignment ID: {assignment_id}\n"
         f"Instructional Package ID: {package_id}\n"
@@ -70,7 +72,9 @@ def create_assignment_quiz_form(
     _raise_for_status(create_resp, action="create form")
     form = create_resp.json()
     form_id = form["formId"]
-    responder_uri = form.get("responderUri") or f"https://docs.google.com/forms/d/{form_id}/viewform"
+    responder_uri = (
+        form.get("responderUri") or f"https://docs.google.com/forms/d/{form_id}/viewform"
+    )
     edit_url = f"https://docs.google.com/forms/d/{form_id}/edit"
     responses_url = f"https://docs.google.com/forms/d/{form_id}/viewanalytics"
 
@@ -89,7 +93,9 @@ def create_assignment_quiz_form(
         },
     ]
 
-    student_options = [{"value": student_number_label(number)} for number in range(1, student_count + 1)]
+    student_options = [
+        {"value": student_number_label(number)} for number in range(1, student_count + 1)
+    ]
     requests.append(
         {
             "createItem": {
@@ -111,7 +117,11 @@ def create_assignment_quiz_form(
     )
 
     question_mapping: list[dict[str, Any]] = [
-        {"teacher_assist_number": None, "google_item_title": "Student Number", "role": "student_number"}
+        {
+            "teacher_assist_number": None,
+            "google_item_title": "Student Number",
+            "role": "student_number",
+        }
     ]
     index = 1
     for question in questions:
@@ -126,7 +136,9 @@ def create_assignment_quiz_form(
         }
 
         if q_type == "multiple_choice":
-            choices = [str(choice) for choice in question.get("choices") or [] if str(choice).strip()]
+            choices = [
+                str(choice) for choice in question.get("choices") or [] if str(choice).strip()
+            ]
             if not choices:
                 continue
             correct = str(question.get("answer") or choices[0])
@@ -214,7 +226,9 @@ def extract_response_rows(
     responses: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     items = form_payload.get("items") or []
-    item_title_by_id = {item.get("itemId"): item.get("title") for item in items if item.get("itemId")}
+    item_title_by_id = {
+        item.get("itemId"): item.get("title") for item in items if item.get("itemId")
+    }
     student_item_id = None
     for item in items:
         title = str(item.get("title") or "")
@@ -229,7 +243,9 @@ def extract_response_rows(
         if student_item_id and student_item_id in answers:
             text_answers = answers[student_item_id].get("textAnswers", {}).get("answers") or []
             if text_answers:
-                student_number = parse_student_number_from_text(str(text_answers[0].get("value") or ""))
+                student_number = parse_student_number_from_text(
+                    str(text_answers[0].get("value") or "")
+                )
 
         score = response.get("totalScore")
         if score is None:

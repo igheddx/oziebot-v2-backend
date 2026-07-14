@@ -19,7 +19,9 @@ from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.ai_mode import is_teacher_assist_real_ai_active
 from oziebot_api.services.teacher_assist_v2.artifact_persistence import persist_package_artifact
 from oziebot_api.services.teacher_assist_v2.assignments import maybe_create_assignment_for_artifact
-from oziebot_api.services.teacher_assist_v2.assignment_constants import ASSIGNMENT_CREATING_ARTIFACT_TYPES
+from oziebot_api.services.teacher_assist_v2.assignment_constants import (
+    ASSIGNMENT_CREATING_ARTIFACT_TYPES,
+)
 from oziebot_api.services.teacher_assist_v2.deterministic_package_content import (
     build_deterministic_fallback,
 )
@@ -30,7 +32,9 @@ from oziebot_api.services.teacher_assist_v2.instructional_package_generation imp
     _resolve_artifact_content,
 )
 from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import resolve_subject_daily_topic
-from oziebot_api.services.teacher_assist_v2.planning_context import build_teacher_planning_generation_context
+from oziebot_api.services.teacher_assist_v2.planning_context import (
+    build_teacher_planning_generation_context,
+)
 from oziebot_api.services.teacher_assist_v2.planning_workflow import _assignment_context
 
 ADDITIONAL_ASSIGNMENT_ARTIFACT_TYPES = ("quiz", "assignment", "writing_response")
@@ -72,11 +76,15 @@ def _get_owned_package(
     return row
 
 
-def _package_subjects(db: Session, package: TeacherAssistV2InstructionalPackage) -> list[dict[str, str]]:
+def _package_subjects(
+    db: Session, package: TeacherAssistV2InstructionalPackage
+) -> list[dict[str, str]]:
     subject_ids = [uuid.UUID(str(value)) for value in package.subject_ids_json]
     names = {
         row.id: row.display_name
-        for row in db.scalars(select(EducationSubject).where(EducationSubject.id.in_(subject_ids))).all()
+        for row in db.scalars(
+            select(EducationSubject).where(EducationSubject.id.in_(subject_ids))
+        ).all()
     }
     return [
         {"subject_id": str(subject_id), "subject_name": names.get(subject_id, str(subject_id))}
@@ -84,7 +92,9 @@ def _package_subjects(db: Session, package: TeacherAssistV2InstructionalPackage)
     ]
 
 
-def _serialize_existing_assignment(artifact: TeacherAssistV2InstructionalPackageArtifact) -> dict[str, Any]:
+def _serialize_existing_assignment(
+    artifact: TeacherAssistV2InstructionalPackageArtifact,
+) -> dict[str, Any]:
     metadata = artifact.metadata_json if isinstance(artifact.metadata_json, dict) else {}
     return {
         "artifact_id": str(artifact.id),
@@ -126,7 +136,9 @@ def _find_week_subject(
     week_number: int,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     subject_key = str(subject_id)
-    subject_meta = next((row for row in context["subjects"] if row["subject_id"] == subject_key), None)
+    subject_meta = next(
+        (row for row in context["subjects"] if row["subject_id"] == subject_key), None
+    )
     if subject_meta is None:
         raise ValueError({"subject_id": "Subject is not part of this instructional package."})
     week = next((row for row in context["weeks"] if row["sequence_number"] == week_number), None)
@@ -222,11 +234,17 @@ def generate_additional_package_assignment(
         daily_topic=resolve_subject_daily_topic(week_subject, day_label="Monday"),
         objectives_list=objectives_list,
     )
-    deterministic["title"] = title_hint.strip() if title_hint and title_hint.strip() else f"{deterministic['title']} — Additional"
+    deterministic["title"] = (
+        title_hint.strip()
+        if title_hint and title_hint.strip()
+        else f"{deterministic['title']} — Additional"
+    )
     if normalized_type == "writing_response":
         deterministic["prompt"] = f"{deterministic.get('prompt', objective_text)} ({notes})"
     elif normalized_type == "assignment":
-        deterministic["student_instructions"] = list(deterministic.get("student_instructions") or []) + [notes]
+        deterministic["student_instructions"] = list(
+            deterministic.get("student_instructions") or []
+        ) + [notes]
     else:
         deterministic["summary"] = f"{deterministic.get('summary', '')} {notes}".strip()
     deterministic["teacher_generation_notes"] = notes
@@ -261,7 +279,9 @@ def generate_additional_package_assignment(
         sequence_number=sequence,
         created_at=now,
         subject_id=subject_id,
-        period_id=uuid.UUID(week_subject["period_id"]) if week_subject and week_subject.get("period_id") else None,
+        period_id=uuid.UUID(week_subject["period_id"])
+        if week_subject and week_subject.get("period_id")
+        else None,
     )
     artifact.metadata_json = {
         **(artifact.metadata_json or {}),

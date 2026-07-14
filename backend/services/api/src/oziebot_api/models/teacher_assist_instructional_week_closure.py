@@ -12,7 +12,9 @@ from oziebot_api.db.base import Base
 
 class TeacherAssistInstructionalWeekClosure(Base):
     __tablename__ = "teacher_assist_instructional_week_closures"
-    __table_args__ = (UniqueConstraint("instructional_week_id", "owner_user_id", name="uq_week_closure_owner"),)
+    __table_args__ = (
+        UniqueConstraint("instructional_week_id", "owner_user_id", name="uq_week_closure_owner"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(

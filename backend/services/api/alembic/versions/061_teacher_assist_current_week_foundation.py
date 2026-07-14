@@ -82,17 +82,27 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("tenant_id", "user_id", "period_id", name="uq_pacing_guide_period_notes_user_period"),
+        sa.UniqueConstraint(
+            "tenant_id", "user_id", "period_id", name="uq_pacing_guide_period_notes_user_period"
+        ),
     )
-    op.create_index("ix_pacing_guide_period_notes_period_id", "pacing_guide_period_notes", ["period_id"])
+    op.create_index(
+        "ix_pacing_guide_period_notes_period_id", "pacing_guide_period_notes", ["period_id"]
+    )
 
 
 def downgrade() -> None:
     op.drop_index("ix_pacing_guide_period_notes_period_id", table_name="pacing_guide_period_notes")
     op.drop_table("pacing_guide_period_notes")
 
-    op.drop_index("ix_planning_input_drafts_pacing_guide_period_id", table_name="planning_input_drafts")
-    op.drop_constraint("fk_planning_input_drafts_pacing_guide_period_id", "planning_input_drafts", type_="foreignkey")
+    op.drop_index(
+        "ix_planning_input_drafts_pacing_guide_period_id", table_name="planning_input_drafts"
+    )
+    op.drop_constraint(
+        "fk_planning_input_drafts_pacing_guide_period_id",
+        "planning_input_drafts",
+        type_="foreignkey",
+    )
     op.drop_column("planning_input_drafts", "pacing_guide_period_id")
 
     op.drop_index(

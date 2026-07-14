@@ -64,9 +64,15 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["assignment_id"], ["assignments.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["class_id"], ["classes.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["grading_period_id"], ["grading_periods.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["resource_library_item_id"], ["resource_library_items.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["resource_library_item_id"], ["resource_library_items.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["school_year_id"], ["school_years.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["student_work_submission_id"], ["assignment_student_work_submissions.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["student_work_submission_id"],
+            ["assignment_student_work_submissions.id"],
+            ondelete="CASCADE",
+        ),
         sa.ForeignKeyConstraint(["subject_id"], ["subjects.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["teacher_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
@@ -122,11 +128,19 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(["assignment_id"], ["assignments.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["class_id"], ["classes.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["extraction_job_id"], ["teacher_assist_extraction_jobs.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["extraction_job_id"], ["teacher_assist_extraction_jobs.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["grading_period_id"], ["grading_periods.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["resource_library_item_id"], ["resource_library_items.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["resource_library_item_id"], ["resource_library_items.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["school_year_id"], ["school_years.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["student_work_submission_id"], ["assignment_student_work_submissions.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["student_work_submission_id"],
+            ["assignment_student_work_submissions.id"],
+            ondelete="CASCADE",
+        ),
         sa.ForeignKeyConstraint(["subject_id"], ["subjects.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["teacher_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),

@@ -32,7 +32,9 @@ from oziebot_api.services.teacher_assist.current_week_resolver import (
     build_current_week_payload,
     build_objective_coverage,
 )
-from oziebot_api.services.teacher_assist.pacing_school_year_options import build_pacing_school_year_options
+from oziebot_api.services.teacher_assist.pacing_school_year_options import (
+    build_pacing_school_year_options,
+)
 from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
     PacingGuideRolloverService,
     add_pacing_guide_objective,
@@ -87,7 +89,9 @@ def _handle(action):
 
 def _require_guide_write(user: CurrentUser, guide_type: str) -> None:
     if guide_type == "DISTRICT" and not user.is_root_admin:
-        raise HTTPException(status_code=403, detail="Only root admins can modify district pacing guides")
+        raise HTTPException(
+            status_code=403, detail="Only root admins can modify district pacing guides"
+        )
 
 
 def _summary_out(guide, *, period_count: int) -> CatalogPacingGuideSummaryOut:
@@ -135,8 +139,12 @@ def _detail_out(guide) -> CatalogPacingGuideDetailOut:
                         objective_id=row.objective_id,
                         is_required=row.is_required,
                         notes=row.notes,
-                        objective_code=getattr(getattr(row, "objective", None), "objective_id", None),
-                        objective_description=getattr(getattr(row, "objective", None), "description", None),
+                        objective_code=getattr(
+                            getattr(row, "objective", None), "objective_id", None
+                        ),
+                        objective_description=getattr(
+                            getattr(row, "objective", None), "description", None
+                        ),
                     )
                     for row in period.objectives
                 ],
@@ -147,8 +155,12 @@ def _detail_out(guide) -> CatalogPacingGuideDetailOut:
                         resource_library_item_id=row.resource_library_item_id,
                         is_primary=row.is_primary,
                         notes=row.notes,
-                        resource_title=getattr(getattr(row, "catalog_resource", None), "title", None),
-                        resource_type=getattr(getattr(row, "catalog_resource", None), "resource_type", None),
+                        resource_title=getattr(
+                            getattr(row, "catalog_resource", None), "title", None
+                        ),
+                        resource_type=getattr(
+                            getattr(row, "catalog_resource", None), "resource_type", None
+                        ),
                     )
                     for row in period.resources
                 ],
@@ -160,7 +172,9 @@ def _detail_out(guide) -> CatalogPacingGuideDetailOut:
 
 
 @router.get("/pacing-guides/school-year-options", response_model=PacingSchoolYearOptionsOut)
-def read_pacing_guide_school_year_options(user: CurrentUser, db: DbSession) -> PacingSchoolYearOptionsOut:
+def read_pacing_guide_school_year_options(
+    user: CurrentUser, db: DbSession
+) -> PacingSchoolYearOptionsOut:
     tenant_id = _tenant_id(db, user)
     payload = build_pacing_school_year_options(db, tenant_id=tenant_id)
     return PacingSchoolYearOptionsOut(**payload)
@@ -231,7 +245,9 @@ def update_active_pacing_guide_selection(
     if "manual_pacing_period_id" in body.model_fields_set:
         row.manual_pacing_period_id = body.manual_pacing_period_id
     db.flush()
-    from oziebot_api.services.teacher_assist.instructional_weeks import ensure_instructional_week_for_current_period
+    from oziebot_api.services.teacher_assist.instructional_weeks import (
+        ensure_instructional_week_for_current_period,
+    )
 
     if "active_pacing_guide_id" in body.model_fields_set and row.active_pacing_guide_id is not None:
         ensure_instructional_week_for_current_period(
@@ -256,7 +272,11 @@ def read_catalog_pacing_guide_detail(
     db: DbSession,
 ) -> CatalogPacingGuideDetailOut:
     tenant_id = _tenant_id(db, user)
-    detail = _handle(lambda: get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id))
+    detail = _handle(
+        lambda: get_catalog_pacing_guide_detail(
+            db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id
+        )
+    )
     return _detail_out(detail)
 
 
@@ -289,7 +309,9 @@ def update_catalog_pacing_guide_route(
             is_shared=body.is_shared,
         )
     )
-    detail = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id)
+    detail = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id
+    )
     return _detail_out(detail)
 
 
@@ -300,7 +322,9 @@ def delete_catalog_pacing_guide_route(
     db: DbSession,
 ) -> CatalogPacingGuideSummaryOut:
     tenant_id = _tenant_id(db, user)
-    existing = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id)
+    existing = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id
+    )
     _require_guide_write(user, existing.guide_type)
     row = _handle(
         lambda: deactivate_catalog_pacing_guide(
@@ -310,7 +334,11 @@ def delete_catalog_pacing_guide_route(
     return _summary_out(row, period_count=len(existing.periods))
 
 
-@router.post("/pacing-guides/{pacing_guide_id}/periods", response_model=CatalogPacingGuidePeriodOut, status_code=201)
+@router.post(
+    "/pacing-guides/{pacing_guide_id}/periods",
+    response_model=CatalogPacingGuidePeriodOut,
+    status_code=201,
+)
 def create_pacing_guide_period_route(
     pacing_guide_id: uuid.UUID,
     body: CatalogPacingGuidePeriodCreate,
@@ -318,9 +346,13 @@ def create_pacing_guide_period_route(
     db: DbSession,
 ) -> CatalogPacingGuidePeriodOut:
     tenant_id = _tenant_id(db, user)
-    guide = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id)
+    guide = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id
+    )
     if guide.guide_type == "DISTRICT" and not user.is_root_admin:
-        raise HTTPException(status_code=403, detail="Only root admins can modify district pacing guides")
+        raise HTTPException(
+            status_code=403, detail="Only root admins can modify district pacing guides"
+        )
     row = _handle(
         lambda: create_pacing_guide_period(
             db,
@@ -334,10 +366,15 @@ def create_pacing_guide_period_route(
             end_date=body.end_date,
         )
     )
-    return CatalogPacingGuidePeriodOut.model_validate({**row.__dict__, "objectives": [], "resources": []})
+    return CatalogPacingGuidePeriodOut.model_validate(
+        {**row.__dict__, "objectives": [], "resources": []}
+    )
 
 
-@router.put("/pacing-guides/{pacing_guide_id}/periods/{period_id}", response_model=CatalogPacingGuidePeriodOut)
+@router.put(
+    "/pacing-guides/{pacing_guide_id}/periods/{period_id}",
+    response_model=CatalogPacingGuidePeriodOut,
+)
 def update_pacing_guide_period_route(
     pacing_guide_id: uuid.UUID,
     period_id: uuid.UUID,
@@ -346,9 +383,13 @@ def update_pacing_guide_period_route(
     db: DbSession,
 ) -> CatalogPacingGuidePeriodOut:
     tenant_id = _tenant_id(db, user)
-    guide = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id)
+    guide = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id
+    )
     if guide.guide_type == "DISTRICT" and not user.is_root_admin:
-        raise HTTPException(status_code=403, detail="Only root admins can modify district pacing guides")
+        raise HTTPException(
+            status_code=403, detail="Only root admins can modify district pacing guides"
+        )
     row = _handle(
         lambda: update_pacing_guide_period(
             db,
@@ -362,7 +403,9 @@ def update_pacing_guide_period_route(
             end_date=body.end_date,
         )
     )
-    return CatalogPacingGuidePeriodOut.model_validate({**row.__dict__, "objectives": [], "resources": []})
+    return CatalogPacingGuidePeriodOut.model_validate(
+        {**row.__dict__, "objectives": [], "resources": []}
+    )
 
 
 @router.delete("/pacing-guides/{pacing_guide_id}/periods/{period_id}", status_code=204)
@@ -373,13 +416,20 @@ def delete_pacing_guide_period_route(
     db: DbSession,
 ) -> None:
     tenant_id = _tenant_id(db, user)
-    guide = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id)
+    guide = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id
+    )
     if guide.guide_type == "DISTRICT" and not user.is_root_admin:
-        raise HTTPException(status_code=403, detail="Only root admins can modify district pacing guides")
+        raise HTTPException(
+            status_code=403, detail="Only root admins can modify district pacing guides"
+        )
     _handle(lambda: delete_pacing_guide_period(db, tenant_id=tenant_id, period_id=period_id))
 
 
-@router.post("/pacing-guides/{pacing_guide_id}/periods/reorder", response_model=list[CatalogPacingGuidePeriodOut])
+@router.post(
+    "/pacing-guides/{pacing_guide_id}/periods/reorder",
+    response_model=list[CatalogPacingGuidePeriodOut],
+)
 def reorder_pacing_guide_periods_route(
     pacing_guide_id: uuid.UUID,
     body: CatalogPacingGuidePeriodReorderIn,
@@ -387,9 +437,13 @@ def reorder_pacing_guide_periods_route(
     db: DbSession,
 ) -> list[CatalogPacingGuidePeriodOut]:
     tenant_id = _tenant_id(db, user)
-    guide = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id)
+    guide = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id
+    )
     if guide.guide_type == "DISTRICT" and not user.is_root_admin:
-        raise HTTPException(status_code=403, detail="Only root admins can modify district pacing guides")
+        raise HTTPException(
+            status_code=403, detail="Only root admins can modify district pacing guides"
+        )
     rows = _handle(
         lambda: reorder_pacing_guide_periods(
             db,
@@ -398,7 +452,12 @@ def reorder_pacing_guide_periods_route(
             ordered_period_ids=body.ordered_period_ids,
         )
     )
-    return [CatalogPacingGuidePeriodOut.model_validate({**row.__dict__, "objectives": [], "resources": []}) for row in rows]
+    return [
+        CatalogPacingGuidePeriodOut.model_validate(
+            {**row.__dict__, "objectives": [], "resources": []}
+        )
+        for row in rows
+    ]
 
 
 @router.post(
@@ -414,9 +473,13 @@ def add_pacing_guide_objective_route(
     db: DbSession,
 ) -> CatalogPacingGuideObjectiveOut:
     tenant_id = _tenant_id(db, user)
-    guide = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id)
+    guide = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id
+    )
     if guide.guide_type == "DISTRICT" and not user.is_root_admin:
-        raise HTTPException(status_code=403, detail="Only root admins can modify district pacing guides")
+        raise HTTPException(
+            status_code=403, detail="Only root admins can modify district pacing guides"
+        )
     row = _handle(
         lambda: add_pacing_guide_objective(
             db,
@@ -443,9 +506,13 @@ def add_pacing_guide_resource_route(
     db: DbSession,
 ) -> CatalogPacingGuideResourceOut:
     tenant_id = _tenant_id(db, user)
-    guide = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id)
+    guide = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id
+    )
     if guide.guide_type == "DISTRICT" and not user.is_root_admin:
-        raise HTTPException(status_code=403, detail="Only root admins can modify district pacing guides")
+        raise HTTPException(
+            status_code=403, detail="Only root admins can modify district pacing guides"
+        )
     row = _handle(
         lambda: add_pacing_guide_resource(
             db,
@@ -460,7 +527,11 @@ def add_pacing_guide_resource_route(
     return CatalogPacingGuideResourceOut.model_validate(row)
 
 
-@router.post("/pacing-guides/{pacing_guide_id}/copy", response_model=CatalogPacingGuideDetailOut, status_code=201)
+@router.post(
+    "/pacing-guides/{pacing_guide_id}/copy",
+    response_model=CatalogPacingGuideDetailOut,
+    status_code=201,
+)
 def copy_pacing_guide_route(
     pacing_guide_id: uuid.UUID,
     body: CatalogPacingGuideCopyIn,
@@ -469,7 +540,9 @@ def copy_pacing_guide_route(
 ) -> CatalogPacingGuideDetailOut:
     tenant_id = _tenant_id(db, user)
     if body.target_guide_type == "DISTRICT" and not user.is_root_admin:
-        raise HTTPException(status_code=403, detail="Only root admins can create district pacing guides")
+        raise HTTPException(
+            status_code=403, detail="Only root admins can create district pacing guides"
+        )
     detail = _handle(
         lambda: copy_pacing_guide(
             db,
@@ -502,7 +575,9 @@ def rollover_pacing_guides_route(
         )
     )
     return [
-        _detail_out(get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=guide.id))
+        _detail_out(
+            get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=guide.id)
+        )
         for guide in guides
     ]
 
@@ -558,7 +633,11 @@ def update_pacing_guide_period_notes(
     db: DbSession,
 ) -> dict:
     tenant_id = _tenant_id(db, user)
-    _handle(lambda: get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id))
+    _handle(
+        lambda: get_catalog_pacing_guide_detail(
+            db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id
+        )
+    )
     row = _handle(
         lambda: upsert_pacing_period_note(
             db,
@@ -612,7 +691,9 @@ def read_pacing_guide_period_week_context(
     db: DbSession,
 ) -> dict:
     tenant_id = _tenant_id(db, user)
-    return _handle(lambda: week_context_as_of(db, tenant_id=tenant_id, user=user, period_id=period_id))
+    return _handle(
+        lambda: week_context_as_of(db, tenant_id=tenant_id, user=user, period_id=period_id)
+    )
 
 
 @router.get("/pacing-guide-periods/{period_id}/artifacts")

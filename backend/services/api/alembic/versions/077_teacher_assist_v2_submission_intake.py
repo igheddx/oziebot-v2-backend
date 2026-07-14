@@ -28,12 +28,22 @@ def upgrade() -> None:
         sa.Column("student_count", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["catalog_grade_id"], ["education_grades.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["catalog_subject_id"], ["education_subjects.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["platform_school_year_id"], ["education_school_years.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"
+        ),
+        sa.ForeignKeyConstraint(
+            ["catalog_subject_id"], ["education_subjects.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["platform_school_year_id"], ["education_school_years.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["teacher_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -54,8 +64,12 @@ def upgrade() -> None:
         sa.Column("qr_payload_json", sa.JSON(), nullable=False),
         sa.Column("qr_token", sa.String(length=128), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["packet_id"], ["teacher_assist_v2_assignment_print_packets.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["packet_id"], ["teacher_assist_v2_assignment_print_packets.id"], ondelete="CASCADE"
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -86,12 +100,22 @@ def upgrade() -> None:
         sa.Column("mime_type", sa.String(length=255), nullable=False),
         sa.Column("file_size", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["catalog_grade_id"], ["education_grades.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["catalog_subject_id"], ["education_subjects.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["platform_school_year_id"], ["education_school_years.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"
+        ),
+        sa.ForeignKeyConstraint(
+            ["catalog_subject_id"], ["education_subjects.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["platform_school_year_id"], ["education_school_years.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["teacher_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -126,14 +150,28 @@ def upgrade() -> None:
         sa.Column("match_method", sa.String(length=32), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["catalog_grade_id"], ["education_grades.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["catalog_subject_id"], ["education_subjects.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["packet_id"], ["teacher_assist_v2_assignment_print_packets.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["platform_school_year_id"], ["education_school_years.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["submission_batch_id"], ["teacher_assist_v2_submission_batches.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"
+        ),
+        sa.ForeignKeyConstraint(
+            ["catalog_subject_id"], ["education_subjects.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["packet_id"], ["teacher_assist_v2_assignment_print_packets.id"], ondelete="SET NULL"
+        ),
+        sa.ForeignKeyConstraint(
+            ["platform_school_year_id"], ["education_school_years.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["submission_batch_id"], ["teacher_assist_v2_submission_batches.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["teacher_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -151,13 +189,26 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_ta_v2_student_submissions_batch", table_name="teacher_assist_v2_student_submissions")
-    op.drop_index("ix_ta_v2_student_submissions_assignment", table_name="teacher_assist_v2_student_submissions")
+    op.drop_index(
+        "ix_ta_v2_student_submissions_batch", table_name="teacher_assist_v2_student_submissions"
+    )
+    op.drop_index(
+        "ix_ta_v2_student_submissions_assignment",
+        table_name="teacher_assist_v2_student_submissions",
+    )
     op.drop_table("teacher_assist_v2_student_submissions")
-    op.drop_index("ix_ta_v2_submission_batches_assignment", table_name="teacher_assist_v2_submission_batches")
+    op.drop_index(
+        "ix_ta_v2_submission_batches_assignment", table_name="teacher_assist_v2_submission_batches"
+    )
     op.drop_table("teacher_assist_v2_submission_batches")
-    op.drop_index("ix_ta_v2_print_pages_assignment", table_name="teacher_assist_v2_assignment_print_pages")
-    op.drop_index("ix_ta_v2_print_pages_qr_token", table_name="teacher_assist_v2_assignment_print_pages")
+    op.drop_index(
+        "ix_ta_v2_print_pages_assignment", table_name="teacher_assist_v2_assignment_print_pages"
+    )
+    op.drop_index(
+        "ix_ta_v2_print_pages_qr_token", table_name="teacher_assist_v2_assignment_print_pages"
+    )
     op.drop_table("teacher_assist_v2_assignment_print_pages")
-    op.drop_index("ix_ta_v2_print_packets_assignment", table_name="teacher_assist_v2_assignment_print_packets")
+    op.drop_index(
+        "ix_ta_v2_print_packets_assignment", table_name="teacher_assist_v2_assignment_print_packets"
+    )
     op.drop_table("teacher_assist_v2_assignment_print_packets")

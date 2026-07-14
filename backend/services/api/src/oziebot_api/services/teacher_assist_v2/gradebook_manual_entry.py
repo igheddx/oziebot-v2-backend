@@ -131,7 +131,9 @@ def create_teacher_grade_entry_assignment(
     allowed_objective_ids = {row["education_objective_id"] for row in available_objectives}
     normalized_objective_ids = [str(value) for value in education_objective_ids]
     if any(value not in allowed_objective_ids for value in normalized_objective_ids):
-        raise _field_errors(education_objective_ids="Selected objectives must belong to the chosen week and subject.")
+        raise _field_errors(
+            education_objective_ids="Selected objectives must belong to the chosen week and subject."
+        )
 
     objectives = db.scalars(
         select(EducationObjective).where(EducationObjective.id.in_(education_objective_ids))
@@ -178,7 +180,9 @@ def create_teacher_grade_entry_assignment(
     db.add(assignment)
     db.flush()
     ensure_grade_entry_roster(db, user=user, assignment=assignment)
-    return get_teacher_assignment_detail(db, user=user, assignment_id=assignment.id, settings=settings)
+    return get_teacher_assignment_detail(
+        db, user=user, assignment_id=assignment.id, settings=settings
+    )
 
 
 def _ensure_submission_for_manual_grade(

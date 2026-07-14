@@ -119,17 +119,17 @@ def build_onboarding_progress(
     school_assignment = get_active_teacher_assignment(db, user_id=user_id)
     class_count = int(
         db.scalar(
-            select(func.count()).select_from(TeacherAssistClass).where(
-                TeacherAssistClass.tenant_id == tenant_id
-            )
+            select(func.count())
+            .select_from(TeacherAssistClass)
+            .where(TeacherAssistClass.tenant_id == tenant_id)
         )
         or 0
     )
     subject_count = int(
         db.scalar(
-            select(func.count()).select_from(TeacherAssistSubject).where(
-                TeacherAssistSubject.tenant_id == tenant_id
-            )
+            select(func.count())
+            .select_from(TeacherAssistSubject)
+            .where(TeacherAssistSubject.tenant_id == tenant_id)
         )
         or 0
     )
@@ -169,7 +169,9 @@ def build_onboarding_progress(
         step for step in step_definitions if step["key"] in TEACHER_ASSIST_ONBOARDING_STEP_KEYS
     ]
     completed_count = sum(1 for step in step_definitions if step["complete"])
-    progress_percent = round((completed_count / len(step_definitions)) * 100) if step_definitions else 0
+    progress_percent = (
+        round((completed_count / len(step_definitions)) * 100) if step_definitions else 0
+    )
     is_complete = completed_count == len(step_definitions)
     if preferences is not None and is_complete and preferences.onboarding_completed_at is None:
         preferences.onboarding_completed_at = _now()

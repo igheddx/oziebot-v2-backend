@@ -45,7 +45,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["source_plan_id"], ["weekly_plans.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["workflow_id"], ["teacher_assist_workflows.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["workflow_id"], ["teacher_assist_workflows.id"], ondelete="SET NULL"
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -81,10 +83,18 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_ta_export_artifacts_artifact_status", table_name="teacher_assist_export_artifacts")
-    op.drop_index("ix_ta_export_artifacts_artifact_type", table_name="teacher_assist_export_artifacts")
-    op.drop_index("ix_ta_export_artifacts_workflow_id", table_name="teacher_assist_export_artifacts")
-    op.drop_index("ix_ta_export_artifacts_source_plan_id", table_name="teacher_assist_export_artifacts")
+    op.drop_index(
+        "ix_ta_export_artifacts_artifact_status", table_name="teacher_assist_export_artifacts"
+    )
+    op.drop_index(
+        "ix_ta_export_artifacts_artifact_type", table_name="teacher_assist_export_artifacts"
+    )
+    op.drop_index(
+        "ix_ta_export_artifacts_workflow_id", table_name="teacher_assist_export_artifacts"
+    )
+    op.drop_index(
+        "ix_ta_export_artifacts_source_plan_id", table_name="teacher_assist_export_artifacts"
+    )
     op.drop_index("ix_ta_export_artifacts_user_id", table_name="teacher_assist_export_artifacts")
     op.drop_index("ix_ta_export_artifacts_tenant_id", table_name="teacher_assist_export_artifacts")
     op.drop_table("teacher_assist_export_artifacts")

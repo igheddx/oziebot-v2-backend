@@ -9,10 +9,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
-from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
-from oziebot_api.models.teacher_assist_instructional_evidence import TeacherAssistInstructionalEvidence
+from oziebot_api.models.teacher_assist_assignment_grade_record import (
+    TeacherAssistAssignmentGradeRecord,
+)
+from oziebot_api.models.teacher_assist_instructional_evidence import (
+    TeacherAssistInstructionalEvidence,
+)
 from oziebot_api.models.teacher_assist_standard import TeacherAssistStandard
-from oziebot_api.services.teacher_assist.instructional_evidence import serialize_instructional_evidence
+from oziebot_api.services.teacher_assist.instructional_evidence import (
+    serialize_instructional_evidence,
+)
 
 
 def build_gradebook_v2_view(
@@ -32,7 +38,9 @@ def build_gradebook_v2_view(
         query = query.where(TeacherAssistAssignmentGradeRecord.class_id == class_id)
     if assignment_id is not None:
         query = query.where(TeacherAssistAssignmentGradeRecord.assignment_id == assignment_id)
-    records = list(db.scalars(query.order_by(TeacherAssistAssignmentGradeRecord.updated_at.desc())).all())
+    records = list(
+        db.scalars(query.order_by(TeacherAssistAssignmentGradeRecord.updated_at.desc())).all()
+    )
 
     rows: list[dict[str, Any]] = []
     for record in records:
@@ -46,11 +54,15 @@ def build_gradebook_v2_view(
             standard_rows = list(
                 db.scalars(
                     select(TeacherAssistStandard).where(
-                        TeacherAssistStandard.id.in_([row.standard_id for row in assignment.standard_links])
+                        TeacherAssistStandard.id.in_(
+                            [row.standard_id for row in assignment.standard_links]
+                        )
                     )
                 ).all()
             )
-            standards = [{"id": str(row.id), "code": row.code, "title": row.title} for row in standard_rows]
+            standards = [
+                {"id": str(row.id), "code": row.code, "title": row.title} for row in standard_rows
+            ]
 
         evidence_rows = list(
             db.scalars(
@@ -59,7 +71,8 @@ def build_gradebook_v2_view(
                     TeacherAssistInstructionalEvidence.owner_user_id == user_id,
                     TeacherAssistInstructionalEvidence.source_type == "ASSIGNMENT",
                     TeacherAssistInstructionalEvidence.source_id == record.assignment_id,
-                    TeacherAssistInstructionalEvidence.student_identifier == str(record.student_number),
+                    TeacherAssistInstructionalEvidence.student_identifier
+                    == str(record.student_number),
                 )
             ).all()
         )
@@ -72,11 +85,10 @@ def build_gradebook_v2_view(
                 "student_number": record.student_number,
                 "score": record.committed_score,
                 "objective_alignment": standards,
-                "mastery_impact": [
-                    serialize_instructional_evidence(row)
-                    for row in evidence_rows
-                ],
-                "teacher_confirmation_required": not any(row.teacher_confirmed for row in evidence_rows),
+                "mastery_impact": [serialize_instructional_evidence(row) for row in evidence_rows],
+                "teacher_confirmation_required": not any(
+                    row.teacher_confirmed for row in evidence_rows
+                ),
                 "navigation_href": f"/teacher-assist/gradebook?assignment_id={record.assignment_id}",
             }
         )
@@ -85,7 +97,9 @@ def build_gradebook_v2_view(
         "records": rows,
         "summary": {
             "record_count": len(rows),
-            "pending_mastery_confirmation": sum(1 for row in rows if row["teacher_confirmation_required"]),
+            "pending_mastery_confirmation": sum(
+                1 for row in rows if row["teacher_confirmation_required"]
+            ),
         },
         "read_only": True,
     }

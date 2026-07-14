@@ -53,5 +53,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_ta_v2_slide_visual_asset_artifact", table_name="teacher_assist_v2_slide_visual_assets")
+    op.drop_index(
+        "ix_ta_v2_slide_visual_asset_artifact", table_name="teacher_assist_v2_slide_visual_assets"
+    )
     op.drop_table("teacher_assist_v2_slide_visual_assets")

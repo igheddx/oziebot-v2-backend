@@ -17,19 +17,33 @@ class TeacherAssistPacingGuideSupportingMaterial(Base):
         Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
     pacing_guide_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("pacing_guides.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guides.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     period_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("pacing_guide_periods.id", ondelete="CASCADE"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guide_periods.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     period_day_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("pacing_guide_period_days.id", ondelete="CASCADE"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guide_period_days.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     education_objective_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_objectives.id", ondelete="CASCADE"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_objectives.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     platform_school_year_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_school_years.id", ondelete="SET NULL"), nullable=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_school_years.id", ondelete="SET NULL"),
+        nullable=True,
     )
     catalog_state_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("education_states.id", ondelete="CASCADE"), nullable=False
@@ -56,7 +70,9 @@ class TeacherAssistPacingGuideSupportingMaterial(Base):
     original_filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
     mime_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
     file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    visibility_scope: Mapped[str] = mapped_column(String(32), nullable=False, server_default="district")
+    visibility_scope: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="district"
+    )
     uploaded_by_user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
@@ -68,7 +84,9 @@ class TeacherAssistPacingGuideSupportingMaterial(Base):
     source_pacing_guide_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("pacing_guides.id", ondelete="SET NULL"), nullable=True
     )
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -81,7 +99,9 @@ class TeacherAssistPacingGuideSupportingMaterial(Base):
         "TeacherAssistPacingGuide",
         foreign_keys=[source_pacing_guide_id],
     )
-    period: Mapped["TeacherAssistPacingGuidePeriod | None"] = relationship("TeacherAssistPacingGuidePeriod")
+    period: Mapped["TeacherAssistPacingGuidePeriod | None"] = relationship(
+        "TeacherAssistPacingGuidePeriod"
+    )
     period_day: Mapped["TeacherAssistPacingGuidePeriodDay | None"] = relationship(
         "TeacherAssistPacingGuidePeriodDay", back_populates="supporting_materials"
     )
@@ -100,5 +120,7 @@ if TYPE_CHECKING:
     from oziebot_api.models.education_catalog import EducationObjective
     from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
     from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
-    from oziebot_api.models.teacher_assist_pacing_guide_period_day import TeacherAssistPacingGuidePeriodDay
+    from oziebot_api.models.teacher_assist_pacing_guide_period_day import (
+        TeacherAssistPacingGuidePeriodDay,
+    )
     from oziebot_api.models.user import User

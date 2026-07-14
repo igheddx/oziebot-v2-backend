@@ -7,7 +7,9 @@ from typing import Any
 from oziebot_api.services.teacher_assist_v2.planning_constants import WEEKDAY_LABELS
 
 
-def resolve_pacing_day_plan(week_subject: dict[str, Any] | None, day_label: str) -> dict[str, Any] | None:
+def resolve_pacing_day_plan(
+    week_subject: dict[str, Any] | None, day_label: str
+) -> dict[str, Any] | None:
     pacing_context = (week_subject or {}).get("pacing_context") or {}
     days = pacing_context.get("days") or []
     if not days:
@@ -43,7 +45,9 @@ def resolve_week_daily_topic(week_subject: dict[str, Any] | None) -> str | None:
     return str(legacy) if legacy else None
 
 
-def resolve_subject_daily_topic(week_subject: dict[str, Any] | None, *, day_label: str | None = None) -> str | None:
+def resolve_subject_daily_topic(
+    week_subject: dict[str, Any] | None, *, day_label: str | None = None
+) -> str | None:
     if day_label:
         day_plan = resolve_pacing_day_plan(week_subject, day_label)
         if day_plan and day_plan.get("daily_topic"):
@@ -160,11 +164,15 @@ def material_labels_from_pacing(
 
     if day_plan:
         for bucket in ("attached_files", "reference_links", "notes"):
-            for row in filter_excluded_pacing_materials(day_plan.get(bucket) or [], excluded_material_ids):
+            for row in filter_excluded_pacing_materials(
+                day_plan.get(bucket) or [], excluded_material_ids
+            ):
                 add_label(_material_label(row))
 
     if include_week_level and pacing_context:
-        for row in flatten_pacing_materials(pacing_context, excluded_material_ids=excluded_material_ids):
+        for row in flatten_pacing_materials(
+            pacing_context, excluded_material_ids=excluded_material_ids
+        ):
             add_label(_material_label(row))
 
     return labels
@@ -178,7 +186,9 @@ def build_subject_lesson_block_from_pacing(
     fallback_objective_text: str,
     excluded_material_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    from oziebot_api.services.teacher_assist_v2.deterministic_package_content import _subject_lesson_block
+    from oziebot_api.services.teacher_assist_v2.deterministic_package_content import (
+        _subject_lesson_block,
+    )
 
     day_plan = resolve_pacing_day_plan(week_subject, day_label)
     pacing_context = (week_subject or {}).get("pacing_context") or {}
@@ -241,7 +251,9 @@ def resolve_daily_plan_objective_text(
     return fallback
 
 
-def resolve_daily_plan_summary(week_subject: dict[str, Any] | None, day_label: str, *, fallback: str) -> str:
+def resolve_daily_plan_summary(
+    week_subject: dict[str, Any] | None, day_label: str, *, fallback: str
+) -> str:
     day_plan = resolve_pacing_day_plan(week_subject, day_label)
     if day_plan:
         for key in ("daily_topic", "teacher_notes", "objective_focus"):

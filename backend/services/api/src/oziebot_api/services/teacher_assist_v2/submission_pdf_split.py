@@ -8,12 +8,18 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
-from oziebot_api.services.teacher_assist.storage import StoredTeacherAssistUpload, save_teacher_assist_bytes
+from oziebot_api.services.teacher_assist.storage import (
+    StoredTeacherAssistUpload,
+    save_teacher_assist_bytes,
+)
 from oziebot_api.services.teacher_assist_v2.qr_decoding import (
     decode_qr_strings_from_fitz_page,
     is_pdf_upload,
 )
-from oziebot_api.services.teacher_assist_v2.qr_matching import QrMatchResult, resolve_qr_match_from_content
+from oziebot_api.services.teacher_assist_v2.qr_matching import (
+    QrMatchResult,
+    resolve_qr_match_from_content,
+)
 
 
 @dataclass
@@ -68,7 +74,9 @@ def build_student_pdf_segments(
     mime_type: str | None,
     original_filename: str | None,
 ) -> list[StudentPdfSegment]:
-    if not is_pdf_upload(file_bytes=file_bytes, mime_type=mime_type, original_filename=original_filename):
+    if not is_pdf_upload(
+        file_bytes=file_bytes, mime_type=mime_type, original_filename=original_filename
+    ):
         return []
 
     import fitz

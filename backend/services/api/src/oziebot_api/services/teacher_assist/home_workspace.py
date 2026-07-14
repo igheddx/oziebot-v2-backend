@@ -34,10 +34,15 @@ from oziebot_api.services.teacher_assist.instructional_weeks import (
     find_instructional_week_for_period,
 )
 from oziebot_api.services.teacher_assist.week_context_service import WeekContextService
-from oziebot_api.services.teacher_assist.recommendation_v2 import build_instructional_loop_recommendations
+from oziebot_api.services.teacher_assist.recommendation_v2 import (
+    build_instructional_loop_recommendations,
+)
 from oziebot_api.services.teacher_assist.objective_performance import ObjectivePerformanceService
 from oziebot_api.services.teacher_assist.reteach_plans import list_reteach_plans
-from oziebot_api.services.teacher_assist.instructional_week_closure import get_or_create_week_closure, serialize_week_closure
+from oziebot_api.services.teacher_assist.instructional_week_closure import (
+    get_or_create_week_closure,
+    serialize_week_closure,
+)
 from oziebot_api.services.teacher_assist.teacher_copilot_service import get_suggested_questions
 from oziebot_api.services.teacher_assist.recommendation_service import build_week_recommendations
 from oziebot_api.services.teacher_assist.teacher_efficiency import (
@@ -113,7 +118,11 @@ def build_home_classes(
     for class_workspace in workspace_payload.get("class_workspaces", []):
         class_id = class_workspace.get("class_id")
         rollup = next(
-            (row for row in action_payload.get("class_rollups", []) if row.get("class_id") == class_id),
+            (
+                row
+                for row in action_payload.get("class_rollups", [])
+                if row.get("class_id") == class_id
+            ),
             None,
         )
         due_assignments = db.scalars(
@@ -134,7 +143,8 @@ def build_home_classes(
                 "class_name": class_workspace.get("class_name"),
                 "subject_names": class_workspace.get("subject_names") or [],
                 "student_count": class_workspace.get("student_count"),
-                "pending_reviews": (rollup or {}).get("grading_count", 0) + (rollup or {}).get("extraction_count", 0),
+                "pending_reviews": (rollup or {}).get("grading_count", 0)
+                + (rollup or {}).get("extraction_count", 0),
                 "pending_grades": (rollup or {}).get("gradebook_count", 0),
                 "mastery_alerts": (rollup or {}).get("planning_assignment_count", 0),
                 "reteach_alerts": 0,
@@ -150,9 +160,15 @@ def build_home_classes(
                 "navigation_href": class_workspace_href(str(class_id)),
                 "actions": [
                     {"label": "Open class", "href": class_workspace_href(str(class_id))},
-                    {"label": "Assignments", "href": f"/teacher-assist/assignments?class_id={class_id}"},
+                    {
+                        "label": "Assignments",
+                        "href": f"/teacher-assist/assignments?class_id={class_id}",
+                    },
                     {"label": "Mastery", "href": f"/teacher-assist/mastery?class_id={class_id}"},
-                    {"label": "Reteach", "href": f"/teacher-assist/reteach-plans?class_id={class_id}"},
+                    {
+                        "label": "Reteach",
+                        "href": f"/teacher-assist/reteach-plans?class_id={class_id}",
+                    },
                 ],
             }
         )
@@ -423,7 +439,9 @@ def _build_recently_used_resources(
     )
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for row in (week_context.get("resources") or []) + (week_context.get("teacher_resources") or []):
+    for row in (week_context.get("resources") or []) + (
+        week_context.get("teacher_resources") or []
+    ):
         title = row.get("title")
         if not title:
             continue
@@ -485,7 +503,12 @@ def build_home_instructional_loop(
         "students_needing_support": performance.get("students_needing_support") or [],
         "objectives_requiring_attention": objectives_attention[:5],
         "open_reteach_plans": [
-            {"id": str(row.id), "title": row.title, "status": row.status, "navigation_href": "/teacher-assist/reteach-plans"}
+            {
+                "id": str(row.id),
+                "title": row.title,
+                "status": row.status,
+                "navigation_href": "/teacher-assist/reteach-plans",
+            }
             for row in open_reteach[:5]
         ],
         "recent_mastery_changes": [
@@ -500,7 +523,9 @@ def build_home_instructional_loop(
         "week_closure_status": closure,
         "instructional_health": {
             "objectives_assessed": len(performance.get("objectives") or []),
-            "students_needing_support_count": len(performance.get("students_needing_support") or []),
+            "students_needing_support_count": len(
+                performance.get("students_needing_support") or []
+            ),
             "open_reteach_plan_count": len(open_reteach),
         },
         "loop_recommendations": recommendations.get("recommended_actions") or [],
@@ -539,8 +564,16 @@ def get_teacher_assist_home_workspace(
         user_id=user_id,
         require_explicit_guide_selection=True,
     )
-    period_id = (current_week.get("current_week") or {}).get("id") if current_week.get("has_active_guide") else None
-    upcoming_period_id = (current_week.get("upcoming_week") or {}).get("id") if current_week.get("has_active_guide") else None
+    period_id = (
+        (current_week.get("current_week") or {}).get("id")
+        if current_week.get("has_active_guide")
+        else None
+    )
+    upcoming_period_id = (
+        (current_week.get("upcoming_week") or {}).get("id")
+        if current_week.get("has_active_guide")
+        else None
+    )
     instructional_week_id = None
     upcoming_instructional_week_id = None
     if period_id is not None:
@@ -567,9 +600,11 @@ def get_teacher_assist_home_workspace(
 
         user = db.get(User, user_id)
         if user is not None:
-            recommended_reuse = build_week_recommendations(
-                db, tenant_id=tenant_id, user=user, period_id=period_id
-            ).get("recommended_for_this_week", {}).get("top_reusable", [])
+            recommended_reuse = (
+                build_week_recommendations(db, tenant_id=tenant_id, user=user, period_id=period_id)
+                .get("recommended_for_this_week", {})
+                .get("top_reusable", [])
+            )
     if onboarding["is_complete"] and current_week.get("has_active_guide"):
         efficiency = build_teacher_efficiency_dashboard(db, tenant_id=tenant_id, user_id=user_id)
         time_savings = build_home_time_savings_summary(db, tenant_id=tenant_id, user_id=user_id)
@@ -620,18 +655,16 @@ def get_teacher_assist_home_workspace(
                 if period_id
                 else "/teacher-assist/planning/pacing-guides/workspace"
             ),
-            "instructional_week_href": instructional_week_href(str(instructional_week_id)) if instructional_week_id else None,
+            "instructional_week_href": instructional_week_href(str(instructional_week_id))
+            if instructional_week_id
+            else None,
             "create_instructional_week_href": None,
             "generate_next_week_href": (
-                weekly_planning_href(str(upcoming_period_id))
-                if upcoming_period_id
-                else None
+                weekly_planning_href(str(upcoming_period_id)) if upcoming_period_id else None
             ),
             "template_library_href": "/teacher-assist/planning/templates",
             "upcoming_instructional_week_href": (
-                weekly_planning_href(str(upcoming_period_id))
-                if upcoming_period_id
-                else None
+                weekly_planning_href(str(upcoming_period_id)) if upcoming_period_id else None
             ),
         },
         "instructional_week_id": instructional_week_id,
@@ -646,8 +679,13 @@ def get_teacher_assist_home_workspace(
                 if instructional_week_id
                 else "/teacher-assist/copilot"
             ),
-            "objectives_requiring_attention": instructional_loop.get("objectives_requiring_attention") or [],
-            "students_needing_support": (instructional_loop.get("students_needing_support") or [])[:5],
+            "objectives_requiring_attention": instructional_loop.get(
+                "objectives_requiring_attention"
+            )
+            or [],
+            "students_needing_support": (instructional_loop.get("students_needing_support") or [])[
+                :5
+            ],
             "suggested_actions": (instructional_loop.get("loop_recommendations") or [])[:4],
             "instructional_health": instructional_loop.get("instructional_health") or {},
         },

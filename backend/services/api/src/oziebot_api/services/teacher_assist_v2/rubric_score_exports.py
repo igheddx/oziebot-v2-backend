@@ -14,7 +14,9 @@ from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assig
 from oziebot_api.models.teacher_assist_v2_assignment_grade import TeacherAssistV2AssignmentGrade
 from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssistV2StudentSubmission
 from oziebot_api.models.user import User
-from oziebot_api.services.teacher_assist_v2.grade_review_constants import OFFICIAL_ASSIGNMENT_GRADE_STATUSES
+from oziebot_api.services.teacher_assist_v2.grade_review_constants import (
+    OFFICIAL_ASSIGNMENT_GRADE_STATUSES,
+)
 from oziebot_api.services.teacher_assist_v2.grading_rubric import (
     assignment_supports_rubric_scorecards,
     grading_template_from_package_rubric,
@@ -23,10 +25,17 @@ from oziebot_api.services.teacher_assist_v2.grading_rubric import (
 from oziebot_api.services.teacher_assist_v2.mastery_constants import serialize_mastery_level_fields
 from oziebot_api.services.teacher_assist_v2.package_export import _BASE_STYLE, _esc, _print_button
 from oziebot_api.services.teacher_assist_v2.quiz_exports import safe_export_filename
-from oziebot_api.services.teacher_assist_v2.submission_intake import _get_assignment_or_404, get_student_submission_or_404
-from oziebot_api.services.teacher_assist_v2.submission_workflow import pending_submission_student_numbers
+from oziebot_api.services.teacher_assist_v2.submission_intake import (
+    _get_assignment_or_404,
+    get_student_submission_or_404,
+)
+from oziebot_api.services.teacher_assist_v2.submission_workflow import (
+    pending_submission_student_numbers,
+)
 
-RUBRIC_SCORE_REPORT_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+RUBRIC_SCORE_REPORT_DOCX_MIME = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
 
 
 def assignment_rubric_score_report_status(
@@ -47,7 +56,10 @@ def assignment_rubric_score_report_status(
         )
     ).all()
     if not submissions:
-        return False, "Upload and confirm at least one student submission before printing the class report."
+        return (
+            False,
+            "Upload and confirm at least one student submission before printing the class report.",
+        )
 
     pending_numbers = pending_submission_student_numbers(db, user=user, assignment=assignment)
     if pending_numbers:
@@ -59,13 +71,16 @@ def assignment_rubric_score_report_status(
             f"({student_hint}). Confirm grades or mark missing work as incomplete."
         )
 
-    official_count = db.scalar(
-        select(func.count(TeacherAssistV2AssignmentGrade.id)).where(
-            TeacherAssistV2AssignmentGrade.assignment_id == assignment.id,
-            TeacherAssistV2AssignmentGrade.teacher_user_id == user.id,
-            TeacherAssistV2AssignmentGrade.status.in_(OFFICIAL_ASSIGNMENT_GRADE_STATUSES),
+    official_count = (
+        db.scalar(
+            select(func.count(TeacherAssistV2AssignmentGrade.id)).where(
+                TeacherAssistV2AssignmentGrade.assignment_id == assignment.id,
+                TeacherAssistV2AssignmentGrade.teacher_user_id == user.id,
+                TeacherAssistV2AssignmentGrade.status.in_(OFFICIAL_ASSIGNMENT_GRADE_STATUSES),
+            )
         )
-    ) or 0
+        or 0
+    )
     if official_count <= 0:
         return False, "Confirm at least one student grade before printing the class report."
 
@@ -138,11 +153,17 @@ def render_student_rubric_scorecard_html(
             "<div style='border-left:4px solid #6366f1;padding:.75rem 1rem;margin-bottom:1rem;background:#f5f3ff'>"
         )
         if celebrate:
-            feedback_html += f"<p style='margin:.25rem 0'><strong>&#127881;</strong> {_esc(celebrate)}</p>"
+            feedback_html += (
+                f"<p style='margin:.25rem 0'><strong>&#127881;</strong> {_esc(celebrate)}</p>"
+            )
         if correct:
-            feedback_html += f"<p style='margin:.25rem 0'><strong>&#128161;</strong> {_esc(correct)}</p>"
+            feedback_html += (
+                f"<p style='margin:.25rem 0'><strong>&#128161;</strong> {_esc(correct)}</p>"
+            )
         if encourage:
-            feedback_html += f"<p style='margin:.25rem 0'><strong>&#127775;</strong> {_esc(encourage)}</p>"
+            feedback_html += (
+                f"<p style='margin:.25rem 0'><strong>&#127775;</strong> {_esc(encourage)}</p>"
+            )
         feedback_html += "</div>"
     if next_step:
         feedback_html += f"<p><strong>Your next step:</strong> {_esc(next_step)}</p>"
@@ -202,7 +223,9 @@ def render_class_rubric_score_report_html(
 def _docx_paragraph(text: str, *, bold: bool = False) -> str:
     escaped = html.escape(text)
     if bold:
-        return f"<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space='preserve'>{escaped}</w:t></w:r></w:p>"
+        return (
+            f"<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space='preserve'>{escaped}</w:t></w:r></w:p>"
+        )
     return f"<w:p><w:r><w:t xml:space='preserve'>{escaped}</w:t></w:r></w:p>"
 
 
@@ -214,9 +237,7 @@ def _build_docx_bytes(parts: list[str]) -> bytes:
     document_xml = (
         "<?xml version='1.0' encoding='UTF-8' standalone='yes'?>"
         "<w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'>"
-        "<w:body>"
-        + "".join(parts)
-        + "</w:body></w:document>"
+        "<w:body>" + "".join(parts) + "</w:body></w:document>"
     ).encode("utf-8")
     content_types = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -300,7 +321,9 @@ def _build_assignment_rubric_score_report_rows(
         ).first()
         if grade is None:
             continue
-        sections = (grade.rubric_json or {}).get("sections") if isinstance(grade.rubric_json, dict) else []
+        sections = (
+            (grade.rubric_json or {}).get("sections") if isinstance(grade.rubric_json, dict) else []
+        )
         mastery = serialize_mastery_level_fields(percentage=grade.percentage)
         rows.append(
             {
@@ -391,7 +414,9 @@ def build_assignment_rubric_score_report_docx(
     rows = _build_assignment_rubric_score_report_rows(db, user=user, assignment=assignment)
     if not rows:
         raise ValueError("No confirmed grades are available for this assignment.")
-    filename = safe_export_filename(str(assignment.title or "Rubric_Report"), "Class_Rubric_Score_Report", "docx")
+    filename = safe_export_filename(
+        str(assignment.title or "Rubric_Report"), "Class_Rubric_Score_Report", "docx"
+    )
     payload = render_class_rubric_score_report_docx(
         assignment=assignment,
         rubric_content=rubric_content,

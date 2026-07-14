@@ -41,16 +41,22 @@ def _resolve_updated_by_label(db: Session, user_id: str | None) -> str | None:
     return user.full_name or user.email
 
 
-def _build_admin_config_payload(*, env_settings: Settings, effective_settings: Settings, db: Session) -> dict[str, Any]:
+def _build_admin_config_payload(
+    *, env_settings: Settings, effective_settings: Settings, db: Session
+) -> dict[str, Any]:
     mode_status = get_teacher_assist_ai_mode_status(db, env_settings)
-    provider_name = (effective_settings.teacher_assist_ai_provider or "mock").strip().lower() or "mock"
+    provider_name = (
+        effective_settings.teacher_assist_ai_provider or "mock"
+    ).strip().lower() or "mock"
     real_provider_enabled = bool(
         effective_settings.teacher_assist_real_provider_enabled
         or effective_settings.teacher_assist_ai_enable_real_provider
     )
     openai_key_configured = bool((env_settings.teacher_assist_openai_api_key or "").strip())
     gemini_key_configured = bool((env_settings.teacher_assist_gemini_api_key or "").strip())
-    circuit = TeacherAssistProviderCircuitBreaker().state_for_provider(effective_settings, provider_name)
+    circuit = TeacherAssistProviderCircuitBreaker().state_for_provider(
+        effective_settings, provider_name
+    )
     real_active = is_teacher_assist_real_ai_active(db, env_settings)
     effective_mode = f"real_{provider_name}" if real_active else "mock"
     daily_cost_limit_cents = get_effective_daily_cost_limit_cents(db, env_settings)
@@ -61,7 +67,11 @@ def _build_admin_config_payload(*, env_settings: Settings, effective_settings: S
         blockers.append("TEACHER_ASSIST_OPENAI_API_KEY is not set on the server.")
     if provider_name == "gemini" and not gemini_key_configured:
         blockers.append("TEACHER_ASSIST_GEMINI_API_KEY is not set on the server.")
-    if provider_name in ("openai", "gemini") and real_provider_enabled and daily_cost_limit_cents <= 0:
+    if (
+        provider_name in ("openai", "gemini")
+        and real_provider_enabled
+        and daily_cost_limit_cents <= 0
+    ):
         blockers.append(f"Daily cost limit must be set before enabling real {provider_name} mode.")
     if circuit.state != "closed" and circuit.reason:
         blockers.append(circuit.reason)

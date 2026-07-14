@@ -77,9 +77,13 @@ def _touch_job_heartbeat(
     now = datetime.now(UTC)
     job.leased_by_worker = worker_name
     job.heartbeat_at = now
-    job.lease_expires_at = now + timedelta(seconds=max(1, settings.teacher_assist_worker_lease_seconds))
+    job.lease_expires_at = now + timedelta(
+        seconds=max(1, settings.teacher_assist_worker_lease_seconds)
+    )
     if job.timeout_at is None:
-        job.timeout_at = now + timedelta(seconds=max(1, settings.teacher_assist_extraction_timeout_seconds))
+        job.timeout_at = now + timedelta(
+            seconds=max(1, settings.teacher_assist_extraction_timeout_seconds)
+        )
     job.updated_at = now
     if progress_percent is not None:
         job.progress_percent = progress_percent
@@ -145,7 +149,11 @@ def _ensure_job_still_active(
 
 
 def _mark_running_job_failed(
-    job: TeacherAssistExtractionJob, *, error_message: str, error_code: str, error_metadata: dict | None = None
+    job: TeacherAssistExtractionJob,
+    *,
+    error_message: str,
+    error_code: str,
+    error_metadata: dict | None = None,
 ) -> None:
     job.error_code = error_code
     metadata = {"error_code": error_code, "traceback": traceback.format_exc(limit=5)}
@@ -183,7 +191,12 @@ def _mark_job_for_retry_or_failure(
         job.completed_at = None
         _clear_job_lease(job)
         return
-    _set_job_status(job, status="failed", progress_percent=min(max(job.progress_percent, 5), 95), error_message=str(exc))
+    _set_job_status(
+        job,
+        status="failed",
+        progress_percent=min(max(job.progress_percent, 5), 95),
+        error_message=str(exc),
+    )
 
 
 def _artifact_summary_text(job: TeacherAssistExtractionJob, *, event_type: str) -> str:
@@ -328,7 +341,9 @@ def create_student_work_extraction_job(
         student_work_submission_id=submission.id,
     )
     if active_job is not None:
-        raise ValueError("An extraction job is already queued or running for this student-work submission")
+        raise ValueError(
+            "An extraction job is already queued or running for this student-work submission"
+        )
     now = datetime.now(UTC)
     row = TeacherAssistExtractionJob(
         tenant_id=tenant_id,
@@ -356,7 +371,10 @@ def create_student_work_extraction_job(
             {
                 "event": "extraction_queued",
                 "message": "TeacherAssist student-work extraction queued for worker execution",
-                "metadata": {"submission_id": str(submission.id), "student_number": submission.student_number},
+                "metadata": {
+                    "submission_id": str(submission.id),
+                    "student_number": submission.student_number,
+                },
                 "recorded_at": now.isoformat(),
             }
         ],
@@ -437,7 +455,9 @@ def list_resource_extraction_runs(
         )
         .order_by(TeacherAssistExtractionJob.created_at.desc())
     ).all()
-    return [(job, job.extracted_text_records[0] if job.extracted_text_records else None) for job in jobs]
+    return [
+        (job, job.extracted_text_records[0] if job.extracted_text_records else None) for job in jobs
+    ]
 
 
 def list_student_work_extraction_runs(
@@ -462,7 +482,9 @@ def list_student_work_extraction_runs(
         )
         .order_by(TeacherAssistExtractionJob.created_at.desc())
     ).all()
-    return [(job, job.extracted_text_records[0] if job.extracted_text_records else None) for job in jobs]
+    return [
+        (job, job.extracted_text_records[0] if job.extracted_text_records else None) for job in jobs
+    ]
 
 
 def latest_extraction_state_for_resources(
@@ -471,7 +493,9 @@ def latest_extraction_state_for_resources(
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
     resource_ids: list[uuid.UUID],
-) -> dict[uuid.UUID, tuple[TeacherAssistExtractionJob | None, TeacherAssistExtractedTextRecord | None]]:
+) -> dict[
+    uuid.UUID, tuple[TeacherAssistExtractionJob | None, TeacherAssistExtractedTextRecord | None]
+]:
     if not resource_ids:
         return {}
     jobs = db.scalars(
@@ -483,12 +507,17 @@ def latest_extraction_state_for_resources(
         )
         .order_by(TeacherAssistExtractionJob.created_at.desc())
     ).all()
-    result: dict[uuid.UUID, tuple[TeacherAssistExtractionJob | None, TeacherAssistExtractedTextRecord | None]] = {}
+    result: dict[
+        uuid.UUID, tuple[TeacherAssistExtractionJob | None, TeacherAssistExtractedTextRecord | None]
+    ] = {}
     for job in jobs:
         resource_id = job.resource_library_item_id
         if resource_id is None or resource_id in result:
             continue
-        result[resource_id] = (job, job.extracted_text_records[0] if job.extracted_text_records else None)
+        result[resource_id] = (
+            job,
+            job.extracted_text_records[0] if job.extracted_text_records else None,
+        )
     return result
 
 
@@ -498,7 +527,9 @@ def latest_extraction_state_for_submissions(
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
     submission_ids: list[uuid.UUID],
-) -> dict[uuid.UUID, tuple[TeacherAssistExtractionJob | None, TeacherAssistExtractedTextRecord | None]]:
+) -> dict[
+    uuid.UUID, tuple[TeacherAssistExtractionJob | None, TeacherAssistExtractedTextRecord | None]
+]:
     if not submission_ids:
         return {}
     jobs = db.scalars(
@@ -510,12 +541,17 @@ def latest_extraction_state_for_submissions(
         )
         .order_by(TeacherAssistExtractionJob.created_at.desc())
     ).all()
-    result: dict[uuid.UUID, tuple[TeacherAssistExtractionJob | None, TeacherAssistExtractedTextRecord | None]] = {}
+    result: dict[
+        uuid.UUID, tuple[TeacherAssistExtractionJob | None, TeacherAssistExtractedTextRecord | None]
+    ] = {}
     for job in jobs:
         submission_id = job.student_work_submission_id
         if submission_id is None or submission_id in result:
             continue
-        result[submission_id] = (job, job.extracted_text_records[0] if job.extracted_text_records else None)
+        result[submission_id] = (
+            job,
+            job.extracted_text_records[0] if job.extracted_text_records else None,
+        )
     return result
 
 
@@ -527,7 +563,10 @@ def recover_stale_extraction_jobs(db: Session, *, settings: Settings | None = No
         select(TeacherAssistExtractionJob).where(
             TeacherAssistExtractionJob.status == "running",
             or_(
-                (TeacherAssistExtractionJob.lease_expires_at.is_not(None) & (TeacherAssistExtractionJob.lease_expires_at < now)),
+                (
+                    TeacherAssistExtractionJob.lease_expires_at.is_not(None)
+                    & (TeacherAssistExtractionJob.lease_expires_at < now)
+                ),
                 (
                     TeacherAssistExtractionJob.heartbeat_at.is_not(None)
                     & (TeacherAssistExtractionJob.heartbeat_at < stale_cutoff)
@@ -589,7 +628,11 @@ def claim_next_teacher_assist_extraction_job(
         job,
         event="extraction_claimed",
         message="TeacherAssist extraction job claimed by worker",
-        metadata={"worker_name": worker_name, "retry_count": job.retry_count, "max_retries": job.max_retries},
+        metadata={
+            "worker_name": worker_name,
+            "retry_count": job.retry_count,
+            "max_retries": job.max_retries,
+        },
     )
     record_activity_event(
         db,
@@ -624,7 +667,11 @@ def _persist_extraction_success(
         worker_name=worker_name,
         progress_percent=10,
     )
-    _append_job_log(job, event="storage_read_started", message="Reading artifact via TeacherAssist storage abstraction")
+    _append_job_log(
+        job,
+        event="storage_read_started",
+        message="Reading artifact via TeacherAssist storage abstraction",
+    )
     session.commit()
 
     job = _ensure_job_still_active(
@@ -636,7 +683,9 @@ def _persist_extraction_success(
     )
     with open_teacher_assist_stream(settings, storage_key=job.storage_key) as stream:
         file_bytes = stream.read()
-    _append_job_log(job, event="storage_read_completed", message="Artifact read through storage abstraction")
+    _append_job_log(
+        job, event="storage_read_completed", message="Artifact read through storage abstraction"
+    )
     session.commit()
 
     job = _ensure_job_still_active(
@@ -686,7 +735,10 @@ def _persist_extraction_success(
             confidence_score = float(confidence_score)
         except (TypeError, ValueError):
             confidence_score = None
-    provider_mode = str(provider_metadata.get("provider_mode") or resolve_teacher_assist_ocr_provider_mode(provider_result.provider))
+    provider_mode = str(
+        provider_metadata.get("provider_mode")
+        or resolve_teacher_assist_ocr_provider_mode(provider_result.provider)
+    )
     page_count_raw = provider_metadata.get("page_count")
     page_count = int(page_count_raw) if page_count_raw is not None else None
     estimated_cost_raw = provider_metadata.get("estimated_cost_cents")
@@ -821,7 +873,9 @@ def _persist_extraction_cancelled(factory, *, extraction_job_id: uuid.UUID) -> N
     try:
         job = _refresh_extraction_job_for_execution(cancel_session, extraction_job_id)
         _set_job_status(job, status="cancelled", progress_percent=job.progress_percent)
-        _append_job_log(job, event="extraction_cancelled", message="TeacherAssist extraction cancelled")
+        _append_job_log(
+            job, event="extraction_cancelled", message="TeacherAssist extraction cancelled"
+        )
         record_activity_event(
             cancel_session,
             tenant_id=job.tenant_id,

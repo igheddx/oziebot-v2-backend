@@ -110,7 +110,9 @@ class ObjectivePerformanceService:
 
 def count_objectives_assessed(db: Session, *, user: User) -> int:
     value = db.scalar(
-        select(func.count(func.distinct(TeacherAssistV2MasteryEvidence.education_objective_id))).where(
+        select(
+            func.count(func.distinct(TeacherAssistV2MasteryEvidence.education_objective_id))
+        ).where(
             TeacherAssistV2MasteryEvidence.teacher_user_id == user.id,
             TeacherAssistV2MasteryEvidence.is_current.is_(True),
             TeacherAssistV2MasteryEvidence.teacher_confirmed.is_(True),

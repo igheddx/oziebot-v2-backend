@@ -17,7 +17,9 @@ def compute_pages_per_student(*, artifact_type: str, content: dict[str, Any]) ->
     return len(split_assessment_content_pages(artifact_type=artifact_type, content=content))
 
 
-def split_assessment_content_pages(*, artifact_type: str, content: dict[str, Any]) -> list[list[tuple[str, bool]]]:
+def split_assessment_content_pages(
+    *, artifact_type: str, content: dict[str, Any]
+) -> list[list[tuple[str, bool]]]:
     if artifact_type == "quiz":
         return _split_quiz_pages(content)
     if artifact_type == "assignment":
@@ -33,7 +35,9 @@ def _split_quiz_pages(content: dict[str, Any]) -> list[list[tuple[str, bool]]]:
     pages: list[list[tuple[str, bool]]] = []
 
     intro: list[tuple[str, bool]] = []
-    instructions = content.get("instructions") or content.get("summary") or content.get("description")
+    instructions = (
+        content.get("instructions") or content.get("summary") or content.get("description")
+    )
     if instructions:
         intro.extend([("Instructions", True), (str(instructions), False), ("", False)])
     pages.append(intro if intro else [("", False)])
@@ -48,7 +52,9 @@ def _split_quiz_pages(content: dict[str, Any]) -> list[list[tuple[str, bool]]]:
         for question in chunk:
             number = question.get("number")
             points = question.get("points", 1)
-            page.append((f"Question {number} ({points} point{'s' if int(points or 1) != 1 else ''})", True))
+            page.append(
+                (f"Question {number} ({points} point{'s' if int(points or 1) != 1 else ''})", True)
+            )
             page.append((str(question.get("prompt") or ""), False))
             q_type = str(question.get("type") or "multiple_choice")
             if q_type == "multiple_choice":

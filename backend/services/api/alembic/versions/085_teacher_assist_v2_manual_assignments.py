@@ -14,11 +14,15 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "teacher_assist_v2_assignments",
-        sa.Column("creation_origin", sa.String(length=32), nullable=False, server_default="PACKAGE"),
+        sa.Column(
+            "creation_origin", sa.String(length=32), nullable=False, server_default="PACKAGE"
+        ),
     )
     op.add_column(
         "teacher_assist_v2_assignment_print_packets",
-        sa.Column("packet_kind", sa.String(length=32), nullable=False, server_default="STUDENT_PACKET"),
+        sa.Column(
+            "packet_kind", sa.String(length=32), nullable=False, server_default="STUDENT_PACKET"
+        ),
     )
 
 

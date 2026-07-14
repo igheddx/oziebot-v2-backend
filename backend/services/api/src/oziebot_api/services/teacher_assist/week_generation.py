@@ -11,10 +11,18 @@ from oziebot_api.models.teacher_assist_class import TeacherAssistClass
 from oziebot_api.models.teacher_assist_standard import TeacherAssistStandard
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.assignments import create_assignment
-from oziebot_api.services.teacher_assist.generated_artifacts import register_generated_artifact, serialize_generated_artifact
+from oziebot_api.services.teacher_assist.generated_artifacts import (
+    register_generated_artifact,
+    serialize_generated_artifact,
+)
 from oziebot_api.services.teacher_assist.newsletters import create_newsletter
-from oziebot_api.services.teacher_assist.planning import attach_planning_draft_resource, create_planning_draft
-from oziebot_api.services.teacher_assist.instructional_weeks import link_entities_to_instructional_week
+from oziebot_api.services.teacher_assist.planning import (
+    attach_planning_draft_resource,
+    create_planning_draft,
+)
+from oziebot_api.services.teacher_assist.instructional_weeks import (
+    link_entities_to_instructional_week,
+)
 from oziebot_api.services.teacher_assist.teacher_classroom import _resolve_homeroom_class
 from oziebot_api.services.teacher_assist.user_preferences import get_user_preferences_or_create
 from oziebot_api.services.teacher_assist.week_context_service import WeekContextService
@@ -111,10 +119,26 @@ def _build_rubric_json(week_context: dict[str, Any]) -> dict[str, Any]:
                 "criterion": code,
                 "description": objective.get("description"),
                 "levels": [
-                    {"label": "Exceeds", "points": 4, "description": f"Demonstrates mastery of {code}."},
-                    {"label": "Meets", "points": 3, "description": f"Meets expectations for {code}."},
-                    {"label": "Approaching", "points": 2, "description": f"Partial understanding of {code}."},
-                    {"label": "Beginning", "points": 1, "description": f"Limited evidence for {code}."},
+                    {
+                        "label": "Exceeds",
+                        "points": 4,
+                        "description": f"Demonstrates mastery of {code}.",
+                    },
+                    {
+                        "label": "Meets",
+                        "points": 3,
+                        "description": f"Meets expectations for {code}.",
+                    },
+                    {
+                        "label": "Approaching",
+                        "points": 2,
+                        "description": f"Partial understanding of {code}.",
+                    },
+                    {
+                        "label": "Beginning",
+                        "points": 1,
+                        "description": f"Limited evidence for {code}.",
+                    },
                 ],
             }
         )
@@ -167,7 +191,11 @@ def generate_week_artifact(
 
     dto = WeekContextService.build(db, tenant_id=tenant_id, user=user, period_id=period_id)
     week_context = WeekContextService.serialize(dto)
-    objective_codes = [row.get("objective_code") for row in week_context.get("objectives", []) if row.get("objective_code")]
+    objective_codes = [
+        row.get("objective_code")
+        for row in week_context.get("objectives", [])
+        if row.get("objective_code")
+    ]
     standard_ids = _resolve_standard_ids(
         db,
         tenant_id=tenant_id,
@@ -247,7 +275,9 @@ def generate_week_artifact(
         grade_level=dto.grade_level,
     )
     if dto.subject_id is None:
-        raise ValueError("Week context is missing a subject. Complete setup or select a subject-aligned pacing guide.")
+        raise ValueError(
+            "Week context is missing a subject. Complete setup or select a subject-aligned pacing guide."
+        )
     due_date = None
 
     if normalized_type == "ASSIGNMENT":
@@ -314,7 +344,10 @@ def generate_week_artifact(
             instructions=dto.notes,
             rubric_json=None,
             source_plan_id=None,
-            source_context_json={"week_context": traceability, "quiz": _build_quiz_metadata(week_context)},
+            source_context_json={
+                "week_context": traceability,
+                "quiz": _build_quiz_metadata(week_context),
+            },
             standard_ids=standard_ids,
             resource_ids=resource_ids,
             pacing_guide_id=dto.pacing_guide_id,
@@ -394,7 +427,11 @@ def generate_week_artifact(
 
     if normalized_type == "NEWSLETTER":
         objective_summary = ", ".join(objective_codes)
-        notes_parts = [part for part in [dto.notes, f"Objectives: {objective_summary}" if objective_summary else ""] if part]
+        notes_parts = [
+            part
+            for part in [dto.notes, f"Objectives: {objective_summary}" if objective_summary else ""]
+            if part
+        ]
         newsletter = create_newsletter(
             db,
             tenant_id=tenant_id,
@@ -463,7 +500,9 @@ def generate_week_artifact(
             },
         )
         payload = serialize_generated_artifact(db, artifact)
-        payload["navigation_href"] = f"/teacher-assist/planning/weeks?period_id={period_id}&artifact_id={artifact.id}"
+        payload["navigation_href"] = (
+            f"/teacher-assist/planning/weeks?period_id={period_id}&artifact_id={artifact.id}"
+        )
         return payload
 
     raise ValueError("Unsupported artifact type for week generation")

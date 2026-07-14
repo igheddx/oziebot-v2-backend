@@ -90,7 +90,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_teacher_assist_workflows_lease_expires_at", table_name="teacher_assist_workflows")
+    op.drop_index(
+        "ix_teacher_assist_workflows_lease_expires_at", table_name="teacher_assist_workflows"
+    )
     op.drop_index(
         "ix_teacher_assist_workflows_status_workflow_type",
         table_name="teacher_assist_workflows",

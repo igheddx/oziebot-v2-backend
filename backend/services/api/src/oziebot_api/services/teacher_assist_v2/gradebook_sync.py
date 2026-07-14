@@ -12,7 +12,9 @@ from sqlalchemy.orm import Session
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
 from oziebot_api.models.teacher_assist_v2_assignment_grade import TeacherAssistV2AssignmentGrade
 from oziebot_api.models.teacher_assist_v2_gradebook_record import TeacherAssistV2GradebookRecord
-from oziebot_api.models.teacher_assist_v2_gradebook_record_revision import TeacherAssistV2GradebookRecordRevision
+from oziebot_api.models.teacher_assist_v2_gradebook_record_revision import (
+    TeacherAssistV2GradebookRecordRevision,
+)
 from oziebot_api.models.teacher_assist_v2_mastery_evidence import TeacherAssistV2MasteryEvidence
 from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssistV2StudentSubmission
 from oziebot_api.models.user import User
@@ -30,7 +32,9 @@ def _now() -> datetime:
 
 def _require_student_number(submission: TeacherAssistV2StudentSubmission) -> int:
     if submission.student_number is None:
-        raise ValueError("Confirmed grades require an assigned student number before gradebook sync.")
+        raise ValueError(
+            "Confirmed grades require an assigned student number before gradebook sync."
+        )
     return submission.student_number
 
 
@@ -111,7 +115,9 @@ def sync_confirmed_grade_to_gradebook_and_mastery(
     student_number = _require_student_number(submission)
     objective_ids = _objective_ids_from_assignment(assignment)
     if not objective_ids:
-        raise ValueError("Assignment must be linked to at least one objective before gradebook sync.")
+        raise ValueError(
+            "Assignment must be linked to at least one objective before gradebook sync."
+        )
 
     now = _now()
     existing = db.scalars(
@@ -200,7 +206,9 @@ def sync_confirmed_grade_to_gradebook_and_mastery(
     return existing
 
 
-def serialize_gradebook_record(row: TeacherAssistV2GradebookRecord, *, assignment_title: str | None = None) -> dict[str, Any]:
+def serialize_gradebook_record(
+    row: TeacherAssistV2GradebookRecord, *, assignment_title: str | None = None
+) -> dict[str, Any]:
     payload = {
         "id": str(row.id),
         "assignment_id": str(row.assignment_id),
@@ -230,7 +238,9 @@ def serialize_gradebook_record(row: TeacherAssistV2GradebookRecord, *, assignmen
     return payload
 
 
-def serialize_mastery_evidence(row: TeacherAssistV2MasteryEvidence, *, objective_label: str | None = None) -> dict[str, Any]:
+def serialize_mastery_evidence(
+    row: TeacherAssistV2MasteryEvidence, *, objective_label: str | None = None
+) -> dict[str, Any]:
     return {
         "id": str(row.id),
         "student_number": row.student_number,

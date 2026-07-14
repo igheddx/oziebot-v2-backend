@@ -12,7 +12,9 @@ from oziebot_api.db.base import Base
 
 if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
-    from oziebot_api.models.teacher_assist_v2_slide_visual_asset import TeacherAssistV2SlideVisualAsset
+    from oziebot_api.models.teacher_assist_v2_slide_visual_asset import (
+        TeacherAssistV2SlideVisualAsset,
+    )
 
 
 class TeacherAssistV2InstructionalPackage(Base):
@@ -26,7 +28,9 @@ class TeacherAssistV2InstructionalPackage(Base):
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     platform_school_year_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_school_years.id", ondelete="CASCADE"), nullable=False
+        Uuid(as_uuid=True),
+        ForeignKey("education_school_years.id", ondelete="CASCADE"),
+        nullable=False,
     )
     catalog_state_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("education_states.id", ondelete="CASCADE"), nullable=False
@@ -52,7 +56,9 @@ class TeacherAssistV2InstructionalPackage(Base):
     plan_end_date: Mapped[date] = mapped_column(Date(), nullable=False)
     teaching_order_json: Mapped[list[Any]] = mapped_column(JSON(), nullable=False)
     selected_outputs_json: Mapped[list[Any]] = mapped_column(JSON(), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="generated", server_default="generated")
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="generated", server_default="generated"
+    )
     provider_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)
     # Backward-designed instructional plan generated once before artifact generation.
@@ -135,12 +141,18 @@ class TeacherAssistV2InstructionalPackageArtifact(Base):
         Uuid(as_uuid=True), ForeignKey("education_subjects.id", ondelete="SET NULL"), nullable=True
     )
     period_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("pacing_guide_periods.id", ondelete="SET NULL"), nullable=True
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guide_periods.id", ondelete="SET NULL"),
+        nullable=True,
     )
     day_label: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    sequence_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     title: Mapped[str] = mapped_column(String(256), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ready", server_default="ready")
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="ready", server_default="ready"
+    )
     content_json: Mapped[dict[str, Any]] = mapped_column(JSON(), nullable=False)
     preview_html: Mapped[str | None] = mapped_column(Text(), nullable=True)
     storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -179,7 +191,9 @@ class TeacherAssistV2PlanningSupplementalMaterial(Base):
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     platform_school_year_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_school_years.id", ondelete="CASCADE"), nullable=False
+        Uuid(as_uuid=True),
+        ForeignKey("education_school_years.id", ondelete="CASCADE"),
+        nullable=False,
     )
     catalog_state_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("education_states.id", ondelete="CASCADE"), nullable=False

@@ -74,7 +74,9 @@ def register_generated_artifact(
     metadata: dict[str, Any] | None = None,
 ) -> TeacherAssistGeneratedArtifact:
     now = _now()
-    from oziebot_api.services.teacher_assist.instructional_weeks import resolve_instructional_week_id_for_period
+    from oziebot_api.services.teacher_assist.instructional_weeks import (
+        resolve_instructional_week_id_for_period,
+    )
 
     instructional_week_id = resolve_instructional_week_id_for_period(
         db,
@@ -126,14 +128,18 @@ def list_generated_artifacts_for_period(
     )
 
 
-def serialize_generated_artifact(db: Session, artifact: TeacherAssistGeneratedArtifact) -> dict[str, Any]:
+def serialize_generated_artifact(
+    db: Session, artifact: TeacherAssistGeneratedArtifact
+) -> dict[str, Any]:
     creator = db.get(User, artifact.created_by_user_id)
     return {
         "id": str(artifact.id),
         "week_id": str(artifact.pacing_guide_period_id),
         "pacing_guide_id": str(artifact.pacing_guide_id),
         "pacing_guide_period_id": str(artifact.pacing_guide_period_id),
-        "instructional_week_id": str(artifact.instructional_week_id) if artifact.instructional_week_id else None,
+        "instructional_week_id": str(artifact.instructional_week_id)
+        if artifact.instructional_week_id
+        else None,
         "artifact_type": artifact.artifact_type,
         "title": artifact.title,
         "status": artifact.status,
@@ -141,10 +147,16 @@ def serialize_generated_artifact(db: Session, artifact: TeacherAssistGeneratedAr
         "created_by_name": creator.full_name if creator else None,
         "created_at": artifact.created_at.isoformat(),
         "updated_at": artifact.updated_at.isoformat(),
-        "instructional_plan_id": str(artifact.instructional_plan_id) if artifact.instructional_plan_id else None,
-        "planning_draft_id": str(artifact.planning_draft_id) if artifact.planning_draft_id else None,
+        "instructional_plan_id": str(artifact.instructional_plan_id)
+        if artifact.instructional_plan_id
+        else None,
+        "planning_draft_id": str(artifact.planning_draft_id)
+        if artifact.planning_draft_id
+        else None,
         "assignment_id": str(artifact.assignment_id) if artifact.assignment_id else None,
-        "export_artifact_id": str(artifact.export_artifact_id) if artifact.export_artifact_id else None,
+        "export_artifact_id": str(artifact.export_artifact_id)
+        if artifact.export_artifact_id
+        else None,
         "newsletter_id": str(artifact.newsletter_id) if artifact.newsletter_id else None,
         "resource_links": artifact.resource_links_json or [],
         "metadata": artifact.metadata_json or {},

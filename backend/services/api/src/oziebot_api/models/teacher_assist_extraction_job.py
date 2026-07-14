@@ -75,7 +75,9 @@ class TeacherAssistExtractionJob(Base):
     mime_type: Mapped[str] = mapped_column(String(255), nullable=False)
     file_size: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    progress_percent: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     provider_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     provider_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     provider_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -88,7 +90,9 @@ class TeacherAssistExtractionJob(Base):
     error_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)
     execution_log_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON(), nullable=True)
     leased_by_worker: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
@@ -104,7 +108,9 @@ class TeacherAssistExtractionJob(Base):
         nullable=True,
         index=True,
     )
-    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    attempt_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
     timeout_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -136,7 +142,9 @@ if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_extracted_text_record import (
         TeacherAssistExtractedTextRecord,
     )
-    from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
+    from oziebot_api.models.teacher_assist_resource_library_item import (
+        TeacherAssistResourceLibraryItem,
+    )
     from oziebot_api.models.teacher_assist_student_work_submission import (
         TeacherAssistStudentWorkSubmission,
     )

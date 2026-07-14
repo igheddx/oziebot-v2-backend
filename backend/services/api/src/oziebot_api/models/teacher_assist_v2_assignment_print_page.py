@@ -39,4 +39,6 @@ class TeacherAssistV2AssignmentPrintPage(Base):
 
 
 if TYPE_CHECKING:
-    from oziebot_api.models.teacher_assist_v2_assignment_print_packet import TeacherAssistV2AssignmentPrintPacket
+    from oziebot_api.models.teacher_assist_v2_assignment_print_packet import (
+        TeacherAssistV2AssignmentPrintPacket,
+    )

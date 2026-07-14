@@ -62,14 +62,20 @@ def build_mastery_matrix_heatmap(
 
     standards_payload: list[dict[str, Any]] = []
     for matrix_standard in sorted(matrix.matrix_standards, key=lambda item: item.display_order):
-        standard_rows = [row for row in evaluations if row.standard_id == matrix_standard.standard_id]
+        standard_rows = [
+            row for row in evaluations if row.standard_id == matrix_standard.standard_id
+        ]
         percentages = compute_standard_percentages(standard_rows)
         standards_payload.append(
             {
                 "matrix_standard_id": matrix_standard.id,
                 "standard_id": matrix_standard.standard_id,
-                "standard_code": matrix_standard.standard.code if matrix_standard.standard else None,
-                "standard_description": matrix_standard.standard.description if matrix_standard.standard else None,
+                "standard_code": matrix_standard.standard.code
+                if matrix_standard.standard
+                else None,
+                "standard_description": matrix_standard.standard.description
+                if matrix_standard.standard
+                else None,
                 "display_order": matrix_standard.display_order,
                 "target_mastery_level": matrix_standard.target_mastery_level,
                 "operational_status": operational_status_from_percentages(
@@ -202,7 +208,9 @@ def build_student_mastery_summary(
         state = {
             "evaluation_id": row.id,
             "standard_id": row.standard_id,
-            "standard_code": matrix_standard.standard.code if matrix_standard and matrix_standard.standard else None,
+            "standard_code": matrix_standard.standard.code
+            if matrix_standard and matrix_standard.standard
+            else None,
             "mastery_level": row.mastery_level,
             "target_mastery_level": target_level,
             "confirmed_at": row.confirmed_at,
@@ -247,7 +255,9 @@ def build_student_mastery_summary(
         "active_evaluation_count": len(active_rows),
         "average_mastery_rank": average_mastery_rank(active_rows),
         "recent_assessment_count": count_recent_evaluations(active_rows, settings=settings),
-        "recent_assignment_count": count_recent_assignment_evaluations(active_rows, settings=settings),
+        "recent_assignment_count": count_recent_assignment_evaluations(
+            active_rows, settings=settings
+        ),
         "mastery_states": mastery_states,
         "standards_needing_attention": standards_needing_attention,
         "latest_assignment_evidence": assignment_evidence[:5],

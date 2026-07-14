@@ -6,11 +6,19 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from oziebot_api.models.education_catalog import EducationCurriculumResource, EducationObjective, EducationSubject
+from oziebot_api.models.education_catalog import (
+    EducationCurriculumResource,
+    EducationObjective,
+    EducationSubject,
+)
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
-from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
+from oziebot_api.models.teacher_assist_pacing_guide_objective import (
+    TeacherAssistPacingGuideObjective,
+)
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
-from oziebot_api.models.teacher_assist_pacing_guide_period_note import TeacherAssistPacingGuidePeriodNote
+from oziebot_api.models.teacher_assist_pacing_guide_period_note import (
+    TeacherAssistPacingGuidePeriodNote,
+)
 from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
 from oziebot_api.models.teacher_assist_standard import TeacherAssistStandard
 from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
@@ -26,8 +34,13 @@ from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
     get_catalog_pacing_guide_detail,
     list_catalog_pacing_guides,
 )
-from oziebot_api.services.teacher_assist.constants import instructional_week_href, weekly_planning_href
-from oziebot_api.services.teacher_assist.instructional_weeks import find_instructional_week_for_period
+from oziebot_api.services.teacher_assist.constants import (
+    instructional_week_href,
+    weekly_planning_href,
+)
+from oziebot_api.services.teacher_assist.instructional_weeks import (
+    find_instructional_week_for_period,
+)
 from oziebot_api.services.teacher_assist.user_preferences import get_user_preferences_or_create
 
 
@@ -73,7 +86,10 @@ def upsert_pacing_period_note(
 ) -> TeacherAssistPacingGuidePeriodNote:
     period = db.scalars(
         select(TeacherAssistPacingGuidePeriod)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id)
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id,
+        )
         .where(
             TeacherAssistPacingGuidePeriod.id == period_id,
             TeacherAssistPacingGuide.tenant_id == tenant_id,
@@ -114,7 +130,9 @@ def build_pacing_guide_workspace(
     guide_id: uuid.UUID | None = None,
     period_id: uuid.UUID | None = None,
 ) -> dict:
-    current = build_current_week_payload(db, tenant_id=tenant_id, user_id=user_id, guide_id=guide_id)
+    current = build_current_week_payload(
+        db, tenant_id=tenant_id, user_id=user_id, guide_id=guide_id
+    )
     active_guide_id = current.get("active_pacing_guide_id")
     guides = list_catalog_pacing_guides(db, tenant_id=tenant_id, active_only=True)
     if active_guide_id is None:
@@ -124,14 +142,23 @@ def build_pacing_guide_workspace(
             "objective_coverage": None,
             "selected_period": None,
             "available_guides": [
-                {"id": row.id, "title": row.title, "guide_type": row.guide_type, "period_count": len(row.periods)}
+                {
+                    "id": row.id,
+                    "title": row.title,
+                    "guide_type": row.guide_type,
+                    "period_count": len(row.periods),
+                }
                 for row in guides
             ],
         }
-    detail = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=active_guide_id)
+    detail = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=active_guide_id
+    )
     selected_period_id = period_id or (current.get("current_week") or {}).get("id")
     timeline = build_pacing_guide_timeline(detail.periods, current_period_id=selected_period_id)
-    coverage = build_objective_coverage(db, tenant_id=tenant_id, user_id=user_id, guide_id=active_guide_id)
+    coverage = build_objective_coverage(
+        db, tenant_id=tenant_id, user_id=user_id, guide_id=active_guide_id
+    )
     selected_period = next((row for row in detail.periods if row.id == selected_period_id), None)
     upcoming_period_id = (current.get("upcoming_week") or {}).get("id")
     return {
@@ -157,7 +184,12 @@ def build_pacing_guide_workspace(
             period_id=uuid.UUID(str(upcoming_period_id)) if upcoming_period_id else None,
         ),
         "available_guides": [
-            {"id": row.id, "title": row.title, "guide_type": row.guide_type, "period_count": len(row.periods)}
+            {
+                "id": row.id,
+                "title": row.title,
+                "guide_type": row.guide_type,
+                "period_count": len(row.periods),
+            }
             for row in guides
         ],
     }
@@ -172,7 +204,10 @@ def build_period_launch_context(
 ) -> dict:
     period = db.scalars(
         select(TeacherAssistPacingGuidePeriod)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id)
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id,
+        )
         .where(
             TeacherAssistPacingGuidePeriod.id == period_id,
             TeacherAssistPacingGuide.tenant_id == tenant_id,
@@ -190,7 +225,9 @@ def build_period_launch_context(
     if guide is None:
         raise LookupError("Pacing guide not found")
 
-    context = CurrentWeekResolver.resolve(db, tenant_id=tenant_id, user_id=user.id, guide_id=guide.id)
+    context = CurrentWeekResolver.resolve(
+        db, tenant_id=tenant_id, user_id=user.id, guide_id=guide.id
+    )
     grading_period_id = context.grading_period.id if context and context.grading_period else None
     subject_id = None
     if guide.catalog_subject_id is not None:
@@ -243,7 +280,9 @@ def build_period_launch_context(
                 resource_ids.append(library_item.id)
         resource_summaries.append(
             {
-                "catalog_resource_id": str(mapping.catalog_resource_id) if mapping.catalog_resource_id else None,
+                "catalog_resource_id": str(mapping.catalog_resource_id)
+                if mapping.catalog_resource_id
+                else None,
                 "resource_library_item_id": str(mapping.resource_library_item_id)
                 if mapping.resource_library_item_id
                 else None,

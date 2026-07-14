@@ -69,7 +69,9 @@ def seed_teacher_copilot(db: Session) -> dict[str, int]:
                 session_id=session.id,
                 role="teacher",
                 content=question,
-                context_snapshot={"context_packet_keys": list((context.get("context_packets") or {}).keys())},
+                context_snapshot={
+                    "context_packet_keys": list((context.get("context_packets") or {}).keys())
+                },
                 created_at=teacher_at,
             )
         )

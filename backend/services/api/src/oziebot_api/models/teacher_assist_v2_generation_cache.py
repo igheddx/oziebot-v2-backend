@@ -26,7 +26,9 @@ class TeacherAssistV2GenerationCache(Base):
 
     __tablename__ = "teacher_assist_v2_generation_cache"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "cache_layer", "cache_key", name="uq_v2_gen_cache_tenant_layer_key"),
+        UniqueConstraint(
+            "tenant_id", "cache_layer", "cache_key", name="uq_v2_gen_cache_tenant_layer_key"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)

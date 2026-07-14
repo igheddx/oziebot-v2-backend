@@ -14,7 +14,10 @@ from oziebot_api.models.teacher_assist_newsletter_export import TeacherAssistNew
 from oziebot_api.services.teacher_assist.activity_events import record_activity_event
 from oziebot_api.services.teacher_assist.constants import validate_newsletter_export_format
 from oziebot_api.services.teacher_assist.newsletters import get_newsletter_or_404
-from oziebot_api.services.teacher_assist.storage import get_teacher_assist_download_url, save_teacher_assist_bytes
+from oziebot_api.services.teacher_assist.storage import (
+    get_teacher_assist_download_url,
+    save_teacher_assist_bytes,
+)
 
 
 def _content_sections(content: dict[str, Any]) -> list[tuple[str, str | list[str]]]:
@@ -82,7 +85,11 @@ def render_newsletter_pdf_bytes(*, title: str, content: dict[str, Any]) -> bytes
         b"2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n",
         b"3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
         b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj\n",
-        b"4 0 obj<< /Length " + str(len(stream)).encode("ascii") + b" >>stream\n" + stream + b"\nendstream\nendobj\n",
+        b"4 0 obj<< /Length "
+        + str(len(stream)).encode("ascii")
+        + b" >>stream\n"
+        + stream
+        + b"\nendstream\nendobj\n",
         b"5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n",
     ]
     pdf = [b"%PDF-1.4\n"]
@@ -96,13 +103,18 @@ def render_newsletter_pdf_bytes(*, title: str, content: dict[str, Any]) -> bytes
     for offset in offsets[1:]:
         pdf.append(f"{offset:010d} 00000 n \n".encode("ascii"))
     pdf.append(
-        f"trailer<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n".encode("ascii")
+        f"trailer<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n".encode(
+            "ascii"
+        )
     )
     return b"".join(pdf)
 
 
 def render_newsletter_docx_bytes(*, title: str, content: dict[str, Any]) -> bytes:
-    paragraphs: list[str] = [title, "Draft for teacher review. TeacherAssist does not send automatically."]
+    paragraphs: list[str] = [
+        title,
+        "Draft for teacher review. TeacherAssist does not send automatically.",
+    ]
     for heading, body in _content_sections(content):
         paragraphs.append(heading)
         if isinstance(body, list):
@@ -142,7 +154,9 @@ def render_newsletter_docx_bytes(*, title: str, content: dict[str, Any]) -> byte
     return buffer.getvalue()
 
 
-def _render_newsletter_export_bytes(*, title: str, content: dict[str, Any], export_format: str) -> bytes:
+def _render_newsletter_export_bytes(
+    *, title: str, content: dict[str, Any], export_format: str
+) -> bytes:
     if export_format == "html":
         return render_newsletter_html_bytes(title=title, content=content)
     if export_format == "pdf":
@@ -163,7 +177,9 @@ def _export_mime_type(export_format: str) -> str:
 
 
 def _export_filename(title: str, export_format: str) -> str:
-    safe = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in title.lower()).strip("-")
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in title.lower()).strip(
+        "-"
+    )
     safe = safe[:60] or "newsletter"
     return f"{safe}.{export_format}"
 
@@ -240,7 +256,9 @@ def create_newsletter_export(
     return export_row
 
 
-def serialize_newsletter_export(export_row: TeacherAssistNewsletterExport, *, title: str) -> dict[str, Any]:
+def serialize_newsletter_export(
+    export_row: TeacherAssistNewsletterExport, *, title: str
+) -> dict[str, Any]:
     return {
         "id": export_row.id,
         "newsletter_id": export_row.newsletter_id,

@@ -101,7 +101,9 @@ def _replace_guide_structure(
     weeks: list[dict[str, Any]],
 ) -> None:
     db.execute(
-        delete(TeacherAssistPacingGuidePeriod).where(TeacherAssistPacingGuidePeriod.pacing_guide_id == guide.id)
+        delete(TeacherAssistPacingGuidePeriod).where(
+            TeacherAssistPacingGuidePeriod.pacing_guide_id == guide.id
+        )
     )
     db.flush()
 
@@ -160,7 +162,9 @@ def create_v2_pacing_guide_from_builder(
 
     tenant_year = ensure_tenant_school_year(db, tenant_id=tenant_id, platform_year=platform_year)
     ownership_scope = str(body.get("ownership_scope") or "district").strip().lower()
-    catalog_school_id = uuid.UUID(str(body["catalog_school_id"])) if body.get("catalog_school_id") else None
+    catalog_school_id = (
+        uuid.UUID(str(body["catalog_school_id"])) if body.get("catalog_school_id") else None
+    )
     if ownership_scope == "school" and catalog_school_id is None:
         raise _field_errors(catalog_school_id="School is required for school-scoped pacing guides.")
 
@@ -181,7 +185,9 @@ def create_v2_pacing_guide_from_builder(
         guide_type="DISTRICT",
         title=str(body["title"]).strip(),
         description=(body.get("description") or None),
-        catalog_state_id=uuid.UUID(str(body["catalog_state_id"])) if body.get("catalog_state_id") else None,
+        catalog_state_id=uuid.UUID(str(body["catalog_state_id"]))
+        if body.get("catalog_state_id")
+        else None,
         catalog_district_id=uuid.UUID(str(body["catalog_district_id"])),
         catalog_school_id=catalog_school_id if ownership_scope == "school" else None,
         catalog_grade_id=uuid.UUID(str(body["catalog_grade_id"])),
@@ -190,7 +196,9 @@ def create_v2_pacing_guide_from_builder(
         is_shared=True,
     )
     _apply_scope_metadata(guide, body=body)
-    _replace_guide_structure(db, tenant_id=tenant_id, guide=guide, objectives=objectives, weeks=weeks)
+    _replace_guide_structure(
+        db, tenant_id=tenant_id, guide=guide, objectives=objectives, weeks=weeks
+    )
     return get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=guide.id)
 
 
@@ -202,7 +210,9 @@ def update_v2_pacing_guide_from_builder(
     pacing_guide_id: uuid.UUID,
     body: dict[str, Any],
 ) -> TeacherAssistPacingGuide:
-    existing = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id)
+    existing = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id
+    )
     platform_year = get_platform_school_year_or_404(
         db, school_year_id=uuid.UUID(str(body["platform_school_year_id"]))
     )
@@ -210,7 +220,9 @@ def update_v2_pacing_guide_from_builder(
 
     tenant_year = ensure_tenant_school_year(db, tenant_id=tenant_id, platform_year=platform_year)
     ownership_scope = str(body.get("ownership_scope") or "district").strip().lower()
-    catalog_school_id = uuid.UUID(str(body["catalog_school_id"])) if body.get("catalog_school_id") else None
+    catalog_school_id = (
+        uuid.UUID(str(body["catalog_school_id"])) if body.get("catalog_school_id") else None
+    )
     if ownership_scope == "school" and catalog_school_id is None:
         raise _field_errors(catalog_school_id="School is required for school-scoped pacing guides.")
 
@@ -223,7 +235,9 @@ def update_v2_pacing_guide_from_builder(
         guide_type="DISTRICT",
         title=str(body["title"]).strip(),
         description=(body.get("description") or None),
-        catalog_state_id=uuid.UUID(str(body["catalog_state_id"])) if body.get("catalog_state_id") else existing.catalog_state_id,
+        catalog_state_id=uuid.UUID(str(body["catalog_state_id"]))
+        if body.get("catalog_state_id")
+        else existing.catalog_state_id,
         catalog_district_id=uuid.UUID(str(body["catalog_district_id"])),
         catalog_school_id=catalog_school_id if ownership_scope == "school" else None,
         catalog_grade_id=uuid.UUID(str(body["catalog_grade_id"])),
@@ -241,6 +255,7 @@ def update_v2_pacing_guide_from_builder(
     estimated_duration_weeks = int(body.get("estimated_duration_weeks") or 6)
     weeks = _weeks_from_duration(estimated_duration_weeks)
     _apply_scope_metadata(guide, body=body)
-    _replace_guide_structure(db, tenant_id=tenant_id, guide=guide, objectives=objectives, weeks=weeks)
+    _replace_guide_structure(
+        db, tenant_id=tenant_id, guide=guide, objectives=objectives, weeks=weeks
+    )
     return get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=guide.id)
-

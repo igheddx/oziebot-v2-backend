@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from oziebot_api.models.teacher_assist_class_subject import TeacherAssistClassSubject
 from oziebot_api.models.teacher_assist_mastery_matrix import TeacherAssistMasteryMatrix
-from oziebot_api.models.teacher_assist_mastery_matrix_standard import TeacherAssistMasteryMatrixStandard
+from oziebot_api.models.teacher_assist_mastery_matrix_standard import (
+    TeacherAssistMasteryMatrixStandard,
+)
 from oziebot_api.models.teacher_assist_standard import TeacherAssistStandard
 from oziebot_api.services.teacher_assist.constants import (
     validate_mastery_level,
@@ -59,7 +61,9 @@ def _validate_matrix_context(
     class_subject_ids = {
         row.subject_id
         for row in db.scalars(
-            select(TeacherAssistClassSubject).where(TeacherAssistClassSubject.class_id == teacher_class.id)
+            select(TeacherAssistClassSubject).where(
+                TeacherAssistClassSubject.class_id == teacher_class.id
+            )
         ).all()
     }
     if class_subject_ids and subject.id not in class_subject_ids:
@@ -76,7 +80,10 @@ def _validate_matrix_standards(
 ) -> list[TeacherAssistStandard]:
     if not standard_ids:
         raise ValueError("At least one standard is required for a mastery matrix")
-    standards = [get_standard_or_404(db, tenant_id=tenant_id, standard_id=standard_id) for standard_id in standard_ids]
+    standards = [
+        get_standard_or_404(db, tenant_id=tenant_id, standard_id=standard_id)
+        for standard_id in standard_ids
+    ]
     for standard in standards:
         if standard.subject_id is not None and standard.subject_id != subject_id:
             raise ValueError("Standards must belong to the selected subject")
@@ -160,7 +167,9 @@ def list_mastery_matrices(
     if subject_id is not None:
         query = query.where(TeacherAssistMasteryMatrix.subject_id == subject_id)
     if status is not None:
-        query = query.where(TeacherAssistMasteryMatrix.status == validate_mastery_matrix_status(status))
+        query = query.where(
+            TeacherAssistMasteryMatrix.status == validate_mastery_matrix_status(status)
+        )
     return db.scalars(query.order_by(TeacherAssistMasteryMatrix.updated_at.desc())).all()
 
 

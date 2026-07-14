@@ -63,7 +63,9 @@ class TeacherAssistOCRProviderCircuitState:
 
 
 class TeacherAssistOCRProviderCircuitBreaker:
-    def state_for_provider(self, settings: Settings, provider_name: str) -> TeacherAssistOCRProviderCircuitState:
+    def state_for_provider(
+        self, settings: Settings, provider_name: str
+    ) -> TeacherAssistOCRProviderCircuitState:
         normalized = validate_teacher_assist_ocr_provider(provider_name)
         if normalized == "mock":
             return TeacherAssistOCRProviderCircuitState(state="closed")
@@ -93,7 +95,9 @@ class TeacherAssistOCRProviderCircuitBreaker:
             return credential_state
         return TeacherAssistOCRProviderCircuitState(state="closed")
 
-    def _credential_state(self, settings: Settings, provider_name: str) -> TeacherAssistOCRProviderCircuitState:
+    def _credential_state(
+        self, settings: Settings, provider_name: str
+    ) -> TeacherAssistOCRProviderCircuitState:
         if provider_name == "textract":
             return TeacherAssistOCRProviderCircuitState(state="closed")
         if provider_name == "openai_vision":
@@ -165,7 +169,10 @@ def assert_ocr_artifact_supported(
             error_code="unsupported_mime_type",
             metadata={"mime_type": normalized_mime},
         )
-    if provider_name == "openai_vision" and normalized_mime not in OPENAI_VISION_SUPPORTED_MIME_TYPES:
+    if (
+        provider_name == "openai_vision"
+        and normalized_mime not in OPENAI_VISION_SUPPORTED_MIME_TYPES
+    ):
         raise TeacherAssistOCRProviderError(
             f"OpenAI vision OCR does not support MIME type: {normalized_mime}",
             error_code="unsupported_mime_type",

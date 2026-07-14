@@ -21,7 +21,9 @@ def safe_export_filename(title: str, suffix: str, extension: str) -> str:
 def _docx_paragraph(text: str, *, bold: bool = False) -> str:
     escaped = html.escape(text)
     if bold:
-        return f"<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space='preserve'>{escaped}</w:t></w:r></w:p>"
+        return (
+            f"<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space='preserve'>{escaped}</w:t></w:r></w:p>"
+        )
     return f"<w:p><w:r><w:t xml:space='preserve'>{escaped}</w:t></w:r></w:p>"
 
 
@@ -71,11 +73,15 @@ def _meta_lines(export_context: dict[str, Any] | None) -> list[tuple[str, bool]]
         value = export_context.get(key)
         if value:
             lines.append((f"{label}: {value}", False))
-    mapping = normalize_objective_mapping({"objective_mapping": export_context.get("objective_mapping")})
+    mapping = normalize_objective_mapping(
+        {"objective_mapping": export_context.get("objective_mapping")}
+    )
     objective_text = mapping.get("objective_text")
     objective_code = mapping.get("objective_code")
     if objective_code or objective_text:
-        lines.append((f"Learning Objective: {objective_code or ''} {objective_text or ''}".strip(), False))
+        lines.append(
+            (f"Learning Objective: {objective_code or ''} {objective_text or ''}".strip(), False)
+        )
     return lines
 
 
@@ -93,7 +99,9 @@ def render_quiz_docx_bytes(
     paragraphs.append(("Student Number: ________________________________", False))
     paragraphs.append(("", False))
 
-    instructions = content.get("instructions") or content.get("summary") or content.get("description")
+    instructions = (
+        content.get("instructions") or content.get("summary") or content.get("description")
+    )
     if instructions:
         paragraphs.append(("Instructions", True))
         paragraphs.append((str(instructions), False))
@@ -102,7 +110,9 @@ def render_quiz_docx_bytes(
     for question in content.get("questions") or []:
         number = question.get("number")
         points = question.get("points", 1)
-        paragraphs.append((f"Question {number} ({points} point{'s' if int(points or 1) != 1 else ''})", True))
+        paragraphs.append(
+            (f"Question {number} ({points} point{'s' if int(points or 1) != 1 else ''})", True)
+        )
         paragraphs.append((str(question.get("prompt") or ""), False))
         q_type = str(question.get("type") or "multiple_choice")
         if q_type == "multiple_choice":
@@ -127,7 +137,10 @@ def render_quiz_answer_key_docx_bytes(
     paragraphs: list[tuple[str, bool]] = [(title, True), ("Teacher use only.", False), ("", False)]
     paragraphs.extend(_meta_lines(export_context))
     mapping = normalize_objective_mapping(
-        {"objective_mapping": content.get("objective_mapping") or (export_context or {}).get("objective_mapping")}
+        {
+            "objective_mapping": content.get("objective_mapping")
+            or (export_context or {}).get("objective_mapping")
+        }
     )
     if mapping.get("objective_text") or mapping.get("objective_code"):
         paragraphs.append(

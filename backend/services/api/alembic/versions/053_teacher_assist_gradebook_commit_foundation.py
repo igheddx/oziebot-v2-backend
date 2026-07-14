@@ -44,7 +44,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["assignment_id"], ["assignments.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["class_id"], ["classes.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["grading_period_id"], ["grading_periods.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["grading_review_id"], ["assignment_grading_reviews.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["grading_review_id"], ["assignment_grading_reviews.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["school_year_id"], ["school_years.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["student_work_submission_id"],
@@ -105,10 +107,18 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["assignment_id"], ["assignments.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["class_id"], ["classes.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["grade_record_id"], ["teacher_assist_assignment_grade_records.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["grade_record_id"], ["teacher_assist_assignment_grade_records.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["grading_period_id"], ["grading_periods.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["grading_review_id"], ["assignment_grading_reviews.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["reversed_by_commit_id"], ["teacher_assist_assignment_gradebook_commits.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["grading_review_id"], ["assignment_grading_reviews.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["reversed_by_commit_id"],
+            ["teacher_assist_assignment_gradebook_commits.id"],
+            ondelete="SET NULL",
+        ),
         sa.ForeignKeyConstraint(["school_year_id"], ["school_years.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["student_work_submission_id"],
@@ -116,7 +126,11 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(["subject_id"], ["subjects.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["supersedes_commit_id"], ["teacher_assist_assignment_gradebook_commits.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["supersedes_commit_id"],
+            ["teacher_assist_assignment_gradebook_commits.id"],
+            ondelete="SET NULL",
+        ),
         sa.ForeignKeyConstraint(["teacher_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -167,7 +181,9 @@ def upgrade() -> None:
         sa.Column("details_json", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["assignment_id"], ["assignments.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["grade_record_id"], ["teacher_assist_assignment_grade_records.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["grade_record_id"], ["teacher_assist_assignment_grade_records.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(
             ["gradebook_commit_id"],
             ["teacher_assist_assignment_gradebook_commits.id"],

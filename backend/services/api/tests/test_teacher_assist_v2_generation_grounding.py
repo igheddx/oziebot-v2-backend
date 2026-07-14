@@ -51,4 +51,8 @@ def test_deterministic_package_content_uses_source_excerpts() -> None:
     assert "supplied source excerpt" in assignment["student_instructions"][0]
     assert any("Chapter 1 explains" in question["prompt"] for question in quiz["questions"])
     assert any(slide["id"] == "source-evidence" for slide in deck["slides"])
-    assert any("Chapter 1 explains" in bullet for slide in deck["slides"] for bullet in slide.get("bullets", []))
+    assert any(
+        "Chapter 1 explains" in bullet
+        for slide in deck["slides"]
+        for bullet in slide.get("bullets", [])
+    )

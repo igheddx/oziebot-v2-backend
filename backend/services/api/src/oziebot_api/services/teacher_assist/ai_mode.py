@@ -27,7 +27,8 @@ def is_teacher_assist_real_ai_active(db: Session | None, settings: Settings) -> 
     if provider_name not in _REAL_AI_PROVIDERS:
         return False
     real_provider_enabled = bool(
-        effective.teacher_assist_real_provider_enabled or effective.teacher_assist_ai_enable_real_provider
+        effective.teacher_assist_real_provider_enabled
+        or effective.teacher_assist_ai_enable_real_provider
     )
     if not real_provider_enabled:
         return False
@@ -64,10 +65,19 @@ def test_teacher_assist_openai_connection(db: Session, *, env_settings: Settings
     try:
         provider_name = validate_teacher_assist_ai_provider(effective.teacher_assist_ai_provider)
         if provider_name not in _REAL_AI_PROVIDERS:
-            return {"success": False, "message": f"Provider must be set to openai or gemini to test connection (currently: {provider_name})."}
-        if provider_name == "openai" and not (effective.teacher_assist_openai_api_key or "").strip():
+            return {
+                "success": False,
+                "message": f"Provider must be set to openai or gemini to test connection (currently: {provider_name}).",
+            }
+        if (
+            provider_name == "openai"
+            and not (effective.teacher_assist_openai_api_key or "").strip()
+        ):
             return {"success": False, "message": "OpenAI API key is not configured on the server."}
-        if provider_name == "gemini" and not (effective.teacher_assist_gemini_api_key or "").strip():
+        if (
+            provider_name == "gemini"
+            and not (effective.teacher_assist_gemini_api_key or "").strip()
+        ):
             return {"success": False, "message": "Gemini API key is not configured on the server."}
         model_name = get_teacher_assist_provider_model(effective, provider_name=provider_name)
     except RuntimeError as exc:
@@ -97,7 +107,10 @@ def test_teacher_assist_openai_connection(db: Session, *, env_settings: Settings
             _provider=provider_name,
         )
         if result.content_json.get("ok") is not True:
-            return {"success": False, "message": f"{provider_name} responded but did not return the expected test payload."}
+            return {
+                "success": False,
+                "message": f"{provider_name} responded but did not return the expected test payload.",
+            }
         return {
             "success": True,
             "message": f"{provider_name} connection successful.",

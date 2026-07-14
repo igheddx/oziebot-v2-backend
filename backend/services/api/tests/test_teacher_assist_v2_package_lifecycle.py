@@ -5,12 +5,21 @@ from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 
-from oziebot_api.models.education_catalog import EducationGrade, EducationSchool, EducationSchoolYear, EducationState
-from oziebot_api.models.teacher_assist_v2_instructional_package import TeacherAssistV2InstructionalPackage
+from oziebot_api.models.education_catalog import (
+    EducationGrade,
+    EducationSchool,
+    EducationSchoolYear,
+    EducationState,
+)
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackage,
+)
 from oziebot_api.models.user import User
 from oziebot_api.scripts.seed_teacher_assist_v2 import seed_teacher_assist_v2
 from oziebot_api.services.teacher_assist.setup import teacher_assist_context_for_user
-from oziebot_api.services.teacher_assist.teacher_assignment_provisioning import provision_teacher_school_assignment
+from oziebot_api.services.teacher_assist.teacher_assignment_provisioning import (
+    provision_teacher_school_assignment,
+)
 from oziebot_api.services.teacher_assist_v2.package_dashboard import (
     build_package_dashboard,
     close_out_instructional_package,
@@ -32,10 +41,16 @@ def _planning_ready_teacher(db_session, client) -> tuple[User, uuid.UUID]:
     db_session.commit()
 
     state = db_session.scalar(select(EducationState).where(EducationState.abbreviation == "TX"))
-    school = db_session.scalar(select(EducationSchool).where(EducationSchool.name == "Mason Elementary"))
-    school_year = db_session.scalar(select(EducationSchoolYear).where(EducationSchoolYear.title == "2026-2027"))
+    school = db_session.scalar(
+        select(EducationSchool).where(EducationSchool.name == "Mason Elementary")
+    )
+    school_year = db_session.scalar(
+        select(EducationSchoolYear).where(EducationSchoolYear.title == "2026-2027")
+    )
     grade = db_session.scalar(
-        select(EducationGrade).where(EducationGrade.school_id == school.id, EducationGrade.grade_code == "5")
+        select(EducationGrade).where(
+            EducationGrade.school_id == school.id, EducationGrade.grade_code == "5"
+        )
     )
     assert state and school and school_year and grade
 
@@ -87,10 +102,16 @@ def _insert_package(
     status: str = "active",
 ) -> TeacherAssistV2InstructionalPackage:
     state = db_session.scalar(select(EducationState).where(EducationState.abbreviation == "TX"))
-    school = db_session.scalar(select(EducationSchool).where(EducationSchool.name == "Mason Elementary"))
-    school_year = db_session.scalar(select(EducationSchoolYear).where(EducationSchoolYear.title == "2026-2027"))
+    school = db_session.scalar(
+        select(EducationSchool).where(EducationSchool.name == "Mason Elementary")
+    )
+    school_year = db_session.scalar(
+        select(EducationSchoolYear).where(EducationSchoolYear.title == "2026-2027")
+    )
     grade = db_session.scalar(
-        select(EducationGrade).where(EducationGrade.school_id == school.id, EducationGrade.grade_code == "5")
+        select(EducationGrade).where(
+            EducationGrade.school_id == school.id, EducationGrade.grade_code == "5"
+        )
     )
     assert state and school and school_year and grade
     now = datetime.now(UTC)
@@ -126,42 +147,54 @@ def test_package_lifecycle_status_rules():
     start = today - timedelta(days=7)
     end = today + timedelta(days=2)
 
-    assert resolve_effective_package_status(
-        stored_status="active",
-        plan_start_date=start,
-        plan_end_date=end,
-        today=today,
-    ) == "ending_soon"
+    assert (
+        resolve_effective_package_status(
+            stored_status="active",
+            plan_start_date=start,
+            plan_end_date=end,
+            today=today,
+        )
+        == "ending_soon"
+    )
     assert package_status_message("ending_soon") == (
         "This plan is ending soon. Review and close it out when teaching is complete."
     )
 
     expired_end = today - timedelta(days=1)
-    assert resolve_effective_package_status(
-        stored_status="active",
-        plan_start_date=start,
-        plan_end_date=expired_end,
-        today=today,
-    ) == "expired"
+    assert (
+        resolve_effective_package_status(
+            stored_status="active",
+            plan_start_date=start,
+            plan_end_date=expired_end,
+            today=today,
+        )
+        == "expired"
+    )
     assert package_status_message("expired") == (
         "This plan has passed its end date. Review it and mark it done when complete."
     )
 
-    assert resolve_effective_package_status(
-        stored_status="completed",
-        plan_start_date=start,
-        plan_end_date=expired_end,
-        today=today,
-    ) == "completed"
+    assert (
+        resolve_effective_package_status(
+            stored_status="completed",
+            plan_start_date=start,
+            plan_end_date=expired_end,
+            today=today,
+        )
+        == "completed"
+    )
 
     future_start = today + timedelta(days=5)
     future_end = today + timedelta(days=12)
-    assert resolve_effective_package_status(
-        stored_status="generated",
-        plan_start_date=future_start,
-        plan_end_date=future_end,
-        today=today,
-    ) == "generated"
+    assert (
+        resolve_effective_package_status(
+            stored_status="generated",
+            plan_start_date=future_start,
+            plan_end_date=future_end,
+            today=today,
+        )
+        == "generated"
+    )
 
     assert ENDING_SOON_DAYS == 3
     assert can_close_out_package(stored_status="active", effective_status="expired") is True

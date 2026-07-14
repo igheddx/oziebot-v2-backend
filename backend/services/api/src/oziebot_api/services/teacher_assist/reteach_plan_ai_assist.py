@@ -100,9 +100,14 @@ def generate_reteach_plan_ai_draft(
     if normalized_provider_mode not in {"mock", "real"}:
         raise ValueError("Unsupported reteach plan AI provider mode")
     if normalized_provider_mode == "real":
-        if not (settings.teacher_assist_real_provider_enabled or settings.teacher_assist_ai_enable_real_provider):
+        if not (
+            settings.teacher_assist_real_provider_enabled
+            or settings.teacher_assist_ai_enable_real_provider
+        ):
             raise ValueError("Real reteach plan AI is disabled")
-        TeacherAssistProviderCircuitBreaker().assert_can_execute(settings, settings.teacher_assist_ai_provider)
+        TeacherAssistProviderCircuitBreaker().assert_can_execute(
+            settings, settings.teacher_assist_ai_provider
+        )
         raise ValueError("Real reteach plan AI provider execution is not enabled in this phase")
 
     prompt_context = build_reteach_plan_prompt_context(

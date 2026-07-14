@@ -85,7 +85,9 @@ class StorageProvider(ABC):
 def _normalize_storage_backend(settings: Settings) -> str:
     normalized = settings.teacher_assist_storage_backend.strip().lower() or "local"
     if normalized not in STORAGE_BACKENDS:
-        raise ValueError(f"Unsupported TeacherAssist storage backend '{settings.teacher_assist_storage_backend}'")
+        raise ValueError(
+            f"Unsupported TeacherAssist storage backend '{settings.teacher_assist_storage_backend}'"
+        )
     return normalized
 
 
@@ -236,7 +238,9 @@ class S3StorageProvider(StorageProvider):
     def __init__(self, *, settings: Settings) -> None:
         bucket = (settings.teacher_assist_s3_bucket or "").strip()
         if not bucket:
-            raise ValueError("TeacherAssist S3 bucket must be configured when storage backend is s3")
+            raise ValueError(
+                "TeacherAssist S3 bucket must be configured when storage backend is s3"
+            )
         self._settings = settings
         self._client = _build_s3_client(settings)
         self._bucket = bucket
@@ -288,7 +292,9 @@ class S3StorageProvider(StorageProvider):
             raise
 
     def open_stream(self, *, storage_key: str) -> BinaryIO:
-        response = self._client.get_object(Bucket=self._bucket, Key=_normalize_storage_key(storage_key))
+        response = self._client.get_object(
+            Bucket=self._bucket, Key=_normalize_storage_key(storage_key)
+        )
         body = response["Body"]
         return io.BytesIO(body.read())
 
@@ -418,8 +424,7 @@ def get_teacher_assist_preview_url(
 
 def _ascii_filename_fallback(filename: str) -> str:
     fallback = "".join(
-        ch if 32 <= ord(ch) < 127 and ch not in {'"', "\\"} else "_"
-        for ch in filename
+        ch if 32 <= ord(ch) < 127 and ch not in {'"', "\\"} else "_" for ch in filename
     )
     fallback = fallback.strip("._")
     return fallback or "download"
@@ -429,4 +434,4 @@ def build_content_disposition(filename: str, *, inline: bool = False) -> str:
     normalized = _normalize_filename(filename)
     ascii_name = _ascii_filename_fallback(normalized)
     disposition = "inline" if inline else "attachment"
-    return f'{disposition}; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(normalized)}'
+    return f"{disposition}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(normalized)}"

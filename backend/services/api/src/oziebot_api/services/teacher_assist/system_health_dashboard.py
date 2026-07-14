@@ -84,11 +84,15 @@ def build_system_health_dashboard(
         or 0
     )
 
-    copilot_filter = [TeacherCopilotMessage.created_at >= since, TeacherCopilotMessage.role == "teacher"]
+    copilot_filter = [
+        TeacherCopilotMessage.created_at >= since,
+        TeacherCopilotMessage.role == "teacher",
+    ]
     if tenant_id:
         copilot_filter.append(TeacherCopilotMessage.tenant_id == tenant_id)
     copilot_messages = int(
-        db.scalar(select(func.count()).select_from(TeacherCopilotMessage).where(*copilot_filter)) or 0
+        db.scalar(select(func.count()).select_from(TeacherCopilotMessage).where(*copilot_filter))
+        or 0
     )
     copilot_sessions = int(
         db.scalar(

@@ -27,7 +27,10 @@ class EducationDistrict(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     state_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_states.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_states.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     district_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
@@ -44,7 +47,10 @@ class EducationSchool(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     district_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_districts.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_districts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     school_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -61,7 +67,10 @@ class EducationGrade(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     school_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_schools.id", ondelete="CASCADE"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_schools.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     grade_code: Mapped[str] = mapped_column(String(16), nullable=False)
     display_name: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -76,7 +85,10 @@ class EducationSubject(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     grade_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_grades.id", ondelete="CASCADE"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_grades.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     subject_code: Mapped[str] = mapped_column(String(64), nullable=False)
     display_name: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -90,13 +102,22 @@ class EducationSchoolYear(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     state_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_states.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_states.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     district_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_districts.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_districts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     school_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_schools.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_schools.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     title: Mapped[str] = mapped_column(String(64), nullable=False)
     start_date: Mapped[date] = mapped_column(Date(), nullable=False)
@@ -115,22 +136,40 @@ class EducationObjective(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     state_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_states.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_states.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     district_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_districts.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_districts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     school_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_schools.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_schools.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     grade_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_grades.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_grades.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     subject_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_subjects.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_subjects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     school_year_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_school_years.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_school_years.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     grade_level: Mapped[str] = mapped_column(String(16), nullable=False)
     subject_code: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -153,13 +192,22 @@ class EducationCurriculumResource(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     state_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_states.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_states.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     district_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_districts.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_districts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     school_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_schools.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_schools.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     grade_level: Mapped[str] = mapped_column(String(16), nullable=False)
     subject_code: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -171,7 +219,9 @@ class EducationCurriculumResource(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    links: Mapped[list["EducationResourceLink"]] = relationship(back_populates="curriculum_resource")
+    links: Mapped[list["EducationResourceLink"]] = relationship(
+        back_populates="curriculum_resource"
+    )
     objective_mappings: Mapped[list["EducationObjectiveResourceMapping"]] = relationship(
         back_populates="resource"
     )
@@ -201,7 +251,10 @@ class EducationObjectiveResourceMapping(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     objective_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_objectives.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_objectives.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     resource_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -212,7 +265,9 @@ class EducationObjectiveResourceMapping(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     objective: Mapped[EducationObjective] = relationship(back_populates="resource_mappings")
-    resource: Mapped[EducationCurriculumResource] = relationship(back_populates="objective_mappings")
+    resource: Mapped[EducationCurriculumResource] = relationship(
+        back_populates="objective_mappings"
+    )
 
 
 class TeacherSchoolAssignment(Base):
@@ -223,13 +278,22 @@ class TeacherSchoolAssignment(Base):
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     state_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_states.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_states.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     district_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_districts.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_districts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     school_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_schools.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_schools.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     active: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

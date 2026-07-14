@@ -43,30 +43,106 @@ logger = logging.getLogger(__name__)
 ARTIFACT_ENGINE_VERSION = "1.0"
 
 # Student-facing artifact types — student content prohibitions enforced on these.
-_STUDENT_FACING_TYPES = frozenset({
-    "student_lesson_deck",
-    "quiz",
-    "assignment",
-    "writing_response",
-    "parent_newsletter_summary",
-})
+_STUDENT_FACING_TYPES = frozenset(
+    {
+        "student_lesson_deck",
+        "quiz",
+        "assignment",
+        "writing_response",
+        "parent_newsletter_summary",
+    }
+)
 
 # Assessment artifacts that receive vocabulary registry in the prompt.
 _ASSESSMENT_TYPES = frozenset({"quiz", "assignment", "writing_response"})
 
 # Stopwords excluded from objective-description vocabulary extraction.
-_VOCAB_STOPWORDS = frozenset([
-    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "with", "by", "from", "that", "this", "which", "when", "where",
-    "how", "what", "who", "is", "are", "was", "were", "be", "been", "have",
-    "has", "had", "do", "does", "did", "will", "would", "could", "should",
-    "may", "might", "can", "using", "through", "including", "about", "as",
-    "not", "no", "so", "if", "then", "than", "its", "their", "they", "them",
-    "student", "students", "able", "demonstrate", "understand",
-    "identify", "explain", "analyze", "describe", "use", "create",
-    "write", "read", "apply", "evaluate", "compare", "contrast",
-    "including", "such", "make", "give", "take", "find", "each", "also",
-])
+_VOCAB_STOPWORDS = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "that",
+        "this",
+        "which",
+        "when",
+        "where",
+        "how",
+        "what",
+        "who",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "can",
+        "using",
+        "through",
+        "including",
+        "about",
+        "as",
+        "not",
+        "no",
+        "so",
+        "if",
+        "then",
+        "than",
+        "its",
+        "their",
+        "they",
+        "them",
+        "student",
+        "students",
+        "able",
+        "demonstrate",
+        "understand",
+        "identify",
+        "explain",
+        "analyze",
+        "describe",
+        "use",
+        "create",
+        "write",
+        "read",
+        "apply",
+        "evaluate",
+        "compare",
+        "contrast",
+        "including",
+        "such",
+        "make",
+        "give",
+        "take",
+        "find",
+        "each",
+        "also",
+    ]
+)
 
 
 # ── Student content prohibition patterns ─────────────────────────────────────────
@@ -74,35 +150,38 @@ _VOCAB_STOPWORDS = frozenset([
 # Each entry: (compiled_pattern, replacement_text).
 _STUDENT_PROHIBITION_SUBS: list[tuple[re.Pattern[str], str]] = [
     # TEKS codes with explicit prefix: "TEKS 5.8A", "TEKS 5.11"
-    (re.compile(r'\bTEKS\s+\d{1,2}\.\d+[A-Za-z]?\b', re.IGNORECASE), ''),
+    (re.compile(r"\bTEKS\s+\d{1,2}\.\d+[A-Za-z]?\b", re.IGNORECASE), ""),
     # Standalone TEKS codes with unambiguous letter suffix: "5.8A", "10.2Bi"
-    (re.compile(r'\b\d{1,2}\.\d+[A-Z][a-z]?\b'), ''),
+    (re.compile(r"\b\d{1,2}\.\d+[A-Z][a-z]?\b"), ""),
     # "Standard X.X" patterns
-    (re.compile(r'\bstandard\s+\d{1,2}\.\d+[A-Za-z]?\b', re.IGNORECASE), ''),
+    (re.compile(r"\bstandard\s+\d{1,2}\.\d+[A-Za-z]?\b", re.IGNORECASE), ""),
     # UUID-formatted objective IDs
-    (re.compile(
-        r'\bobjective\s+[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}'
-        r'-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b',
-        re.IGNORECASE,
-    ), ''),
+    (
+        re.compile(
+            r"\bobjective\s+[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
+            re.IGNORECASE,
+        ),
+        "",
+    ),
     # Named internal planning documents
-    (re.compile(r'\bessential\s+unit\s+of\s+study\b', re.IGNORECASE), 'this unit'),
-    (re.compile(r'\bpacing\s+guide\b', re.IGNORECASE), 'our learning plan'),
-    (re.compile(r'\bcurriculum\s+(?:document|map|guide|framework)\b', re.IGNORECASE), ''),
-    (re.compile(r'\bdistrict\s+materials?\b', re.IGNORECASE), ''),
-    (re.compile(r'\bunit\s+of\s+study\b', re.IGNORECASE), 'this unit'),
-    (re.compile(r'\bcurriculum\s+alignment\b', re.IGNORECASE), ''),
-    (re.compile(r'\bbenchmark\s+assessment\b', re.IGNORECASE), 'assessment'),
+    (re.compile(r"\bessential\s+unit\s+of\s+study\b", re.IGNORECASE), "this unit"),
+    (re.compile(r"\bpacing\s+guide\b", re.IGNORECASE), "our learning plan"),
+    (re.compile(r"\bcurriculum\s+(?:document|map|guide|framework)\b", re.IGNORECASE), ""),
+    (re.compile(r"\bdistrict\s+materials?\b", re.IGNORECASE), ""),
+    (re.compile(r"\bunit\s+of\s+study\b", re.IGNORECASE), "this unit"),
+    (re.compile(r"\bcurriculum\s+alignment\b", re.IGNORECASE), ""),
+    (re.compile(r"\bbenchmark\s+assessment\b", re.IGNORECASE), "assessment"),
     # Instructional metadata field names that must never appear in student content
-    (re.compile(r'\binstructional\s+purpose\b', re.IGNORECASE), ''),
-    (re.compile(r'\blearning\s+journey\s+rationale\b', re.IGNORECASE), ''),
-    (re.compile(r'\bmastery\s+gate\b', re.IGNORECASE), 'learning goal'),
-    (re.compile(r'\bterminal\s+mastery\b', re.IGNORECASE), 'final goal'),
-    (re.compile(r'\bknowledge\s+dependency\b', re.IGNORECASE), ''),
-    (re.compile(r'\binstructional\s+contract\b', re.IGNORECASE), ''),
-    (re.compile(r'\bdistrict\s+anchor\b', re.IGNORECASE), ''),
-    (re.compile(r'\bteacher\s+goal\b', re.IGNORECASE), ''),
-    (re.compile(r'\breteach\s+if\s+needed\b', re.IGNORECASE), ''),
+    (re.compile(r"\binstructional\s+purpose\b", re.IGNORECASE), ""),
+    (re.compile(r"\blearning\s+journey\s+rationale\b", re.IGNORECASE), ""),
+    (re.compile(r"\bmastery\s+gate\b", re.IGNORECASE), "learning goal"),
+    (re.compile(r"\bterminal\s+mastery\b", re.IGNORECASE), "final goal"),
+    (re.compile(r"\bknowledge\s+dependency\b", re.IGNORECASE), ""),
+    (re.compile(r"\binstructional\s+contract\b", re.IGNORECASE), ""),
+    (re.compile(r"\bdistrict\s+anchor\b", re.IGNORECASE), ""),
+    (re.compile(r"\bteacher\s+goal\b", re.IGNORECASE), ""),
+    (re.compile(r"\breteach\s+if\s+needed\b", re.IGNORECASE), ""),
 ]
 
 # Only the TEKS-detection patterns (first 3) are used in the post-generation scan
@@ -111,6 +190,7 @@ _TEKS_DETECTION_PATTERNS = _STUDENT_PROHIBITION_SUBS[:3]
 
 
 # ── Phase 0e: Vocabulary Registry ────────────────────────────────────────────────
+
 
 def build_vocabulary_registry(
     plan: dict[str, Any],
@@ -133,8 +213,8 @@ def build_vocabulary_registry(
 
     # KDG prerequisite vocabulary: available from the start of the package.
     kdg_terms: set[str] = set()
-    for entry in (plan.get("knowledge_dependency_graph") or []):
-        for dep in (entry.get("dependencies") or []):
+    for entry in plan.get("knowledge_dependency_graph") or []:
+        for dep in entry.get("dependencies") or []:
             node = (dep.get("knowledge_node") or "").strip()
             if len(node) >= 3:
                 kdg_terms.add(node.lower())
@@ -154,9 +234,9 @@ def build_vocabulary_registry(
                 continue
             anchors = get_plan_district_anchors(plan, week_num, subj_lower) or {}
             new_terms: set[str] = set()
-            for obj in (anchors.get("primary_objectives") or []):
+            for obj in anchors.get("primary_objectives") or []:
                 desc = (obj.get("description") or "").strip()
-                for word in re.split(r'\W+', desc.lower()):
+                for word in re.split(r"\W+", desc.lower()):
                     if len(word) >= 4 and word not in _VOCAB_STOPWORDS:
                         new_terms.add(word)
             weekly_new[(week_num, subj_lower)] = new_terms
@@ -175,6 +255,7 @@ def build_vocabulary_registry(
 
 
 # ── Phase 1: Instructional Contract Extraction ───────────────────────────────────
+
 
 def extract_instructional_contract(
     artifact_type: str,
@@ -198,9 +279,7 @@ def extract_instructional_contract(
     subj_lower = subject_name.strip().lower()
     design_week = get_plan_instructional_design_week(plan, week_num, subj_lower) or {}
     contracts = design_week.get("instructional_contracts") or {}
-    day_entry = (
-        get_plan_for_day(plan, week_num, subj_lower, day_label) if day_label else {}
-    ) or {}
+    day_entry = (get_plan_for_day(plan, week_num, subj_lower, day_label) if day_label else {}) or {}
 
     vocab_key = (week_num, subj_lower)
     introduced_vocabulary = list(vocabulary_registry.get(vocab_key) or [])
@@ -220,6 +299,7 @@ def extract_instructional_contract(
 
 
 # ── Phase 3: Contract Enforcement ────────────────────────────────────────────────
+
 
 def _stem_in_text(stem: str, text: str) -> bool:
     """Case-insensitive check: first 40 chars of stem appear in text."""
@@ -276,11 +356,14 @@ def enforce_instructional_contract(
             slides = content.get("slides")
             if isinstance(slides, list):
                 exit_slides = [
-                    s for s in slides
-                    if isinstance(s, dict) and (
+                    s
+                    for s in slides
+                    if isinstance(s, dict)
+                    and (
                         (s.get("slide_type") or "").lower().replace(" ", "_") == "exit_ticket"
                         or "exit" in (s.get("title") or "").lower()
-                        or ((s.get("engagement") or {}).get("type") or "").lower().replace(" ", "_") == "exit_ticket"
+                        or ((s.get("engagement") or {}).get("type") or "").lower().replace(" ", "_")
+                        == "exit_ticket"
                     )
                 ]
                 stem_present = any(
@@ -291,7 +374,9 @@ def enforce_instructional_contract(
                 if exit_slides and not stem_present:
                     slide = exit_slides[0]
                     slide["body"] = f"{slide.get('body') or ''}\n\n{stem}".strip()
-                    contracts_enforced.append("exit_ticket_stem: injected into student_lesson_deck exit slide")
+                    contracts_enforced.append(
+                        "exit_ticket_stem: injected into student_lesson_deck exit slide"
+                    )
                 elif exit_slides and stem_present:
                     contracts_enforced.append("exit_ticket_stem: present in exit slide")
                 else:
@@ -306,7 +391,8 @@ def enforce_instructional_contract(
             questions = content.get("questions") or []
             if isinstance(questions, list) and questions:
                 compliant = [
-                    q for q in questions
+                    q
+                    for q in questions
                     if not isinstance(q, dict)
                     or not q.get("objective_id")
                     or (q.get("objective_id") or "").strip() in allowed
@@ -405,7 +491,9 @@ def _validate_deck_structure(content: dict[str, Any]) -> dict[str, Any]:
         for s in (slides if isinstance(slides, list) else [])
     )
     if not has_exit:
-        violations.append("no exit_ticket or check_in slide found — instructional contract requires one")
+        violations.append(
+            "no exit_ticket or check_in slide found — instructional contract requires one"
+        )
 
     # Per-slide checks
     _ENGAGEMENT_OPTIONAL = {"hook", "connection", "wrap_up", "share", "read_aloud", "title_full"}
@@ -431,7 +519,7 @@ def _validate_deck_structure(content: dict[str, Any]) -> dict[str, Any]:
         if body and len(body.split()) > 40:
             long_body.append(f"{slide_id} ({len(body.split())} words)")
 
-        for bullet in (s.get("bullets") or []):
+        for bullet in s.get("bullets") or []:
             if isinstance(bullet, str) and len(bullet.split()) > 15:
                 long_bullets.append(f"{slide_id}: '{bullet[:40]}'")
 
@@ -460,7 +548,11 @@ def _validate_deck_structure(content: dict[str, Any]) -> dict[str, Any]:
         "warnings": warnings,
         "alignment_explanation": (
             f"Deck has {slide_count} slides. "
-            + (f"{len(violations)} violation(s): {'; '.join(violations[:2])}. " if violations else "No structural violations. ")
+            + (
+                f"{len(violations)} violation(s): {'; '.join(violations[:2])}. "
+                if violations
+                else "No structural violations. "
+            )
             + (f"{len(warnings)} advisory warning(s)." if warnings else "No warnings.")
         ),
     }
@@ -527,6 +619,7 @@ def _walk_and_clean(
 
 # ── Phase 3b: Cross-Artifact Alignment Validation ────────────────────────────────
 
+
 def validate_week_alignment(
     *,
     package_id: Any,
@@ -552,7 +645,7 @@ def validate_week_alignment(
 
     # Derive subject names for this week from the plan
     subject_names: list[str] = []
-    for week_entry in (plan.get("weeks") or []):
+    for week_entry in plan.get("weeks") or []:
         if int(week_entry.get("sequence_number") or 0) == week_num:
             for ws in week_entry.get("subjects") or []:
                 sn = (ws.get("subject_name") or "").strip()
@@ -566,19 +659,13 @@ def validate_week_alignment(
         "rubric_criterion_alignment": _check_rubric_criterion(
             by_type, plan, week_num, subject_names
         ),
-        "quiz_objective_coverage": _check_quiz_objectives(
-            by_type, plan, week_num, subject_names
-        ),
-        "vocabulary_sequence": _check_vocabulary_sequence(
-            by_type, vocabulary_registry, week_num
-        ),
+        "quiz_objective_coverage": _check_quiz_objectives(by_type, plan, week_num, subject_names),
+        "vocabulary_sequence": _check_vocabulary_sequence(by_type, vocabulary_registry, week_num),
         "student_prohibition_scan": _check_student_prohibitions(by_type),
     }
 
     statuses = [c.get("status") for c in checks.values()]
-    week_confidence = (
-        "Ready" if all(s in ("pass", "skipped") for s in statuses) else "Needs Review"
-    )
+    week_confidence = "Ready" if all(s in ("pass", "skipped") for s in statuses) else "Needs Review"
 
     return {
         "week": week_num,
@@ -759,7 +846,9 @@ def _check_quiz_objectives(
     allowed_objectives: set[str] = set()
     for sn in subject_names:
         design_week = get_plan_instructional_design_week(plan, week_num, sn.lower()) or {}
-        for obj_code in (design_week.get("instructional_contracts") or {}).get("quiz_objectives") or []:
+        for obj_code in (design_week.get("instructional_contracts") or {}).get(
+            "quiz_objectives"
+        ) or []:
             allowed_objectives.add(str(obj_code).strip())
 
     artifacts_checked = [str(getattr(a, "id", "")) for a in quizzes]
@@ -854,7 +943,7 @@ def _check_vocabulary_sequence(
 
     for artifact in assessment_artifacts:
         content_str = json.dumps(getattr(artifact, "content_json", {}) or {}).lower()
-        words = re.findall(r'\b[a-z]{4,}\b', content_str)
+        words = re.findall(r"\b[a-z]{4,}\b", content_str)
         significant = {w for w in words if w not in _VOCAB_STOPWORDS}
         in_registry = {w for w in significant if w in all_vocab}
         total_significant += len(significant)
@@ -897,9 +986,7 @@ def _check_vocabulary_sequence(
 
 
 def _check_student_prohibitions(by_type: dict[str, list[Any]]) -> dict[str, Any]:
-    student_artifacts = [
-        a for atype in _STUDENT_FACING_TYPES for a in (by_type.get(atype) or [])
-    ]
+    student_artifacts = [a for atype in _STUDENT_FACING_TYPES for a in (by_type.get(atype) or [])]
     if not student_artifacts:
         return {
             "status": "skipped",

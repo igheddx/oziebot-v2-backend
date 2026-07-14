@@ -9,8 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
-from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
-from oziebot_api.models.teacher_assist_instructional_evidence import TeacherAssistInstructionalEvidence
+from oziebot_api.models.teacher_assist_assignment_grade_record import (
+    TeacherAssistAssignmentGradeRecord,
+)
+from oziebot_api.models.teacher_assist_instructional_evidence import (
+    TeacherAssistInstructionalEvidence,
+)
 from oziebot_api.models.teacher_assist_standard import TeacherAssistStandard
 from oziebot_api.services.teacher_assist.objective_performance import ObjectivePerformanceService
 
@@ -34,14 +38,22 @@ def build_assignment_coverage_view(
         query = query.where(TeacherAssistAssignment.instructional_week_id == instructional_week_id)
     if class_id is not None:
         query = query.where(TeacherAssistAssignment.class_id == class_id)
-    assignments = list(db.scalars(query.options(selectinload(TeacherAssistAssignment.standard_links))).all())
+    assignments = list(
+        db.scalars(query.options(selectinload(TeacherAssistAssignment.standard_links))).all()
+    )
 
     assignment_rows: list[dict[str, Any]] = []
     for assignment in assignments:
         standard_ids = [row.standard_id for row in assignment.standard_links]
-        standards = list(
-            db.scalars(select(TeacherAssistStandard).where(TeacherAssistStandard.id.in_(standard_ids))).all()
-        ) if standard_ids else []
+        standards = (
+            list(
+                db.scalars(
+                    select(TeacherAssistStandard).where(TeacherAssistStandard.id.in_(standard_ids))
+                ).all()
+            )
+            if standard_ids
+            else []
+        )
 
         grade_records = list(
             db.scalars(
@@ -91,7 +103,11 @@ def build_assignment_coverage_view(
                 if assignment.instructional_week_id
                 else None,
                 "associated_objectives": [
-                    {"standard_id": str(standard.id), "code": standard.code, "title": standard.title}
+                    {
+                        "standard_id": str(standard.id),
+                        "code": standard.code,
+                        "title": standard.title,
+                    }
                     for standard in standards
                 ],
                 "students_assessed": len(students_assessed),

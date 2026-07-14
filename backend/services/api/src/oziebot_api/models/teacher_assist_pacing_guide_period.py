@@ -16,7 +16,10 @@ class TeacherAssistPacingGuidePeriod(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     pacing_guide_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("pacing_guides.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guides.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     period_type: Mapped[str] = mapped_column(String(32), nullable=False)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
@@ -53,6 +56,12 @@ from typing import TYPE_CHECKING  # noqa: E402
 
 if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
-    from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
-    from oziebot_api.models.teacher_assist_pacing_guide_period_day import TeacherAssistPacingGuidePeriodDay
-    from oziebot_api.models.teacher_assist_pacing_guide_resource import TeacherAssistPacingGuideResource
+    from oziebot_api.models.teacher_assist_pacing_guide_objective import (
+        TeacherAssistPacingGuideObjective,
+    )
+    from oziebot_api.models.teacher_assist_pacing_guide_period_day import (
+        TeacherAssistPacingGuidePeriodDay,
+    )
+    from oziebot_api.models.teacher_assist_pacing_guide_resource import (
+        TeacherAssistPacingGuideResource,
+    )

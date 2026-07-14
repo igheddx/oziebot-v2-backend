@@ -124,14 +124,17 @@ def _build_action_center(
             {
                 "action_key": "reuse_prior_work",
                 "label": "Reuse prior year assignment",
-                "navigation_href": first.get("navigation_href") or instructional_week_href(str(instructional_week_id), tab="recommendations"),
+                "navigation_href": first.get("navigation_href")
+                or instructional_week_href(str(instructional_week_id), tab="recommendations"),
             }
         )
     actions.append(
         {
             "action_key": "generate_next_week",
             "label": "Generate next week",
-            "navigation_href": instructional_week_href(str(instructional_week_id), action="generate_next_week"),
+            "navigation_href": instructional_week_href(
+                str(instructional_week_id), action="generate_next_week"
+            ),
         }
     )
     return actions
@@ -144,15 +147,15 @@ def build_instructional_week_workspace(
     user: User,
     instructional_week_id: uuid.UUID,
 ) -> dict[str, Any]:
-    week = get_instructional_week(db, tenant_id=tenant_id, user_id=user.id, instructional_week_id=instructional_week_id)
+    week = get_instructional_week(
+        db, tenant_id=tenant_id, user_id=user.id, instructional_week_id=instructional_week_id
+    )
     week_context = WeekContextService.build(
         db, tenant_id=tenant_id, user=user, period_id=week.pacing_guide_period_id
     )
     week_context_payload = WeekContextService.serialize(week_context)
     objectives = [
-        serialize_instructional_week_objective(row)
-        for row in week.objectives
-        if row.is_active
+        serialize_instructional_week_objective(row) for row in week.objectives if row.is_active
     ]
     if not objectives:
         objectives = week_context_payload.get("objectives", [])
@@ -208,9 +211,7 @@ def build_instructional_week_workspace(
             "navigation_href": _lesson_href(plan.id),
         }
         for plan in plans
-    ] + [
-        row for row in serialized_artifacts if row["artifact_type"] == "LESSON_PLAN"
-    ]
+    ] + [row for row in serialized_artifacts if row["artifact_type"] == "LESSON_PLAN"]
     assignment_rows = [
         {
             "id": str(row.id),
@@ -220,9 +221,7 @@ def build_instructional_week_workspace(
             "navigation_href": _assignment_href(row.id),
         }
         for row in assignments
-    ] + [
-        row for row in serialized_artifacts if row["artifact_type"] == "ASSIGNMENT"
-    ]
+    ] + [row for row in serialized_artifacts if row["artifact_type"] == "ASSIGNMENT"]
     assessment_rows = [
         row for row in serialized_artifacts if row["artifact_type"] in {"QUIZ", "RUBRIC"}
     ] + [
@@ -245,9 +244,7 @@ def build_instructional_week_workspace(
             "navigation_href": _newsletter_href(row.id),
         }
         for row in newsletters
-    ] + [
-        row for row in serialized_artifacts if row["artifact_type"] == "NEWSLETTER"
-    ]
+    ] + [row for row in serialized_artifacts if row["artifact_type"] == "NEWSLETTER"]
 
     coverage = build_objective_coverage(
         db,
@@ -267,7 +264,11 @@ def build_instructional_week_workspace(
         resources_count=len(resources),
         newsletter_count=len(newsletter_rows),
         mastery_covered=len(
-            [row for row in (coverage.get("objectives") or []) if row.get("coverage_status") == "covered"]
+            [
+                row
+                for row in (coverage.get("objectives") or [])
+                if row.get("coverage_status") == "covered"
+            ]
         ),
     )
     history = build_generation_history(
@@ -305,17 +306,30 @@ def build_instructional_week_workspace(
             "navigation_href": instructional_week_href(str(week.id), tab="timeline"),
         }
         for row in activity
-        if (row.metadata_json or {}).get("pacing_guide_period_id") == str(week.pacing_guide_period_id)
+        if (row.metadata_json or {}).get("pacing_guide_period_id")
+        == str(week.pacing_guide_period_id)
         or (row.metadata_json or {}).get("instructional_week_id") == str(week.id)
     ]
     timeline.sort(key=lambda row: row["created_at"], reverse=True)
 
-    from oziebot_api.services.teacher_assist.assignment_coverage import build_assignment_coverage_view
-    from oziebot_api.services.teacher_assist.instructional_week_closure import get_or_create_week_closure, serialize_week_closure
-    from oziebot_api.services.teacher_assist.objective_performance import ObjectivePerformanceService
-    from oziebot_api.services.teacher_assist.recommendation_v2 import build_instructional_loop_recommendations
+    from oziebot_api.services.teacher_assist.assignment_coverage import (
+        build_assignment_coverage_view,
+    )
+    from oziebot_api.services.teacher_assist.instructional_week_closure import (
+        get_or_create_week_closure,
+        serialize_week_closure,
+    )
+    from oziebot_api.services.teacher_assist.objective_performance import (
+        ObjectivePerformanceService,
+    )
+    from oziebot_api.services.teacher_assist.recommendation_v2 import (
+        build_instructional_loop_recommendations,
+    )
     from oziebot_api.services.teacher_assist.reteach_workspace import build_reteach_workspace
-    from oziebot_api.services.teacher_assist.student_support_groups import list_support_groups, serialize_support_group
+    from oziebot_api.services.teacher_assist.student_support_groups import (
+        list_support_groups,
+        serialize_support_group,
+    )
 
     loop_performance = ObjectivePerformanceService.calculate_for_scope(
         db,
@@ -367,7 +381,8 @@ def build_instructional_week_workspace(
                     "end_date": week.end_date.isoformat() if week.end_date else None,
                 },
                 "subject": week_context_payload.get("subject_name"),
-                "grade": week_context_payload.get("grade_display_name") or week_context_payload.get("grade_level"),
+                "grade": week_context_payload.get("grade_display_name")
+                or week_context_payload.get("grade_level"),
                 "objectives": objectives,
                 "resources": resources,
                 "mastery_goals": coverage,
@@ -382,7 +397,9 @@ def build_instructional_week_workspace(
                 "curriculum_references": week_context_payload.get("curriculum_references", []),
                 "teacher_resources": week_context_payload.get("teacher_resources", []),
                 "external_links": week_context_payload.get("external_links", []),
-                "recommendations": recommendations.get("recommended_for_this_week", {}).get("top_reusable", []),
+                "recommendations": recommendations.get("recommended_for_this_week", {}).get(
+                    "top_reusable", []
+                ),
             },
             "newsletter": {"items": newsletter_rows},
             "mastery": {

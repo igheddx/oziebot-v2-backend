@@ -16,7 +16,9 @@ from oziebot_api.models.teacher_assist_v2_assignment_grade import TeacherAssistV
 from oziebot_api.models.teacher_assist_v2_mastery_evidence import TeacherAssistV2MasteryEvidence
 from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssistV2StudentSubmission
 from oziebot_api.models.user import User
-from oziebot_api.services.teacher_assist_v2.grade_review_constants import OFFICIAL_ASSIGNMENT_GRADE_STATUSES
+from oziebot_api.services.teacher_assist_v2.grade_review_constants import (
+    OFFICIAL_ASSIGNMENT_GRADE_STATUSES,
+)
 from oziebot_api.services.teacher_assist_v2.mastery_constants import (
     serialize_mastery_level_fields,
 )
@@ -67,7 +69,9 @@ def _reteach_recommendation(
     return {"type": reteach_type, "explanation": explanation}
 
 
-def _teacher_action_prompt(reteach_type: str, struggling_count: int, misconception: str | None) -> str:
+def _teacher_action_prompt(
+    reteach_type: str, struggling_count: int, misconception: str | None
+) -> str:
     if reteach_type == "whole_class":
         anchor = f" Anchor on: {misconception}." if misconception else ""
         return (
@@ -76,9 +80,7 @@ def _teacher_action_prompt(reteach_type: str, struggling_count: int, misconcepti
         )
     elif reteach_type == "small_group":
         target = f" Target: {misconception}." if misconception else ""
-        return (
-            f"Pull {struggling_count} students for a small-group session during independent work.{target}"
-        )
+        return f"Pull {struggling_count} students for a small-group session during independent work.{target}"
     else:
         return (
             f"Schedule brief 1:1 check-ins with {struggling_count} student(s) "
@@ -93,7 +95,7 @@ def _objective_breakdown(
 ) -> list[dict[str, Any]]:
     """Per-objective mastery summary for this assignment, drawn from MasteryEvidence."""
     objective_ids: list[uuid.UUID] = []
-    for raw in (assignment.education_objective_ids_json or []):
+    for raw in assignment.education_objective_ids_json or []:
         try:
             objective_ids.append(uuid.UUID(str(raw)))
         except (ValueError, TypeError):
@@ -129,17 +131,19 @@ def _objective_breakdown(
         beginning_count = sum(1 for r in rows if r.mastery_level == "beginning")
         avg_pct = round(sum(r.percentage for r in rows) / len(rows), 1)
         mastery_pct = round((mastery_count / len(rows)) * 100, 1)
-        breakdown.append({
-            "objective_id": str(obj_id),
-            "objective_code": obj.objective_id if obj else None,
-            "description": obj.description if obj else None,
-            "students_assessed": len(student_numbers),
-            "mastery_count": mastery_count,
-            "developing_count": developing_count,
-            "beginning_count": beginning_count,
-            "average_percentage": avg_pct,
-            "mastery_percentage": mastery_pct,
-        })
+        breakdown.append(
+            {
+                "objective_id": str(obj_id),
+                "objective_code": obj.objective_id if obj else None,
+                "description": obj.description if obj else None,
+                "students_assessed": len(student_numbers),
+                "mastery_count": mastery_count,
+                "developing_count": developing_count,
+                "beginning_count": beginning_count,
+                "average_percentage": avg_pct,
+                "mastery_percentage": mastery_pct,
+            }
+        )
     return breakdown
 
 
@@ -164,13 +168,15 @@ def _criterion_averages(grades: list[TeacherAssistV2AssignmentGrade]) -> list[di
     for name, scores in criterion_scores.items():
         max_score = criterion_maxes.get(name, 0)
         avg = sum(scores) / len(scores)
-        averages.append({
-            "criterion": name,
-            "average_score": round(avg, 2),
-            "max_score": max_score,
-            "average_percentage": round((avg / max_score) * 100, 1) if max_score else 0,
-            "sample_count": len(scores),
-        })
+        averages.append(
+            {
+                "criterion": name,
+                "average_score": round(avg, 2),
+                "max_score": max_score,
+                "average_percentage": round((avg / max_score) * 100, 1) if max_score else 0,
+                "sample_count": len(scores),
+            }
+        )
     averages.sort(key=lambda r: r["average_percentage"])
     return averages
 
@@ -193,17 +199,22 @@ def build_assignment_class_insight(
         .order_by(TeacherAssistV2AssignmentGrade.student_number.asc().nulls_last())
     ).all()
 
-    unconfirmed_count = db.scalar(
-        select(
-            __import__("sqlalchemy", fromlist=["func"]).func.count(
-                TeacherAssistV2StudentSubmission.id
+    unconfirmed_count = (
+        db.scalar(
+            select(
+                __import__("sqlalchemy", fromlist=["func"]).func.count(
+                    TeacherAssistV2StudentSubmission.id
+                )
+            ).where(
+                TeacherAssistV2StudentSubmission.assignment_id == assignment.id,
+                TeacherAssistV2StudentSubmission.teacher_user_id == user.id,
+                TeacherAssistV2StudentSubmission.status.notin_(
+                    {"CONFIRMED", "ARCHIVED", "INCOMPLETE"}
+                ),
             )
-        ).where(
-            TeacherAssistV2StudentSubmission.assignment_id == assignment.id,
-            TeacherAssistV2StudentSubmission.teacher_user_id == user.id,
-            TeacherAssistV2StudentSubmission.status.notin_({"CONFIRMED", "ARCHIVED", "INCOMPLETE"}),
         )
-    ) or 0
+        or 0
+    )
 
     confirmed_count = len(confirmed_grades)
     if confirmed_count < _MIN_GRADES_REQUIRED:
@@ -228,7 +239,9 @@ def build_assignment_class_insight(
     extension_students: list[dict[str, Any]] = []
 
     for grade in confirmed_grades:
-        fields = serialize_mastery_level_fields(percentage=grade.percentage, mastery_level=grade.mastery_level)
+        fields = serialize_mastery_level_fields(
+            percentage=grade.percentage, mastery_level=grade.mastery_level
+        )
         level = fields["mastery_level"]
         mastery_counts[level] += 1
         total_percentage += grade.percentage or 0
@@ -236,20 +249,24 @@ def build_assignment_class_insight(
         total_max_score += grade.max_score or 0
         if level in {"developing", "beginning"}:
             grade_rubric = grade.rubric_json if isinstance(grade.rubric_json, dict) else {}
-            reteach_students.append({
-                "student_number": grade.student_number,
-                "percentage": grade.percentage,
-                "mastery_level": level,
-                "mastery_level_label": fields["mastery_level_label"],
-                "assignment_grade_id": str(grade.id),
-                "suspected_misconception": grade_rubric.get("suspected_misconception"),
-            })
+            reteach_students.append(
+                {
+                    "student_number": grade.student_number,
+                    "percentage": grade.percentage,
+                    "mastery_level": level,
+                    "mastery_level_label": fields["mastery_level_label"],
+                    "assignment_grade_id": str(grade.id),
+                    "suspected_misconception": grade_rubric.get("suspected_misconception"),
+                }
+            )
         if level == "mastery" and (grade.percentage or 0) >= 92:
-            extension_students.append({
-                "student_number": grade.student_number,
-                "percentage": grade.percentage,
-                "mastery_level": level,
-            })
+            extension_students.append(
+                {
+                    "student_number": grade.student_number,
+                    "percentage": grade.percentage,
+                    "mastery_level": level,
+                }
+            )
 
     mastery_distribution: dict[str, dict[str, Any]] = {}
     for level in ["mastery", "developing", "beginning"]:
@@ -282,7 +299,7 @@ def build_assignment_class_insight(
     objective_scores: dict[str, list[float]] = {}
     for grade in confirmed_grades:
         rubric = grade.rubric_json if isinstance(grade.rubric_json, dict) else {}
-        for ev in (rubric.get("objective_evidence") or []):
+        for ev in rubric.get("objective_evidence") or []:
             if not isinstance(ev, dict):
                 continue
             obj_id = ev.get("objective_id")
@@ -331,7 +348,7 @@ def build_assignment_class_insight(
         "weakest_criterion": weakest_criterion,
         "students_needing_support": sorted(
             reteach_students,
-            key=lambda r: (r["percentage"] or 0),
+            key=lambda r: r["percentage"] or 0,
         ),
         "students_ready_for_extension": extension_students,
         "reteach_recommendation": reteach_rec,

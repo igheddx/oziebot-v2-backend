@@ -9,12 +9,18 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
-from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
-from oziebot_api.models.teacher_assist_assignment_grading_review import TeacherAssistAssignmentGradingReview
+from oziebot_api.models.teacher_assist_assignment_grade_record import (
+    TeacherAssistAssignmentGradeRecord,
+)
+from oziebot_api.models.teacher_assist_assignment_grading_review import (
+    TeacherAssistAssignmentGradingReview,
+)
 from oziebot_api.models.teacher_assist_class import TeacherAssistClass
 from oziebot_api.models.teacher_assist_mastery_evaluation import TeacherAssistMasteryEvaluation
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
-from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
+from oziebot_api.models.teacher_assist_student_work_submission import (
+    TeacherAssistStudentWorkSubmission,
+)
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.services.teacher_assist.action_workspace import (
     SEVERITY_SORT_ORDER,
@@ -164,7 +170,9 @@ def _build_workflow_progress_cards(
         has_submissions = bool(submissions_by_assignment.get(assignment.id))
         has_gradebook = bool(grade_records_by_assignment.get(assignment.id))
         has_mastery = bool(mastery_by_assignment.get(assignment.id))
-        source_plan = plans_by_id.get(assignment.source_plan_id) if assignment.source_plan_id else None
+        source_plan = (
+            plans_by_id.get(assignment.source_plan_id) if assignment.source_plan_id else None
+        )
 
         steps = {
             "lesson_plan": _step_status(
@@ -174,7 +182,8 @@ def _build_workflow_progress_cards(
             "assignment": "complete",
             "student_work": _step_status(
                 complete=has_submissions,
-                in_progress=assignment.status in {"collected", "review_in_progress"} and not has_submissions,
+                in_progress=assignment.status in {"collected", "review_in_progress"}
+                and not has_submissions,
             ),
             "grading_review": _step_status(
                 complete=bool(confirmed_reviews),
@@ -216,10 +225,14 @@ def _build_onboarding_checklist(
     profile = get_teacher_profile(db, user_id=user_id)
     school_assignment = get_active_teacher_assignment(db, user_id=user_id)
     school_year_count = db.scalar(
-        select(func.count()).select_from(TeacherAssistSchoolYear).where(TeacherAssistSchoolYear.tenant_id == tenant_id)
+        select(func.count())
+        .select_from(TeacherAssistSchoolYear)
+        .where(TeacherAssistSchoolYear.tenant_id == tenant_id)
     )
     class_count = db.scalar(
-        select(func.count()).select_from(TeacherAssistClass).where(TeacherAssistClass.tenant_id == tenant_id)
+        select(func.count())
+        .select_from(TeacherAssistClass)
+        .where(TeacherAssistClass.tenant_id == tenant_id)
     )
     items = [
         {
@@ -363,7 +376,8 @@ def get_teacher_assist_today_workspace(
                 "action_type": "review_required",
                 "severity": "review",
                 "title": review_item.get("title") or "Review required",
-                "description": review_item.get("review_reason") or "This item needs teacher review.",
+                "description": review_item.get("review_reason")
+                or "This item needs teacher review.",
                 "tenant_id": tenant_id,
                 "class_id": review_item.get("class_id"),
                 "navigation": {
@@ -388,12 +402,18 @@ def get_teacher_assist_today_workspace(
             "gradebook_pending_count": category_counts["gradebook_pending"],
             "mastery_alert_count": category_counts["mastery_alerts"],
             "reteach_plans_pending_count": category_counts["reteach_plans_pending"],
-            "mastery_reteach_standard_count": len(mastery_dashboard.get("reteach_recommended_standards", [])),
+            "mastery_reteach_standard_count": len(
+                mastery_dashboard.get("reteach_recommended_standards", [])
+            ),
         },
         "priority_items": priority_items[:20],
         "categories": {key: buckets[key][:12] for key in TODAY_CATEGORY_KEYS},
-        "workflow_progress_cards": _build_workflow_progress_cards(db, tenant_id=tenant_id, user_id=user_id),
-        "onboarding_checklist": _build_onboarding_checklist(db, tenant_id=tenant_id, user_id=user_id),
+        "workflow_progress_cards": _build_workflow_progress_cards(
+            db, tenant_id=tenant_id, user_id=user_id
+        ),
+        "onboarding_checklist": _build_onboarding_checklist(
+            db, tenant_id=tenant_id, user_id=user_id
+        ),
         "recent_activity": action_payload.get("recent_activity", [])[:15],
         "current_school_year": workspace_payload.get("current_school_year"),
         "active_grading_period": workspace_payload.get("active_grading_period"),

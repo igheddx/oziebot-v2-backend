@@ -53,9 +53,13 @@ class FixtureAwareTeacherAssistAIProvider(TeacherAssistAIProvider):
     def generate_instructional_plan(
         self, context_preview: dict[str, Any]
     ) -> TeacherAssistAIProviderResult:
-        fixture_key = str(context_preview.get("draft", {}).get("id") or "teacher-assist-weekly-plan")
+        fixture_key = str(
+            context_preview.get("draft", {}).get("id") or "teacher-assist-weekly-plan"
+        )
         if self._fixture_mode == "replay":
-            return self._fixture_store.load(feature=INSTRUCTIONAL_PLAN_GENERATION_FEATURE, key=fixture_key)
+            return self._fixture_store.load(
+                feature=INSTRUCTIONAL_PLAN_GENERATION_FEATURE, key=fixture_key
+            )
 
         result = self._inner.generate_instructional_plan(context_preview)
         if self._fixture_mode == "record":
@@ -80,9 +84,12 @@ class TeacherAssistProviderCircuitState:
 
 
 class TeacherAssistProviderCircuitBreaker:
-    def state_for_provider(self, settings: Settings, provider_name: str) -> TeacherAssistProviderCircuitState:
+    def state_for_provider(
+        self, settings: Settings, provider_name: str
+    ) -> TeacherAssistProviderCircuitState:
         real_provider_enabled = (
-            settings.teacher_assist_real_provider_enabled or settings.teacher_assist_ai_enable_real_provider
+            settings.teacher_assist_real_provider_enabled
+            or settings.teacher_assist_ai_enable_real_provider
         )
         if provider_name != "mock" and not real_provider_enabled:
             return TeacherAssistProviderCircuitState(
@@ -117,11 +124,17 @@ def get_teacher_assist_ai_provider(
     workflow_type: str = INSTRUCTIONAL_PLAN_GENERATION_FEATURE,
 ) -> TeacherAssistAIProvider:
     effective_settings = resolve_teacher_assist_settings(db, settings)
-    provider_name = validate_teacher_assist_ai_provider(effective_settings.teacher_assist_ai_provider)
-    fixture_mode = validate_teacher_assist_ai_fixture_mode(effective_settings.teacher_assist_ai_fixture_mode)
+    provider_name = validate_teacher_assist_ai_provider(
+        effective_settings.teacher_assist_ai_provider
+    )
+    fixture_mode = validate_teacher_assist_ai_fixture_mode(
+        effective_settings.teacher_assist_ai_fixture_mode
+    )
     TeacherAssistProviderCircuitBreaker().assert_can_execute(effective_settings, provider_name)
     if provider_name != "mock" and workflow_type not in REAL_AI_WORKFLOWS:
-        raise RuntimeError("TeacherAssist real provider execution is limited to supported workflows")
+        raise RuntimeError(
+            "TeacherAssist real provider execution is limited to supported workflows"
+        )
 
     if provider_name == "mock":
         provider: TeacherAssistAIProvider = MockTeacherAssistAIProvider()
@@ -130,20 +143,26 @@ def get_teacher_assist_ai_provider(
             raise RuntimeError("TeacherAssist OpenAI API key is not configured")
         provider = OpenAITeacherAssistAIProvider(
             effective_settings,
-            model_name=get_teacher_assist_provider_model(effective_settings, provider_name=provider_name),
+            model_name=get_teacher_assist_provider_model(
+                effective_settings, provider_name=provider_name
+            ),
         )
     elif provider_name == "gemini":
         if not effective_settings.teacher_assist_gemini_api_key:
             raise RuntimeError("TeacherAssist Gemini API key is not configured")
         # Gemini exposes an OpenAI-compatible endpoint; re-use the OpenAI provider
         # with Gemini's key and base URL substituted into the openai slots.
-        gemini_settings = effective_settings.model_copy(update={
-            "teacher_assist_openai_api_key": effective_settings.teacher_assist_gemini_api_key,
-            "teacher_assist_openai_base_url": effective_settings.teacher_assist_gemini_base_url,
-        })
+        gemini_settings = effective_settings.model_copy(
+            update={
+                "teacher_assist_openai_api_key": effective_settings.teacher_assist_gemini_api_key,
+                "teacher_assist_openai_base_url": effective_settings.teacher_assist_gemini_base_url,
+            }
+        )
         provider = OpenAITeacherAssistAIProvider(
             gemini_settings,
-            model_name=get_teacher_assist_provider_model(effective_settings, provider_name=provider_name),
+            model_name=get_teacher_assist_provider_model(
+                effective_settings, provider_name=provider_name
+            ),
         )
     else:
         raise NotImplementedError(f"TeacherAssist AI provider '{provider_name}' is not implemented")
@@ -152,6 +171,8 @@ def get_teacher_assist_ai_provider(
         return provider
     return FixtureAwareTeacherAssistAIProvider(
         inner=provider,
-        fixture_store=TeacherAssistAIFixtureStore(effective_settings.teacher_assist_ai_fixtures_root),
+        fixture_store=TeacherAssistAIFixtureStore(
+            effective_settings.teacher_assist_ai_fixtures_root
+        ),
         fixture_mode=fixture_mode,
     )

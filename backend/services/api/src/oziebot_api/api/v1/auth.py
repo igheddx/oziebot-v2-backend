@@ -155,7 +155,9 @@ def logout(body: LogoutRequest, db: DbSession) -> Response:
 
 
 @router.post("/change-password", response_model=ChangePasswordResponse)
-def change_password(body: ChangePasswordRequest, user: CurrentUser, db: DbSession) -> ChangePasswordResponse:
+def change_password(
+    body: ChangePasswordRequest, user: CurrentUser, db: DbSession
+) -> ChangePasswordResponse:
     field_errors: dict[str, str] = {}
     if body.new_password != body.confirm_password:
         field_errors["confirm_password"] = "Passwords must match."

@@ -20,7 +20,9 @@ class TeacherAssistV2TeacherGoogleConnection(Base):
     google_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     encrypted_access_token: Mapped[bytes] = mapped_column(LargeBinary(), nullable=False)
     encrypted_refresh_token: Mapped[bytes | None] = mapped_column(LargeBinary(), nullable=True)
-    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     scopes_json: Mapped[list[Any]] = mapped_column(JSON(), nullable=False)
     connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

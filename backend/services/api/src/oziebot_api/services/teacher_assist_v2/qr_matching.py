@@ -10,8 +10,12 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.teacher_assist_v2_assignment_print_packet import TeacherAssistV2AssignmentPrintPacket
-from oziebot_api.models.teacher_assist_v2_assignment_print_page import TeacherAssistV2AssignmentPrintPage
+from oziebot_api.models.teacher_assist_v2_assignment_print_packet import (
+    TeacherAssistV2AssignmentPrintPacket,
+)
+from oziebot_api.models.teacher_assist_v2_assignment_print_page import (
+    TeacherAssistV2AssignmentPrintPage,
+)
 
 QR_TOKEN_FILENAME_PATTERN = re.compile(r"(?:^|[-_])([a-f0-9]{32})(?:[-_.]|$)", re.IGNORECASE)
 STUDENT_NUMBER_FILENAME_PATTERN = re.compile(r"student[-_ ]?(\d+)", re.IGNORECASE)
@@ -154,7 +158,9 @@ def resolve_qr_match_from_content(
             page_number=row.page_number,
         )
 
-    resolved_page_number = int(page_number) if isinstance(page_number, int) and page_number > 0 else 1
+    resolved_page_number = (
+        int(page_number) if isinstance(page_number, int) and page_number > 0 else 1
+    )
     resolved_packet_id = _resolve_assignment_packet_id(
         db,
         assignment_id=assignment_id,

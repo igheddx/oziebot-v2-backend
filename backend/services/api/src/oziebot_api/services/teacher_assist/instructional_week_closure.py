@@ -15,12 +15,20 @@ from oziebot_api.models.teacher_assist_instructional_week_closure import (
     TeacherAssistInstructionalWeekSummary,
 )
 from oziebot_api.services.teacher_assist.assignment_coverage import build_assignment_coverage_view
-from oziebot_api.services.teacher_assist.constants import WEEK_CLOSURE_CHECKLIST_KEYS, validate_instructional_week_closure_status
-from oziebot_api.services.teacher_assist.instructional_reflections import list_instructional_reflections
+from oziebot_api.services.teacher_assist.constants import (
+    WEEK_CLOSURE_CHECKLIST_KEYS,
+    validate_instructional_week_closure_status,
+)
+from oziebot_api.services.teacher_assist.instructional_reflections import (
+    list_instructional_reflections,
+)
 from oziebot_api.services.teacher_assist.instructional_weeks import get_instructional_week
 from oziebot_api.services.teacher_assist.objective_performance import ObjectivePerformanceService
 from oziebot_api.services.teacher_assist.reteach_workspace import build_reteach_workspace
-from oziebot_api.services.teacher_assist.student_support_groups import list_support_groups, serialize_support_group
+from oziebot_api.services.teacher_assist.student_support_groups import (
+    list_support_groups,
+    serialize_support_group,
+)
 
 
 def _now() -> datetime:

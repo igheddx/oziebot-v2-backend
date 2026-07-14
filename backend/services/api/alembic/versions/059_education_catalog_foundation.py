@@ -104,7 +104,9 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["state_id"], ["education_states.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("state_id", "objective_id", name="uq_education_objectives_state_objective_id"),
+        sa.UniqueConstraint(
+            "state_id", "objective_id", name="uq_education_objectives_state_objective_id"
+        ),
     )
     op.create_index("ix_education_objectives_state_id", "education_objectives", ["state_id"])
 
@@ -129,7 +131,11 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     for column in ("state_id", "district_id", "school_id"):
-        op.create_index(f"ix_education_curriculum_resources_{column}", "education_curriculum_resources", [column])
+        op.create_index(
+            f"ix_education_curriculum_resources_{column}",
+            "education_curriculum_resources",
+            [column],
+        )
 
     op.create_table(
         "education_resource_links",
@@ -158,12 +164,20 @@ def upgrade() -> None:
         sa.Column("resource_id", sa.Uuid(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["objective_id"], ["education_objectives.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["resource_id"], ["education_curriculum_resources.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["resource_id"], ["education_curriculum_resources.id"], ondelete="CASCADE"
+        ),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("objective_id", "resource_id", name="uq_objective_resource_mapping_pair"),
+        sa.UniqueConstraint(
+            "objective_id", "resource_id", name="uq_objective_resource_mapping_pair"
+        ),
     )
-    op.create_index("ix_objective_resource_mapping_objective_id", "objective_resource_mapping", ["objective_id"])
-    op.create_index("ix_objective_resource_mapping_resource_id", "objective_resource_mapping", ["resource_id"])
+    op.create_index(
+        "ix_objective_resource_mapping_objective_id", "objective_resource_mapping", ["objective_id"]
+    )
+    op.create_index(
+        "ix_objective_resource_mapping_resource_id", "objective_resource_mapping", ["resource_id"]
+    )
 
     op.create_table(
         "teacher_school_assignments",
@@ -180,10 +194,14 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["state_id"], ["education_states.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("user_id", "school_id", name="uq_teacher_school_assignments_user_school"),
+        sa.UniqueConstraint(
+            "user_id", "school_id", name="uq_teacher_school_assignments_user_school"
+        ),
     )
     for column in ("user_id", "state_id", "district_id", "school_id"):
-        op.create_index(f"ix_teacher_school_assignments_{column}", "teacher_school_assignments", [column])
+        op.create_index(
+            f"ix_teacher_school_assignments_{column}", "teacher_school_assignments", [column]
+        )
 
 
 def downgrade() -> None:

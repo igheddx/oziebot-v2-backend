@@ -71,7 +71,9 @@ class TeacherAssistAssignmentPrintPacket(Base):
     )
     teacher_class: Mapped["TeacherAssistClass"] = relationship("TeacherAssistClass")
     school_year: Mapped["TeacherAssistSchoolYear"] = relationship("TeacherAssistSchoolYear")
-    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship("TeacherAssistGradingPeriod")
+    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship(
+        "TeacherAssistGradingPeriod"
+    )
     subject: Mapped["TeacherAssistSubject"] = relationship("TeacherAssistSubject")
     pages: Mapped[list["TeacherAssistAssignmentPrintPage"]] = relationship(
         "TeacherAssistAssignmentPrintPage",
@@ -89,7 +91,9 @@ from typing import TYPE_CHECKING  # noqa: E402
 
 if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
-    from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
+    from oziebot_api.models.teacher_assist_assignment_print_page import (
+        TeacherAssistAssignmentPrintPage,
+    )
     from oziebot_api.models.teacher_assist_student_work_submission import (
         TeacherAssistStudentWorkSubmission,
     )

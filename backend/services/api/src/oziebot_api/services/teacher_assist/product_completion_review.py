@@ -240,7 +240,9 @@ FEATURE_AREAS: list[dict[str, Any]] = [
 
 
 def build_product_completion_review() -> dict[str, Any]:
-    counts = {status: 0 for status in ("implemented", "partial", "deferred", "deprecated", "blocked")}
+    counts = {
+        status: 0 for status in ("implemented", "partial", "deferred", "deprecated", "blocked")
+    }
     for row in FEATURE_AREAS:
         counts[row["status"]] = counts.get(row["status"], 0) + 1
     pilot_ready_count = sum(1 for row in FEATURE_AREAS if row.get("pilot_ready"))

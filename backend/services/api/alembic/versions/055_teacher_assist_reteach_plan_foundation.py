@@ -40,7 +40,9 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["class_id"], ["classes.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["grading_period_id"], ["grading_periods.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["latest_ai_usage_event_id"], ["teacher_assist_ai_usage_events.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["latest_ai_usage_event_id"], ["teacher_assist_ai_usage_events.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(
             ["mastery_matrix_id"],
             ["teacher_assist_mastery_matrices.id"],
@@ -89,7 +91,9 @@ def upgrade() -> None:
         sa.Column("created_by_user_id", sa.Uuid(), nullable=False),
         sa.Column("change_reason", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["ai_usage_event_id"], ["teacher_assist_ai_usage_events.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["ai_usage_event_id"], ["teacher_assist_ai_usage_events.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["owner_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
@@ -99,9 +103,17 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("reteach_plan_id", "version_number", name="uq_reteach_plan_version_number"),
+        sa.UniqueConstraint(
+            "reteach_plan_id", "version_number", name="uq_reteach_plan_version_number"
+        ),
     )
-    for column_name in ("tenant_id", "owner_user_id", "reteach_plan_id", "version_source", "ai_usage_event_id"):
+    for column_name in (
+        "tenant_id",
+        "owner_user_id",
+        "reteach_plan_id",
+        "version_source",
+        "ai_usage_event_id",
+    ):
         op.create_index(
             op.f(f"ix_teacher_assist_reteach_plan_versions_{column_name}"),
             "teacher_assist_reteach_plan_versions",
@@ -146,14 +158,41 @@ def downgrade() -> None:
         table_name="teacher_assist_reteach_plan_versions",
     )
     op.drop_table("teacher_assist_reteach_plan_versions")
-    op.drop_index(op.f("ix_teacher_assist_reteach_plans_current_version_id"), table_name="teacher_assist_reteach_plans")
-    op.drop_index(op.f("ix_teacher_assist_reteach_plans_status"), table_name="teacher_assist_reteach_plans")
-    op.drop_index(op.f("ix_teacher_assist_reteach_plans_subject_id"), table_name="teacher_assist_reteach_plans")
-    op.drop_index(op.f("ix_teacher_assist_reteach_plans_class_id"), table_name="teacher_assist_reteach_plans")
-    op.drop_index(op.f("ix_teacher_assist_reteach_plans_grading_period_id"), table_name="teacher_assist_reteach_plans")
-    op.drop_index(op.f("ix_teacher_assist_reteach_plans_school_year_id"), table_name="teacher_assist_reteach_plans")
-    op.drop_index(op.f("ix_teacher_assist_reteach_plans_standard_id"), table_name="teacher_assist_reteach_plans")
-    op.drop_index(op.f("ix_teacher_assist_reteach_plans_mastery_matrix_id"), table_name="teacher_assist_reteach_plans")
-    op.drop_index(op.f("ix_teacher_assist_reteach_plans_owner_user_id"), table_name="teacher_assist_reteach_plans")
-    op.drop_index(op.f("ix_teacher_assist_reteach_plans_tenant_id"), table_name="teacher_assist_reteach_plans")
+    op.drop_index(
+        op.f("ix_teacher_assist_reteach_plans_current_version_id"),
+        table_name="teacher_assist_reteach_plans",
+    )
+    op.drop_index(
+        op.f("ix_teacher_assist_reteach_plans_status"), table_name="teacher_assist_reteach_plans"
+    )
+    op.drop_index(
+        op.f("ix_teacher_assist_reteach_plans_subject_id"),
+        table_name="teacher_assist_reteach_plans",
+    )
+    op.drop_index(
+        op.f("ix_teacher_assist_reteach_plans_class_id"), table_name="teacher_assist_reteach_plans"
+    )
+    op.drop_index(
+        op.f("ix_teacher_assist_reteach_plans_grading_period_id"),
+        table_name="teacher_assist_reteach_plans",
+    )
+    op.drop_index(
+        op.f("ix_teacher_assist_reteach_plans_school_year_id"),
+        table_name="teacher_assist_reteach_plans",
+    )
+    op.drop_index(
+        op.f("ix_teacher_assist_reteach_plans_standard_id"),
+        table_name="teacher_assist_reteach_plans",
+    )
+    op.drop_index(
+        op.f("ix_teacher_assist_reteach_plans_mastery_matrix_id"),
+        table_name="teacher_assist_reteach_plans",
+    )
+    op.drop_index(
+        op.f("ix_teacher_assist_reteach_plans_owner_user_id"),
+        table_name="teacher_assist_reteach_plans",
+    )
+    op.drop_index(
+        op.f("ix_teacher_assist_reteach_plans_tenant_id"), table_name="teacher_assist_reteach_plans"
+    )
     op.drop_table("teacher_assist_reteach_plans")

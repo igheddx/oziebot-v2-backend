@@ -54,8 +54,12 @@ class TeacherAssistV2Onboarding(Base):
     )
     selected_subject_ids: Mapped[list[Any]] = mapped_column(JSON(), nullable=False)
     student_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    pacing_guide_setup_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    onboarding_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    pacing_guide_setup_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

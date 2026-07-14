@@ -21,15 +21,25 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("pacing_guides", sa.Column("guide_type", sa.String(length=32), nullable=False, server_default="TEACHER"))
-    op.add_column("pacing_guides", sa.Column("school_year_label", sa.String(length=32), nullable=True))
+    op.add_column(
+        "pacing_guides",
+        sa.Column("guide_type", sa.String(length=32), nullable=False, server_default="TEACHER"),
+    )
+    op.add_column(
+        "pacing_guides", sa.Column("school_year_label", sa.String(length=32), nullable=True)
+    )
     op.add_column("pacing_guides", sa.Column("catalog_state_id", sa.Uuid(), nullable=True))
     op.add_column("pacing_guides", sa.Column("catalog_district_id", sa.Uuid(), nullable=True))
     op.add_column("pacing_guides", sa.Column("catalog_school_id", sa.Uuid(), nullable=True))
     op.add_column("pacing_guides", sa.Column("catalog_grade_id", sa.Uuid(), nullable=True))
     op.add_column("pacing_guides", sa.Column("catalog_subject_id", sa.Uuid(), nullable=True))
-    op.add_column("pacing_guides", sa.Column("is_template", sa.Boolean(), nullable=False, server_default="false"))
-    op.add_column("pacing_guides", sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"))
+    op.add_column(
+        "pacing_guides",
+        sa.Column("is_template", sa.Boolean(), nullable=False, server_default="false"),
+    )
+    op.add_column(
+        "pacing_guides", sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true")
+    )
     op.add_column(
         "pacing_guides",
         sa.Column("updated_by_user_id", sa.Uuid(), nullable=True),
@@ -106,7 +116,9 @@ def upgrade() -> None:
             name="uq_pacing_guide_periods_guide_sequence",
         ),
     )
-    op.create_index("ix_pacing_guide_periods_pacing_guide_id", "pacing_guide_periods", ["pacing_guide_id"])
+    op.create_index(
+        "ix_pacing_guide_periods_pacing_guide_id", "pacing_guide_periods", ["pacing_guide_id"]
+    )
 
     op.create_table(
         "pacing_guide_objectives",
@@ -119,10 +131,16 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["objective_id"], ["education_objectives.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["period_id"], ["pacing_guide_periods.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("period_id", "objective_id", name="uq_pacing_guide_objectives_period_objective"),
+        sa.UniqueConstraint(
+            "period_id", "objective_id", name="uq_pacing_guide_objectives_period_objective"
+        ),
     )
-    op.create_index("ix_pacing_guide_objectives_period_id", "pacing_guide_objectives", ["period_id"])
-    op.create_index("ix_pacing_guide_objectives_objective_id", "pacing_guide_objectives", ["objective_id"])
+    op.create_index(
+        "ix_pacing_guide_objectives_period_id", "pacing_guide_objectives", ["period_id"]
+    )
+    op.create_index(
+        "ix_pacing_guide_objectives_objective_id", "pacing_guide_objectives", ["objective_id"]
+    )
 
     op.create_table(
         "pacing_guide_resources",
@@ -133,9 +151,13 @@ def upgrade() -> None:
         sa.Column("is_primary", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["catalog_resource_id"], ["education_curriculum_resources.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["catalog_resource_id"], ["education_curriculum_resources.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["period_id"], ["pacing_guide_periods.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["resource_library_item_id"], ["resource_library_items.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["resource_library_item_id"], ["resource_library_items.id"], ondelete="CASCADE"
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_pacing_guide_resources_period_id", "pacing_guide_resources", ["period_id"])
@@ -149,7 +171,9 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
-    op.create_index("ix_weekly_plans_pacing_guide_period_id", "weekly_plans", ["pacing_guide_period_id"])
+    op.create_index(
+        "ix_weekly_plans_pacing_guide_period_id", "weekly_plans", ["pacing_guide_period_id"]
+    )
 
 
 def downgrade() -> None:

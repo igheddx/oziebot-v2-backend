@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsageEvent
-from oziebot_api.models.teacher_assist_assignment_grading_review import TeacherAssistAssignmentGradingReview
+from oziebot_api.models.teacher_assist_assignment_grading_review import (
+    TeacherAssistAssignmentGradingReview,
+)
 from oziebot_api.services.teacher_assist.activity_events import record_activity_event
 from oziebot_api.services.teacher_assist.assignments import get_assignment_or_404
 from oziebot_api.services.teacher_assist.constants import (
@@ -43,7 +45,9 @@ def _build_mock_grading_suggestion(
     text_source: str,
 ) -> dict:
     normalized_max = max_score if max_score is not None and max_score > 0 else 10.0
-    confidence_level = _mock_confidence_level(approved_text=approved_text, student_number=student_number)
+    confidence_level = _mock_confidence_level(
+        approved_text=approved_text, student_number=student_number
+    )
     word_count = len(approved_text.split())
     completeness_ratio = min(1.0, word_count / 120)
     suggested_score = round(normalized_max * (0.55 + (0.35 * completeness_ratio)), 1)
@@ -109,9 +113,14 @@ def generate_grading_review_ai_suggestion(
     if normalized_provider_mode not in {"mock", "real"}:
         raise ValueError("Unsupported grading assist provider mode")
     if normalized_provider_mode == "real":
-        if not (settings.teacher_assist_real_provider_enabled or settings.teacher_assist_ai_enable_real_provider):
+        if not (
+            settings.teacher_assist_real_provider_enabled
+            or settings.teacher_assist_ai_enable_real_provider
+        ):
             raise ValueError("Real grading assist is disabled")
-        TeacherAssistProviderCircuitBreaker().assert_can_execute(settings, settings.teacher_assist_ai_provider)
+        TeacherAssistProviderCircuitBreaker().assert_can_execute(
+            settings, settings.teacher_assist_ai_provider
+        )
         raise ValueError("Real grading assist provider execution is not enabled in this phase")
 
     approved_text = str(prep_context["approved_text"] or "")

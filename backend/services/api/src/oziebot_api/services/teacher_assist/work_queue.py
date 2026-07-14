@@ -46,7 +46,11 @@ def _queue_section_for_item(item: dict[str, Any]) -> str | None:
         return "mastery_actions"
     if "newsletter" in action_type:
         return "newsletter_actions"
-    if section_key == "workflows_exports" or action_type.startswith("workflow_") or action_type.startswith("export_"):
+    if (
+        section_key == "workflows_exports"
+        or action_type.startswith("workflow_")
+        or action_type.startswith("export_")
+    ):
         return "workflow_failures"
     if section_key in {"planning_assignments", "grading"} or action_type in {
         "review_required",
@@ -113,7 +117,9 @@ def build_teacher_assist_work_queue(
     return {
         "summary": {
             "total_actionable": len(actionable),
-            "critical_count": sum(1 for item in actionable if item.get("priority_level") == "critical"),
+            "critical_count": sum(
+                1 for item in actionable if item.get("priority_level") == "critical"
+            ),
             "high_count": sum(1 for item in actionable if item.get("priority_level") == "high"),
             "medium_count": sum(1 for item in actionable if item.get("priority_level") == "medium"),
         },

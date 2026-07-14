@@ -83,7 +83,9 @@ from oziebot_api.services.teacher_assist.teacher_school_setup import (
 )
 from oziebot_api.services.teacher_assist.setup import teacher_assist_context_for_user
 
-router = APIRouter(prefix="/teacher-assist/education-catalog", tags=["teacher_assist_education_catalog"])
+router = APIRouter(
+    prefix="/teacher-assist/education-catalog", tags=["teacher_assist_education_catalog"]
+)
 
 
 def _tenant_id(db: DbSession, user: CurrentUser) -> uuid.UUID:
@@ -122,7 +124,9 @@ def read_my_catalog_context(user: CurrentUser, db: DbSession) -> TeacherCatalogC
 def read_my_school_setup(user: CurrentUser, db: DbSession) -> TeacherMySchoolSetupOut:
     _require_teacher_assist(db, user)
     tenant_id = _tenant_id(db, user)
-    return TeacherMySchoolSetupOut(**build_my_school_setup(db, tenant_id=tenant_id, user_id=user.id))
+    return TeacherMySchoolSetupOut(
+        **build_my_school_setup(db, tenant_id=tenant_id, user_id=user.id)
+    )
 
 
 @router.put("/my-school-setup", response_model=TeacherMySchoolSetupOut)
@@ -163,13 +167,20 @@ def read_states(
     active_only: bool = False,
 ) -> list[EducationStateOut]:
     _require_teacher_assist(db, user)
-    return [EducationStateOut.model_validate(row) for row in list_states(db, q=q, active_only=active_only)]
+    return [
+        EducationStateOut.model_validate(row)
+        for row in list_states(db, q=q, active_only=active_only)
+    ]
 
 
 @router.post("/states", response_model=EducationStateOut, status_code=201)
-def create_catalog_state(body: EducationStateCreate, user: RootAdminUser, db: DbSession) -> EducationStateOut:
+def create_catalog_state(
+    body: EducationStateCreate, user: RootAdminUser, db: DbSession
+) -> EducationStateOut:
     _require_teacher_assist(db, user)
-    row = _handle_value_errors(lambda: create_state(db, name=body.name, abbreviation=body.abbreviation, active=body.active))
+    row = _handle_value_errors(
+        lambda: create_state(db, name=body.name, abbreviation=body.abbreviation, active=body.active)
+    )
     return EducationStateOut.model_validate(row)
 
 
@@ -206,7 +217,9 @@ def read_districts(
 
 
 @router.post("/districts", response_model=EducationDistrictOut, status_code=201)
-def create_catalog_district(body: EducationDistrictCreate, user: RootAdminUser, db: DbSession) -> EducationDistrictOut:
+def create_catalog_district(
+    body: EducationDistrictCreate, user: RootAdminUser, db: DbSession
+) -> EducationDistrictOut:
     _require_teacher_assist(db, user)
     row = _handle_value_errors(
         lambda: create_district(
@@ -254,7 +267,9 @@ def read_schools(
 
 
 @router.post("/schools", response_model=EducationSchoolOut, status_code=201)
-def create_catalog_school(body: EducationSchoolCreate, user: RootAdminUser, db: DbSession) -> EducationSchoolOut:
+def create_catalog_school(
+    body: EducationSchoolCreate, user: RootAdminUser, db: DbSession
+) -> EducationSchoolOut:
     _require_teacher_assist(db, user)
     row = _handle_value_errors(
         lambda: create_school(
@@ -294,11 +309,16 @@ def read_grades(
     active_only: bool = False,
 ) -> list[EducationGradeOut]:
     _require_teacher_assist(db, user)
-    return [EducationGradeOut.model_validate(row) for row in list_grades(db, school_id=school_id, active_only=active_only)]
+    return [
+        EducationGradeOut.model_validate(row)
+        for row in list_grades(db, school_id=school_id, active_only=active_only)
+    ]
 
 
 @router.post("/grades", response_model=EducationGradeOut, status_code=201)
-def create_catalog_grade(body: EducationGradeCreate, user: RootAdminUser, db: DbSession) -> EducationGradeOut:
+def create_catalog_grade(
+    body: EducationGradeCreate, user: RootAdminUser, db: DbSession
+) -> EducationGradeOut:
     _require_teacher_assist(db, user)
     row = _handle_value_errors(
         lambda: create_grade(
@@ -339,12 +359,15 @@ def read_subjects(
 ) -> list[EducationSubjectOut]:
     _require_teacher_assist(db, user)
     return [
-        EducationSubjectOut.model_validate(row) for row in list_subjects(db, grade_id=grade_id, active_only=active_only)
+        EducationSubjectOut.model_validate(row)
+        for row in list_subjects(db, grade_id=grade_id, active_only=active_only)
     ]
 
 
 @router.post("/subjects", response_model=EducationSubjectOut, status_code=201)
-def create_catalog_subject(body: EducationSubjectCreate, user: RootAdminUser, db: DbSession) -> EducationSubjectOut:
+def create_catalog_subject(
+    body: EducationSubjectCreate, user: RootAdminUser, db: DbSession
+) -> EducationSubjectOut:
     _require_teacher_assist(db, user)
     row = _handle_value_errors(
         lambda: create_subject(
@@ -401,7 +424,9 @@ def read_objectives(
 
 
 @router.post("/objectives", response_model=EducationObjectiveOut, status_code=201)
-def create_catalog_objective(body: EducationObjectiveCreate, user: RootAdminUser, db: DbSession) -> EducationObjectiveOut:
+def create_catalog_objective(
+    body: EducationObjectiveCreate, user: RootAdminUser, db: DbSession
+) -> EducationObjectiveOut:
     _require_teacher_assist(db, user)
     row = _handle_value_errors(
         lambda: create_objective(
@@ -455,7 +480,10 @@ def preview_catalog_objectives_import(
         valid_count=preview.valid_count,
         invalid_count=preview.invalid_count,
         duplicate_count=preview.duplicate_count,
-        errors=[CatalogImportRowErrorOut(row_number=e.row_number, message=e.message, field=e.field) for e in preview.errors],
+        errors=[
+            CatalogImportRowErrorOut(row_number=e.row_number, message=e.message, field=e.field)
+            for e in preview.errors
+        ],
     )
 
 
@@ -471,7 +499,10 @@ def commit_catalog_objectives_import(
     return CatalogImportCommitOut(
         created_count=result.created_count,
         skipped_duplicate_count=result.skipped_duplicate_count,
-        errors=[CatalogImportRowErrorOut(row_number=e.row_number, message=e.message, field=e.field) for e in result.errors],
+        errors=[
+            CatalogImportRowErrorOut(row_number=e.row_number, message=e.message, field=e.field)
+            for e in result.errors
+        ],
     )
 
 
@@ -499,7 +530,9 @@ def read_curriculum_resources(
     ]
 
 
-@router.post("/curriculum-resources", response_model=EducationCurriculumResourceOut, status_code=201)
+@router.post(
+    "/curriculum-resources", response_model=EducationCurriculumResourceOut, status_code=201
+)
 def create_catalog_curriculum_resource(
     body: EducationCurriculumResourceCreate, user: RootAdminUser, db: DbSession
 ) -> EducationCurriculumResourceOut:
@@ -524,7 +557,10 @@ def create_catalog_curriculum_resource(
 
 @router.put("/curriculum-resources/{resource_id}", response_model=EducationCurriculumResourceOut)
 def update_catalog_curriculum_resource(
-    resource_id: uuid.UUID, body: EducationCurriculumResourceCreate, user: RootAdminUser, db: DbSession
+    resource_id: uuid.UUID,
+    body: EducationCurriculumResourceCreate,
+    user: RootAdminUser,
+    db: DbSession,
 ) -> EducationCurriculumResourceOut:
     _require_teacher_assist(db, user)
     row = _handle_value_errors(
@@ -556,7 +592,9 @@ def read_resource_links(
     _require_teacher_assist(db, user)
     return [
         EducationResourceLinkOut.model_validate(row)
-        for row in list_resource_links(db, curriculum_resource_id=curriculum_resource_id, active_only=active_only)
+        for row in list_resource_links(
+            db, curriculum_resource_id=curriculum_resource_id, active_only=active_only
+        )
     ]
 
 
@@ -651,7 +689,9 @@ def provision_catalog_teacher_assignment(
 ) -> TeacherSchoolAssignmentProvisionOut:
     _require_teacher_assist(db, user)
     if body.user_id is None and not body.email:
-        raise HTTPException(status_code=422, detail="Provide user_id or email for teacher assignment")
+        raise HTTPException(
+            status_code=422, detail="Provide user_id or email for teacher assignment"
+        )
     row = _handle_value_errors(
         lambda: provision_teacher_school_assignment(
             db,
@@ -697,7 +737,10 @@ def create_catalog_teacher_assignment(
 
 @router.put("/teacher-assignments/{assignment_id}", response_model=TeacherSchoolAssignmentOut)
 def update_catalog_teacher_assignment(
-    assignment_id: uuid.UUID, body: TeacherSchoolAssignmentCreate, user: RootAdminUser, db: DbSession
+    assignment_id: uuid.UUID,
+    body: TeacherSchoolAssignmentCreate,
+    user: RootAdminUser,
+    db: DbSession,
 ) -> TeacherSchoolAssignmentOut:
     _require_teacher_assist(db, user)
     row = _handle_value_errors(

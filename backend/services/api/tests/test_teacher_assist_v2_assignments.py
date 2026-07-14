@@ -42,7 +42,9 @@ def test_v2_assignments_created_from_package_generation(client, db_session):
     assert "QUIZ" in types
     assert "WRITTEN_ASSIGNMENT" in types
 
-    detail = client.get(f"/v1/teacher-assist-v2/teacher/assignments/{rows[0]['id']}", headers=headers)
+    detail = client.get(
+        f"/v1/teacher-assist-v2/teacher/assignments/{rows[0]['id']}", headers=headers
+    )
     assert detail.status_code == 200, detail.text
     payload = detail.json()
     assert payload["instructional_plan_id"]

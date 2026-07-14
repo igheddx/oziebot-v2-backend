@@ -14,7 +14,11 @@ from oziebot_api.models.tenant import Tenant
 from oziebot_api.models.tenant_product_access import TenantProductAccess
 from oziebot_api.models.user import User
 from oziebot_api.models.user_product_preference import UserProductPreference
-from oziebot_api.services.product_access import TEACHER_ASSIST_PRODUCT_KEY, TRADING_PRODUCT_KEY, get_user_products
+from oziebot_api.services.product_access import (
+    TEACHER_ASSIST_PRODUCT_KEY,
+    TRADING_PRODUCT_KEY,
+    get_user_products,
+)
 from oziebot_api.services.teacher_assist.access_seed import (
     ensure_existing_user_teacher_assist_access,
     ensure_user_teacher_assist_access,
@@ -47,7 +51,9 @@ def test_teacher_assist_access_seed_is_idempotent_and_preserves_trading_access(
     teacher_assist_product.display_name = "Wrong Name"
     db_session.commit()
 
-    dominic_result = ensure_existing_user_teacher_assist_access(db_session, email="Dominic@oziebot.com")
+    dominic_result = ensure_existing_user_teacher_assist_access(
+        db_session, email="Dominic@oziebot.com"
+    )
     awele_result = ensure_user_teacher_assist_access(
         db_session,
         email="aweleu@gmail.com",
@@ -117,7 +123,9 @@ def test_teacher_assist_access_seed_is_idempotent_and_preserves_trading_access(
         "preferences": db_session.scalar(select(func.count()).select_from(UserProductPreference)),
     }
 
-    second_dominic = ensure_existing_user_teacher_assist_access(db_session, email="dominic@oziebot.com")
+    second_dominic = ensure_existing_user_teacher_assist_access(
+        db_session, email="dominic@oziebot.com"
+    )
     second_awele = ensure_user_teacher_assist_access(
         db_session,
         email="aweleu@gmail.com",
@@ -224,14 +232,18 @@ def test_user_preferences_or_create_recovers_from_duplicate_insert(db_session: S
     db_session.add(existing)
     db_session.flush()
 
-    with patch.object(
-        user_preferences_module,
-        "_get_user_preferences",
-        side_effect=[None, existing],
-    ), patch.object(db_session, "begin_nested", db_session.begin_nested), patch.object(
-        db_session,
-        "flush",
-        side_effect=IntegrityError("duplicate key", None, None),
+    with (
+        patch.object(
+            user_preferences_module,
+            "_get_user_preferences",
+            side_effect=[None, existing],
+        ),
+        patch.object(db_session, "begin_nested", db_session.begin_nested),
+        patch.object(
+            db_session,
+            "flush",
+            side_effect=IntegrityError("duplicate key", None, None),
+        ),
     ):
         recovered = get_user_preferences_or_create(
             db_session,

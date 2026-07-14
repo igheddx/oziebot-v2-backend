@@ -91,7 +91,9 @@ class TeacherAssistStudentWorkSubmission(Base):
         back_populates="student_work_submissions",
     )
     school_year: Mapped["TeacherAssistSchoolYear"] = relationship("TeacherAssistSchoolYear")
-    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship("TeacherAssistGradingPeriod")
+    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship(
+        "TeacherAssistGradingPeriod"
+    )
     teacher_class: Mapped["TeacherAssistClass"] = relationship("TeacherAssistClass")
     subject: Mapped["TeacherAssistSubject"] = relationship("TeacherAssistSubject")
     grading_reviews: Mapped[list["TeacherAssistAssignmentGradingReview"]] = relationship(
@@ -128,7 +130,9 @@ if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_assignment_print_packet import (
         TeacherAssistAssignmentPrintPacket,
     )
-    from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
+    from oziebot_api.models.teacher_assist_assignment_print_page import (
+        TeacherAssistAssignmentPrintPage,
+    )
     from oziebot_api.models.teacher_assist_class import TeacherAssistClass
     from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
     from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear

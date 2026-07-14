@@ -27,7 +27,11 @@ def _catalog_scope(client, root_token: str) -> dict[str, str]:
     district = client.post(
         "/v1/teacher-assist/education-catalog/districts",
         headers={"Authorization": f"Bearer {root_token}"},
-        json={"state_id": state["id"], "name": "Leander Independent School District", "active": True},
+        json={
+            "state_id": state["id"],
+            "name": "Leander Independent School District",
+            "active": True,
+        },
     ).json()
     school = client.post(
         "/v1/teacher-assist/education-catalog/schools",
@@ -47,7 +51,12 @@ def _catalog_scope(client, root_token: str) -> dict[str, str]:
     subject = client.post(
         "/v1/teacher-assist/education-catalog/subjects",
         headers={"Authorization": f"Bearer {root_token}"},
-        json={"grade_id": grade["id"], "subject_code": "Math", "display_name": "Math", "active": True},
+        json={
+            "grade_id": grade["id"],
+            "subject_code": "Math",
+            "display_name": "Math",
+            "active": True,
+        },
     ).json()
     objective = client.post(
         "/v1/teacher-assist/education-catalog/objectives",
@@ -109,9 +118,15 @@ def test_catalog_pacing_guide_crud_periods_copy_and_rollover(client, db_session:
     root_token = _root_token(client, db_session)
     teacher_token = _teacher_token(client, db_session, tenant_name="Teacher Copy Tenant")
     root_user = db_session.scalar(select(User).where(User.email == "catalog-root@example.com"))
-    teacher_user = db_session.scalar(select(User).where(User.email == "pacing-guide-teacher@example.com"))
-    root_membership = db_session.scalar(select(TenantMembership).where(TenantMembership.user_id == root_user.id))
-    teacher_membership = db_session.scalar(select(TenantMembership).where(TenantMembership.user_id == teacher_user.id))
+    teacher_user = db_session.scalar(
+        select(User).where(User.email == "pacing-guide-teacher@example.com")
+    )
+    root_membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == root_user.id)
+    )
+    teacher_membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == teacher_user.id)
+    )
     assert root_membership is not None and teacher_membership is not None
     teacher_membership.tenant_id = root_membership.tenant_id
     db_session.commit()
@@ -184,14 +199,22 @@ def test_catalog_pacing_guide_crud_periods_copy_and_rollover(client, db_session:
     objective = client.post(
         f"/v1/teacher-assist/pacing-guides/{guide['id']}/periods/{period_id}/objectives",
         headers={"Authorization": f"Bearer {root_token}"},
-        json={"objective_id": scope["objective_id"], "is_required": True, "notes": "Required focus"},
+        json={
+            "objective_id": scope["objective_id"],
+            "is_required": True,
+            "notes": "Required focus",
+        },
     )
     assert objective.status_code == 201, objective.text
 
     resource = client.post(
         f"/v1/teacher-assist/pacing-guides/{guide['id']}/periods/{period_id}/resources",
         headers={"Authorization": f"Bearer {root_token}"},
-        json={"catalog_resource_id": scope["resource_id"], "is_primary": True, "notes": "Primary guide"},
+        json={
+            "catalog_resource_id": scope["resource_id"],
+            "is_primary": True,
+            "notes": "Primary guide",
+        },
     )
     assert resource.status_code == 201, resource.text
 
@@ -203,7 +226,10 @@ def test_catalog_pacing_guide_crud_periods_copy_and_rollover(client, db_session:
     detail_payload = detail.json()
     assert detail_payload["period_count"] == 1
     assert detail_payload["periods"][0]["objectives"][0]["objective_code"] == "5.MATH.1"
-    assert detail_payload["periods"][0]["resources"][0]["resource_title"] == "5th Grade Math Curriculum Guide"
+    assert (
+        detail_payload["periods"][0]["resources"][0]["resource_title"]
+        == "5th Grade Math Curriculum Guide"
+    )
 
     teacher_copy = client.post(
         f"/v1/teacher-assist/pacing-guides/{guide['id']}/copy",

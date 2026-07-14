@@ -16,7 +16,9 @@ from oziebot_api.schemas.time_savings import (
     WeekTemplateSaveIn,
 )
 from oziebot_api.services.teacher_assist.generate_next_week import generate_next_week_draft
-from oziebot_api.services.teacher_assist.instructional_asset_reuse import InstructionalAssetReuseService
+from oziebot_api.services.teacher_assist.instructional_asset_reuse import (
+    InstructionalAssetReuseService,
+)
 from oziebot_api.services.teacher_assist.planning_groups import (
     create_planning_group,
     join_planning_group,
@@ -25,7 +27,9 @@ from oziebot_api.services.teacher_assist.planning_groups import (
 )
 from oziebot_api.services.teacher_assist.recommendation_service import build_week_recommendations
 from oziebot_api.services.teacher_assist.rollover_v2 import rollover_school_year_v2
-from oziebot_api.services.teacher_assist.teacher_efficiency import build_teacher_efficiency_dashboard
+from oziebot_api.services.teacher_assist.teacher_efficiency import (
+    build_teacher_efficiency_dashboard,
+)
 from oziebot_api.services.teacher_assist.week_duplication import duplicate_week
 from oziebot_api.services.teacher_assist.week_templates import (
     apply_week_template,
@@ -99,7 +103,9 @@ def generate_next_week(
     db: DbSession,
 ) -> dict:
     tenant_id = _tenant_id(db, user)
-    return _handle(lambda: generate_next_week_draft(db, tenant_id=tenant_id, user=user, period_id=period_id))
+    return _handle(
+        lambda: generate_next_week_draft(db, tenant_id=tenant_id, user=user, period_id=period_id)
+    )
 
 
 @router.get("/pacing-guide-periods/{period_id}/recommendations")
@@ -205,11 +211,16 @@ def rollover_v2(
 @router.get("/planning-groups")
 def read_planning_groups(user: CurrentUser, db: DbSession) -> list[dict]:
     tenant_id = _tenant_id(db, user)
-    return [serialize_planning_group(row) for row in list_planning_groups(db, tenant_id=tenant_id, user_id=user.id)]
+    return [
+        serialize_planning_group(row)
+        for row in list_planning_groups(db, tenant_id=tenant_id, user_id=user.id)
+    ]
 
 
 @router.post("/planning-groups", status_code=201)
-def create_planning_group_route(body: PlanningGroupCreateIn, user: CurrentUser, db: DbSession) -> dict:
+def create_planning_group_route(
+    body: PlanningGroupCreateIn, user: CurrentUser, db: DbSession
+) -> dict:
     tenant_id = _tenant_id(db, user)
     row = create_planning_group(
         db,

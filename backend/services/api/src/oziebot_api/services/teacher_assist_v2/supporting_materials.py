@@ -12,15 +12,21 @@ from sqlalchemy.orm import Session, selectinload
 from oziebot_api.config import Settings
 from oziebot_api.models.education_catalog import EducationObjective, EducationSchoolYear
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
-from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
+from oziebot_api.models.teacher_assist_pacing_guide_objective import (
+    TeacherAssistPacingGuideObjective,
+)
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
 from oziebot_api.models.teacher_assist_pacing_guide_resource import TeacherAssistPacingGuideResource
-from oziebot_api.models.teacher_assist_pacing_guide_period_day import TeacherAssistPacingGuidePeriodDay
+from oziebot_api.models.teacher_assist_pacing_guide_period_day import (
+    TeacherAssistPacingGuidePeriodDay,
+)
 from oziebot_api.models.teacher_assist_pacing_guide_supporting_material import (
     TeacherAssistPacingGuideSupportingMaterial,
 )
 from oziebot_api.models.user import User
-from oziebot_api.services.teacher_assist.pacing_guide_foundation import get_catalog_pacing_guide_detail
+from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
+    get_catalog_pacing_guide_detail,
+)
 from oziebot_api.services.teacher_assist.storage import (
     StoredTeacherAssistUpload,
     get_teacher_assist_download_url,
@@ -63,7 +69,9 @@ def _validate_external_url(external_url: str) -> str:
 def _validate_file_extension(filename: str) -> None:
     suffix = Path(filename).suffix.lower()
     if suffix not in PACING_SUPPORTING_UPLOAD_EXTENSIONS:
-        raise _field_errors(file="Unsupported file type. Use PDF, DOCX, PPTX, TXT, or common image formats.")
+        raise _field_errors(
+            file="Unsupported file type. Use PDF, DOCX, PPTX, TXT, or common image formats."
+        )
 
 
 def _get_guide_or_404(
@@ -72,7 +80,9 @@ def _get_guide_or_404(
     return get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id)
 
 
-def _resolve_platform_school_year_id(db: Session, *, guide: TeacherAssistPacingGuide) -> uuid.UUID | None:
+def _resolve_platform_school_year_id(
+    db: Session, *, guide: TeacherAssistPacingGuide
+) -> uuid.UUID | None:
     if not guide.school_year_label:
         return None
     row = db.scalars(
@@ -148,8 +158,14 @@ def _validate_objective_linkage(
     ).one_or_none()
     if objective is None:
         raise LookupError("Learning objective not found")
-    if guide.catalog_subject_id and objective.subject_id and objective.subject_id != guide.catalog_subject_id:
-        raise _field_errors(education_objective_id="Objective subject does not match pacing guide subject")
+    if (
+        guide.catalog_subject_id
+        and objective.subject_id
+        and objective.subject_id != guide.catalog_subject_id
+    ):
+        raise _field_errors(
+            education_objective_id="Objective subject does not match pacing guide subject"
+        )
     if period_id is not None:
         mapped = db.scalars(
             select(TeacherAssistPacingGuideObjective).where(
@@ -158,7 +174,9 @@ def _validate_objective_linkage(
             )
         ).one_or_none()
         if mapped is None:
-            raise _field_errors(education_objective_id="Objective is not mapped to the selected week")
+            raise _field_errors(
+                education_objective_id="Objective is not mapped to the selected week"
+            )
     else:
         mapped = db.scalars(
             select(TeacherAssistPacingGuideObjective)
@@ -169,7 +187,9 @@ def _validate_objective_linkage(
             )
         ).first()
         if mapped is None:
-            raise _field_errors(education_objective_id="Objective is not mapped to this pacing guide")
+            raise _field_errors(
+                education_objective_id="Objective is not mapped to this pacing guide"
+            )
     return objective
 
 
@@ -315,24 +335,31 @@ def list_supporting_materials(
         stmt = stmt.where(TeacherAssistPacingGuideSupportingMaterial.period_id == period_id)
     if education_objective_id is not None:
         stmt = stmt.where(
-            TeacherAssistPacingGuideSupportingMaterial.education_objective_id == education_objective_id
+            TeacherAssistPacingGuideSupportingMaterial.education_objective_id
+            == education_objective_id
         )
     elif period_day_id is not None:
-        stmt = stmt.where(TeacherAssistPacingGuideSupportingMaterial.education_objective_id.is_(None))
+        stmt = stmt.where(
+            TeacherAssistPacingGuideSupportingMaterial.education_objective_id.is_(None)
+        )
     elif period_id is not None and week_level_only:
         stmt = stmt.where(
             TeacherAssistPacingGuideSupportingMaterial.period_day_id.is_(None),
             TeacherAssistPacingGuideSupportingMaterial.education_objective_id.is_(None),
         )
     elif period_id is not None:
-        stmt = stmt.where(TeacherAssistPacingGuideSupportingMaterial.education_objective_id.is_(None))
+        stmt = stmt.where(
+            TeacherAssistPacingGuideSupportingMaterial.education_objective_id.is_(None)
+        )
     elif guide_level_only:
         stmt = stmt.where(
             TeacherAssistPacingGuideSupportingMaterial.period_id.is_(None),
             TeacherAssistPacingGuideSupportingMaterial.period_day_id.is_(None),
             TeacherAssistPacingGuideSupportingMaterial.education_objective_id.is_(None),
         )
-    rows = db.scalars(stmt.order_by(TeacherAssistPacingGuideSupportingMaterial.created_at.asc())).all()
+    rows = db.scalars(
+        stmt.order_by(TeacherAssistPacingGuideSupportingMaterial.created_at.asc())
+    ).all()
     if settings is not None:
         for row in rows:
             if row.material_kind != "file" or not row.storage_key:
@@ -380,7 +407,11 @@ def _create_material_row(
         raise _field_errors(file="File is required")
     if material_kind == "link" and not external_url and source_resource_id is None:
         raise _field_errors(external_url="URL is required")
-    if material_kind == "note" and not (note_body and note_body.strip()) and source_resource_id is None:
+    if (
+        material_kind == "note"
+        and not (note_body and note_body.strip())
+        and source_resource_id is None
+    ):
         raise _field_errors(note_body="Note body is required")
     now = datetime.now(UTC)
     row = TeacherAssistPacingGuideSupportingMaterial(
@@ -390,7 +421,9 @@ def _create_material_row(
             period_id=period_id,
             period_day_id=period_day_id,
             education_objective_id=education_objective_id,
-            allow_guide_level=period_id is None and period_day_id is None and education_objective_id is None,
+            allow_guide_level=period_id is None
+            and period_day_id is None
+            and education_objective_id is None,
         ),
         material_kind=material_kind,
         resource_type=_validate_resource_type(resource_type),
@@ -583,18 +616,23 @@ def get_pacing_guide_planning_context(
     guide_level = [
         row
         for row in all_materials
-        if row["period_id"] is None and row["period_day_id"] is None and row["education_objective_id"] is None
+        if row["period_id"] is None
+        and row["period_day_id"] is None
+        and row["education_objective_id"] is None
     ]
     week_level = [
         row
         for row in all_materials
-        if row["period_id"] == period_id and row["period_day_id"] is None and row["education_objective_id"] is None
+        if row["period_id"] == period_id
+        and row["period_day_id"] is None
+        and row["education_objective_id"] is None
     ]
     objective_ids = {str(row.objective_id) for row in period.objectives}
     objective_level = [
         row
         for row in all_materials
-        if row["education_objective_id"] is not None and str(row["education_objective_id"]) in objective_ids
+        if row["education_objective_id"] is not None
+        and str(row["education_objective_id"]) in objective_ids
     ]
     day_level_by_id: dict[str, list[dict]] = {}
     for row in all_materials:
@@ -608,9 +646,7 @@ def get_pacing_guide_planning_context(
     for mapped in period.objectives:
         objective = mapped.objective
         linked = [
-            row
-            for row in objective_level
-            if row["education_objective_id"] == mapped.objective_id
+            row for row in objective_level if row["education_objective_id"] == mapped.objective_id
         ]
         objectives.append(
             {
@@ -629,8 +665,12 @@ def get_pacing_guide_planning_context(
             }
         )
 
-    period_metadata = period.metadata_json if isinstance(getattr(period, "metadata_json", None), dict) else {}
-    guide_metadata = guide.metadata_json if isinstance(getattr(guide, "metadata_json", None), dict) else {}
+    period_metadata = (
+        period.metadata_json if isinstance(getattr(period, "metadata_json", None), dict) else {}
+    )
+    guide_metadata = (
+        guide.metadata_json if isinstance(getattr(guide, "metadata_json", None), dict) else {}
+    )
     days = load_period_days(db, period_id=period.id)
     daily_context = []
     for day in days:
@@ -659,12 +699,18 @@ def get_pacing_guide_planning_context(
             {
                 "id": str(linked.id),
                 "material_kind": "catalog_resource",
-                "resource_type": getattr(catalog, "resource_type", None) if catalog is not None else "catalog_resource",
+                "resource_type": getattr(catalog, "resource_type", None)
+                if catalog is not None
+                else "catalog_resource",
                 "title": title or linked.notes or "Catalog resource",
-                "description": getattr(catalog, "description", None) if catalog is not None else linked.notes,
+                "description": getattr(catalog, "description", None)
+                if catalog is not None
+                else linked.notes,
                 "notes": linked.notes,
                 "is_primary": linked.is_primary,
-                "catalog_resource_id": str(linked.catalog_resource_id) if linked.catalog_resource_id else None,
+                "catalog_resource_id": str(linked.catalog_resource_id)
+                if linked.catalog_resource_id
+                else None,
             }
         )
 
@@ -693,7 +739,12 @@ def get_pacing_guide_planning_context(
         "week_level_materials": week_level,
         "day_level_materials": [row for rows in day_level_by_id.values() for row in rows],
         "objective_level_materials": objective_level,
-        "curriculum_files": [row for row in week_level if row["material_kind"] == "file" and row["resource_type"] in {"curriculum_file", "curriculum_reference"}],
+        "curriculum_files": [
+            row
+            for row in week_level
+            if row["material_kind"] == "file"
+            and row["resource_type"] in {"curriculum_file", "curriculum_reference"}
+        ],
         "reference_links": [row for row in week_level if row["material_kind"] == "link"],
         "notes": [row for row in week_level if row["material_kind"] == "note"],
         "attached_curriculum_files": [row for row in week_level if row["material_kind"] == "file"],
@@ -701,7 +752,8 @@ def get_pacing_guide_planning_context(
         "supporting_documents": [
             row
             for row in week_level
-            if row["material_kind"] == "file" and row["resource_type"] not in {"curriculum_file", "curriculum_reference"}
+            if row["material_kind"] == "file"
+            and row["resource_type"] not in {"curriculum_file", "curriculum_reference"}
         ],
     }
 

@@ -30,7 +30,9 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_education_school_years_state_id", "education_school_years", ["state_id"])
-    op.create_index("ix_education_school_years_district_id", "education_school_years", ["district_id"])
+    op.create_index(
+        "ix_education_school_years_district_id", "education_school_years", ["district_id"]
+    )
     op.create_index("ix_education_school_years_school_id", "education_school_years", ["school_id"])
 
     op.add_column("education_objectives", sa.Column("district_id", sa.Uuid(), nullable=True))
@@ -81,11 +83,21 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint("fk_education_objectives_school_year_id", "education_objectives", type_="foreignkey")
-    op.drop_constraint("fk_education_objectives_subject_id", "education_objectives", type_="foreignkey")
-    op.drop_constraint("fk_education_objectives_grade_id", "education_objectives", type_="foreignkey")
-    op.drop_constraint("fk_education_objectives_school_id", "education_objectives", type_="foreignkey")
-    op.drop_constraint("fk_education_objectives_district_id", "education_objectives", type_="foreignkey")
+    op.drop_constraint(
+        "fk_education_objectives_school_year_id", "education_objectives", type_="foreignkey"
+    )
+    op.drop_constraint(
+        "fk_education_objectives_subject_id", "education_objectives", type_="foreignkey"
+    )
+    op.drop_constraint(
+        "fk_education_objectives_grade_id", "education_objectives", type_="foreignkey"
+    )
+    op.drop_constraint(
+        "fk_education_objectives_school_id", "education_objectives", type_="foreignkey"
+    )
+    op.drop_constraint(
+        "fk_education_objectives_district_id", "education_objectives", type_="foreignkey"
+    )
     op.drop_column("education_objectives", "school_year_id")
     op.drop_column("education_objectives", "subject_id")
     op.drop_column("education_objectives", "grade_id")

@@ -23,8 +23,8 @@ class _TokenBucket:
 
     def __init__(self, rate_per_minute: float) -> None:
         self._rate = rate_per_minute / 60.0  # tokens per second
-        self._capacity = rate_per_minute      # max burst = 1 full minute of quota
-        self._tokens = float(rate_per_minute) # start full so first requests aren't delayed
+        self._capacity = rate_per_minute  # max burst = 1 full minute of quota
+        self._tokens = float(rate_per_minute)  # start full so first requests aren't delayed
         self._last = time.monotonic()
         self._lock = threading.Lock()
 
@@ -123,7 +123,11 @@ def execute_openai_json_completion(
                     if response.status_code in (429, 503) and rate_delay is not None:
                         # Fast-fail for permanent billing errors — retrying will never work.
                         _body = response.text.lower()
-                        if "credits are depleted" in _body or "prepayment credits" in _body or "billing" in _body:
+                        if (
+                            "credits are depleted" in _body
+                            or "prepayment credits" in _body
+                            or "billing" in _body
+                        ):
                             response.raise_for_status()
                         time.sleep(rate_delay)
                         continue
@@ -155,7 +159,9 @@ def execute_openai_json_completion(
     message = choices[0].get("message") or {}
     raw_content = message.get("content")
     if isinstance(raw_content, list):
-        raw_content = "".join(entry.get("text", "") for entry in raw_content if isinstance(entry, dict))
+        raw_content = "".join(
+            entry.get("text", "") for entry in raw_content if isinstance(entry, dict)
+        )
     if not isinstance(raw_content, str) or not raw_content.strip():
         raise ValueError(f"TeacherAssist {_provider} provider returned empty JSON content")
     try:

@@ -20,7 +20,9 @@ def _root_token(client, db_session: Session) -> str:
     return token
 
 
-def _seed_assignment_context(client, root_token: str, teacher_token: str, db_session: Session, teacher_email: str):
+def _seed_assignment_context(
+    client, root_token: str, teacher_token: str, db_session: Session, teacher_email: str
+):
     state = client.post(
         "/v1/teacher-assist/education-catalog/states",
         headers={"Authorization": f"Bearer {root_token}"},
@@ -34,7 +36,12 @@ def _seed_assignment_context(client, root_token: str, teacher_token: str, db_ses
     school = client.post(
         "/v1/teacher-assist/education-catalog/schools",
         headers={"Authorization": f"Bearer {root_token}"},
-        json={"district_id": district["id"], "name": "Browse Elementary", "school_type": "elementary", "active": True},
+        json={
+            "district_id": district["id"],
+            "name": "Browse Elementary",
+            "school_type": "elementary",
+            "active": True,
+        },
     ).json()
     grade = client.post(
         "/v1/teacher-assist/education-catalog/grades",
@@ -44,7 +51,12 @@ def _seed_assignment_context(client, root_token: str, teacher_token: str, db_ses
     client.post(
         "/v1/teacher-assist/education-catalog/subjects",
         headers={"Authorization": f"Bearer {root_token}"},
-        json={"grade_id": grade["id"], "subject_code": "Math", "display_name": "Math", "active": True},
+        json={
+            "grade_id": grade["id"],
+            "subject_code": "Math",
+            "display_name": "Math",
+            "active": True,
+        },
     )
     client.post(
         "/v1/teacher-assist/education-catalog/objectives",
@@ -92,7 +104,9 @@ def _seed_assignment_context(client, root_token: str, teacher_token: str, db_ses
 def test_catalog_browse_inherits_assignment_and_blocks_edits(client, db_session: Session):
     root_token = _root_token(client, db_session)
     teacher_email = "catalog-browse-teacher@example.com"
-    teacher_token = _register_user(client, email=teacher_email, tenant_name="Catalog Browse Teacher Tenant")
+    teacher_token = _register_user(
+        client, email=teacher_email, tenant_name="Catalog Browse Teacher Tenant"
+    )
     ensure_user_teacher_assist_access(
         db_session,
         email=teacher_email,
@@ -143,7 +157,9 @@ def test_catalog_browse_inherits_assignment_and_blocks_edits(client, db_session:
 
 def test_catalog_browse_missing_assignment_is_audited(client, db_session: Session):
     teacher_email = "catalog-browse-unassigned@example.com"
-    teacher_token = _register_user(client, email=teacher_email, tenant_name="Catalog Browse Unassigned Tenant")
+    teacher_token = _register_user(
+        client, email=teacher_email, tenant_name="Catalog Browse Unassigned Tenant"
+    )
     ensure_user_teacher_assist_access(
         db_session,
         email=teacher_email,

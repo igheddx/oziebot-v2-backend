@@ -93,7 +93,9 @@ class TeacherAssistAssignmentGradeRecord(Base):
         "TeacherAssistAssignmentGradingReview"
     )
     school_year: Mapped["TeacherAssistSchoolYear"] = relationship("TeacherAssistSchoolYear")
-    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship("TeacherAssistGradingPeriod")
+    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship(
+        "TeacherAssistGradingPeriod"
+    )
     teacher_class: Mapped["TeacherAssistClass"] = relationship("TeacherAssistClass")
     subject: Mapped["TeacherAssistSubject"] = relationship("TeacherAssistSubject")
     current_commit: Mapped["TeacherAssistAssignmentGradebookCommit | None"] = relationship(
@@ -115,7 +117,9 @@ if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_assignment_gradebook_commit import (
         TeacherAssistAssignmentGradebookCommit,
     )
-    from oziebot_api.models.teacher_assist_assignment_grading_review import TeacherAssistAssignmentGradingReview
+    from oziebot_api.models.teacher_assist_assignment_grading_review import (
+        TeacherAssistAssignmentGradingReview,
+    )
     from oziebot_api.models.teacher_assist_class import TeacherAssistClass
     from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
     from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear

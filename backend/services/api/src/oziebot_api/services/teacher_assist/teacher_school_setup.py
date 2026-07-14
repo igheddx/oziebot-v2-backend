@@ -8,7 +8,11 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.education_catalog import EducationGrade, EducationSubject, TeacherSchoolAssignment
+from oziebot_api.models.education_catalog import (
+    EducationGrade,
+    EducationSubject,
+    TeacherSchoolAssignment,
+)
 from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.education_catalog import (
@@ -18,7 +22,11 @@ from oziebot_api.services.teacher_assist.education_catalog import (
     get_school_or_404,
     get_state_or_404,
 )
-from oziebot_api.services.teacher_assist.setup import create_subject, get_teacher_profile, upsert_teacher_profile
+from oziebot_api.services.teacher_assist.setup import (
+    create_subject,
+    get_teacher_profile,
+    upsert_teacher_profile,
+)
 from oziebot_api.services.teacher_assist.user_preferences import get_user_preferences_or_create
 
 
@@ -132,7 +140,9 @@ def _load_catalog_subject_selection(
     subject_ids = school_setup.get("catalog_subject_ids") or []
     if not isinstance(subject_ids, list):
         return grade_id if isinstance(grade_id, str) else None, []
-    return grade_id if isinstance(grade_id, str) else None, [str(subject_id) for subject_id in subject_ids]
+    return grade_id if isinstance(grade_id, str) else None, [
+        str(subject_id) for subject_id in subject_ids
+    ]
 
 
 def _prune_deselected_tenant_subjects(
@@ -189,7 +199,9 @@ def sync_my_teaching_subjects(
         selected_subjects = catalog_subjects
     else:
         selected_ids = {str(subject_id) for subject_id in catalog_subject_ids}
-        selected_subjects = [subject for subject in catalog_subjects if str(subject.id) in selected_ids]
+        selected_subjects = [
+            subject for subject in catalog_subjects if str(subject.id) in selected_ids
+        ]
         if not selected_subjects:
             raise ValueError("Select at least one district subject for your grade")
         invalid_ids = selected_ids - {str(subject.id) for subject in selected_subjects}
@@ -244,7 +256,9 @@ def sync_my_teaching_subjects(
     return grade, synced
 
 
-def _sync_homeroom_after_subject_change(db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> None:
+def _sync_homeroom_after_subject_change(
+    db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUID
+) -> None:
     from oziebot_api.services.teacher_assist.teacher_classroom import (
         sync_homeroom_class_subjects_from_school_setup,
     )
@@ -277,7 +291,11 @@ def build_my_school_setup(db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UU
         .order_by(EducationGrade.grade_code.asc())
     ).all()
     selected_grade = next(
-        (grade for grade in grades if grade.grade_code == (profile.preferred_grade_level if profile else None)),
+        (
+            grade
+            for grade in grades
+            if grade.grade_code == (profile.preferred_grade_level if profile else None)
+        ),
         None,
     )
 
@@ -285,7 +303,9 @@ def build_my_school_setup(db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UU
     if selected_grade is not None:
         catalog_subjects = db.scalars(
             select(EducationSubject)
-            .where(EducationSubject.grade_id == selected_grade.id, EducationSubject.active.is_(True))
+            .where(
+                EducationSubject.grade_id == selected_grade.id, EducationSubject.active.is_(True)
+            )
             .order_by(EducationSubject.subject_code.asc())
         ).all()
 
@@ -300,13 +320,19 @@ def build_my_school_setup(db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UU
         user_id=user_id,
     )
     valid_catalog_ids = {str(subject.id) for subject in catalog_subjects}
-    if selected_grade is not None and stored_grade_id == str(selected_grade.id) and stored_subject_ids:
+    if (
+        selected_grade is not None
+        and stored_grade_id == str(selected_grade.id)
+        and stored_subject_ids
+    ):
         selected_catalog_subject_ids = [
             subject_id for subject_id in stored_subject_ids if subject_id in valid_catalog_ids
         ]
     else:
         selected_catalog_subject_ids = [
-            str(subject.id) for subject in catalog_subjects if subject.subject_code in tenant_by_code
+            str(subject.id)
+            for subject in catalog_subjects
+            if subject.subject_code in tenant_by_code
         ]
 
     selected_catalog_id_set = set(selected_catalog_subject_ids)

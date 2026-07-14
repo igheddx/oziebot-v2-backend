@@ -66,7 +66,10 @@ def test_teacher_copilot_endpoints(client, db_session: Session):
     assert payload["requires_teacher_review"] is True
     assert payload["analysis"]["intent"] == "week_summarizer"
     assert payload["assistant_message"]["role"] == "assistant"
-    assert payload["assistant_message"]["context_snapshot"]["audit"]["prompt"] == "Summarize this week."
+    assert (
+        payload["assistant_message"]["context_snapshot"]["audit"]["prompt"]
+        == "Summarize this week."
+    )
 
     history = client.get(
         f"/v1/teacher-assist/copilot/sessions/{session_id}/messages",

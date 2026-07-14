@@ -16,7 +16,9 @@ def upgrade() -> None:
         "education_districts",
         sa.Column("district_code", sa.String(length=32), nullable=True),
     )
-    op.create_index("ix_education_districts_district_code", "education_districts", ["district_code"])
+    op.create_index(
+        "ix_education_districts_district_code", "education_districts", ["district_code"]
+    )
     op.execute(
         """
         UPDATE education_districts

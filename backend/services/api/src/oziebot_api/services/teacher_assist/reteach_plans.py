@@ -18,7 +18,9 @@ from oziebot_api.services.teacher_assist.mastery_matrix import (
     get_mastery_matrix_or_404,
     get_matrix_standard_or_404,
 )
-from oziebot_api.services.teacher_assist.reteach_insights import build_mastery_matrix_reteach_insights
+from oziebot_api.services.teacher_assist.reteach_insights import (
+    build_mastery_matrix_reteach_insights,
+)
 
 
 def _normalize_title(value: str) -> str:
@@ -75,7 +77,9 @@ def list_reteach_plans(
     if status is not None:
         query = query.where(TeacherAssistReteachPlan.status == validate_reteach_plan_status(status))
     return db.scalars(
-        query.order_by(TeacherAssistReteachPlan.updated_at.desc(), TeacherAssistReteachPlan.created_at.desc())
+        query.order_by(
+            TeacherAssistReteachPlan.updated_at.desc(), TeacherAssistReteachPlan.created_at.desc()
+        )
     ).all()
 
 
@@ -336,7 +340,11 @@ def build_reteach_plan_prompt_context(
         settings=settings,
     )
     standard_insight = next(
-        (item for item in insights["standard_insights"] if item["standard_id"] == reteach_plan.standard_id),
+        (
+            item
+            for item in insights["standard_insights"]
+            if item["standard_id"] == reteach_plan.standard_id
+        ),
         None,
     )
     evaluations = list_mastery_evaluations(
@@ -369,7 +377,9 @@ def build_reteach_plan_prompt_context(
             "student_summaries": student_summaries,
             "mastery_distribution": distribution,
             "insight_panels": {
-                "standards_needing_reteach_count": len(insights["panels"]["standards_needing_reteach"]),
+                "standards_needing_reteach_count": len(
+                    insights["panels"]["standards_needing_reteach"]
+                ),
             },
             "anonymous_only": True,
             "pii_policy": "STUDENT_NUMBER_ONLY",

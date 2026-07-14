@@ -125,7 +125,13 @@ def build_subject_slide_deck() -> dict[str, Any]:
         },
         {
             "title": "Vocabulary",
-            "bullets": ["main idea", "supporting detail", "evidence", "informational text", "summarize"],
+            "bullets": [
+                "main idea",
+                "supporting detail",
+                "evidence",
+                "informational text",
+                "summarize",
+            ],
             "layout": "two_column",
             "visualType": "vocabulary_card",
             "teacherNotes": "Quick choral read; add motions for main idea vs. detail.",
@@ -255,7 +261,12 @@ def build_quiz() -> dict[str, Any]:
             "number": 5,
             "type": "multiple_choice",
             "prompt": "Supporting details are meant to —",
-            "choices": ["prove or explain the main idea", "replace the main idea", "introduce a new topic", "list random facts"],
+            "choices": [
+                "prove or explain the main idea",
+                "replace the main idea",
+                "introduce a new topic",
+                "list random facts",
+            ],
             "answer": "prove or explain the main idea",
         },
         {
@@ -344,11 +355,47 @@ def build_written_assignment() -> dict[str, Any]:
 
 def build_rubric() -> dict[str, Any]:
     criteria = [
-        {"name": "Main Idea Identification", "points": 4, "levels": ["States a clear, accurate main idea", "Main idea is vague or partially accurate", "Main idea missing or incorrect"]},
-        {"name": "Supporting Details", "points": 4, "levels": ["Two or more relevant details", "One relevant detail", "Details missing or unrelated"]},
-        {"name": "Evidence and Explanation", "points": 4, "levels": ["Explains how details support the main idea", "Partial explanation", "No explanation"]},
-        {"name": "Organization", "points": 4, "levels": ["Logical paragraph structure", "Some organization", "Disorganized"]},
-        {"name": "Grammar / Conventions", "points": 4, "levels": ["Strong conventions", "Minor errors", "Frequent errors that interfere with meaning"]},
+        {
+            "name": "Main Idea Identification",
+            "points": 4,
+            "levels": [
+                "States a clear, accurate main idea",
+                "Main idea is vague or partially accurate",
+                "Main idea missing or incorrect",
+            ],
+        },
+        {
+            "name": "Supporting Details",
+            "points": 4,
+            "levels": [
+                "Two or more relevant details",
+                "One relevant detail",
+                "Details missing or unrelated",
+            ],
+        },
+        {
+            "name": "Evidence and Explanation",
+            "points": 4,
+            "levels": [
+                "Explains how details support the main idea",
+                "Partial explanation",
+                "No explanation",
+            ],
+        },
+        {
+            "name": "Organization",
+            "points": 4,
+            "levels": ["Logical paragraph structure", "Some organization", "Disorganized"],
+        },
+        {
+            "name": "Grammar / Conventions",
+            "points": 4,
+            "levels": [
+                "Strong conventions",
+                "Minor errors",
+                "Frequent errors that interfere with meaning",
+            ],
+        },
     ]
     return {
         "title": f"{PACKAGE_TITLE} Rubric",
@@ -421,8 +468,14 @@ def build_vocabulary_list() -> dict[str, Any]:
         "description": "Student-friendly definitions for the week.",
         "objective_mapping": objective_mapping(),
         "terms": [
-            {"term": "main idea", "definition": "The most important point the author wants readers to understand."},
-            {"term": "supporting detail", "definition": "A fact or example that proves or explains the main idea."},
+            {
+                "term": "main idea",
+                "definition": "The most important point the author wants readers to understand.",
+            },
+            {
+                "term": "supporting detail",
+                "definition": "A fact or example that proves or explains the main idea.",
+            },
             {"term": "evidence", "definition": "Proof from the text that supports your thinking."},
             {"term": "summarize", "definition": "Tell the most important ideas in a shorter way."},
         ],
@@ -437,9 +490,22 @@ def build_study_guide() -> dict[str, Any]:
         "description": "Student study support for the week assessment.",
         "objective_mapping": objective_mapping(),
         "sections": [
-            {"heading": "Key Question", "body": "What is the main idea, and how do details support it?"},
-            {"heading": "Steps to Find Main Idea", "bullets": ["Read the title and headings.", "Look for repeated ideas.", "Ask what the author wants you to learn."]},
-            {"heading": "Practice", "body": "Reread How Honeybees Help Farmers and write the main idea with two details."},
+            {
+                "heading": "Key Question",
+                "body": "What is the main idea, and how do details support it?",
+            },
+            {
+                "heading": "Steps to Find Main Idea",
+                "bullets": [
+                    "Read the title and headings.",
+                    "Look for repeated ideas.",
+                    "Ask what the author wants you to learn.",
+                ],
+            },
+            {
+                "heading": "Practice",
+                "body": "Reread How Honeybees Help Farmers and write the main idea with two details.",
+            },
         ],
         **COMMON_METADATA,
     }

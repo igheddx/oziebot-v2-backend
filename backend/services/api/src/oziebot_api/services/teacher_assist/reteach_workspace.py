@@ -9,11 +9,21 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.services.teacher_assist.mastery_dashboard_v2 import build_mastery_dashboard_v2
 from oziebot_api.services.teacher_assist.objective_performance import ObjectivePerformanceService
-from oziebot_api.services.teacher_assist.reteach_plans import list_reteach_plans, serialize_reteach_plan
-from oziebot_api.services.teacher_assist.reteach_insights import build_mastery_matrix_reteach_insights
+from oziebot_api.services.teacher_assist.reteach_plans import (
+    list_reteach_plans,
+    serialize_reteach_plan,
+)
+from oziebot_api.services.teacher_assist.reteach_insights import (
+    build_mastery_matrix_reteach_insights,
+)
 from oziebot_api.services.teacher_assist.mastery_matrix import list_mastery_matrices
-from oziebot_api.services.teacher_assist.student_support_groups import list_support_groups, serialize_support_group
-from oziebot_api.models.teacher_assist_reteach_effectiveness import TeacherAssistReteachEffectivenessRecord
+from oziebot_api.services.teacher_assist.student_support_groups import (
+    list_support_groups,
+    serialize_support_group,
+)
+from oziebot_api.models.teacher_assist_reteach_effectiveness import (
+    TeacherAssistReteachEffectivenessRecord,
+)
 from sqlalchemy import select
 
 
@@ -54,7 +64,9 @@ def build_reteach_workspace(
         status=None,
     )
     if instructional_week_id is not None:
-        reteach_plans = [row for row in reteach_plans if row.instructional_week_id == instructional_week_id]
+        reteach_plans = [
+            row for row in reteach_plans if row.instructional_week_id == instructional_week_id
+        ]
 
     matrices = list_mastery_matrices(
         db,
@@ -104,7 +116,11 @@ def build_reteach_workspace(
                 "title": f"{row.get('objective_code') or 'Objective'} Support Group",
                 "objective_code": row.get("objective_code"),
                 "student_count_hint": row.get("students_assessed"),
-                "suggested_activities": ["Small-group review", "Guided practice", "Reassessment checkpoint"],
+                "suggested_activities": [
+                    "Small-group review",
+                    "Guided practice",
+                    "Reassessment checkpoint",
+                ],
             }
             for row in objectives_requiring_reteach[:5]
         ],

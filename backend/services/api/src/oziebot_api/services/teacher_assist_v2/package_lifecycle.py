@@ -6,7 +6,15 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.models.user import User
 
-STORED_PACKAGE_STATUSES = ("draft", "processing", "generated", "active", "completed", "archived", "failed")
+STORED_PACKAGE_STATUSES = (
+    "draft",
+    "processing",
+    "generated",
+    "active",
+    "completed",
+    "archived",
+    "failed",
+)
 
 DISPLAY_PACKAGE_STATUSES = STORED_PACKAGE_STATUSES + ("ending_soon", "expired")
 
@@ -62,7 +70,9 @@ def can_close_out_package(*, stored_status: str, effective_status: str) -> bool:
     return effective_status in {"active", "ending_soon", "expired", "generated"}
 
 
-def is_upcoming_package(*, effective_status: str, plan_start_date: date, today: date | None = None) -> bool:
+def is_upcoming_package(
+    *, effective_status: str, plan_start_date: date, today: date | None = None
+) -> bool:
     reference = today or date.today()
     return effective_status == "generated" and plan_start_date > reference
 
@@ -82,7 +92,9 @@ def default_plan_dates_for_week_range(
 
 
 def build_package_title(*, week_start: int, week_end: int, subject_names: list[str]) -> str:
-    week_label = f"Week {week_start}" if week_start == week_end else f"Weeks {week_start}–{week_end}"
+    week_label = (
+        f"Week {week_start}" if week_start == week_end else f"Weeks {week_start}–{week_end}"
+    )
     subjects = ", ".join(subject_names[:4])
     if len(subject_names) > 4:
         subjects += ", …"
@@ -96,7 +108,9 @@ def resolve_default_plan_dates(
     week_start: int,
     week_end: int,
 ) -> tuple[date, date]:
-    from oziebot_api.services.teacher_assist_v2.planning_workflow import build_planning_review_context
+    from oziebot_api.services.teacher_assist_v2.planning_workflow import (
+        build_planning_review_context,
+    )
 
     review = build_planning_review_context(
         db,

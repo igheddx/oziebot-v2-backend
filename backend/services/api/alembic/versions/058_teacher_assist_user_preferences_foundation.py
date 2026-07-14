@@ -36,14 +36,24 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["last_class_id"], ["classes.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["last_grading_period_id"], ["grading_periods.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["last_grading_period_id"], ["grading_periods.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["last_subject_id"], ["subjects.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("tenant_id", "user_id", name="uq_teacher_assist_user_preferences_tenant_user"),
+        sa.UniqueConstraint(
+            "tenant_id", "user_id", name="uq_teacher_assist_user_preferences_tenant_user"
+        ),
     )
-    for column_name in ("tenant_id", "user_id", "last_class_id", "last_grading_period_id", "last_subject_id"):
+    for column_name in (
+        "tenant_id",
+        "user_id",
+        "last_class_id",
+        "last_grading_period_id",
+        "last_subject_id",
+    ):
         op.create_index(
             op.f(f"ix_teacher_assist_user_preferences_{column_name}"),
             "teacher_assist_user_preferences",

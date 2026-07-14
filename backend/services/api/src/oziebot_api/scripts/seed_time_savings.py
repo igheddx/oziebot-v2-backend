@@ -18,8 +18,16 @@ from oziebot_api.models.teacher_assist_time_savings import (
     TeacherAssistReuseEvent,
     TeacherAssistWeekTemplate,
 )
-from oziebot_api.scripts.seed_pacing_guides import _build_week_schedule, _schedule_reference_date, _seed_actor, seed_pacing_guides
-from oziebot_api.services.teacher_assist.pacing_guide_foundation import create_catalog_pacing_guide, create_pacing_guide_period
+from oziebot_api.scripts.seed_pacing_guides import (
+    _build_week_schedule,
+    _schedule_reference_date,
+    _seed_actor,
+    seed_pacing_guides,
+)
+from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
+    create_catalog_pacing_guide,
+    create_pacing_guide_period,
+)
 from oziebot_api.services.teacher_assist.setup import create_school_year
 from oziebot_api.services.teacher_assist.time_savings_constants import TIME_SAVINGS_MINUTES
 from oziebot_api.services.teacher_assist.week_context_service import WeekContextService
@@ -58,7 +66,9 @@ def _ensure_school_year(
     )
 
 
-def _ensure_planning_group(db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> TeacherAssistPlanningGroup:
+def _ensure_planning_group(
+    db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUID
+) -> TeacherAssistPlanningGroup:
     existing = db.scalars(
         select(TeacherAssistPlanningGroup).where(
             TeacherAssistPlanningGroup.tenant_id == tenant_id,
@@ -180,8 +190,18 @@ def _ensure_sample_templates(
     ).all()
     samples = (
         ("Decimal Review Week Template", "WEEK", "TEAM", periods[0].id if periods else None),
-        ("Decimal Operations Assignment Template", "ASSIGNMENT", "SCHOOL", periods[1].id if len(periods) > 1 else None),
-        ("Problem Solving Quiz Template", "QUIZ", "DISTRICT", periods[2].id if len(periods) > 2 else None),
+        (
+            "Decimal Operations Assignment Template",
+            "ASSIGNMENT",
+            "SCHOOL",
+            periods[1].id if len(periods) > 1 else None,
+        ),
+        (
+            "Problem Solving Quiz Template",
+            "QUIZ",
+            "DISTRICT",
+            periods[2].id if len(periods) > 2 else None,
+        ),
     )
     for name, artifact_type, visibility, period_id in samples:
         existing = db.scalars(
@@ -218,13 +238,17 @@ def _ensure_sample_templates(
     return created
 
 
-def _ensure_reuse_events(db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUID, period_id: uuid.UUID | None) -> int:
+def _ensure_reuse_events(
+    db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUID, period_id: uuid.UUID | None
+) -> int:
     existing = db.scalar(
-        select(TeacherAssistReuseEvent.id).where(
+        select(TeacherAssistReuseEvent.id)
+        .where(
             TeacherAssistReuseEvent.tenant_id == tenant_id,
             TeacherAssistReuseEvent.user_id == user_id,
             TeacherAssistReuseEvent.event_type == "duplicate_week",
-        ).limit(1)
+        )
+        .limit(1)
     )
     if existing is not None or period_id is None:
         return 0
@@ -262,17 +286,27 @@ def _ensure_reuse_events(db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUI
 
 
 def seed_time_savings(db: Session) -> dict[str, int]:
-    counts = {"school_years": 0, "planning_groups": 0, "shared_guides": 0, "templates": 0, "reuse_events": 0}
+    counts = {
+        "school_years": 0,
+        "planning_groups": 0,
+        "shared_guides": 0,
+        "templates": 0,
+        "reuse_events": 0,
+    }
     seed_pacing_guides(db)
 
     actor, tenant_id = _seed_actor(db)
     state_id = district_id = school_id = grade_id = subject_id = None
-    school = db.scalars(select(EducationSchool).where(EducationSchool.name == "Mason Elementary")).first()
+    school = db.scalars(
+        select(EducationSchool).where(EducationSchool.name == "Mason Elementary")
+    ).first()
     if school is not None:
         school_id = school.id
         district_id = school.district_id
         grade = db.scalars(
-            select(EducationGrade).where(EducationGrade.school_id == school.id, EducationGrade.grade_code == "5")
+            select(EducationGrade).where(
+                EducationGrade.school_id == school.id, EducationGrade.grade_code == "5"
+            )
         ).first()
         if grade is not None:
             grade_id = grade.id
@@ -341,7 +375,9 @@ def seed_time_savings(db: Session) -> dict[str, int]:
         )
         if guide_before is None:
             counts["shared_guides"] += 1
-        counts["templates"] += _ensure_sample_templates(db, tenant_id=tenant_id, user=actor, guide=guide)
+        counts["templates"] += _ensure_sample_templates(
+            db, tenant_id=tenant_id, user=actor, guide=guide
+        )
         first_period = db.scalars(
             select(TeacherAssistPacingGuidePeriod)
             .where(

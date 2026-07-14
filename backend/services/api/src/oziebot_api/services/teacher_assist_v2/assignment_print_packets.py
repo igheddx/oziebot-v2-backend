@@ -11,8 +11,12 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
-from oziebot_api.models.teacher_assist_v2_assignment_print_packet import TeacherAssistV2AssignmentPrintPacket
-from oziebot_api.models.teacher_assist_v2_assignment_print_page import TeacherAssistV2AssignmentPrintPage
+from oziebot_api.models.teacher_assist_v2_assignment_print_packet import (
+    TeacherAssistV2AssignmentPrintPacket,
+)
+from oziebot_api.models.teacher_assist_v2_assignment_print_page import (
+    TeacherAssistV2AssignmentPrintPage,
+)
 from oziebot_api.models.teacher_assist_v2_onboarding import TeacherAssistV2Onboarding
 from oziebot_api.services.teacher_assist.print_packets import render_qr_svg_data_uri
 from oziebot_api.services.teacher_assist_v2.assignment_constants import PRINT_PACKET_KINDS
@@ -31,7 +35,9 @@ def _now() -> datetime:
 
 def resolve_student_count(db: Session, *, teacher_user_id: uuid.UUID, fallback: int = 5) -> int:
     onboarding = db.scalars(
-        select(TeacherAssistV2Onboarding).where(TeacherAssistV2Onboarding.user_id == teacher_user_id)
+        select(TeacherAssistV2Onboarding).where(
+            TeacherAssistV2Onboarding.user_id == teacher_user_id
+        )
     ).one_or_none()
     if onboarding and onboarding.student_count and onboarding.student_count > 0:
         return onboarding.student_count
@@ -54,7 +60,9 @@ def _build_qr_payload(
         "tenant_id": str(assignment.tenant_id),
         "school_year_id": str(assignment.platform_school_year_id),
         "catalog_district_id": str(assignment.catalog_district_id),
-        "catalog_school_id": str(assignment.catalog_school_id) if assignment.catalog_school_id else None,
+        "catalog_school_id": str(assignment.catalog_school_id)
+        if assignment.catalog_school_id
+        else None,
         "catalog_grade_id": str(assignment.catalog_grade_id),
         "catalog_subject_id": str(assignment.catalog_subject_id),
         "student_number": student_number,
@@ -129,12 +137,18 @@ def render_qr_student_packet_html(
             f"<h2>{_esc(assignment.title)}</h2><p><strong>{student_label}</strong></p></div></div>"
             f"<p><strong>Objective:</strong> {_esc(assignment_content.get('objective_text') or assignment.description)}</p>"
             f"<h3>Instructions</h3><ul>"
-            + "".join(f"<li>{_esc(item)}</li>" for item in assignment_content.get("student_instructions") or [])
+            + "".join(
+                f"<li>{_esc(item)}</li>"
+                for item in assignment_content.get("student_instructions") or []
+            )
             + "</ul>"
             f"<h3>{_esc(assignment_content.get('passage_title'))}</h3>"
             f"<p>{_esc(assignment_content.get('passage_text'))}</p>"
             f"<h3>Writing Page</h3>"
-            + "".join("<div style='border-bottom:1px solid #cbd5e1;height:1.75rem;margin:.5rem 0'></div>" for _ in range(10))
+            + "".join(
+                "<div style='border-bottom:1px solid #cbd5e1;height:1.75rem;margin:.5rem 0'></div>"
+                for _ in range(10)
+            )
             + f"<p style='font-size:11px;color:#64748b;margin-top:1rem'>"
             f"Assignment ID: {_esc(assignment.id)} · {student_label} · Page {page.page_number}</p></section>"
         )

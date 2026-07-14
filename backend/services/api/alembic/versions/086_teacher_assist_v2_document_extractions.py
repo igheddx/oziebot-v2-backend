@@ -47,13 +47,23 @@ def upgrade() -> None:
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["catalog_district_id"], ["education_districts.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="SET NULL"
+        ),
+        sa.ForeignKeyConstraint(
+            ["catalog_district_id"], ["education_districts.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["catalog_grade_id"], ["education_grades.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["catalog_state_id"], ["education_states.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["catalog_subject_id"], ["education_subjects.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["package_id"], ["teacher_assist_v2_instructional_packages.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["catalog_subject_id"], ["education_subjects.id"], ondelete="SET NULL"
+        ),
+        sa.ForeignKeyConstraint(
+            ["package_id"], ["teacher_assist_v2_instructional_packages.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["pacing_guide_id"], ["pacing_guides.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(
             ["planning_supplemental_material_id"],
@@ -64,7 +74,9 @@ def upgrade() -> None:
             ["platform_school_year_id"], ["education_school_years.id"], ondelete="SET NULL"
         ),
         sa.ForeignKeyConstraint(
-            ["student_submission_id"], ["teacher_assist_v2_student_submissions.id"], ondelete="CASCADE"
+            ["student_submission_id"],
+            ["teacher_assist_v2_student_submissions.id"],
+            ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
             ["supporting_material_id"], ["pacing_guide_supporting_materials.id"], ondelete="CASCADE"
@@ -89,6 +101,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_ta_v2_doc_extract_status", table_name="teacher_assist_v2_document_extractions")
-    op.drop_index("ix_ta_v2_doc_extract_tenant_teacher", table_name="teacher_assist_v2_document_extractions")
+    op.drop_index(
+        "ix_ta_v2_doc_extract_status", table_name="teacher_assist_v2_document_extractions"
+    )
+    op.drop_index(
+        "ix_ta_v2_doc_extract_tenant_teacher", table_name="teacher_assist_v2_document_extractions"
+    )
     op.drop_table("teacher_assist_v2_document_extractions")

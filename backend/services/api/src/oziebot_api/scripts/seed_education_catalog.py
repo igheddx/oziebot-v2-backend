@@ -33,13 +33,13 @@ from oziebot_api.services.teacher_assist.education_catalog import (
 )
 
 GOLDEN_PATH_ELA_OBJECTIVE_ID = "5.6E"
-GOLDEN_PATH_ELA_OBJECTIVE_DESCRIPTION = (
-    "Students will make inferences from informational text and support their conclusions with textual evidence."
-)
+GOLDEN_PATH_ELA_OBJECTIVE_DESCRIPTION = "Students will make inferences from informational text and support their conclusions with textual evidence."
 
 
 def _user_by_email(db: Session, email: str) -> User | None:
-    return db.scalars(select(User).where(func.lower(User.email) == email.strip().lower())).one_or_none()
+    return db.scalars(
+        select(User).where(func.lower(User.email) == email.strip().lower())
+    ).one_or_none()
 
 
 def seed_education_catalog(db: Session) -> dict[str, int]:
@@ -56,7 +56,9 @@ def seed_education_catalog(db: Session) -> dict[str, int]:
         "assignments": 0,
     }
 
-    state = db.scalars(select(EducationState).where(EducationState.abbreviation == "TX")).one_or_none()
+    state = db.scalars(
+        select(EducationState).where(EducationState.abbreviation == "TX")
+    ).one_or_none()
     if state is None:
         state = create_state(db, name="Texas", abbreviation="TX")
         counts["states"] += 1
@@ -93,7 +95,14 @@ def seed_education_catalog(db: Session) -> dict[str, int]:
         )
         counts["schools"] += 1
 
-    grade_codes = [("K", "Kindergarten"), ("1", "1"), ("2", "2"), ("3", "3"), ("4", "4"), ("5", "5")]
+    grade_codes = [
+        ("K", "Kindergarten"),
+        ("1", "1"),
+        ("2", "2"),
+        ("3", "3"),
+        ("4", "4"),
+        ("5", "5"),
+    ]
     grade_rows: dict[str, EducationGrade] = {}
     for grade_code, display_name in grade_codes:
         existing = db.scalars(

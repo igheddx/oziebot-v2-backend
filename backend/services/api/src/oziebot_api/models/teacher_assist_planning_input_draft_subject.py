@@ -43,5 +43,7 @@ class TeacherAssistPlanningInputDraftSubject(Base):
 from typing import TYPE_CHECKING  # noqa: E402
 
 if TYPE_CHECKING:
-    from oziebot_api.models.teacher_assist_planning_input_draft import TeacherAssistPlanningInputDraft
+    from oziebot_api.models.teacher_assist_planning_input_draft import (
+        TeacherAssistPlanningInputDraft,
+    )
     from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject

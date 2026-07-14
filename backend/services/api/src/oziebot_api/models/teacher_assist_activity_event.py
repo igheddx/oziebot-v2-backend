@@ -30,7 +30,9 @@ class TeacherAssistActivityEvent(Base):
     event_category: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     entity_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     entity_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
-    event_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    event_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
     school_year_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("school_years.id", ondelete="SET NULL"),
@@ -68,7 +70,9 @@ class TeacherAssistActivityEvent(Base):
     tenant: Mapped["Tenant"] = relationship("Tenant")
     user: Mapped["User"] = relationship("User")
     school_year: Mapped["TeacherAssistSchoolYear | None"] = relationship("TeacherAssistSchoolYear")
-    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship("TeacherAssistGradingPeriod")
+    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship(
+        "TeacherAssistGradingPeriod"
+    )
     teacher_class: Mapped["TeacherAssistClass | None"] = relationship("TeacherAssistClass")
     subject: Mapped["TeacherAssistSubject | None"] = relationship("TeacherAssistSubject")
     workflow: Mapped["TeacherAssistWorkflow | None"] = relationship("TeacherAssistWorkflow")

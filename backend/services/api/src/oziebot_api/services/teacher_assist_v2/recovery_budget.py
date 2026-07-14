@@ -9,7 +9,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.teacher_assist_v2_instructional_package import TeacherAssistV2InstructionalPackage
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackage,
+)
 from oziebot_api.models.teacher_assist_v2_recovery_queue import TeacherAssistV2RecoveryQueue
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist_v2.recovery_queue import ACTIVE_STATUSES
@@ -21,39 +23,40 @@ MINUTES_PER_CLASS_PERIOD = 50
 # Estimated class-time cost per teacher_response type (minutes)
 # conference: base per student, multiplied by student count
 RECOVERY_TIME_MINUTES: dict[str, int] = {
-    "embedded_review":        10,
-    "bell_ringer":            8,
-    "small_group":            20,
-    "whole_class_recovery":   45,
-    "spiral_review":          30,
-    "conference":             10,
+    "embedded_review": 10,
+    "bell_ringer": 8,
+    "small_group": 20,
+    "whole_class_recovery": 45,
+    "spiral_review": 30,
+    "conference": 10,
     "homework_reinforcement": 0,
-    "defer":                  0,
-    "dismiss":                0,
+    "defer": 0,
+    "dismiss": 0,
 }
 
 # Lesson components in displacement priority order (most interruptible first)
 # Assumption: if no explicit time allocation in plan, use these defaults
 _DEFAULT_COMPONENT_MINUTES: dict[str, int] = {
     "independent_practice": 10,
-    "guided_practice":      15,
-    "direct_instruction":   15,
-    "hook":                  5,
-    "closure":               5,
+    "guided_practice": 15,
+    "direct_instruction": 15,
+    "hook": 5,
+    "closure": 5,
 }
 _DISPLACEABLE_COMPONENTS = ("independent_practice", "guided_practice", "direct_instruction")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+
 def _item_estimated_minutes(item: TeacherAssistV2RecoveryQueue) -> int:
     response = item.teacher_response or item.recommendation_type
     # Map recommendation_type to closest response time estimate
     _type_map = {
-        "whole_class":        "whole_class_recovery",
-        "small_group":        "small_group",
+        "whole_class": "whole_class_recovery",
+        "small_group": "small_group",
         "individual_follow_up": "conference",
-        "extension":          "embedded_review",
+        "extension": "embedded_review",
     }
     key = _type_map.get(response, response)
     base = RECOVERY_TIME_MINUTES.get(key, 20)
@@ -117,6 +120,7 @@ def _remaining_instructional_days(package: TeacherAssistV2InstructionalPackage) 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
+
 def compute_recovery_budget(
     db: Session,
     *,
@@ -168,24 +172,25 @@ def compute_recovery_budget(
     for item in items:
         est_minutes = _item_estimated_minutes(item)
         displaced_label, displaced_minutes, impact_note = _displaced_components(est_minutes)
-        at_risk = (
-            item.best_before is not None
-            and item.best_before <= date.today() + __import__("datetime").timedelta(days=5)
+        at_risk = item.best_before is not None and item.best_before <= date.today() + __import__(
+            "datetime"
+        ).timedelta(days=5)
+        trade_off_items.append(
+            {
+                "queue_item_id": str(item.id),
+                "objective_code": item.objective_code,
+                "recommendation_type": item.recommendation_type,
+                "teacher_response": item.teacher_response,
+                "status": item.status,
+                "scheduled_for": item.scheduled_for.isoformat() if item.scheduled_for else None,
+                "students_affected_count": len(item.students_affected_json or []),
+                "estimated_minutes": est_minutes,
+                "displaced_component": displaced_label,
+                "displaced_minutes": displaced_minutes,
+                "impact_note": impact_note,
+                "at_risk": at_risk,
+            }
         )
-        trade_off_items.append({
-            "queue_item_id": str(item.id),
-            "objective_code": item.objective_code,
-            "recommendation_type": item.recommendation_type,
-            "teacher_response": item.teacher_response,
-            "status": item.status,
-            "scheduled_for": item.scheduled_for.isoformat() if item.scheduled_for else None,
-            "students_affected_count": len(item.students_affected_json or []),
-            "estimated_minutes": est_minutes,
-            "displaced_component": displaced_label,
-            "displaced_minutes": displaced_minutes,
-            "impact_note": impact_note,
-            "at_risk": at_risk,
-        })
 
     total_displaced = sum(t["displaced_minutes"] for t in trade_off_items)
     trade_off_available = bool(package.instructional_design_plan_json)
@@ -208,8 +213,12 @@ def compute_recovery_budget(
             "displacement_note": (
                 "Estimates assume recovery occurs on the next available lesson day. "
                 "Scheduling on a review or flex day reduces displacement of primary instruction."
-            ) if trade_off_available else None,
-            "reason": None if trade_off_available else "Lesson plan does not contain a structured daily progression.",
+            )
+            if trade_off_available
+            else None,
+            "reason": None
+            if trade_off_available
+            else "Lesson plan does not contain a structured daily progression.",
         },
         "budget_note": (
             "Estimates only. Recovery decisions do not modify the district pacing guide or your lesson plan."

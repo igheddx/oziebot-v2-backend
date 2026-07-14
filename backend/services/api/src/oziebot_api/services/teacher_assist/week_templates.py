@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 from oziebot_api.models.teacher_assist_time_savings import TeacherAssistWeekTemplate
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.reuse_events import record_reuse_event
-from oziebot_api.services.teacher_assist.time_savings_constants import TEMPLATE_TYPES, TEMPLATE_VISIBILITY, TIME_SAVINGS_MINUTES
+from oziebot_api.services.teacher_assist.time_savings_constants import (
+    TEMPLATE_TYPES,
+    TEMPLATE_VISIBILITY,
+    TIME_SAVINGS_MINUTES,
+)
 from oziebot_api.services.teacher_assist.week_context_service import WeekContextService
 from oziebot_api.services.teacher_assist.week_duplication import duplicate_week
 

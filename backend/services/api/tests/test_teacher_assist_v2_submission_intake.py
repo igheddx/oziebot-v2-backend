@@ -7,8 +7,12 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
-from oziebot_api.models.teacher_assist_v2_assignment_print_packet import TeacherAssistV2AssignmentPrintPacket
-from oziebot_api.models.teacher_assist_v2_assignment_print_page import TeacherAssistV2AssignmentPrintPage
+from oziebot_api.models.teacher_assist_v2_assignment_print_packet import (
+    TeacherAssistV2AssignmentPrintPacket,
+)
+from oziebot_api.models.teacher_assist_v2_assignment_print_page import (
+    TeacherAssistV2AssignmentPrintPage,
+)
 from tests.test_teacher_assist_v2_planning import _ready_teacher_token
 
 
@@ -76,7 +80,9 @@ def test_v2_submission_intake_qr_filename_match(client, db_session):
     _generate_week1_package(client, headers)
     assignment_id = _written_assignment_id(client, headers)
     assignment = db_session.scalar(
-        select(TeacherAssistV2Assignment).where(TeacherAssistV2Assignment.id == uuid.UUID(assignment_id))
+        select(TeacherAssistV2Assignment).where(
+            TeacherAssistV2Assignment.id == uuid.UUID(assignment_id)
+        )
     )
     assert assignment is not None
 
@@ -107,7 +113,11 @@ def test_v2_submission_intake_qr_filename_match(client, db_session):
         assignment_id=assignment.id,
         student_number=7,
         page_number=1,
-        qr_payload_json={"qr_token": qr_token, "student_number": 7, "assignment_id": str(assignment.id)},
+        qr_payload_json={
+            "qr_token": qr_token,
+            "student_number": 7,
+            "assignment_id": str(assignment.id),
+        },
         qr_token=qr_token,
         created_at=now,
     )

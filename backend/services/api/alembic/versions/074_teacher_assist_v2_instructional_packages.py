@@ -33,11 +33,17 @@ def upgrade() -> None:
         sa.Column("metadata_json", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["catalog_grade_id"], ["education_grades.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["catalog_state_id"], ["education_states.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["platform_school_year_id"], ["education_school_years.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["platform_school_year_id"], ["education_school_years.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["teacher_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -67,7 +73,9 @@ def upgrade() -> None:
         sa.Column("metadata_json", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["package_id"], ["teacher_assist_v2_instructional_packages.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["package_id"], ["teacher_assist_v2_instructional_packages.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["period_id"], ["pacing_guide_periods.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["subject_id"], ["education_subjects.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
@@ -106,12 +114,20 @@ def upgrade() -> None:
         sa.Column("active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["catalog_grade_id"], ["education_grades.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["catalog_state_id"], ["education_states.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["package_id"], ["teacher_assist_v2_instructional_packages.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["platform_school_year_id"], ["education_school_years.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["package_id"], ["teacher_assist_v2_instructional_packages.id"], ondelete="SET NULL"
+        ),
+        sa.ForeignKeyConstraint(
+            ["platform_school_year_id"], ["education_school_years.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["teacher_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["uploaded_by_user_id"], ["users.id"], ondelete="CASCADE"),
@@ -125,9 +141,18 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_ta_v2_planning_supplemental_teacher_week", table_name="teacher_assist_v2_planning_supplemental_materials")
+    op.drop_index(
+        "ix_ta_v2_planning_supplemental_teacher_week",
+        table_name="teacher_assist_v2_planning_supplemental_materials",
+    )
     op.drop_table("teacher_assist_v2_planning_supplemental_materials")
-    op.drop_index("ix_ta_v2_package_artifacts_package", table_name="teacher_assist_v2_instructional_package_artifacts")
+    op.drop_index(
+        "ix_ta_v2_package_artifacts_package",
+        table_name="teacher_assist_v2_instructional_package_artifacts",
+    )
     op.drop_table("teacher_assist_v2_instructional_package_artifacts")
-    op.drop_index("ix_ta_v2_instructional_packages_teacher", table_name="teacher_assist_v2_instructional_packages")
+    op.drop_index(
+        "ix_ta_v2_instructional_packages_teacher",
+        table_name="teacher_assist_v2_instructional_packages",
+    )
     op.drop_table("teacher_assist_v2_instructional_packages")

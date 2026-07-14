@@ -8,10 +8,16 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.teacher_assist_instructional_evidence import TeacherAssistInstructionalEvidence
-from oziebot_api.models.teacher_assist_instructional_reflection import TeacherAssistInstructionalReflection
+from oziebot_api.models.teacher_assist_instructional_evidence import (
+    TeacherAssistInstructionalEvidence,
+)
+from oziebot_api.models.teacher_assist_instructional_reflection import (
+    TeacherAssistInstructionalReflection,
+)
 from oziebot_api.models.teacher_assist_instructional_week import TeacherAssistInstructionalWeek
-from oziebot_api.models.teacher_assist_reteach_effectiveness import TeacherAssistReteachEffectivenessRecord
+from oziebot_api.models.teacher_assist_reteach_effectiveness import (
+    TeacherAssistReteachEffectivenessRecord,
+)
 from oziebot_api.models.teacher_assist_reteach_plan import TeacherAssistReteachPlan
 from oziebot_api.models.teacher_assist_student_support_group import (
     TeacherAssistStudentSupportGroup,
@@ -19,7 +25,9 @@ from oziebot_api.models.teacher_assist_student_support_group import (
 )
 from oziebot_api.scripts.seed_instructional_weeks import seed_instructional_weeks
 from oziebot_api.scripts.seed_pacing_guides import _seed_actor
-from oziebot_api.services.teacher_assist.instructional_week_closure import generate_instructional_week_summary
+from oziebot_api.services.teacher_assist.instructional_week_closure import (
+    generate_instructional_week_summary,
+)
 
 
 def seed_instructional_loop(db: Session) -> dict[str, int]:
@@ -49,13 +57,20 @@ def seed_instructional_loop(db: Session) -> dict[str, int]:
     ).first()
 
     now = datetime.now(UTC)
-    if db.scalars(
-        select(TeacherAssistInstructionalEvidence).where(
-            TeacherAssistInstructionalEvidence.tenant_id == tenant_id,
-            TeacherAssistInstructionalEvidence.instructional_week_id == week.id,
-        )
-    ).first() is None:
-        for student, score, level in [("1", 62.0, "developing"), ("2", 41.0, "beginning"), ("3", 88.0, "mastery")]:
+    if (
+        db.scalars(
+            select(TeacherAssistInstructionalEvidence).where(
+                TeacherAssistInstructionalEvidence.tenant_id == tenant_id,
+                TeacherAssistInstructionalEvidence.instructional_week_id == week.id,
+            )
+        ).first()
+        is None
+    ):
+        for student, score, level in [
+            ("1", 62.0, "developing"),
+            ("2", 41.0, "beginning"),
+            ("3", 88.0, "mastery"),
+        ]:
             db.add(
                 TeacherAssistInstructionalEvidence(
                     tenant_id=tenant_id,
@@ -73,12 +88,15 @@ def seed_instructional_loop(db: Session) -> dict[str, int]:
             )
             counts["instructional_evidence"] += 1
 
-    if db.scalars(
-        select(TeacherAssistStudentSupportGroup).where(
-            TeacherAssistStudentSupportGroup.tenant_id == tenant_id,
-            TeacherAssistStudentSupportGroup.instructional_week_id == week.id,
-        )
-    ).first() is None:
+    if (
+        db.scalars(
+            select(TeacherAssistStudentSupportGroup).where(
+                TeacherAssistStudentSupportGroup.tenant_id == tenant_id,
+                TeacherAssistStudentSupportGroup.instructional_week_id == week.id,
+            )
+        ).first()
+        is None
+    ):
         from oziebot_api.models.teacher_assist_class import TeacherAssistClass
         from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
 
@@ -115,12 +133,15 @@ def seed_instructional_loop(db: Session) -> dict[str, int]:
                 )
             counts["support_groups"] += 1
 
-    if db.scalars(
-        select(TeacherAssistInstructionalReflection).where(
-            TeacherAssistInstructionalReflection.tenant_id == tenant_id,
-            TeacherAssistInstructionalReflection.instructional_week_id == week.id,
-        )
-    ).first() is None:
+    if (
+        db.scalars(
+            select(TeacherAssistInstructionalReflection).where(
+                TeacherAssistInstructionalReflection.tenant_id == tenant_id,
+                TeacherAssistInstructionalReflection.instructional_week_id == week.id,
+            )
+        ).first()
+        is None
+    ):
         db.add(
             TeacherAssistInstructionalReflection(
                 tenant_id=tenant_id,
@@ -138,11 +159,15 @@ def seed_instructional_loop(db: Session) -> dict[str, int]:
         )
         counts["reflections"] += 1
 
-    if reteach_plan is not None and db.scalars(
-        select(TeacherAssistReteachEffectivenessRecord).where(
-            TeacherAssistReteachEffectivenessRecord.reteach_plan_id == reteach_plan.id
-        )
-    ).first() is None:
+    if (
+        reteach_plan is not None
+        and db.scalars(
+            select(TeacherAssistReteachEffectivenessRecord).where(
+                TeacherAssistReteachEffectivenessRecord.reteach_plan_id == reteach_plan.id
+            )
+        ).first()
+        is None
+    ):
         db.add(
             TeacherAssistReteachEffectivenessRecord(
                 tenant_id=tenant_id,

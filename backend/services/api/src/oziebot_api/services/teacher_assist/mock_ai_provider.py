@@ -55,7 +55,11 @@ def _build_daily_breakdown(
         for index, item in enumerate(pacing_items[:5], start=1):
             day_number = item.get("day_number") or index
             focus = item.get("title") or f"Mock {subject_name} focus {index}"
-            objective = item.get("objectives") or item.get("instructional_focus") or "Reinforce weekly goals"
+            objective = (
+                item.get("objectives")
+                or item.get("instructional_focus")
+                or "Reinforce weekly goals"
+            )
             note = item.get("notes") or teacher_notes or "No additional teacher notes provided."
             breakdown.append(
                 {
@@ -189,7 +193,9 @@ def _mock_regenerated_section(
             ],
         }
     if section_key == "weekly_segments":
-        current_segments = list(current_section_content or current_plan_content.get("weekly_segments") or [])
+        current_segments = list(
+            current_section_content or current_plan_content.get("weekly_segments") or []
+        )
         if not current_segments:
             return [
                 {
@@ -239,7 +245,9 @@ def _mock_regenerated_section(
 class MockTeacherAssistAIProvider(TeacherAssistAIProvider):
     provider_name = "mock"
 
-    def generate_instructional_plan(self, context_preview: dict[str, Any]) -> TeacherAssistAIProviderResult:
+    def generate_instructional_plan(
+        self, context_preview: dict[str, Any]
+    ) -> TeacherAssistAIProviderResult:
         draft = context_preview["draft"]
         subjects = context_preview.get("subjects", [])
         pacing_items = context_preview.get("pacing_items", [])
@@ -281,7 +289,9 @@ class MockTeacherAssistAIProvider(TeacherAssistAIProvider):
                     ],
                     "objectives": _non_empty(
                         [
-                            item.get("objectives") or item.get("instructional_focus") or item.get("title")
+                            item.get("objectives")
+                            or item.get("instructional_focus")
+                            or item.get("title")
                             for item in subject_pacing_items
                         ]
                     )
@@ -311,7 +321,9 @@ class MockTeacherAssistAIProvider(TeacherAssistAIProvider):
             )
 
         subject_names = ", ".join(subject["name"] for subject in subjects) or "selected subjects"
-        draft_title = draft.get("plan_title") or draft.get("title") or "TeacherAssist Instructional Plan"
+        draft_title = (
+            draft.get("plan_title") or draft.get("title") or "TeacherAssist Instructional Plan"
+        )
         standards_progression = [
             {
                 "code": standard["code"],
@@ -332,12 +344,17 @@ class MockTeacherAssistAIProvider(TeacherAssistAIProvider):
         grouped_items = pacing_groups or [{"label": "Week 1", "pacing_items": pacing_items}]
         for index, group in enumerate(grouped_items, start=1):
             group_items = group.get("pacing_items", [])
-            segment_objectives = _non_empty(
-                [
-                    item.get("objectives") or item.get("instructional_focus") or item.get("title")
-                    for item in group_items
-                ]
-            ) or weekly_objectives[:2]
+            segment_objectives = (
+                _non_empty(
+                    [
+                        item.get("objectives")
+                        or item.get("instructional_focus")
+                        or item.get("title")
+                        for item in group_items
+                    ]
+                )
+                or weekly_objectives[:2]
+            )
             segment_subjects = []
             for section in subject_sections:
                 segment_subjects.append(
@@ -373,7 +390,8 @@ class MockTeacherAssistAIProvider(TeacherAssistAIProvider):
             "duration": {
                 "start_date": draft.get("start_date"),
                 "end_date": draft.get("end_date"),
-                "estimated_weeks": draft.get("estimated_weeks") or duration_summary.get("estimated_weeks"),
+                "estimated_weeks": draft.get("estimated_weeks")
+                or duration_summary.get("estimated_weeks"),
                 "instructional_days_count": draft.get("instructional_days_count")
                 or duration_summary.get("instructional_days_count"),
                 "summary": duration_summary.get("summary"),

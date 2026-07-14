@@ -16,7 +16,9 @@ def student_number_label(number: int) -> str:
 
 
 def render_qr_png_bytes(payload: dict[str, Any]) -> bytes:
-    qr = qrcode.make(json.dumps(payload, sort_keys=True, separators=(",", ":")), box_size=4, border=1)
+    qr = qrcode.make(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")), box_size=4, border=1
+    )
     buffer = io.BytesIO()
     qr.save(buffer, format="PNG")
     return buffer.getvalue()
@@ -25,7 +27,9 @@ def render_qr_png_bytes(payload: dict[str, Any]) -> bytes:
 def _docx_paragraph(text: str, *, bold: bool = False) -> str:
     escaped = html.escape(text)
     if bold:
-        return f"<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space='preserve'>{escaped}</w:t></w:r></w:p>"
+        return (
+            f"<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space='preserve'>{escaped}</w:t></w:r></w:p>"
+        )
     return f"<w:p><w:r><w:t xml:space='preserve'>{escaped}</w:t></w:r></w:p>"
 
 
@@ -75,7 +79,9 @@ def build_student_packet_docx_bytes(
         images.append(page["qr_png"])
         rel_id = f"rId{index + 1}"
         body_parts.append(
-            _docx_header(rel_id, image_id=index, student_label=str(page["student_label"]), title=title)
+            _docx_header(
+                rel_id, image_id=index, student_label=str(page["student_label"]), title=title
+            )
         )
         for text, bold in page.get("paragraphs") or []:
             body_parts.append(_docx_paragraph(str(text), bold=bold))
@@ -90,9 +96,7 @@ def build_student_packet_docx_bytes(
         "xmlns:wp='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing' "
         "xmlns:a='http://schemas.openxmlformats.org/drawingml/2006/main' "
         "xmlns:pic='http://schemas.openxmlformats.org/drawingml/2006/picture'>"
-        "<w:body>"
-        + "".join(body_parts)
-        + "</w:body></w:document>"
+        "<w:body>" + "".join(body_parts) + "</w:body></w:document>"
     )
 
     rels = [

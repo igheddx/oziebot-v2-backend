@@ -5,6 +5,7 @@ repetition. Goals:
   1. Guide AI to vary hooks, strategies, discussion prompts, closures, and layouts.
   2. Provide a shared Pixabay ID registry so image_search.py skips already-used images.
 """
+
 from __future__ import annotations
 
 import json
@@ -82,32 +83,41 @@ CORE_PRACTICES: frozenset[str] = frozenset({"teacher_modeling"})
 INSTRUCTIONAL_SUPPORTS: frozenset[str] = frozenset({"graphic_organizer", "anchor_chart"})
 
 # Engagement Strategies: interactive approaches — apply percentage-based variety check.
-ENGAGEMENT_STRATEGIES: frozenset[str] = frozenset({
-    "turn_and_talk", "think_pair_share", "quick_write", "picture_walk",
-    "vocabulary_sort", "gallery_walk", "notebook_reflection", "partner_discussion",
-})
+ENGAGEMENT_STRATEGIES: frozenset[str] = frozenset(
+    {
+        "turn_and_talk",
+        "think_pair_share",
+        "quick_write",
+        "picture_walk",
+        "vocabulary_sort",
+        "gallery_walk",
+        "notebook_reflection",
+        "partner_discussion",
+    }
+)
 
 # Configurable variety thresholds
-ENGAGEMENT_OVERUSE_RATIO: float = 0.40      # flag if used in ≥40% of instructional days
-CONSECUTIVE_SUPPORT_THRESHOLD: int = 3       # flag support tool used N+ consecutive days
+ENGAGEMENT_OVERUSE_RATIO: float = 0.40  # flag if used in ≥40% of instructional days
+CONSECUTIVE_SUPPORT_THRESHOLD: int = 3  # flag support tool used N+ consecutive days
 
 # Lowercase search patterns for extracting strategy usage from generated artifact JSON.
 _STRATEGY_KEYWORDS: dict[str, list[str]] = {
-    "turn_and_talk":      ["turn and talk", "turn-and-talk"],
-    "think_pair_share":   ["think-pair-share", "think pair share"],
-    "quick_write":        ["quick write", "quick-write"],
-    "picture_walk":       ["picture walk", "picture-walk"],
-    "vocabulary_sort":    ["vocabulary sort", "word sort"],
-    "gallery_walk":       ["gallery walk"],
-    "notebook_reflection":["notebook reflection", "notebook entry", "notebook response"],
-    "anchor_chart":       ["anchor chart"],
+    "turn_and_talk": ["turn and talk", "turn-and-talk"],
+    "think_pair_share": ["think-pair-share", "think pair share"],
+    "quick_write": ["quick write", "quick-write"],
+    "picture_walk": ["picture walk", "picture-walk"],
+    "vocabulary_sort": ["vocabulary sort", "word sort"],
+    "gallery_walk": ["gallery walk"],
+    "notebook_reflection": ["notebook reflection", "notebook entry", "notebook response"],
+    "anchor_chart": ["anchor chart"],
     "partner_discussion": ["partner discussion", "partner talk"],
-    "teacher_modeling":   ["teacher modeling", "teacher model", "think aloud", "think-aloud"],
-    "graphic_organizer":  ["graphic organizer", "t-chart", "venn diagram"],
+    "teacher_modeling": ["teacher modeling", "teacher model", "think aloud", "think-aloud"],
+    "graphic_organizer": ["graphic organizer", "t-chart", "venn diagram"],
 }
 
 
 # ── Tracker ───────────────────────────────────────────────────────────────────
+
 
 class VarietyTracker:
     """Thread-safe usage tracker for a single package generation run.
@@ -120,8 +130,8 @@ class VarietyTracker:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._strategy_history: list[str] = []   # ordered; most-recent last
-        self._layout_history: list[str] = []      # slide layout names
+        self._strategy_history: list[str] = []  # ordered; most-recent last
+        self._layout_history: list[str] = []  # slide layout names
         self._used_pixabay_ids: set[int] = set()
 
     # ── Recording ────────────────────────────────────────────────────────────
@@ -189,24 +199,17 @@ class VarietyTracker:
         # Core practices (Teacher Modeling, etc.) are expected every day — never flag them.
         # Instructional supports are not flagged by raw count; flag only at full saturation.
         overused_keys = [
-            k for k, n in counts.items()
-            if k in ENGAGEMENT_STRATEGIES and n >= overuse_threshold
+            k for k, n in counts.items() if k in ENGAGEMENT_STRATEGIES and n >= overuse_threshold
         ]
 
         # Core practices remain available even if just used; engagement strategies rotate.
         fresh_off_limits = set(recent_strategies[-3:]) - CORE_PRACTICES
-        available = [
-            v["display"]
-            for k, v in STRATEGY_LIBRARY.items()
-            if k not in fresh_off_limits
-        ]
+        available = [v["display"] for k, v in STRATEGY_LIBRARY.items() if k not in fresh_off_limits]
 
         guidance_parts: list[str] = []
         if overused_keys:
             overused_display = [
-                STRATEGY_LIBRARY[k]["display"]
-                for k in overused_keys
-                if k in STRATEGY_LIBRARY
+                STRATEGY_LIBRARY[k]["display"] for k in overused_keys if k in STRATEGY_LIBRARY
             ]
             guidance_parts.append(f"Vary these (used heavily): {', '.join(overused_display)}.")
         if available:
@@ -219,11 +222,10 @@ class VarietyTracker:
                 f"Slide layout '{overused_layouts[0]}' repeated — vary layout structure."
             )
 
-        recent_display = [
-            STRATEGY_LIBRARY.get(k, {}).get("display", k) for k in recent_strategies
-        ]
+        recent_display = [STRATEGY_LIBRARY.get(k, {}).get("display", k) for k in recent_strategies]
         return {
             "recent_strategies": recent_display,
             "recent_slide_layouts": recent_layouts,
-            "guidance": " ".join(guidance_parts) or "Vary engagement strategies based on today's objective.",
+            "guidance": " ".join(guidance_parts)
+            or "Vary engagement strategies based on today's objective.",
         }

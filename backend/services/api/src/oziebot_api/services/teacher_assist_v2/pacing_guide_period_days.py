@@ -10,7 +10,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
-from oziebot_api.models.teacher_assist_pacing_guide_period_day import TeacherAssistPacingGuidePeriodDay
+from oziebot_api.models.teacher_assist_pacing_guide_period_day import (
+    TeacherAssistPacingGuidePeriodDay,
+)
 from oziebot_api.schemas.pacing_guide import CatalogPacingGuideDailyPlanOut
 
 
@@ -42,10 +44,18 @@ def replace_period_days(
             day_label=day_label,
             sequence_number=int(item.get("sequence_number") or index),
             daily_topic=daily_topic,
-            objective_focus=(str(item.get("objective_focus")).strip() if item.get("objective_focus") else None),
-            teacher_notes=(str(item.get("teacher_notes")).strip() if item.get("teacher_notes") else None),
-            materials_needed=(str(item.get("materials_needed")).strip() if item.get("materials_needed") else None),
-            assessment_check=(str(item.get("assessment_check")).strip() if item.get("assessment_check") else None),
+            objective_focus=(
+                str(item.get("objective_focus")).strip() if item.get("objective_focus") else None
+            ),
+            teacher_notes=(
+                str(item.get("teacher_notes")).strip() if item.get("teacher_notes") else None
+            ),
+            materials_needed=(
+                str(item.get("materials_needed")).strip() if item.get("materials_needed") else None
+            ),
+            assessment_check=(
+                str(item.get("assessment_check")).strip() if item.get("assessment_check") else None
+            ),
             created_at=now,
             updated_at=now,
         )
@@ -55,7 +65,9 @@ def replace_period_days(
     return rows
 
 
-def daily_plans_metadata_snapshot(days: list[TeacherAssistPacingGuidePeriodDay]) -> list[dict[str, Any]]:
+def daily_plans_metadata_snapshot(
+    days: list[TeacherAssistPacingGuidePeriodDay],
+) -> list[dict[str, Any]]:
     return [
         {
             "id": str(day.id),
@@ -71,7 +83,9 @@ def daily_plans_metadata_snapshot(days: list[TeacherAssistPacingGuidePeriodDay])
     ]
 
 
-def load_period_days(db: Session, *, period_id: uuid.UUID) -> list[TeacherAssistPacingGuidePeriodDay]:
+def load_period_days(
+    db: Session, *, period_id: uuid.UUID
+) -> list[TeacherAssistPacingGuidePeriodDay]:
     return db.scalars(
         select(TeacherAssistPacingGuidePeriodDay)
         .where(TeacherAssistPacingGuidePeriodDay.period_id == period_id)
@@ -99,7 +113,9 @@ def serialize_period_daily_plans(
             )
             for day in days
         ]
-    metadata = period.metadata_json if isinstance(getattr(period, "metadata_json", None), dict) else {}
+    metadata = (
+        period.metadata_json if isinstance(getattr(period, "metadata_json", None), dict) else {}
+    )
     raw_plans = metadata.get("daily_plans") or []
     return [
         CatalogPacingGuideDailyPlanOut(
@@ -125,10 +141,14 @@ def copy_period_days(
 ) -> dict[str, uuid.UUID]:
     day_id_map: dict[str, uuid.UUID] = {}
     now = _now()
-    source_days = sorted(getattr(source_period, "days", []) or [], key=lambda row: row.sequence_number)
+    source_days = sorted(
+        getattr(source_period, "days", []) or [], key=lambda row: row.sequence_number
+    )
     if not source_days:
         metadata = (
-            source_period.metadata_json if isinstance(getattr(source_period, "metadata_json", None), dict) else {}
+            source_period.metadata_json
+            if isinstance(getattr(source_period, "metadata_json", None), dict)
+            else {}
         )
         for index, item in enumerate(metadata.get("daily_plans") or [], start=1):
             if not isinstance(item, dict):

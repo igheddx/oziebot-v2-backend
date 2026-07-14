@@ -31,7 +31,9 @@ from oziebot_api.services.teacher_assist_v2.planning_workflow import (
     _teacher_assignments,
     _week_periods,
 )
-from oziebot_api.services.teacher_assist_v2.platform_context import resolve_instructional_catalog_tenant_id
+from oziebot_api.services.teacher_assist_v2.platform_context import (
+    resolve_instructional_catalog_tenant_id,
+)
 from oziebot_api.services.teacher_assist_v2.student_packet_docx import student_number_label
 
 
@@ -117,7 +119,9 @@ def build_gradebook_grid_form(db: Session, *, user: User) -> dict[str, Any]:
             continue
         grading_periods = [
             {
-                "grading_period_id": str(item["grading_period_id"]) if item["grading_period_id"] else None,
+                "grading_period_id": str(item["grading_period_id"])
+                if item["grading_period_id"]
+                else None,
                 "title": item["title"],
                 "week_numbers": item["week_numbers"],
             }
@@ -174,7 +178,9 @@ def _assignment_cell(*, record: TeacherAssistV2GradebookRecord | None) -> dict[s
             "mastery_level_label": "Missing",
             "mastery_level_short": MASTERY_LEVEL_SHORT_LABELS["missing"],
         }
-    fields = serialize_mastery_level_fields(percentage=record.percentage, mastery_level=record.mastery_level)
+    fields = serialize_mastery_level_fields(
+        percentage=record.percentage, mastery_level=record.mastery_level
+    )
     level = fields["mastery_level"]
     return {
         "has_grade": True,
@@ -270,10 +276,16 @@ def build_subject_gradebook_grid(
 
     objective_ids = {_primary_objective_id(row) for row in assignments}
     objective_ids.discard(None)
-    objectives = {
-        row.id: row
-        for row in db.scalars(select(EducationObjective).where(EducationObjective.id.in_(objective_ids))).all()
-    } if objective_ids else {}
+    objectives = (
+        {
+            row.id: row
+            for row in db.scalars(
+                select(EducationObjective).where(EducationObjective.id.in_(objective_ids))
+            ).all()
+        }
+        if objective_ids
+        else {}
+    )
 
     grouped: dict[uuid.UUID, dict[str, Any]] = {}
     for assignment in assignments:
@@ -345,7 +357,9 @@ def build_subject_gradebook_grid(
                 )
                 cells[assignment["column_key"]] = cell
                 assignment_cells.append(cell)
-            cells[f"teks:{group['objective_id']}"] = _teks_summary_cell(assignment_cells=assignment_cells)
+            cells[f"teks:{group['objective_id']}"] = _teks_summary_cell(
+                assignment_cells=assignment_cells
+            )
 
         rows.append(
             {

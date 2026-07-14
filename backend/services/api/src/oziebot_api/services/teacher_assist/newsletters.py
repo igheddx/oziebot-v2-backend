@@ -131,7 +131,9 @@ def _validate_newsletter_context(
 ) -> None:
     get_school_year_or_404(db, tenant_id=tenant_id, school_year_id=school_year_id)
     if grading_period_id is not None:
-        period = get_grading_period_or_404(db, tenant_id=tenant_id, grading_period_id=grading_period_id)
+        period = get_grading_period_or_404(
+            db, tenant_id=tenant_id, grading_period_id=grading_period_id
+        )
         if period.school_year_id != school_year_id:
             raise ValueError("Grading period does not belong to the selected school year")
     teacher_class = get_class_or_404(db, tenant_id=tenant_id, class_id=class_id)
@@ -410,7 +412,9 @@ def build_newsletter_prompt_context(
                 "title": plan.title,
                 "planning_scope": plan.planning_scope,
                 "module_title": plan.module_title,
-                "objectives": (content.get("learning_objectives") or content.get("objectives") or [])[:5],
+                "objectives": (
+                    content.get("learning_objectives") or content.get("objectives") or []
+                )[:5],
                 "topics": (content.get("topics") or content.get("weekly_topics") or [])[:5],
             }
         )
@@ -467,12 +471,18 @@ def build_newsletter_prompt_context(
         {
             "newsletter_id": str(newsletter.id),
             "school_year_id": str(newsletter.school_year_id),
-            "grading_period_id": str(newsletter.grading_period_id) if newsletter.grading_period_id else None,
+            "grading_period_id": str(newsletter.grading_period_id)
+            if newsletter.grading_period_id
+            else None,
             "grading_period_title": grading_period_title,
             "class_id": str(newsletter.class_id),
             "subject_id": str(newsletter.subject_id),
-            "week_start_date": newsletter.week_start_date.isoformat() if newsletter.week_start_date else None,
-            "week_end_date": newsletter.week_end_date.isoformat() if newsletter.week_end_date else None,
+            "week_start_date": newsletter.week_start_date.isoformat()
+            if newsletter.week_start_date
+            else None,
+            "week_end_date": newsletter.week_end_date.isoformat()
+            if newsletter.week_end_date
+            else None,
             "teacher_notes": newsletter.teacher_notes,
             "weekly_plan_summaries": weekly_plan_summaries[:5],
             "instructional_assignments": instructional_assignments[:10],

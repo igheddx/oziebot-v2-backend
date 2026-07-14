@@ -12,7 +12,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("teacher_assist_v2_instructional_packages", sa.Column("title", sa.String(length=256), nullable=True))
+    op.add_column(
+        "teacher_assist_v2_instructional_packages",
+        sa.Column("title", sa.String(length=256), nullable=True),
+    )
     op.add_column(
         "teacher_assist_v2_instructional_packages",
         sa.Column("primary_pacing_guide_id", sa.Uuid(), nullable=True),
@@ -76,8 +79,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint("fk_ta_v2_packages_closed_by", "teacher_assist_v2_instructional_packages", type_="foreignkey")
-    op.drop_constraint("fk_ta_v2_packages_primary_pacing_guide", "teacher_assist_v2_instructional_packages", type_="foreignkey")
+    op.drop_constraint(
+        "fk_ta_v2_packages_closed_by",
+        "teacher_assist_v2_instructional_packages",
+        type_="foreignkey",
+    )
+    op.drop_constraint(
+        "fk_ta_v2_packages_primary_pacing_guide",
+        "teacher_assist_v2_instructional_packages",
+        type_="foreignkey",
+    )
     op.drop_column("teacher_assist_v2_instructional_packages", "close_out_notes")
     op.drop_column("teacher_assist_v2_instructional_packages", "closed_by_user_id")
     op.drop_column("teacher_assist_v2_instructional_packages", "closed_at")

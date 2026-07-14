@@ -20,7 +20,16 @@ def test_split_quiz_pages_and_student_count() -> None:
     content = {
         "title": "Week 1 Quiz",
         "description": "Instructions here",
-        "questions": [{"number": index, "type": "multiple_choice", "prompt": f"Q{index}", "choices": ["A"], "points": 1} for index in range(1, 8)],
+        "questions": [
+            {
+                "number": index,
+                "type": "multiple_choice",
+                "prompt": f"Q{index}",
+                "choices": ["A"],
+                "points": 1,
+            }
+            for index in range(1, 8)
+        ],
         "questions_per_page": 3,
     }
     pages = split_assessment_content_pages(artifact_type="quiz", content=content)
@@ -82,7 +91,10 @@ def test_google_forms_json_accepts_list_objective_mapping() -> None:
         }
     )
     assert payload["objectiveMappings"]["objective_code"] == "5.6E"
-    assert payload["objectiveMappings"]["objective_text"] == "Identify the main idea and supporting details."
+    assert (
+        payload["objectiveMappings"]["objective_text"]
+        == "Identify the main idea and supporting details."
+    )
 
 
 def test_answer_key_payload_accepts_list_objective_mapping() -> None:

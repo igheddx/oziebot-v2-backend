@@ -13,7 +13,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
-from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAssistAssignmentPrintPacket
+from oziebot_api.models.teacher_assist_assignment_print_packet import (
+    TeacherAssistAssignmentPrintPacket,
+)
 from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
 from oziebot_api.services.teacher_assist.activity_events import record_activity_event
 from oziebot_api.services.teacher_assist.assignments import get_assignment_or_404
@@ -22,7 +24,9 @@ from oziebot_api.services.teacher_assist.constants import (
     validate_assignment_print_packet_status,
     validate_assignment_print_template_type,
 )
-from oziebot_api.services.teacher_assist.instructional_plan_validator import contains_pii_like_content
+from oziebot_api.services.teacher_assist.instructional_plan_validator import (
+    contains_pii_like_content,
+)
 from oziebot_api.services.teacher_assist.setup import get_class_or_404
 
 QR_PACKET_VERSION = "teacher_assist_assignment_packet_v1"
@@ -55,7 +59,9 @@ def _build_qr_payload(
         "teacher_user_id": str(assignment.teacher_user_id),
         "tenant_id": str(assignment.tenant_id),
         "school_year_id": str(assignment.school_year_id),
-        "grading_period_id": str(assignment.grading_period_id) if assignment.grading_period_id else None,
+        "grading_period_id": str(assignment.grading_period_id)
+        if assignment.grading_period_id
+        else None,
         "class_id": str(assignment.class_id),
         "subject_id": str(assignment.subject_id),
         "student_number": student_number,
@@ -162,7 +168,9 @@ def create_assignment_print_packet(
 ) -> TeacherAssistAssignmentPrintPacket:
     if pages_per_student <= 0:
         raise ValueError("Pages per student must be greater than zero")
-    assignment = get_assignment_or_404(db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id)
+    assignment = get_assignment_or_404(
+        db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id
+    )
     teacher_class = get_class_or_404(db, tenant_id=tenant_id, class_id=assignment.class_id)
     if teacher_class.student_count <= 0:
         raise ValueError("Assignments require a class with at least one student")

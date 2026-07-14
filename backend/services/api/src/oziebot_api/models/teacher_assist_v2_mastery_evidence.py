@@ -22,7 +22,10 @@ class TeacherAssistV2MasteryEvidence(Base):
     )
     student_number: Mapped[int] = mapped_column(Integer, nullable=False)
     education_objective_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_objectives.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_objectives.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     assignment_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -46,8 +49,12 @@ class TeacherAssistV2MasteryEvidence(Base):
     score: Mapped[float] = mapped_column(Float(), nullable=False)
     percentage: Mapped[float] = mapped_column(Float(), nullable=False)
     mastery_level: Mapped[str] = mapped_column(String(32), nullable=False)
-    teacher_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    teacher_confirmed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    is_current: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     gradebook_record: Mapped["TeacherAssistV2GradebookRecord"] = relationship(

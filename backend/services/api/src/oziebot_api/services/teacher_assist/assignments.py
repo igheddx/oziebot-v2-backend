@@ -19,7 +19,9 @@ from oziebot_api.services.teacher_assist.constants import (
     validate_assignment_status,
     validate_assignment_type,
 )
-from oziebot_api.services.teacher_assist.instructional_plan_validator import contains_pii_like_content
+from oziebot_api.services.teacher_assist.instructional_plan_validator import (
+    contains_pii_like_content,
+)
 from oziebot_api.services.teacher_assist.planning import get_resource_or_404, get_standard_or_404
 from oziebot_api.services.teacher_assist.setup import (
     get_class_or_404,
@@ -139,16 +141,23 @@ def _validate_assignment_references(
     class_subject_ids = {
         row.subject_id
         for row in db.scalars(
-            select(TeacherAssistClassSubject).where(TeacherAssistClassSubject.class_id == teacher_class.id)
+            select(TeacherAssistClassSubject).where(
+                TeacherAssistClassSubject.class_id == teacher_class.id
+            )
         ).all()
     }
     if class_subject_ids and subject.id not in class_subject_ids:
         raise ValueError("Selected subject must be attached to the selected class")
 
-    if due_date is not None and (due_date < school_year.start_date or due_date > school_year.end_date):
+    if due_date is not None and (
+        due_date < school_year.start_date or due_date > school_year.end_date
+    ):
         raise ValueError("Due date must fall within the selected school year")
 
-    standards = [get_standard_or_404(db, tenant_id=tenant_id, standard_id=standard_id) for standard_id in standard_ids]
+    standards = [
+        get_standard_or_404(db, tenant_id=tenant_id, standard_id=standard_id)
+        for standard_id in standard_ids
+    ]
     for standard in standards:
         if standard.subject_id is not None and standard.subject_id != subject.id:
             raise ValueError("Standards must belong to the selected subject")
@@ -156,7 +165,8 @@ def _validate_assignment_references(
             raise ValueError("Standards must belong to the selected school year")
 
     resources = [
-        get_resource_or_404(db, tenant_id=tenant_id, resource_id=resource_id) for resource_id in resource_ids
+        get_resource_or_404(db, tenant_id=tenant_id, resource_id=resource_id)
+        for resource_id in resource_ids
     ]
     return standards, resources
 
@@ -222,7 +232,9 @@ def list_assignments(
             )
         )
     return db.scalars(
-        stmt.order_by(TeacherAssistAssignment.updated_at.desc(), TeacherAssistAssignment.created_at.desc())
+        stmt.order_by(
+            TeacherAssistAssignment.updated_at.desc(), TeacherAssistAssignment.created_at.desc()
+        )
     ).all()
 
 
@@ -235,7 +247,10 @@ def list_assignment_standards(
 ) -> list[TeacherAssistAssignmentStandard]:
     stmt = (
         select(TeacherAssistAssignmentStandard)
-        .join(TeacherAssistAssignment, TeacherAssistAssignment.id == TeacherAssistAssignmentStandard.assignment_id)
+        .join(
+            TeacherAssistAssignment,
+            TeacherAssistAssignment.id == TeacherAssistAssignmentStandard.assignment_id,
+        )
         .where(
             TeacherAssistAssignment.tenant_id == tenant_id,
             TeacherAssistAssignment.teacher_user_id == user_id,
@@ -256,7 +271,10 @@ def list_assignment_resources(
 ) -> list[TeacherAssistAssignmentResource]:
     stmt = (
         select(TeacherAssistAssignmentResource)
-        .join(TeacherAssistAssignment, TeacherAssistAssignment.id == TeacherAssistAssignmentResource.assignment_id)
+        .join(
+            TeacherAssistAssignment,
+            TeacherAssistAssignment.id == TeacherAssistAssignmentResource.assignment_id,
+        )
         .where(
             TeacherAssistAssignment.tenant_id == tenant_id,
             TeacherAssistAssignment.teacher_user_id == user_id,
@@ -341,7 +359,13 @@ def create_assignment(
 ) -> TeacherAssistAssignment:
     normalized_standard_ids = _normalize_uuid_list(standard_ids)
     normalized_resource_ids = _normalize_uuid_list(resource_ids)
-    normalized_title, normalized_description, normalized_instructions, normalized_rubric_json, normalized_source_context_json = _validate_assignment_content(
+    (
+        normalized_title,
+        normalized_description,
+        normalized_instructions,
+        normalized_rubric_json,
+        normalized_source_context_json,
+    ) = _validate_assignment_content(
         title=title,
         description=description,
         instructions=instructions,
@@ -436,10 +460,18 @@ def update_assignment(
     standard_ids: list[uuid.UUID] | None = None,
     resource_ids: list[uuid.UUID] | None = None,
 ) -> TeacherAssistAssignment:
-    row = get_assignment_or_404(db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id)
+    row = get_assignment_or_404(
+        db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id
+    )
     normalized_standard_ids = _normalize_uuid_list(standard_ids)
     normalized_resource_ids = _normalize_uuid_list(resource_ids)
-    normalized_title, normalized_description, normalized_instructions, normalized_rubric_json, normalized_source_context_json = _validate_assignment_content(
+    (
+        normalized_title,
+        normalized_description,
+        normalized_instructions,
+        normalized_rubric_json,
+        normalized_source_context_json,
+    ) = _validate_assignment_content(
         title=title,
         description=description,
         instructions=instructions,
@@ -511,9 +543,13 @@ def update_assignment_status(
     assignment_id: uuid.UUID,
     status: str,
 ) -> TeacherAssistAssignment:
-    row = get_assignment_or_404(db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id)
+    row = get_assignment_or_404(
+        db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id
+    )
     previous_status = row.status
-    row.status = _validate_assignment_status_transition(current_status=row.status, next_status=status)
+    row.status = _validate_assignment_status_transition(
+        current_status=row.status, next_status=status
+    )
     row.updated_at = datetime.now(UTC)
     record_activity_event(
         db,
@@ -542,7 +578,9 @@ def attach_assignment_standard(
     assignment_id: uuid.UUID,
     standard_id: uuid.UUID,
 ) -> TeacherAssistAssignment:
-    row = get_assignment_or_404(db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id)
+    row = get_assignment_or_404(
+        db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id
+    )
     _validate_assignment_references(
         db,
         tenant_id=tenant_id,
@@ -551,7 +589,9 @@ def attach_assignment_standard(
         class_id=row.class_id,
         subject_id=row.subject_id,
         due_date=row.due_date,
-        standard_ids=_normalize_uuid_list([link.standard_id for link in row.standard_links] + [standard_id]),
+        standard_ids=_normalize_uuid_list(
+            [link.standard_id for link in row.standard_links] + [standard_id]
+        ),
         resource_ids=[link.resource_library_item_id for link in row.resource_links],
     )
     if all(link.standard_id != standard_id for link in row.standard_links):
@@ -576,7 +616,9 @@ def attach_assignment_resource(
     assignment_id: uuid.UUID,
     resource_library_item_id: uuid.UUID,
 ) -> TeacherAssistAssignment:
-    row = get_assignment_or_404(db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id)
+    row = get_assignment_or_404(
+        db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id
+    )
     _validate_assignment_references(
         db,
         tenant_id=tenant_id,
@@ -587,10 +629,13 @@ def attach_assignment_resource(
         due_date=row.due_date,
         standard_ids=[link.standard_id for link in row.standard_links],
         resource_ids=_normalize_uuid_list(
-            [link.resource_library_item_id for link in row.resource_links] + [resource_library_item_id]
+            [link.resource_library_item_id for link in row.resource_links]
+            + [resource_library_item_id]
         ),
     )
-    if all(link.resource_library_item_id != resource_library_item_id for link in row.resource_links):
+    if all(
+        link.resource_library_item_id != resource_library_item_id for link in row.resource_links
+    ):
         db.add(
             TeacherAssistAssignmentResource(
                 assignment_id=row.id,

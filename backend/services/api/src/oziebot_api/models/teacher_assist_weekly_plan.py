@@ -63,7 +63,9 @@ class TeacherAssistWeeklyPlan(Base):
         index=True,
     )
     is_template: Mapped[bool] = mapped_column(Boolean(), nullable=False, server_default="false")
-    visibility_scope: Mapped[str] = mapped_column(String(32), nullable=False, server_default="private")
+    visibility_scope: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="private"
+    )
     reuse_status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="active")
     school_year_origin_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
@@ -128,7 +130,9 @@ class TeacherAssistWeeklyPlan(Base):
 from typing import TYPE_CHECKING  # noqa: E402
 
 if TYPE_CHECKING:
-    from oziebot_api.models.teacher_assist_planning_input_draft import TeacherAssistPlanningInputDraft
+    from oziebot_api.models.teacher_assist_planning_input_draft import (
+        TeacherAssistPlanningInputDraft,
+    )
     from oziebot_api.models.teacher_assist_weekly_plan_version import TeacherAssistWeeklyPlanVersion
     from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
     from oziebot_api.models.tenant import Tenant

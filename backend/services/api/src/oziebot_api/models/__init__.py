@@ -62,7 +62,9 @@ from oziebot_api.models.strategy_signal_pipeline import StrategyRun, StrategySig
 from oziebot_api.models.subscription_plan import SubscriptionPlan
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
 from oziebot_api.models.teacher_assist_activity_event import TeacherAssistActivityEvent
-from oziebot_api.models.teacher_assist_assignment_grading_review import TeacherAssistAssignmentGradingReview
+from oziebot_api.models.teacher_assist_assignment_grading_review import (
+    TeacherAssistAssignmentGradingReview,
+)
 from oziebot_api.models.teacher_assist_assignment_grading_review_item import (
     TeacherAssistAssignmentGradingReviewItem,
 )
@@ -80,21 +82,29 @@ from oziebot_api.models.teacher_assist_instructional_week import (
     TeacherAssistInstructionalWeekObjective,
     TeacherAssistInstructionalWeekSnapshot,
 )
-from oziebot_api.models.teacher_assist_instructional_evidence import TeacherAssistInstructionalEvidence
+from oziebot_api.models.teacher_assist_instructional_evidence import (
+    TeacherAssistInstructionalEvidence,
+)
 from oziebot_api.models.teacher_assist_student_support_group import (
     TeacherAssistStudentSupportGroup,
     TeacherAssistStudentSupportGroupMember,
 )
-from oziebot_api.models.teacher_assist_instructional_reflection import TeacherAssistInstructionalReflection
+from oziebot_api.models.teacher_assist_instructional_reflection import (
+    TeacherAssistInstructionalReflection,
+)
 from oziebot_api.models.teacher_assist_instructional_week_closure import (
     TeacherAssistInstructionalWeekClosure,
     TeacherAssistInstructionalWeekSummary,
 )
-from oziebot_api.models.teacher_assist_reteach_effectiveness import TeacherAssistReteachEffectivenessRecord
+from oziebot_api.models.teacher_assist_reteach_effectiveness import (
+    TeacherAssistReteachEffectivenessRecord,
+)
 from oziebot_api.models.teacher_copilot_session import TeacherCopilotMessage, TeacherCopilotSession
 from oziebot_api.models.teacher_assist_pilot_feedback import TeacherAssistPilotFeedback
 from oziebot_api.models.teacher_assist_usage_metric import TeacherAssistUsageMetric
-from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
+from oziebot_api.models.teacher_assist_assignment_grade_record import (
+    TeacherAssistAssignmentGradeRecord,
+)
 from oziebot_api.models.teacher_assist_assignment_gradebook_audit_event import (
     TeacherAssistAssignmentGradebookAuditEvent,
 )
@@ -105,7 +115,9 @@ from oziebot_api.models.teacher_assist_mastery_audit_event import TeacherAssistM
 from oziebot_api.models.teacher_assist_mastery_commit import TeacherAssistMasteryCommit
 from oziebot_api.models.teacher_assist_mastery_evaluation import TeacherAssistMasteryEvaluation
 from oziebot_api.models.teacher_assist_mastery_matrix import TeacherAssistMasteryMatrix
-from oziebot_api.models.teacher_assist_mastery_matrix_standard import TeacherAssistMasteryMatrixStandard
+from oziebot_api.models.teacher_assist_mastery_matrix_standard import (
+    TeacherAssistMasteryMatrixStandard,
+)
 from oziebot_api.models.teacher_assist_reteach_plan import TeacherAssistReteachPlan
 from oziebot_api.models.teacher_assist_reteach_plan_version import TeacherAssistReteachPlanVersion
 from oziebot_api.models.teacher_assist_newsletter import TeacherAssistNewsletter
@@ -113,9 +125,13 @@ from oziebot_api.models.teacher_assist_newsletter_export import TeacherAssistNew
 from oziebot_api.models.teacher_assist_newsletter_version import TeacherAssistNewsletterVersion
 from oziebot_api.models.teacher_assist_user_preference import TeacherAssistUserPreference
 from oziebot_api.models.teacher_assist_lesson_reflection import TeacherAssistLessonReflection
-from oziebot_api.models.teacher_assist_lesson_reflection_version import TeacherAssistLessonReflectionVersion
+from oziebot_api.models.teacher_assist_lesson_reflection_version import (
+    TeacherAssistLessonReflectionVersion,
+)
 from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtractionJob
-from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAssistAssignmentPrintPacket
+from oziebot_api.models.teacher_assist_assignment_print_packet import (
+    TeacherAssistAssignmentPrintPacket,
+)
 from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
 from oziebot_api.models.teacher_assist_assignment_resource import TeacherAssistAssignmentResource
 from oziebot_api.models.teacher_assist_assignment_standard import TeacherAssistAssignmentStandard
@@ -124,10 +140,16 @@ from oziebot_api.models.teacher_assist_class_subject import TeacherAssistClassSu
 from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsageEvent
 from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
-from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
+from oziebot_api.models.teacher_assist_pacing_guide_objective import (
+    TeacherAssistPacingGuideObjective,
+)
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
-from oziebot_api.models.teacher_assist_pacing_guide_period_day import TeacherAssistPacingGuidePeriodDay
-from oziebot_api.models.teacher_assist_pacing_guide_period_note import TeacherAssistPacingGuidePeriodNote
+from oziebot_api.models.teacher_assist_pacing_guide_period_day import (
+    TeacherAssistPacingGuidePeriodDay,
+)
+from oziebot_api.models.teacher_assist_pacing_guide_period_note import (
+    TeacherAssistPacingGuidePeriodNote,
+)
 from oziebot_api.models.teacher_assist_pacing_guide_resource import TeacherAssistPacingGuideResource
 from oziebot_api.models.teacher_assist_pacing_guide_supporting_material import (
     TeacherAssistPacingGuideSupportingMaterial,
@@ -159,21 +181,35 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2PlanningSupplementalMaterial,
 )
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
-from oziebot_api.models.teacher_assist_v2_assignment_print_packet import TeacherAssistV2AssignmentPrintPacket
-from oziebot_api.models.teacher_assist_v2_assignment_print_page import TeacherAssistV2AssignmentPrintPage
+from oziebot_api.models.teacher_assist_v2_assignment_print_packet import (
+    TeacherAssistV2AssignmentPrintPacket,
+)
+from oziebot_api.models.teacher_assist_v2_assignment_print_page import (
+    TeacherAssistV2AssignmentPrintPage,
+)
 from oziebot_api.models.teacher_assist_v2_grading_draft import TeacherAssistV2GradingDraft
 from oziebot_api.models.teacher_assist_v2_grading_job import TeacherAssistV2GradingJob
-from oziebot_api.models.teacher_assist_v2_assignment_google_form import TeacherAssistV2AssignmentGoogleForm
-from oziebot_api.models.teacher_assist_v2_teacher_google_connection import TeacherAssistV2TeacherGoogleConnection
+from oziebot_api.models.teacher_assist_v2_assignment_google_form import (
+    TeacherAssistV2AssignmentGoogleForm,
+)
+from oziebot_api.models.teacher_assist_v2_teacher_google_connection import (
+    TeacherAssistV2TeacherGoogleConnection,
+)
 from oziebot_api.models.teacher_assist_v2_assignment_grade import TeacherAssistV2AssignmentGrade
 from oziebot_api.models.teacher_assist_v2_assignment_grade_audit_event import (
     TeacherAssistV2AssignmentGradeAuditEvent,
 )
-from oziebot_api.models.teacher_assist_v2_submission_review_view import TeacherAssistV2SubmissionReviewView
+from oziebot_api.models.teacher_assist_v2_submission_review_view import (
+    TeacherAssistV2SubmissionReviewView,
+)
 from oziebot_api.models.teacher_assist_v2_mastery_evidence import TeacherAssistV2MasteryEvidence
-from oziebot_api.models.teacher_assist_v2_gradebook_record_revision import TeacherAssistV2GradebookRecordRevision
+from oziebot_api.models.teacher_assist_v2_gradebook_record_revision import (
+    TeacherAssistV2GradebookRecordRevision,
+)
 from oziebot_api.models.teacher_assist_v2_gradebook_record import TeacherAssistV2GradebookRecord
-from oziebot_api.models.teacher_assist_v2_document_extraction import TeacherAssistV2DocumentExtraction
+from oziebot_api.models.teacher_assist_v2_document_extraction import (
+    TeacherAssistV2DocumentExtraction,
+)
 from oziebot_api.models.teacher_assist_v2_slide_visual_asset import TeacherAssistV2SlideVisualAsset
 from oziebot_api.models.teacher_assist_v2_generation_cache import TeacherAssistV2GenerationCache
 from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssistV2StudentSubmission
@@ -194,7 +230,9 @@ from oziebot_api.models.education_catalog import (
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
 from oziebot_api.models.teacher_assist_standard import TeacherAssistStandard
 from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
-from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
+from oziebot_api.models.teacher_assist_student_work_submission import (
+    TeacherAssistStudentWorkSubmission,
+)
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.models.teacher_assist_weekly_plan_version import TeacherAssistWeeklyPlanVersion
 from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow

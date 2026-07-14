@@ -37,10 +37,17 @@ RT_DIAGRAM = "diagram"
 RT_OTHER = "other"
 
 # Resource types that represent text/book selections (used for named_books_and_texts)
-_TEXT_RESOURCE_TYPES: frozenset[str] = frozenset({
-    RT_READ_ALOUD, RT_MENTOR_TEXT, RT_SHARED_READING,
-    RT_INDEPENDENT_READING, RT_PASSAGE, RT_POEM, RT_ARTICLE,
-})
+_TEXT_RESOURCE_TYPES: frozenset[str] = frozenset(
+    {
+        RT_READ_ALOUD,
+        RT_MENTOR_TEXT,
+        RT_SHARED_READING,
+        RT_INDEPENDENT_READING,
+        RT_PASSAGE,
+        RT_POEM,
+        RT_ARTICLE,
+    }
+)
 
 # Instructional purpose → resource types that serve it best
 _PURPOSE_PREFERRED_TYPES: dict[str, list[str]] = {
@@ -54,7 +61,14 @@ _PURPOSE_PREFERRED_TYPES: dict[str, list[str]] = {
 
 # Which resource types each artifact type prefers, in priority order
 _ARTIFACT_PREFERRED_TYPES: dict[str, list[str]] = {
-    "daily_lesson_plan": [RT_READ_ALOUD, RT_MENTOR_TEXT, RT_SHARED_READING, RT_PASSAGE, RT_POEM, RT_ARTICLE],
+    "daily_lesson_plan": [
+        RT_READ_ALOUD,
+        RT_MENTOR_TEXT,
+        RT_SHARED_READING,
+        RT_PASSAGE,
+        RT_POEM,
+        RT_ARTICLE,
+    ],
     "student_lesson_deck": [RT_READ_ALOUD, RT_PASSAGE, RT_MENTOR_TEXT, RT_SHARED_READING, RT_POEM],
     "subject_slide_deck": [RT_MENTOR_TEXT, RT_ANCHOR_CHART, RT_READ_ALOUD, RT_DIAGRAM],
     "bell_ringer": [RT_PASSAGE, RT_ARTICLE, RT_POEM, RT_READ_ALOUD],
@@ -65,9 +79,19 @@ _ARTIFACT_PREFERRED_TYPES: dict[str, list[str]] = {
     "rubric": [RT_MENTOR_TEXT, RT_PASSAGE],
 }
 _DEFAULT_PREFERRED_TYPES: list[str] = [
-    RT_READ_ALOUD, RT_MENTOR_TEXT, RT_SHARED_READING, RT_PASSAGE,
-    RT_POEM, RT_ARTICLE, RT_ANCHOR_CHART, RT_GRAPHIC_ORGANIZER,
-    RT_VIDEO, RT_DIAGRAM, RT_MANIPULATIVE, RT_INDEPENDENT_READING, RT_OTHER,
+    RT_READ_ALOUD,
+    RT_MENTOR_TEXT,
+    RT_SHARED_READING,
+    RT_PASSAGE,
+    RT_POEM,
+    RT_ARTICLE,
+    RT_ANCHOR_CHART,
+    RT_GRAPHIC_ORGANIZER,
+    RT_VIDEO,
+    RT_DIAGRAM,
+    RT_MANIPULATIVE,
+    RT_INDEPENDENT_READING,
+    RT_OTHER,
 ]
 
 # Resource type → allowed classroom instructional activities.
@@ -76,53 +100,99 @@ _DEFAULT_PREFERRED_TYPES: list[str] = [
 # (which is the purpose-matching scoring field); it is the AI behavioral constraint.
 _ALLOWED_USES_FOR_TYPE: dict[str, list[str]] = {
     RT_READ_ALOUD: [
-        "teacher_read_aloud", "think_aloud", "shared_reading_follow_along",
-        "discussion", "turn_and_talk", "notebook_response",
+        "teacher_read_aloud",
+        "think_aloud",
+        "shared_reading_follow_along",
+        "discussion",
+        "turn_and_talk",
+        "notebook_response",
     ],
     RT_MENTOR_TEXT: [
-        "teacher_read_aloud", "shared_reading", "teacher_modeling",
-        "guided_practice", "close_reading", "annotation", "discussion",
-        "writing_response", "notebook_response",
+        "teacher_read_aloud",
+        "shared_reading",
+        "teacher_modeling",
+        "guided_practice",
+        "close_reading",
+        "annotation",
+        "discussion",
+        "writing_response",
+        "notebook_response",
     ],
     RT_SHARED_READING: [
-        "shared_reading", "choral_reading", "echo_reading",
-        "guided_practice", "annotation", "discussion", "close_reading",
+        "shared_reading",
+        "choral_reading",
+        "echo_reading",
+        "guided_practice",
+        "annotation",
+        "discussion",
+        "close_reading",
     ],
     RT_INDEPENDENT_READING: [
-        "independent_reading", "reading_response", "book_share",
+        "independent_reading",
+        "reading_response",
+        "book_share",
     ],
     RT_PASSAGE: [
-        "guided_practice", "close_reading", "annotation",
-        "discussion", "assessment", "independent_practice",
+        "guided_practice",
+        "close_reading",
+        "annotation",
+        "discussion",
+        "assessment",
+        "independent_practice",
     ],
     RT_POEM: [
-        "teacher_read_aloud", "shared_reading", "choral_reading",
-        "word_study", "discussion", "writing_response",
+        "teacher_read_aloud",
+        "shared_reading",
+        "choral_reading",
+        "word_study",
+        "discussion",
+        "writing_response",
     ],
     RT_ARTICLE: [
-        "guided_practice", "close_reading", "annotation",
-        "discussion", "assessment", "independent_practice",
+        "guided_practice",
+        "close_reading",
+        "annotation",
+        "discussion",
+        "assessment",
+        "independent_practice",
     ],
     RT_GRAPHIC_ORGANIZER: [
-        "teacher_modeling", "guided_practice", "independent_practice",
+        "teacher_modeling",
+        "guided_practice",
+        "independent_practice",
     ],
     RT_VIDEO: [
-        "whole_class_viewing", "discussion", "note_taking",
+        "whole_class_viewing",
+        "discussion",
+        "note_taking",
     ],
     RT_ANCHOR_CHART: [
-        "teacher_modeling", "reference", "guided_practice",
+        "teacher_modeling",
+        "reference",
+        "guided_practice",
     ],
     RT_MANIPULATIVE: [
-        "hands_on", "guided_practice", "independent_practice",
+        "hands_on",
+        "guided_practice",
+        "independent_practice",
     ],
     RT_DIAGRAM: [
-        "teacher_modeling", "reference", "discussion",
+        "teacher_modeling",
+        "reference",
+        "discussion",
     ],
 }
 
 # Strand name → resource types most relevant to that strand
 _STRAND_PREFERRED_TYPES: dict[str, list[str]] = {
-    "reading": [RT_READ_ALOUD, RT_SHARED_READING, RT_PASSAGE, RT_INDEPENDENT_READING, RT_ARTICLE, RT_POEM],
+    "reading": [
+        RT_READ_ALOUD,
+        RT_SHARED_READING,
+        RT_PASSAGE,
+        RT_INDEPENDENT_READING,
+        RT_ARTICLE,
+        RT_POEM,
+    ],
     "writing": [RT_MENTOR_TEXT, RT_PASSAGE, RT_POEM, RT_ARTICLE],
     "word study": [RT_POEM, RT_PASSAGE, RT_ANCHOR_CHART],
     "phonics": [RT_ANCHOR_CHART, RT_GRAPHIC_ORGANIZER, RT_MANIPULATIVE],
@@ -160,12 +230,21 @@ _TOPIC_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 _EXTRACT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"read[\s\-]?aloud\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE), RT_READ_ALOUD),
     (re.compile(r"mentor[\s\-]?text\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE), RT_MENTOR_TEXT),
-    (re.compile(r"shared[\s\-]?reading\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE), RT_SHARED_READING),
-    (re.compile(r"independent[\s\-]?reading\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE), RT_INDEPENDENT_READING),
+    (
+        re.compile(r"shared[\s\-]?reading\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE),
+        RT_SHARED_READING,
+    ),
+    (
+        re.compile(r"independent[\s\-]?reading\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE),
+        RT_INDEPENDENT_READING,
+    ),
     (re.compile(r"passage\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE), RT_PASSAGE),
     (re.compile(r"\bpoem\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE), RT_POEM),
     (re.compile(r"\barticle\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE), RT_ARTICLE),
-    (re.compile(r"graphic[\s\-]?organizer\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE), RT_GRAPHIC_ORGANIZER),
+    (
+        re.compile(r"graphic[\s\-]?organizer\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE),
+        RT_GRAPHIC_ORGANIZER,
+    ),
     (re.compile(r"anchor[\s\-]?chart\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE), RT_ANCHOR_CHART),
     (re.compile(r"\bvideo\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE), RT_VIDEO),
     (re.compile(r"manipulative\s*[:\-]\s*([^\n;,]{3,80})", re.IGNORECASE), RT_MANIPULATIVE),
@@ -173,16 +252,30 @@ _EXTRACT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 # Titles that are noise — pacing guide meta-labels, not actual resources
-_NOISE_TITLES: frozenset[str] = frozenset({
-    "see above", "see below", "as needed", "teacher choice", "teacher selected",
-    "district provided", "various", "multiple texts", "student selected",
-    "tbd", "n/a", "none", "materials", "resources",
-})
+_NOISE_TITLES: frozenset[str] = frozenset(
+    {
+        "see above",
+        "see below",
+        "as needed",
+        "teacher choice",
+        "teacher selected",
+        "district provided",
+        "various",
+        "multiple texts",
+        "student selected",
+        "tbd",
+        "n/a",
+        "none",
+        "materials",
+        "resources",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _clean_title(raw: str) -> str | None:
     """Strip whitespace, trailing punctuation, and reject noise titles."""
@@ -240,7 +333,7 @@ def _purposes_for_resource_type(resource_type: str) -> list[str]:
 
 def _detect_week_near(text: str, pos: int, window: int = 600) -> int | None:
     """Return the closest Week N number within `window` chars before `pos`."""
-    segment = text[max(0, pos - window): pos]
+    segment = text[max(0, pos - window) : pos]
     matches = list(_WEEK_PATTERN.finditer(segment))
     if not matches:
         return None
@@ -249,7 +342,7 @@ def _detect_week_near(text: str, pos: int, window: int = 600) -> int | None:
 
 def _detect_day_near(text: str, pos: int, window: int = 300) -> str | None:
     """Return a day name found within `window` chars before pos."""
-    segment = text[max(0, pos - window): pos]
+    segment = text[max(0, pos - window) : pos]
     matches = list(_DAY_PATTERN.finditer(segment))
     if not matches:
         return None
@@ -257,7 +350,7 @@ def _detect_day_near(text: str, pos: int, window: int = 300) -> str | None:
 
 
 def _excerpt_near(text: str, pos: int, radius: int = 120) -> str:
-    return text[max(0, pos - radius): min(len(text), pos + radius)].strip()
+    return text[max(0, pos - radius) : min(len(text), pos + radius)].strip()
 
 
 def _make_entry(
@@ -288,7 +381,9 @@ def _make_entry(
         "theme": theme,
         "topic": topic,
         "instructional_purposes": instructional_purposes,
-        "allowed_uses": allowed_uses if allowed_uses is not None else _ALLOWED_USES_FOR_TYPE.get(resource_type, ["instruction"]),
+        "allowed_uses": allowed_uses
+        if allowed_uses is not None
+        else _ALLOWED_USES_FOR_TYPE.get(resource_type, ["instruction"]),
         "supported_objectives": supported_objectives,
         "extraction_source": extraction_source,
         "curriculum_grounding": _SOURCE_GROUNDING.get(extraction_source, 0.7),
@@ -302,6 +397,7 @@ def _make_entry(
 # Priority 1: Structured pacing context fields
 # ---------------------------------------------------------------------------
 
+
 def _extract_from_pacing_context(
     generation_context: dict[str, Any],
 ) -> list[dict[str, Any]]:
@@ -314,11 +410,11 @@ def _extract_from_pacing_context(
     entries: list[dict[str, Any]] = []
     seen: set[tuple[str, str, int | None, str | None]] = set()
 
-    for week in (generation_context.get("weeks") or []):
+    for week in generation_context.get("weeks") or []:
         week_num: int | None = week.get("sequence_number")
-        for subj in (week.get("subjects") or []):
+        for subj in week.get("subjects") or []:
             subj_name: str | None = subj.get("subject_name") or subj.get("subject")
-            pacing = (subj.get("pacing_context") or {})
+            pacing = subj.get("pacing_context") or {}
             obj_codes = [
                 str(o.get("objective_code") or o.get("description") or "")
                 for o in (subj.get("objectives") or [])
@@ -326,10 +422,8 @@ def _extract_from_pacing_context(
             ]
 
             # ── Per-day structured: materials_needed ─────────────────────────
-            for day in (pacing.get("days") or []):
-                day_label: str | None = (
-                    day.get("day_label") or day.get("day")
-                )
+            for day in pacing.get("days") or []:
+                day_label: str | None = day.get("day_label") or day.get("day")
                 materials_raw = day.get("materials_needed") or ""
                 topic_raw = day.get("daily_topic") or ""
 
@@ -344,45 +438,53 @@ def _extract_from_pacing_context(
                         if key in seen:
                             continue
                         seen.add(key)
-                        entries.append(_make_entry(
-                            title=title,
-                            resource_type=rt,
-                            week=week_num,
-                            day=day_label,
-                            subject=subj_name,
-                            strand_name=strand,
-                            instructional_purposes=_purposes_for_resource_type(rt),
-                            supported_objectives=obj_codes,
-                            extraction_source="structured_materials_needed",
-                        ))
+                        entries.append(
+                            _make_entry(
+                                title=title,
+                                resource_type=rt,
+                                week=week_num,
+                                day=day_label,
+                                subject=subj_name,
+                                strand_name=strand,
+                                instructional_purposes=_purposes_for_resource_type(rt),
+                                supported_objectives=obj_codes,
+                                extraction_source="structured_materials_needed",
+                            )
+                        )
 
             # ── Week-level structured: attached_files and reference_links ─────
             for bucket in ("attached_files", "reference_links"):
-                for row in (pacing.get(bucket) or []):
+                for row in pacing.get(bucket) or []:
                     raw_title = (
-                        row.get("title") or row.get("display_name")
-                        or row.get("original_filename") or ""
+                        row.get("title")
+                        or row.get("display_name")
+                        or row.get("original_filename")
+                        or ""
                     )
                     title = _clean_title(raw_title)
                     if not title:
                         continue
-                    rt = _infer_resource_type(str(row.get("resource_type") or row.get("material_kind") or raw_title))
+                    rt = _infer_resource_type(
+                        str(row.get("resource_type") or row.get("material_kind") or raw_title)
+                    )
                     key = (title.lower(), rt, week_num, None)
                     if key in seen:
                         continue
                     seen.add(key)
-                    entries.append(_make_entry(
-                        title=title,
-                        resource_type=rt,
-                        week=week_num,
-                        day=None,
-                        subject=subj_name,
-                        strand_name=None,
-                        instructional_purposes=_purposes_for_resource_type(rt),
-                        supported_objectives=obj_codes,
-                        extraction_source="structured_pacing_context",
-                        source_document=raw_title,
-                    ))
+                    entries.append(
+                        _make_entry(
+                            title=title,
+                            resource_type=rt,
+                            week=week_num,
+                            day=None,
+                            subject=subj_name,
+                            strand_name=None,
+                            instructional_purposes=_purposes_for_resource_type(rt),
+                            supported_objectives=obj_codes,
+                            extraction_source="structured_pacing_context",
+                            source_document=raw_title,
+                        )
+                    )
 
     return entries
 
@@ -390,6 +492,7 @@ def _extract_from_pacing_context(
 # ---------------------------------------------------------------------------
 # Priority 2: Phase 0a AI-confirmed mentor_texts from curriculum_sequence_plan
 # ---------------------------------------------------------------------------
+
 
 def _extract_from_sequence_plan(
     curriculum_sequence_plan: dict[int, dict[str, Any]],
@@ -399,7 +502,7 @@ def _extract_from_sequence_plan(
     seen: set[tuple[str, str, int]] = set()
 
     for week_num, week_data in curriculum_sequence_plan.items():
-        for title_raw in (week_data.get("mentor_texts") or []):
+        for title_raw in week_data.get("mentor_texts") or []:
             title = _clean_title(title_raw) if title_raw else None
             if not title:
                 continue
@@ -414,20 +517,22 @@ def _extract_from_sequence_plan(
             purposes = _purposes_for_resource_type(RT_MENTOR_TEXT)
             if reading_focus:
                 purposes = ["read_aloud", "guided_practice"] + purposes
-            entries.append(_make_entry(
-                title=title,
-                resource_type=RT_MENTOR_TEXT,
-                week=week_num,
-                day=None,
-                subject=None,
-                strand_name=None,
-                theme=theme,
-                topic=topic,
-                instructional_purposes=purposes,
-                supported_objectives=list(week_data.get("primary_teks") or []),
-                extraction_source="ai_sequence_plan",
-                source_document="curriculum_sequence_plan",
-            ))
+            entries.append(
+                _make_entry(
+                    title=title,
+                    resource_type=RT_MENTOR_TEXT,
+                    week=week_num,
+                    day=None,
+                    subject=None,
+                    strand_name=None,
+                    theme=theme,
+                    topic=topic,
+                    instructional_purposes=purposes,
+                    supported_objectives=list(week_data.get("primary_teks") or []),
+                    extraction_source="ai_sequence_plan",
+                    source_document="curriculum_sequence_plan",
+                )
+            )
 
     return entries
 
@@ -435,6 +540,7 @@ def _extract_from_sequence_plan(
 # ---------------------------------------------------------------------------
 # Priority 3: Regex extraction from full curriculum document text (fallback)
 # ---------------------------------------------------------------------------
+
 
 def _extract_from_document(doc_title: str, doc_text: str) -> list[dict[str, Any]]:
     """Parse extracted curriculum PDF text. Used only when structured fields yield nothing."""
@@ -453,19 +559,21 @@ def _extract_from_document(doc_title: str, doc_text: str) -> list[dict[str, Any]
             if key in seen:
                 continue
             seen.add(key)
-            entries.append(_make_entry(
-                title=title,
-                resource_type=resource_type,
-                week=week,
-                day=day,
-                subject=None,
-                strand_name=None,
-                instructional_purposes=_purposes_for_resource_type(resource_type),
-                supported_objectives=[],
-                extraction_source="regex_document",
-                source_document=doc_title,
-                source_excerpt=_excerpt_near(doc_text, m.start()),
-            ))
+            entries.append(
+                _make_entry(
+                    title=title,
+                    resource_type=resource_type,
+                    week=week,
+                    day=day,
+                    subject=None,
+                    strand_name=None,
+                    instructional_purposes=_purposes_for_resource_type(resource_type),
+                    supported_objectives=[],
+                    extraction_source="regex_document",
+                    source_document=doc_title,
+                    source_excerpt=_excerpt_near(doc_text, m.start()),
+                )
+            )
 
     return entries
 
@@ -473,6 +581,7 @@ def _extract_from_document(doc_title: str, doc_text: str) -> list[dict[str, Any]
 # ---------------------------------------------------------------------------
 # Public: build_instructional_resource_bank
 # ---------------------------------------------------------------------------
+
 
 def build_instructional_resource_bank(
     full_curriculum_docs: list[dict[str, Any]],
@@ -495,8 +604,7 @@ def build_instructional_resource_bank(
 
     # Priority 1: structured pacing context (most reliable — day-specific, no inference)
     structured_entries = (
-        _extract_from_pacing_context(generation_context)
-        if generation_context else []
+        _extract_from_pacing_context(generation_context) if generation_context else []
     )
 
     # Priority 2: AI sequence plan mentor_texts
@@ -537,6 +645,7 @@ def build_instructional_resource_bank(
 # ---------------------------------------------------------------------------
 # Public: select_instructional_resource
 # ---------------------------------------------------------------------------
+
 
 def select_instructional_resource(
     bank: dict[str, Any],
@@ -641,8 +750,7 @@ def select_instructional_resource(
 
         # Specificity: entries with day/strand specified beat week-level entries
         specificity = sum(
-            1 for f in ("week", "day", "subject", "strand_name")
-            if entry.get(f) is not None
+            1 for f in ("week", "day", "subject", "strand_name") if entry.get(f) is not None
         )
 
         return (s, grounding, specificity)
@@ -651,10 +759,9 @@ def select_instructional_resource(
     if not candidates:
         # Relax: any curriculum-assigned entry from the right week
         candidates = [
-            e for e in entries
-            if e.get("is_curriculum_assigned") and (
-                e.get("week") is None or e.get("week") == week
-            )
+            e
+            for e in entries
+            if e.get("is_curriculum_assigned") and (e.get("week") is None or e.get("week") == week)
         ]
     if not candidates:
         return None
@@ -666,6 +773,7 @@ def select_instructional_resource(
 # ---------------------------------------------------------------------------
 # Public: check_resource_sufficiency
 # ---------------------------------------------------------------------------
+
 
 def check_resource_sufficiency(
     bank: dict[str, Any],
@@ -728,6 +836,7 @@ def check_resource_sufficiency(
 # Public: named_books_from_bank
 # ---------------------------------------------------------------------------
 
+
 def named_books_from_bank(
     bank: dict[str, Any],
     week: int | None,
@@ -767,6 +876,7 @@ def named_books_from_bank(
 # Public: build_resource_alignment_map
 # ---------------------------------------------------------------------------
 
+
 def build_resource_alignment_map(
     bank: dict[str, Any],
     generation_context: dict[str, Any],
@@ -794,21 +904,21 @@ def build_resource_alignment_map(
     """
     alignment: dict[str, Any] = {}
 
-    for week in (generation_context.get("weeks") or []):
+    for week in generation_context.get("weeks") or []:
         week_num = week.get("sequence_number")
         week_key = f"week_{week_num}"
         week_map: dict[str, Any] = {}
 
         # Collect strand names in use this week
-        for subj in (week.get("subjects") or []):
-            for obj in (subj.get("objectives") or []):
+        for subj in week.get("subjects") or []:
+            for obj in subj.get("objectives") or []:
                 pass  # walk to get context
 
         # Build per-day alignment
         all_day_labels = set()
-        for subj in (week.get("subjects") or []):
+        for subj in week.get("subjects") or []:
             pacing = subj.get("pacing_context") or {}
-            for day_plan in (pacing.get("days") or []):
+            for day_plan in pacing.get("days") or []:
                 all_day_labels.add(day_plan.get("day_label") or "")
 
         if not all_day_labels:
@@ -873,4 +983,5 @@ def _alignment_entry(resource: dict[str, Any]) -> dict[str, Any]:
 
 def _alignment_timestamp() -> str:
     import datetime
+
     return datetime.datetime.now(datetime.timezone.utc).isoformat()

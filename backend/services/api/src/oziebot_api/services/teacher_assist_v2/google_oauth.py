@@ -14,7 +14,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
-from oziebot_api.models.teacher_assist_v2_teacher_google_connection import TeacherAssistV2TeacherGoogleConnection
+from oziebot_api.models.teacher_assist_v2_teacher_google_connection import (
+    TeacherAssistV2TeacherGoogleConnection,
+)
 from oziebot_api.services.credential_crypto import CredentialCrypto
 from oziebot_api.services.teacher_assist_v2.google_integration_constants import GOOGLE_OAUTH_SCOPES
 
@@ -184,7 +186,9 @@ def complete_oauth_callback(
             teacher_user_id=teacher_user_id,
             google_email=google_email,
             encrypted_access_token=crypto.encrypt(access_token.encode("utf-8")),
-            encrypted_refresh_token=crypto.encrypt(refresh_token.encode("utf-8")) if refresh_token else None,
+            encrypted_refresh_token=crypto.encrypt(refresh_token.encode("utf-8"))
+            if refresh_token
+            else None,
             token_expires_at=expires_at,
             scopes_json=list(GOOGLE_OAUTH_SCOPES),
             connected_at=now,

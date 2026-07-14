@@ -18,7 +18,9 @@ from oziebot_api.services.teacher_assist.instructional_evidence import (
     record_instructional_evidence,
     serialize_instructional_evidence,
 )
-from oziebot_api.services.teacher_assist.instructional_health_report import build_instructional_health_report
+from oziebot_api.services.teacher_assist.instructional_health_report import (
+    build_instructional_health_report,
+)
 from oziebot_api.services.teacher_assist.instructional_reflections import (
     list_instructional_reflections,
     serialize_instructional_reflection,
@@ -33,7 +35,9 @@ from oziebot_api.services.teacher_assist.instructional_week_closure import (
 )
 from oziebot_api.services.teacher_assist.mastery_dashboard_v2 import build_mastery_dashboard_v2
 from oziebot_api.services.teacher_assist.objective_performance import ObjectivePerformanceService
-from oziebot_api.services.teacher_assist.recommendation_v2 import build_instructional_loop_recommendations
+from oziebot_api.services.teacher_assist.recommendation_v2 import (
+    build_instructional_loop_recommendations,
+)
 from oziebot_api.services.teacher_assist.reteach_effectiveness import (
     list_reteach_effectiveness,
     record_reteach_effectiveness,
@@ -236,7 +240,9 @@ def read_instructional_evidence(
 
 
 @router.post("/instructional-evidence", status_code=201)
-def create_instructional_evidence(user: CurrentUser, db: DbSession, body: InstructionalEvidenceIn) -> dict:
+def create_instructional_evidence(
+    user: CurrentUser, db: DbSession, body: InstructionalEvidenceIn
+) -> dict:
     tenant_id = _tenant_id(db, user)
 
     def _create():
@@ -367,7 +373,9 @@ def read_instructional_reflections(
 
 
 @router.put("/instructional-reflections")
-def upsert_instructional_reflection_route(user: CurrentUser, db: DbSession, body: InstructionalReflectionIn) -> dict:
+def upsert_instructional_reflection_route(
+    user: CurrentUser, db: DbSession, body: InstructionalReflectionIn
+) -> dict:
     tenant_id = _tenant_id(db, user)
 
     def _upsert():
@@ -506,7 +514,9 @@ def create_reteach_effectiveness(
 
 
 @router.get("/reteach-plans/{reteach_plan_id}/effectiveness")
-def read_reteach_effectiveness(reteach_plan_id: uuid.UUID, user: CurrentUser, db: DbSession) -> list[dict]:
+def read_reteach_effectiveness(
+    reteach_plan_id: uuid.UUID, user: CurrentUser, db: DbSession
+) -> list[dict]:
     tenant_id = _tenant_id(db, user)
     rows = list_reteach_effectiveness(
         db,

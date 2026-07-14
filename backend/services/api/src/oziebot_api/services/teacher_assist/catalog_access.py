@@ -153,7 +153,11 @@ def resolve_catalog_access_scope(
         elif resolved_district_id is not None:
             district = get_district_or_404(db, resolved_district_id)
             resolved_state_id = district.state_id
-        grades = list_grades(db, school_id=resolved_school_id, active_only=True) if resolved_school_id else []
+        grades = (
+            list_grades(db, school_id=resolved_school_id, active_only=True)
+            if resolved_school_id
+            else []
+        )
         grade_ids = tuple(grade.id for grade in grades)
         grade_codes = tuple(grade.grade_code for grade in grades)
         subject_codes: tuple[str, ...] = ()
@@ -195,7 +199,10 @@ def resolve_catalog_access_scope(
             user_id=user.id,
             event_type="catalog_multiple_assignments_detected",
             summary_text="Multiple active school assignments detected for teacher catalog access.",
-            details_json={"assignment_ids": assignment_ids, "selected_assignment_id": str(assignment.id)},
+            details_json={
+                "assignment_ids": assignment_ids,
+                "selected_assignment_id": str(assignment.id),
+            },
         )
 
     if assignment is None:
@@ -303,7 +310,9 @@ def _scope_labels(db: Session, scope: CatalogAccessScope) -> dict[str, str | Non
     }
 
 
-def _scope_banner(*, is_root_admin: bool, scope: CatalogAccessScope, labels: dict[str, str | None]) -> str | None:
+def _scope_banner(
+    *, is_root_admin: bool, scope: CatalogAccessScope, labels: dict[str, str | None]
+) -> str | None:
     if is_root_admin and scope.is_root_unscoped:
         return "Root admin view: all catalog data"
     parts = [labels["state_name"], labels["district_name"], labels["school_name"]]
@@ -341,15 +350,27 @@ def build_catalog_context(
         can_browse = False
     else:
         can_browse = True
-        if scope.state_id is not None and scope.district_id is not None and scope.school_id is not None:
+        if (
+            scope.state_id is not None
+            and scope.district_id is not None
+            and scope.school_id is not None
+        ):
             state = get_state_or_404(db, scope.state_id)
             district = get_district_or_404(db, scope.district_id)
             school = get_school_or_404(db, scope.school_id)
             assignment_payload = {
                 "id": str(scope.assignment_id) if scope.assignment_id else None,
-                "state": {"id": str(state.id), "name": state.name, "abbreviation": state.abbreviation},
+                "state": {
+                    "id": str(state.id),
+                    "name": state.name,
+                    "abbreviation": state.abbreviation,
+                },
                 "district": {"id": str(district.id), "name": district.name},
-                "school": {"id": str(school.id), "name": school.name, "school_type": school.school_type},
+                "school": {
+                    "id": str(school.id),
+                    "name": school.name,
+                    "school_type": school.school_type,
+                },
             }
 
     labels = _scope_labels(db, scope)
@@ -496,10 +517,14 @@ def list_catalog_subjects(
                 )
                 or 0
             )
-        resource_stmt = select(func.count()).select_from(EducationCurriculumResource).where(
-            EducationCurriculumResource.active.is_(True),
-            EducationCurriculumResource.grade_level == (grade_code or ""),
-            EducationCurriculumResource.subject_code == row.subject_code,
+        resource_stmt = (
+            select(func.count())
+            .select_from(EducationCurriculumResource)
+            .where(
+                EducationCurriculumResource.active.is_(True),
+                EducationCurriculumResource.grade_level == (grade_code or ""),
+                EducationCurriculumResource.subject_code == row.subject_code,
+            )
         )
         resource_filter = _resource_scope_filter(scope)
         if resource_filter is not None:
@@ -568,7 +593,9 @@ def list_catalog_objectives(
     ).all()
 
     objective_ids = [row.id for row in rows]
-    resources_by_objective: dict[uuid.UUID, list[dict]] = {objective_id: [] for objective_id in objective_ids}
+    resources_by_objective: dict[uuid.UUID, list[dict]] = {
+        objective_id: [] for objective_id in objective_ids
+    }
     if objective_ids:
         mappings = db.scalars(
             select(EducationObjectiveResourceMapping).where(
@@ -594,7 +621,12 @@ def list_catalog_objectives(
             ).all()
             for link in links:
                 links_by_resource.setdefault(link.curriculum_resource_id, []).append(
-                    {"id": str(link.id), "link_title": link.link_title, "url": link.url, "active": link.active}
+                    {
+                        "id": str(link.id),
+                        "link_title": link.link_title,
+                        "url": link.url,
+                        "active": link.active,
+                    }
                 )
         for mapping in mappings:
             resource = resources_by_id.get(mapping.resource_id)
@@ -651,7 +683,9 @@ def list_catalog_resources(
         lowered = q.strip().lower()
         stmt = stmt.where(
             func.lower(EducationCurriculumResource.title).contains(lowered)
-            | func.lower(func.coalesce(EducationCurriculumResource.description, "")).contains(lowered)
+            | func.lower(func.coalesce(EducationCurriculumResource.description, "")).contains(
+                lowered
+            )
         )
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -664,8 +698,12 @@ def list_catalog_resources(
     ).all()
 
     resource_ids = [row.id for row in rows]
-    links_by_resource: dict[uuid.UUID, list[dict]] = {resource_id: [] for resource_id in resource_ids}
-    objectives_by_resource: dict[uuid.UUID, list[dict]] = {resource_id: [] for resource_id in resource_ids}
+    links_by_resource: dict[uuid.UUID, list[dict]] = {
+        resource_id: [] for resource_id in resource_ids
+    }
+    objectives_by_resource: dict[uuid.UUID, list[dict]] = {
+        resource_id: [] for resource_id in resource_ids
+    }
 
     if resource_ids:
         links = db.scalars(
@@ -676,7 +714,12 @@ def list_catalog_resources(
         ).all()
         for link in links:
             links_by_resource[link.curriculum_resource_id].append(
-                {"id": str(link.id), "link_title": link.link_title, "url": link.url, "active": link.active}
+                {
+                    "id": str(link.id),
+                    "link_title": link.link_title,
+                    "url": link.url,
+                    "active": link.active,
+                }
             )
 
         mappings = db.scalars(
@@ -687,7 +730,9 @@ def list_catalog_resources(
         objective_ids = {mapping.objective_id for mapping in mappings}
         objectives_by_id: dict[uuid.UUID, EducationObjective] = {}
         if objective_ids:
-            objectives = db.scalars(select(EducationObjective).where(EducationObjective.id.in_(objective_ids))).all()
+            objectives = db.scalars(
+                select(EducationObjective).where(EducationObjective.id.in_(objective_ids))
+            ).all()
             objectives_by_id = {objective.id: objective for objective in objectives}
         for mapping in mappings:
             objective = objectives_by_id.get(mapping.objective_id)

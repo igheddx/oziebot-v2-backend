@@ -22,7 +22,9 @@ def test_build_cover_sheet_docx_one_page_per_student() -> None:
         }
         for student_number in (1, 2, 3)
     ]
-    docx = build_cover_sheet_docx_bytes(assignment_title="Partner Teacher Fractions Sheet", pages=pages)
+    docx = build_cover_sheet_docx_bytes(
+        assignment_title="Partner Teacher Fractions Sheet", pages=pages
+    )
     with zipfile.ZipFile(io.BytesIO(docx)) as archive:
         names = archive.namelist()
         assert "word/document.xml" in names

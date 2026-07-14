@@ -18,12 +18,16 @@ from oziebot_api.models.teacher_assist_assignment_grading_review import (
 from oziebot_api.models.teacher_assist_assignment_grading_review_item import (
     TeacherAssistAssignmentGradingReviewItem,
 )
-from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAssistAssignmentPrintPacket
+from oziebot_api.models.teacher_assist_assignment_print_packet import (
+    TeacherAssistAssignmentPrintPacket,
+)
 from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
 from oziebot_api.models.teacher_assist_assignment_resource import TeacherAssistAssignmentResource
 from oziebot_api.models.teacher_assist_assignment_standard import TeacherAssistAssignmentStandard
 from oziebot_api.models.teacher_assist_export_artifact import TeacherAssistExportArtifact
-from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
+from oziebot_api.models.teacher_assist_assignment_grade_record import (
+    TeacherAssistAssignmentGradeRecord,
+)
 from oziebot_api.models.teacher_assist_assignment_gradebook_audit_event import (
     TeacherAssistAssignmentGradebookAuditEvent,
 )
@@ -35,7 +39,9 @@ from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtrac
 from oziebot_api.models.teacher_assist_mastery_commit import TeacherAssistMasteryCommit
 from oziebot_api.models.teacher_assist_mastery_evaluation import TeacherAssistMasteryEvaluation
 from oziebot_api.models.teacher_assist_mastery_matrix import TeacherAssistMasteryMatrix
-from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
+from oziebot_api.models.teacher_assist_student_work_submission import (
+    TeacherAssistStudentWorkSubmission,
+)
 from oziebot_api.models.teacher_assist_class import TeacherAssistClass
 from oziebot_api.models.teacher_assist_class_subject import TeacherAssistClassSubject
 from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
@@ -46,7 +52,9 @@ from oziebot_api.models.teacher_assist_profile import TeacherAssistProfile
 from oziebot_api.models.teacher_assist_newsletter import TeacherAssistNewsletter
 from oziebot_api.models.teacher_assist_newsletter_version import TeacherAssistNewsletterVersion
 from oziebot_api.models.teacher_assist_lesson_reflection import TeacherAssistLessonReflection
-from oziebot_api.models.teacher_assist_lesson_reflection_version import TeacherAssistLessonReflectionVersion
+from oziebot_api.models.teacher_assist_lesson_reflection_version import (
+    TeacherAssistLessonReflectionVersion,
+)
 from oziebot_api.models.teacher_assist_reteach_plan import TeacherAssistReteachPlan
 from oziebot_api.models.teacher_assist_reteach_plan_version import TeacherAssistReteachPlanVersion
 from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
@@ -336,7 +344,9 @@ from oziebot_api.services.teacher_assist.gradebook_commits import (
     list_grade_record_commits,
     list_gradebook_audit_events,
 )
-from oziebot_api.services.teacher_assist.grading_ai_assist import generate_grading_review_ai_suggestion
+from oziebot_api.services.teacher_assist.grading_ai_assist import (
+    generate_grading_review_ai_suggestion,
+)
 from oziebot_api.services.teacher_assist.mastery_commit_service import (
     commit_mastery_evaluation,
     correct_mastery_evaluation,
@@ -355,7 +365,9 @@ from oziebot_api.services.teacher_assist.mastery_matrix import (
     serialize_mastery_matrix,
     update_mastery_matrix,
 )
-from oziebot_api.services.teacher_assist.assignment_effectiveness import build_assignment_effectiveness
+from oziebot_api.services.teacher_assist.assignment_effectiveness import (
+    build_assignment_effectiveness,
+)
 from oziebot_api.services.teacher_assist.mastery_dashboard import build_mastery_dashboard
 from oziebot_api.services.teacher_assist.mastery_heatmaps import (
     build_mastery_matrix_heatmap,
@@ -378,8 +390,12 @@ from oziebot_api.services.teacher_assist.lesson_reflections import (
     serialize_lesson_reflection_version,
     update_lesson_reflection,
 )
-from oziebot_api.services.teacher_assist.planning_reflection_hints import build_planning_reflection_hints
-from oziebot_api.services.teacher_assist.reflection_ai_assist import generate_lesson_reflection_ai_suggestions
+from oziebot_api.services.teacher_assist.planning_reflection_hints import (
+    build_planning_reflection_hints,
+)
+from oziebot_api.services.teacher_assist.reflection_ai_assist import (
+    generate_lesson_reflection_ai_suggestions,
+)
 from oziebot_api.services.teacher_assist.newsletter_ai_assist import (
     generate_newsletter_ai_draft,
     regenerate_newsletter_section,
@@ -399,8 +415,12 @@ from oziebot_api.services.teacher_assist.newsletters import (
     serialize_newsletter_version,
     update_newsletter,
 )
-from oziebot_api.services.teacher_assist.reteach_insights import build_mastery_matrix_reteach_insights
-from oziebot_api.services.teacher_assist.reteach_plan_ai_assist import generate_reteach_plan_ai_draft
+from oziebot_api.services.teacher_assist.reteach_insights import (
+    build_mastery_matrix_reteach_insights,
+)
+from oziebot_api.services.teacher_assist.reteach_plan_ai_assist import (
+    generate_reteach_plan_ai_draft,
+)
 from oziebot_api.services.teacher_assist.reteach_plans import (
     create_reteach_plan,
     create_teacher_reteach_plan_version as save_teacher_reteach_plan_version,
@@ -512,7 +532,10 @@ from oziebot_api.services.teacher_assist.workflow_service import (
     _plan_source_metadata,
 )
 from oziebot_api.services.teacher_assist.workspace_service import get_teacher_assist_workspace
-from oziebot_api.services.teacher_assist.teacher_classroom import build_my_classroom, upsert_my_classroom
+from oziebot_api.services.teacher_assist.teacher_classroom import (
+    build_my_classroom,
+    upsert_my_classroom,
+)
 from oziebot_api.services.teacher_assist.education_catalog import get_active_teacher_assignment
 from oziebot_api.services.teacher_assist.setup import (
     attach_class_subject,
@@ -699,7 +722,9 @@ def _resource_out(
         linked_pacing_items_count=linked_pacing_items_count,
         linked_planning_drafts_count=linked_planning_drafts_count,
         latest_extraction_job=(
-            _extraction_job_out(latest_extraction_job) if latest_extraction_job is not None else None
+            _extraction_job_out(latest_extraction_job)
+            if latest_extraction_job is not None
+            else None
         ),
         latest_extracted_text=(
             _extracted_text_record_out(latest_extracted_text)
@@ -741,7 +766,9 @@ def _assignment_out(
     )
 
 
-def _assignment_print_packet_out(row: TeacherAssistAssignmentPrintPacket) -> AssignmentPrintPacketOut:
+def _assignment_print_packet_out(
+    row: TeacherAssistAssignmentPrintPacket,
+) -> AssignmentPrintPacketOut:
     return AssignmentPrintPacketOut(
         id=row.id,
         tenant_id=row.tenant_id,
@@ -802,7 +829,9 @@ def _assignment_student_work_out(
         upload_status=row.upload_status,
         processing_status=row.processing_status,
         latest_extraction_job=(
-            _extraction_job_out(latest_extraction_job) if latest_extraction_job is not None else None
+            _extraction_job_out(latest_extraction_job)
+            if latest_extraction_job is not None
+            else None
         ),
         latest_extracted_text=(
             _extracted_text_record_out(latest_extracted_text)
@@ -958,7 +987,9 @@ def _assignment_grading_review_item_out(
     )
 
 
-def _assignment_grading_review_out(row: TeacherAssistAssignmentGradingReview) -> AssignmentGradingReviewOut:
+def _assignment_grading_review_out(
+    row: TeacherAssistAssignmentGradingReview,
+) -> AssignmentGradingReviewOut:
     return AssignmentGradingReviewOut(
         id=row.id,
         tenant_id=row.tenant_id,
@@ -1020,7 +1051,9 @@ def _assignment_gradebook_commit_out(
     )
 
 
-def _assignment_grade_record_out(row: TeacherAssistAssignmentGradeRecord) -> AssignmentGradeRecordOut:
+def _assignment_grade_record_out(
+    row: TeacherAssistAssignmentGradeRecord,
+) -> AssignmentGradeRecordOut:
     return AssignmentGradeRecordOut(
         id=row.id,
         tenant_id=row.tenant_id,
@@ -1141,15 +1174,21 @@ def _workspace_plan_summary_out(data: dict[str, object]) -> TeacherAssistWorkspa
     return TeacherAssistWorkspacePlanSummaryOut(**data)
 
 
-def _workspace_assignment_summary_out(data: dict[str, object]) -> TeacherAssistWorkspaceAssignmentSummaryOut:
+def _workspace_assignment_summary_out(
+    data: dict[str, object],
+) -> TeacherAssistWorkspaceAssignmentSummaryOut:
     return TeacherAssistWorkspaceAssignmentSummaryOut(**data)
 
 
-def _workspace_packet_summary_out(data: dict[str, object]) -> TeacherAssistWorkspacePacketSummaryOut:
+def _workspace_packet_summary_out(
+    data: dict[str, object],
+) -> TeacherAssistWorkspacePacketSummaryOut:
     return TeacherAssistWorkspacePacketSummaryOut(**data)
 
 
-def _workspace_submission_summary_out(data: dict[str, object]) -> TeacherAssistWorkspaceSubmissionSummaryOut:
+def _workspace_submission_summary_out(
+    data: dict[str, object],
+) -> TeacherAssistWorkspaceSubmissionSummaryOut:
     return TeacherAssistWorkspaceSubmissionSummaryOut(**data)
 
 
@@ -1159,11 +1198,15 @@ def _workspace_grading_review_summary_out(
     return TeacherAssistWorkspaceGradingReviewSummaryOut(**data)
 
 
-def _workspace_workflow_summary_out(data: dict[str, object]) -> TeacherAssistWorkspaceWorkflowSummaryOut:
+def _workspace_workflow_summary_out(
+    data: dict[str, object],
+) -> TeacherAssistWorkspaceWorkflowSummaryOut:
     return TeacherAssistWorkspaceWorkflowSummaryOut(**data)
 
 
-def _workspace_needs_attention_out(data: dict[str, object]) -> TeacherAssistWorkspaceNeedsAttentionOut:
+def _workspace_needs_attention_out(
+    data: dict[str, object],
+) -> TeacherAssistWorkspaceNeedsAttentionOut:
     return TeacherAssistWorkspaceNeedsAttentionOut(**data)
 
 
@@ -1178,9 +1221,13 @@ def _workspace_class_out(
 ) -> TeacherAssistClassWorkspaceOut:
     teacher_class = data["class_row"]
     return TeacherAssistClassWorkspaceOut(
-        class_context=_class_out(teacher_class, subject_ids=subject_ids_by_class.get(teacher_class.id, [])),
+        class_context=_class_out(
+            teacher_class, subject_ids=subject_ids_by_class.get(teacher_class.id, [])
+        ),
         active_plans=[_workspace_plan_summary_out(item) for item in data.get("active_plans", [])],
-        assignments=[_workspace_assignment_summary_out(item) for item in data.get("assignments", [])],
+        assignments=[
+            _workspace_assignment_summary_out(item) for item in data.get("assignments", [])
+        ],
         pending_grading_reviews=[
             _workspace_grading_review_summary_out(item)
             for item in data.get("pending_grading_reviews", [])
@@ -1191,7 +1238,9 @@ def _workspace_class_out(
         workflow_summaries=[
             _workspace_workflow_summary_out(item) for item in data.get("workflow_summaries", [])
         ],
-        packet_summaries=[_workspace_packet_summary_out(item) for item in data.get("packet_summaries", [])],
+        packet_summaries=[
+            _workspace_packet_summary_out(item) for item in data.get("packet_summaries", [])
+        ],
         needs_attention_count=int(data.get("needs_attention_count", 0)),
     )
 
@@ -1404,7 +1453,10 @@ def _workflow_detail_out(row: TeacherAssistWorkflow) -> TeacherAssistWorkflowDet
     return TeacherAssistWorkflowDetailOut(
         **_workflow_out(row).model_dump(),
         steps=[_workflow_step_out(step) for step in row.steps],
-        usage_events=[_usage_event_out(event) for event in sorted(row.usage_events, key=lambda event: event.created_at, reverse=True)],
+        usage_events=[
+            _usage_event_out(event)
+            for event in sorted(row.usage_events, key=lambda event: event.created_at, reverse=True)
+        ],
     )
 
 
@@ -1438,7 +1490,9 @@ def _weekly_plan_out(
         content_json=row.content_json,
         source_context_json=row.source_context_json,
         current_version_number=max((version.version_number for version in row.versions), default=1),
-        latest_usage_event=_usage_event_out(latest_usage_event) if latest_usage_event is not None else None,
+        latest_usage_event=_usage_event_out(latest_usage_event)
+        if latest_usage_event is not None
+        else None,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -1565,7 +1619,9 @@ def read_teacher_assist_options(user: CurrentUser, db: DbSession) -> TeacherAssi
         assignment_print_template_types=list(ASSIGNMENT_PRINT_TEMPLATE_TYPES),
         assignment_print_output_formats=list(ASSIGNMENT_PRINT_OUTPUT_FORMATS),
         assignment_student_work_upload_statuses=list(ASSIGNMENT_STUDENT_WORK_UPLOAD_STATUSES),
-        assignment_student_work_processing_statuses=list(ASSIGNMENT_STUDENT_WORK_PROCESSING_STATUSES),
+        assignment_student_work_processing_statuses=list(
+            ASSIGNMENT_STUDENT_WORK_PROCESSING_STATUSES
+        ),
         assignment_grading_review_statuses=list(ASSIGNMENT_GRADING_REVIEW_STATUSES),
         assignment_grading_review_sources=list(ASSIGNMENT_GRADING_REVIEW_SOURCES),
         assignment_grade_record_statuses=list(ASSIGNMENT_GRADE_RECORD_STATUSES),
@@ -1626,7 +1682,9 @@ def read_teacher_assist_workspace(
         active_grading_period=_grading_period_out(payload["active_grading_period"])
         if payload.get("active_grading_period") is not None
         else None,
-        today_summary=TeacherAssistWorkspaceTodaySummaryOut(**dict(payload.get("today_summary") or {})),
+        today_summary=TeacherAssistWorkspaceTodaySummaryOut(
+            **dict(payload.get("today_summary") or {})
+        ),
         class_workspaces=[
             _workspace_class_out(item, subject_ids_by_class=class_subjects)
             for item in payload.get("class_workspaces", [])
@@ -1642,8 +1700,12 @@ def read_teacher_assist_workspace(
             _workspace_review_required_item_out(item)
             for item in payload.get("review_required_items", [])
         ],
-        workspace_stats=TeacherAssistWorkspaceStatsOut(**dict(payload.get("workspace_stats") or {})),
-        mastery_insights=TeacherAssistWorkspaceMasteryInsightsOut(**dict(payload.get("mastery_insights") or {}))
+        workspace_stats=TeacherAssistWorkspaceStatsOut(
+            **dict(payload.get("workspace_stats") or {})
+        ),
+        mastery_insights=TeacherAssistWorkspaceMasteryInsightsOut(
+            **dict(payload.get("mastery_insights") or {})
+        )
         if payload.get("mastery_insights") is not None
         else None,
     )
@@ -1673,7 +1735,9 @@ def read_teacher_assist_action_workspace(
             )
             for section in payload.get("sections", [])
         ],
-        priority_items=[_action_workspace_item_out(item) for item in payload.get("priority_items", [])],
+        priority_items=[
+            _action_workspace_item_out(item) for item in payload.get("priority_items", [])
+        ],
         class_rollups=[
             TeacherAssistActionWorkspaceClassRollupOut(**dict(row))
             for row in payload.get("class_rollups", [])
@@ -1777,7 +1841,9 @@ def read_teacher_assist_work_queue(
     return TeacherAssistWorkQueueOut(**payload)
 
 
-@router.get("/classes/{class_id}/workspace", response_model=TeacherAssistClassOperationalWorkspaceOut)
+@router.get(
+    "/classes/{class_id}/workspace", response_model=TeacherAssistClassOperationalWorkspaceOut
+)
 def read_teacher_assist_class_workspace(
     class_id: uuid.UUID,
     user: CurrentUser,
@@ -1879,7 +1945,9 @@ def read_teacher_assist_today_workspace(
         priority_items.append(
             TeacherAssistTodayPriorityItemOut(
                 **base.model_dump(),
-                today_category=str(item.get("today_category")) if item.get("today_category") else None,
+                today_category=str(item.get("today_category"))
+                if item.get("today_category")
+                else None,
             )
         )
     categories: dict[str, list[TeacherAssistActionWorkspaceItemOut]] = {}
@@ -1901,7 +1969,9 @@ def read_teacher_assist_today_workspace(
         active_grading_period=_grading_period_out(payload["active_grading_period"])
         if payload.get("active_grading_period") is not None
         else None,
-        mastery_insights=TeacherAssistWorkspaceMasteryInsightsOut(**dict(payload.get("mastery_insights") or {}))
+        mastery_insights=TeacherAssistWorkspaceMasteryInsightsOut(
+            **dict(payload.get("mastery_insights") or {})
+        )
         if payload.get("mastery_insights") is not None
         else None,
     )
@@ -1988,7 +2058,9 @@ def create_teacher_school_year(
             end_date=body.end_date,
             is_active=body.is_active,
         )
-        mark_onboarding_step_complete(db, tenant_id=tenant_id, user_id=user.id, step_key="school_year")
+        mark_onboarding_step_complete(
+            db, tenant_id=tenant_id, user_id=user.id, step_key="school_year"
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _school_year_out(row)
@@ -2012,7 +2084,9 @@ def update_teacher_school_year(
             end_date=body.end_date,
             is_active=body.is_active,
         )
-        mark_onboarding_step_complete(db, tenant_id=tenant_id, user_id=user.id, step_key="school_year")
+        mark_onboarding_step_complete(
+            db, tenant_id=tenant_id, user_id=user.id, step_key="school_year"
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -2393,7 +2467,9 @@ def read_pacing_guide_items(
     ]
 
 
-@router.post("/pacing-guides/{pacing_guide_id}/items", response_model=PacingItemOut, status_code=201)
+@router.post(
+    "/pacing-guides/{pacing_guide_id}/items", response_model=PacingItemOut, status_code=201
+)
 def create_teacher_pacing_item(
     pacing_guide_id: uuid.UUID,
     body: PacingItemCreate,
@@ -2616,7 +2692,11 @@ def read_resource(
     )
 
 
-@router.post("/resources/{resource_id}/extraction-jobs", response_model=TeacherAssistExtractionJobOut, status_code=201)
+@router.post(
+    "/resources/{resource_id}/extraction-jobs",
+    response_model=TeacherAssistExtractionJobOut,
+    status_code=201,
+)
 def create_teacher_resource_extraction_job(
     resource_id: uuid.UUID,
     user: CurrentUser,
@@ -2639,7 +2719,11 @@ def create_teacher_resource_extraction_job(
     return _extraction_job_out(row)
 
 
-@router.post("/resources/{resource_id}/extraction-jobs/retry", response_model=TeacherAssistExtractionJobOut, status_code=201)
+@router.post(
+    "/resources/{resource_id}/extraction-jobs/retry",
+    response_model=TeacherAssistExtractionJobOut,
+    status_code=201,
+)
 def retry_teacher_resource_extraction_job(
     resource_id: uuid.UUID,
     user: CurrentUser,
@@ -2662,7 +2746,9 @@ def retry_teacher_resource_extraction_job(
     return _extraction_job_out(row)
 
 
-@router.get("/resources/{resource_id}/extractions", response_model=list[TeacherAssistExtractionRunOut])
+@router.get(
+    "/resources/{resource_id}/extractions", response_model=list[TeacherAssistExtractionRunOut]
+)
 def read_teacher_resource_extractions(
     resource_id: uuid.UUID,
     user: CurrentUser,
@@ -2694,7 +2780,9 @@ def read_resource_download_url(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if not row.storage_key or not row.original_filename or not row.mime_type:
-        raise HTTPException(status_code=400, detail="Resource does not have a stored file to download")
+        raise HTTPException(
+            status_code=400, detail="Resource does not have a stored file to download"
+        )
     if not teacher_assist_file_exists(settings, storage_key=row.storage_key):
         raise HTTPException(status_code=404, detail="Stored resource file not found")
     return _file_download_out(
@@ -2766,10 +2854,14 @@ def read_assignments(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     assignment_ids = [row.id for row in rows]
     standards_map = _assignment_standard_map(
-        list_assignment_standards(db, tenant_id=tenant_id, user_id=user.id, assignment_ids=assignment_ids)
+        list_assignment_standards(
+            db, tenant_id=tenant_id, user_id=user.id, assignment_ids=assignment_ids
+        )
     )
     resources_map = _assignment_resource_map(
-        list_assignment_resources(db, tenant_id=tenant_id, user_id=user.id, assignment_ids=assignment_ids)
+        list_assignment_resources(
+            db, tenant_id=tenant_id, user_id=user.id, assignment_ids=assignment_ids
+        )
     )
     return [
         _assignment_out(
@@ -2834,7 +2926,9 @@ def read_assignment(
 ) -> AssignmentOut:
     tenant_id = _teacher_assist_tenant_id(db, user)
     try:
-        row = get_assignment_or_404(db, tenant_id=tenant_id, user_id=user.id, assignment_id=assignment_id)
+        row = get_assignment_or_404(
+            db, tenant_id=tenant_id, user_id=user.id, assignment_id=assignment_id
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     standards_map = _assignment_standard_map(
@@ -2996,7 +3090,11 @@ def create_teacher_assignment_resource(
     )
 
 
-@router.post("/assignments/{assignment_id}/print-packets", response_model=AssignmentPrintPacketOut, status_code=201)
+@router.post(
+    "/assignments/{assignment_id}/print-packets",
+    response_model=AssignmentPrintPacketOut,
+    status_code=201,
+)
 def create_teacher_assignment_print_packet(
     assignment_id: uuid.UUID,
     body: AssignmentPrintPacketCreate,
@@ -3021,7 +3119,9 @@ def create_teacher_assignment_print_packet(
     return _assignment_print_packet_out(row)
 
 
-@router.get("/assignments/{assignment_id}/print-packets", response_model=list[AssignmentPrintPacketOut])
+@router.get(
+    "/assignments/{assignment_id}/print-packets", response_model=list[AssignmentPrintPacketOut]
+)
 def read_teacher_assignment_print_packets(
     assignment_id: uuid.UUID,
     user: CurrentUser,
@@ -3062,13 +3162,17 @@ def read_teacher_assignment_print_packet_pages(
 ) -> list[AssignmentPrintPageOut]:
     tenant_id = _teacher_assist_tenant_id(db, user)
     try:
-        rows = list_print_packet_pages(db, tenant_id=tenant_id, user_id=user.id, packet_id=packet_id)
+        rows = list_print_packet_pages(
+            db, tenant_id=tenant_id, user_id=user.id, packet_id=packet_id
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return [_assignment_print_page_out(row) for row in rows]
 
 
-@router.get("/assignments/{assignment_id}/student-work", response_model=list[AssignmentStudentWorkOut])
+@router.get(
+    "/assignments/{assignment_id}/student-work", response_model=list[AssignmentStudentWorkOut]
+)
 def read_teacher_assignment_student_work(
     assignment_id: uuid.UUID,
     user: CurrentUser,
@@ -3100,7 +3204,11 @@ def read_teacher_assignment_student_work(
     ]
 
 
-@router.post("/assignments/{assignment_id}/student-work", response_model=AssignmentStudentWorkOut, status_code=201)
+@router.post(
+    "/assignments/{assignment_id}/student-work",
+    response_model=AssignmentStudentWorkOut,
+    status_code=201,
+)
 async def upload_teacher_assignment_student_work(
     assignment_id: uuid.UUID,
     user: CurrentUser,
@@ -3166,7 +3274,11 @@ def read_teacher_assignment_student_work_submission(
     )
 
 
-@router.post("/student-work/{submission_id}/extraction-jobs", response_model=TeacherAssistExtractionJobOut, status_code=201)
+@router.post(
+    "/student-work/{submission_id}/extraction-jobs",
+    response_model=TeacherAssistExtractionJobOut,
+    status_code=201,
+)
 def create_teacher_student_work_extraction_job(
     submission_id: uuid.UUID,
     user: CurrentUser,
@@ -3216,7 +3328,9 @@ def retry_teacher_student_work_extraction_job(
     return _extraction_job_out(row)
 
 
-@router.get("/student-work/{submission_id}/extractions", response_model=list[TeacherAssistExtractionRunOut])
+@router.get(
+    "/student-work/{submission_id}/extractions", response_model=list[TeacherAssistExtractionRunOut]
+)
 def read_teacher_student_work_extractions(
     submission_id: uuid.UUID,
     user: CurrentUser,
@@ -3235,7 +3349,9 @@ def read_teacher_student_work_extractions(
     return [_extraction_run_out(job, record) for job, record in rows]
 
 
-@router.get("/extraction-jobs/{extraction_job_id}", response_model=TeacherAssistExtractionJobDetailOut)
+@router.get(
+    "/extraction-jobs/{extraction_job_id}", response_model=TeacherAssistExtractionJobDetailOut
+)
 def read_teacher_extraction_job(
     extraction_job_id: uuid.UUID,
     user: CurrentUser,
@@ -3269,7 +3385,9 @@ def read_teacher_extraction_job(
     )
 
 
-@router.patch("/extraction-jobs/{extraction_job_id}/cancel", response_model=TeacherAssistExtractionJobOut)
+@router.patch(
+    "/extraction-jobs/{extraction_job_id}/cancel", response_model=TeacherAssistExtractionJobOut
+)
 def cancel_teacher_extraction_job(
     extraction_job_id: uuid.UUID,
     body: TeacherAssistExtractionJobCancelUpdate,
@@ -3304,7 +3422,9 @@ def read_teacher_extraction_summaries(
         TeacherAssistExtractionSummaryOut(
             job=_extraction_job_out(item["job"]),
             extracted_text=(
-                _extracted_text_record_out(item["record"]) if item.get("record") is not None else None
+                _extracted_text_record_out(item["record"])
+                if item.get("record") is not None
+                else None
             ),
             retry_eligible=bool(item.get("retry_eligible")),
             processing_duration_seconds=item.get("processing_duration_seconds"),
@@ -3313,7 +3433,11 @@ def read_teacher_extraction_summaries(
     ]
 
 
-@router.post("/extraction-jobs/{extraction_job_id}/retry", response_model=TeacherAssistExtractionJobOut, status_code=201)
+@router.post(
+    "/extraction-jobs/{extraction_job_id}/retry",
+    response_model=TeacherAssistExtractionJobOut,
+    status_code=201,
+)
 def retry_teacher_extraction_job(
     extraction_job_id: uuid.UUID,
     user: CurrentUser,
@@ -3336,7 +3460,10 @@ def retry_teacher_extraction_job(
     return _extraction_job_out(row)
 
 
-@router.get("/extracted-text/{extracted_text_id}", response_model=TeacherAssistExtractedTextDetailAggregateOut)
+@router.get(
+    "/extracted-text/{extracted_text_id}",
+    response_model=TeacherAssistExtractedTextDetailAggregateOut,
+)
 def read_teacher_extracted_text_detail(
     extracted_text_id: uuid.UUID,
     user: CurrentUser,
@@ -3363,7 +3490,10 @@ def read_teacher_extracted_text_detail(
     )
 
 
-@router.get("/extracted-text/{extracted_text_id}/history", response_model=TeacherAssistExtractedTextHistoryOut)
+@router.get(
+    "/extracted-text/{extracted_text_id}/history",
+    response_model=TeacherAssistExtractedTextHistoryOut,
+)
 def read_teacher_extracted_text_history(
     extracted_text_id: uuid.UUID,
     user: CurrentUser,
@@ -3383,12 +3513,17 @@ def read_teacher_extracted_text_history(
         current_record=_extracted_text_detail_out(payload["current_record"]),
         current_job=_extraction_job_out(payload["current_job"]),
         attempt_jobs=[_extraction_job_out(row) for row in payload.get("attempt_jobs", [])],
-        attempt_records=[_extracted_text_record_out(row) for row in payload.get("attempt_records", [])],
+        attempt_records=[
+            _extracted_text_record_out(row) for row in payload.get("attempt_records", [])
+        ],
         activity_events=[_activity_event_out(row) for row in payload.get("activity_events", [])],
     )
 
 
-@router.patch("/extracted-text/{extracted_text_id}/review-status", response_model=TeacherAssistExtractedTextRecordOut)
+@router.patch(
+    "/extracted-text/{extracted_text_id}/review-status",
+    response_model=TeacherAssistExtractedTextRecordOut,
+)
 def update_teacher_extracted_text_review_status(
     extracted_text_id: uuid.UUID,
     body: TeacherAssistExtractedTextReviewStatusUpdate,
@@ -3413,7 +3548,10 @@ def update_teacher_extracted_text_review_status(
     return _extracted_text_record_out(row)
 
 
-@router.put("/extracted-text/{extracted_text_id}/approved-text", response_model=TeacherAssistExtractedTextRecordOut)
+@router.put(
+    "/extracted-text/{extracted_text_id}/approved-text",
+    response_model=TeacherAssistExtractedTextRecordOut,
+)
 def update_teacher_extracted_text_approved_text(
     extracted_text_id: uuid.UUID,
     body: TeacherAssistExtractedTextApprovedTextUpdate,
@@ -3437,7 +3575,9 @@ def update_teacher_extracted_text_approved_text(
     return _extracted_text_record_out(row)
 
 
-@router.get("/student-work/{submission_id}/download-url", response_model=TeacherAssistFileDownloadOut)
+@router.get(
+    "/student-work/{submission_id}/download-url", response_model=TeacherAssistFileDownloadOut
+)
 def read_teacher_assignment_student_work_download_url(
     submission_id: uuid.UUID,
     user: CurrentUser,
@@ -3490,7 +3630,9 @@ def update_teacher_assignment_student_work_status(
     return _assignment_student_work_out(row)
 
 
-@router.patch("/student-work/{submission_id}/packet-context", response_model=AssignmentStudentWorkOut)
+@router.patch(
+    "/student-work/{submission_id}/packet-context", response_model=AssignmentStudentWorkOut
+)
 def update_teacher_assignment_student_work_packet_context(
     submission_id: uuid.UUID,
     body: AssignmentStudentWorkPacketContextUpdate,
@@ -3514,7 +3656,9 @@ def update_teacher_assignment_student_work_packet_context(
     return _assignment_student_work_out(row)
 
 
-@router.get("/assignments/{assignment_id}/grading-reviews", response_model=list[AssignmentGradingReviewOut])
+@router.get(
+    "/assignments/{assignment_id}/grading-reviews", response_model=list[AssignmentGradingReviewOut]
+)
 def read_teacher_assignment_grading_reviews(
     assignment_id: uuid.UUID,
     user: CurrentUser,
@@ -3577,7 +3721,11 @@ def read_teacher_student_work_grading_prep_context(
     return TeacherAssistStudentWorkGradingPrepContextOut.model_validate(payload)
 
 
-@router.post("/student-work/{submission_id}/grading-review", response_model=AssignmentGradingReviewOut, status_code=201)
+@router.post(
+    "/student-work/{submission_id}/grading-review",
+    response_model=AssignmentGradingReviewOut,
+    status_code=201,
+)
 def create_teacher_assignment_grading_review(
     submission_id: uuid.UUID,
     body: AssignmentGradingReviewCreate,
@@ -3658,7 +3806,9 @@ def update_teacher_assignment_grading_review(
     return _assignment_grading_review_out(row)
 
 
-@router.patch("/grading-reviews/{grading_review_id}/status", response_model=AssignmentGradingReviewOut)
+@router.patch(
+    "/grading-reviews/{grading_review_id}/status", response_model=AssignmentGradingReviewOut
+)
 def update_teacher_assignment_grading_review_status(
     grading_review_id: uuid.UUID,
     body: AssignmentGradingReviewStatusUpdate,
@@ -3711,7 +3861,9 @@ def create_teacher_assignment_grading_review_ai_suggestion(
         review=_assignment_grading_review_out(row),
         confidence_level=response_meta["confidence_level"],  # type: ignore[arg-type]
         teacher_review_required=bool(response_meta["teacher_review_required"]),
-        rubric_notes=str(response_meta["rubric_notes"]) if response_meta.get("rubric_notes") else None,
+        rubric_notes=str(response_meta["rubric_notes"])
+        if response_meta.get("rubric_notes")
+        else None,
         text_source=str(response_meta["text_source"]) if response_meta.get("text_source") else None,
         message=str(response_meta["message"]),
     )
@@ -3748,7 +3900,9 @@ def create_teacher_assignment_gradebook_commit(
     )
 
 
-@router.get("/assignments/{assignment_id}/gradebook-records", response_model=list[AssignmentGradeRecordOut])
+@router.get(
+    "/assignments/{assignment_id}/gradebook-records", response_model=list[AssignmentGradeRecordOut]
+)
 def read_teacher_assignment_gradebook_records(
     assignment_id: uuid.UUID,
     user: CurrentUser,
@@ -3867,7 +4021,9 @@ def create_teacher_gradebook_record_reversal(
     )
 
 
-@router.get("/assignments/{assignment_id}/gradebook-export", response_model=AssignmentGradebookExportViewOut)
+@router.get(
+    "/assignments/{assignment_id}/gradebook-export", response_model=AssignmentGradebookExportViewOut
+)
 def read_teacher_assignment_gradebook_export(
     assignment_id: uuid.UUID,
     user: CurrentUser,
@@ -3890,7 +4046,9 @@ def read_teacher_assignment_gradebook_export(
         class_id=uuid.UUID(str(payload["class_id"])),
         subject_id=uuid.UUID(str(payload["subject_id"])),
         school_year_id=uuid.UUID(str(payload["school_year_id"])),
-        grading_period_id=uuid.UUID(str(payload["grading_period_id"])) if payload.get("grading_period_id") else None,
+        grading_period_id=uuid.UUID(str(payload["grading_period_id"]))
+        if payload.get("grading_period_id")
+        else None,
         generated_at=payload["generated_at"],
         record_count=int(payload["record_count"]),
         active_record_count=int(payload["active_record_count"]),
@@ -4099,7 +4257,9 @@ def update_teacher_mastery_evaluation(
     return _mastery_evaluation_out(evaluation)
 
 
-@router.get("/mastery-evaluations/{mastery_evaluation_id}", response_model=MasteryEvaluationDetailOut)
+@router.get(
+    "/mastery-evaluations/{mastery_evaluation_id}", response_model=MasteryEvaluationDetailOut
+)
 def read_teacher_mastery_evaluation_detail(
     mastery_evaluation_id: uuid.UUID,
     user: CurrentUser,
@@ -4249,7 +4409,10 @@ def read_teacher_mastery_matrix_summary(
     return MasteryMatrixSummaryOut(**payload)
 
 
-@router.get("/mastery-matrices/{mastery_matrix_id}/standards", response_model=MasteryMatrixStandardsSummaryOut)
+@router.get(
+    "/mastery-matrices/{mastery_matrix_id}/standards",
+    response_model=MasteryMatrixStandardsSummaryOut,
+)
 def read_teacher_mastery_matrix_standards_summary(
     mastery_matrix_id: uuid.UUID,
     user: CurrentUser,
@@ -4268,7 +4431,9 @@ def read_teacher_mastery_matrix_standards_summary(
     return MasteryMatrixStandardsSummaryOut(**payload)
 
 
-@router.get("/mastery-matrices/{mastery_matrix_id}/students", response_model=MasteryMatrixStudentsSummaryOut)
+@router.get(
+    "/mastery-matrices/{mastery_matrix_id}/students", response_model=MasteryMatrixStudentsSummaryOut
+)
 def read_teacher_mastery_matrix_students_summary(
     mastery_matrix_id: uuid.UUID,
     user: CurrentUser,
@@ -4287,7 +4452,10 @@ def read_teacher_mastery_matrix_students_summary(
     return MasteryMatrixStudentsSummaryOut(**payload)
 
 
-@router.get("/mastery-matrices/{mastery_matrix_id}/reteach-summary", response_model=MasteryMatrixReteachSummaryOut)
+@router.get(
+    "/mastery-matrices/{mastery_matrix_id}/reteach-summary",
+    response_model=MasteryMatrixReteachSummaryOut,
+)
 def read_teacher_mastery_matrix_reteach_summary(
     mastery_matrix_id: uuid.UUID,
     user: CurrentUser,
@@ -4327,7 +4495,10 @@ def read_teacher_mastery_matrix_heatmap(
     return MasteryMatrixHeatmapOut(**payload)
 
 
-@router.get("/mastery-matrices/{mastery_matrix_id}/reteach-insights", response_model=MasteryMatrixReteachInsightsOut)
+@router.get(
+    "/mastery-matrices/{mastery_matrix_id}/reteach-insights",
+    response_model=MasteryMatrixReteachInsightsOut,
+)
 def read_teacher_mastery_matrix_reteach_insights(
     mastery_matrix_id: uuid.UUID,
     user: CurrentUser,
@@ -4540,7 +4711,11 @@ def read_teacher_reteach_plan_versions(
     return [_reteach_plan_version_out(row) for row in rows]
 
 
-@router.post("/reteach-plans/{reteach_plan_id}/versions", response_model=ReteachPlanVersionOut, status_code=201)
+@router.post(
+    "/reteach-plans/{reteach_plan_id}/versions",
+    response_model=ReteachPlanVersionOut,
+    status_code=201,
+)
 def create_teacher_reteach_plan_version(
     reteach_plan_id: uuid.UUID,
     body: ReteachPlanVersionCreate,
@@ -4593,7 +4768,9 @@ def create_teacher_reteach_plan_ai_draft(
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    plan = get_reteach_plan_or_404(db, tenant_id=tenant_id, user_id=user.id, reteach_plan_id=plan.id)
+    plan = get_reteach_plan_or_404(
+        db, tenant_id=tenant_id, user_id=user.id, reteach_plan_id=plan.id
+    )
     return ReteachPlanAIDraftOut(
         plan=_reteach_plan_out(plan),
         version=_reteach_plan_version_out(version),
@@ -4737,7 +4914,9 @@ def read_teacher_newsletter_versions(
     return [_newsletter_version_out(row) for row in rows]
 
 
-@router.post("/newsletters/{newsletter_id}/versions", response_model=NewsletterVersionOut, status_code=201)
+@router.post(
+    "/newsletters/{newsletter_id}/versions", response_model=NewsletterVersionOut, status_code=201
+)
 def create_teacher_newsletter_version(
     newsletter_id: uuid.UUID,
     body: NewsletterVersionCreate,
@@ -4803,7 +4982,9 @@ def create_teacher_newsletter_ai_draft(
     )
 
 
-@router.post("/newsletters/{newsletter_id}/regenerate-section", response_model=NewsletterSectionRegenerateOut)
+@router.post(
+    "/newsletters/{newsletter_id}/regenerate-section", response_model=NewsletterSectionRegenerateOut
+)
 def regenerate_teacher_newsletter_section(
     newsletter_id: uuid.UUID,
     body: NewsletterSectionRegenerateCreate,
@@ -4844,7 +5025,9 @@ def regenerate_teacher_newsletter_section(
     )
 
 
-@router.post("/newsletters/{newsletter_id}/exports", response_model=NewsletterExportOut, status_code=201)
+@router.post(
+    "/newsletters/{newsletter_id}/exports", response_model=NewsletterExportOut, status_code=201
+)
 def create_teacher_newsletter_export(
     newsletter_id: uuid.UUID,
     body: NewsletterExportCreate,
@@ -4906,7 +5089,9 @@ def _lesson_reflection_out(row: TeacherAssistLessonReflection) -> LessonReflecti
     return LessonReflectionOut(**serialize_lesson_reflection(row))
 
 
-def _lesson_reflection_version_out(row: TeacherAssistLessonReflectionVersion) -> LessonReflectionVersionOut:
+def _lesson_reflection_version_out(
+    row: TeacherAssistLessonReflectionVersion,
+) -> LessonReflectionVersionOut:
     return LessonReflectionVersionOut(**serialize_lesson_reflection_version(row))
 
 
@@ -4936,7 +5121,9 @@ def read_teacher_lesson_effectiveness(
     return [LessonEffectivenessOut(**row) for row in rows]
 
 
-@router.get("/weekly-plans/{weekly_plan_id}/lesson-effectiveness", response_model=LessonEffectivenessOut)
+@router.get(
+    "/weekly-plans/{weekly_plan_id}/lesson-effectiveness", response_model=LessonEffectivenessOut
+)
 def read_teacher_weekly_plan_lesson_effectiveness(
     weekly_plan_id: uuid.UUID,
     user: CurrentUser,
@@ -5042,7 +5229,9 @@ def create_teacher_lesson_reflection(
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    row = get_lesson_reflection_or_404(db, tenant_id=tenant_id, user_id=user.id, lesson_reflection_id=row.id)
+    row = get_lesson_reflection_or_404(
+        db, tenant_id=tenant_id, user_id=user.id, lesson_reflection_id=row.id
+    )
     return _lesson_reflection_out(row)
 
 
@@ -5091,11 +5280,15 @@ def update_teacher_lesson_reflection(
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    row = get_lesson_reflection_or_404(db, tenant_id=tenant_id, user_id=user.id, lesson_reflection_id=row.id)
+    row = get_lesson_reflection_or_404(
+        db, tenant_id=tenant_id, user_id=user.id, lesson_reflection_id=row.id
+    )
     return _lesson_reflection_out(row)
 
 
-@router.get("/reflections/{lesson_reflection_id}/versions", response_model=list[LessonReflectionVersionOut])
+@router.get(
+    "/reflections/{lesson_reflection_id}/versions", response_model=list[LessonReflectionVersionOut]
+)
 def read_teacher_lesson_reflection_versions(
     lesson_reflection_id: uuid.UUID,
     user: CurrentUser,
@@ -5197,7 +5390,9 @@ def read_planning_drafts(user: CurrentUser, db: DbSession) -> list[PlanningDraft
     return [
         _planning_draft_out(
             row,
-            subject_ids=subject_map.get(row.id, [row.subject_id] if row.subject_id is not None else []),
+            subject_ids=subject_map.get(
+                row.id, [row.subject_id] if row.subject_id is not None else []
+            ),
             pacing_item_ids=pacing_item_map.get(row.id, []),
             standard_ids=standard_map.get(row.id, []),
             resource_ids=resource_map.get(row.id, []),
@@ -5215,7 +5410,9 @@ def create_teacher_planning_draft(
     tenant_id = _teacher_assist_tenant_id(db, user)
     launch_context = None
     if body.pacing_guide_period_id is not None:
-        from oziebot_api.services.teacher_assist.pacing_guide_workspace import build_period_launch_context
+        from oziebot_api.services.teacher_assist.pacing_guide_workspace import (
+            build_period_launch_context,
+        )
 
         launch_context = build_period_launch_context(
             db,
@@ -5228,7 +5425,9 @@ def create_teacher_planning_draft(
         uuid.UUID(draft_payload["school_year_id"]) if draft_payload.get("school_year_id") else None
     )
     grading_period_id = body.grading_period_id or (
-        uuid.UUID(draft_payload["grading_period_id"]) if draft_payload.get("grading_period_id") else None
+        uuid.UUID(draft_payload["grading_period_id"])
+        if draft_payload.get("grading_period_id")
+        else None
     )
     subject_id = body.subject_id or (
         uuid.UUID(draft_payload["subject_id"]) if draft_payload.get("subject_id") else None
@@ -5253,9 +5452,17 @@ def create_teacher_planning_draft(
             title=body.plan_title or body.title or draft_payload.get("title"),
             module_title=body.module_title or draft_payload.get("module_title"),
             start_date=body.start_date
-            or (date.fromisoformat(draft_payload["start_date"]) if draft_payload.get("start_date") else None),
+            or (
+                date.fromisoformat(draft_payload["start_date"])
+                if draft_payload.get("start_date")
+                else None
+            ),
             end_date=body.end_date
-            or (date.fromisoformat(draft_payload["end_date"]) if draft_payload.get("end_date") else None),
+            or (
+                date.fromisoformat(draft_payload["end_date"])
+                if draft_payload.get("end_date")
+                else None
+            ),
             estimated_weeks=body.estimated_weeks,
             instructional_days_count=body.instructional_days_count,
             notes=body.notes or draft_payload.get("notes"),
@@ -5278,7 +5485,9 @@ def create_teacher_planning_draft(
                 )
                 resource_ids.append(attach.resource_library_item_id)
     if body.pacing_guide_period_id is not None and launch_context:
-        from oziebot_api.services.teacher_assist.generated_artifacts import register_generated_artifact
+        from oziebot_api.services.teacher_assist.generated_artifacts import (
+            register_generated_artifact,
+        )
 
         register_generated_artifact(
             db,
@@ -5381,7 +5590,9 @@ def create_teacher_planning_draft_resource(
     )
     return _planning_draft_out(
         draft,
-        subject_ids=subject_map.get(draft.id, [draft.subject_id] if draft.subject_id is not None else []),
+        subject_ids=subject_map.get(
+            draft.id, [draft.subject_id] if draft.subject_id is not None else []
+        ),
         pacing_item_ids=pacing_item_map.get(draft.id, []),
         standard_ids=standard_map.get(draft.id, []),
         resource_ids=resource_map.get(draft.id, []),
@@ -5435,7 +5646,9 @@ def read_planning_draft_context_preview(
             standard_ids=standard_ids,
             resource_ids=resource_ids,
         ),
-        school_year=_school_year_out(preview.draft.school_year) if preview.draft.school_year is not None else None,
+        school_year=_school_year_out(preview.draft.school_year)
+        if preview.draft.school_year is not None
+        else None,
         grading_period=_grading_period_out(preview.draft.grading_period)
         if preview.draft.grading_period is not None
         else None,
@@ -5446,14 +5659,8 @@ def read_planning_draft_context_preview(
         pacing_items=[
             _pacing_item_out(
                 row,
-                standard_ids=[
-                    item.standard_id
-                    for item in row.standard_links
-                ],
-                resource_ids=[
-                    item.resource_library_item_id
-                    for item in row.resource_links
-                ],
+                standard_ids=[item.standard_id for item in row.standard_links],
+                resource_ids=[item.resource_library_item_id for item in row.resource_links],
             )
             for row in preview.pacing_items
         ],
@@ -5609,7 +5816,9 @@ def start_teacher_weekly_plan_workflow(
 
 
 @router.get("/workflows", response_model=list[TeacherAssistWorkflowOut])
-def read_teacher_assist_workflows(user: CurrentUser, db: DbSession) -> list[TeacherAssistWorkflowOut]:
+def read_teacher_assist_workflows(
+    user: CurrentUser, db: DbSession
+) -> list[TeacherAssistWorkflowOut]:
     tenant_id = _teacher_assist_tenant_id(db, user)
     return [
         _workflow_out(row)
@@ -5705,7 +5914,9 @@ def read_teacher_assist_weekly_plan(
     )
 
 
-@router.post("/weekly-plans/{weekly_plan_id}/assignments", response_model=AssignmentOut, status_code=201)
+@router.post(
+    "/weekly-plans/{weekly_plan_id}/assignments", response_model=AssignmentOut, status_code=201
+)
 def create_teacher_assignment_from_weekly_plan(
     weekly_plan_id: uuid.UUID,
     body: WeeklyPlanAssignmentCreate,
@@ -6040,7 +6251,9 @@ def read_teacher_assist_weekly_plan_versions(
     return [_weekly_plan_version_out(row) for row in rows]
 
 
-@router.get("/weekly-plans/{weekly_plan_id}/versions/{version_id}", response_model=WeeklyPlanVersionOut)
+@router.get(
+    "/weekly-plans/{weekly_plan_id}/versions/{version_id}", response_model=WeeklyPlanVersionOut
+)
 def read_teacher_assist_weekly_plan_version(
     weekly_plan_id: uuid.UUID,
     version_id: uuid.UUID,

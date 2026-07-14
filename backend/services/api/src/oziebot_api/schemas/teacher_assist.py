@@ -7,10 +7,14 @@ import uuid
 from pydantic import BaseModel, Field
 
 
-GradeLevelLiteral = Literal["Pre-K", "K", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
+GradeLevelLiteral = Literal[
+    "Pre-K", "K", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"
+]
 GradingPeriodTypeLiteral = Literal["nine_weeks", "six_weeks", "semester", "trimester", "custom"]
 StandardTypeLiteral = Literal["TEKS", "CUSTOM"]
-ResourceTypeLiteral = Literal["pdf", "pptx", "image", "worksheet", "spreadsheet", "link", "doc", "other"]
+ResourceTypeLiteral = Literal[
+    "pdf", "pptx", "image", "worksheet", "spreadsheet", "link", "doc", "other"
+]
 AssignmentTypeLiteral = Literal[
     "writing",
     "reading_response",
@@ -94,7 +98,9 @@ ReteachPlanStatusLiteral = Literal["draft", "ai_draft", "teacher_review", "archi
 ReteachPlanVersionSourceLiteral = Literal["initial", "ai_draft", "teacher_edit"]
 NewsletterStatusLiteral = Literal["draft", "review", "approved", "archived"]
 NewsletterVersionSourceLiteral = Literal["initial", "ai_draft", "ai_section_regen", "teacher_edit"]
-NewsletterRegeneratableSectionLiteral = Literal["overview", "upcoming_learning", "teacher_message", "reminders"]
+NewsletterRegeneratableSectionLiteral = Literal[
+    "overview", "upcoming_learning", "teacher_message", "reminders"
+]
 NewsletterExportFormatLiteral = Literal["html", "pdf", "docx"]
 LessonReflectionStatusLiteral = Literal["draft", "review", "archived"]
 LessonReflectionVersionSourceLiteral = Literal["initial", "ai_draft", "teacher_edit"]
@@ -137,8 +143,12 @@ TeacherAssistWorkflowTypeLiteral = Literal[
     "grading_assist",
     "artifact_export",
 ]
-TeacherAssistWorkflowStatusLiteral = Literal["queued", "running", "completed", "failed", "cancelled"]
-TeacherAssistWorkflowStepStatusLiteral = Literal["queued", "running", "completed", "failed", "skipped"]
+TeacherAssistWorkflowStatusLiteral = Literal[
+    "queued", "running", "completed", "failed", "cancelled"
+]
+TeacherAssistWorkflowStepStatusLiteral = Literal[
+    "queued", "running", "completed", "failed", "skipped"
+]
 WeeklyPlanStatusLiteral = Literal["in_progress", "completed"]
 TeacherAssistExportArtifactTypeLiteral = Literal[
     "lesson_slides",
@@ -1524,7 +1534,9 @@ class LessonEffectivenessOut(BaseModel):
     gradebook_commit_count: int
     reteach_plan_count: int
     mixed_or_reteach_assignments: int
-    assignment_summaries: list[LessonEffectivenessAssignmentSummaryOut] = Field(default_factory=list)
+    assignment_summaries: list[LessonEffectivenessAssignmentSummaryOut] = Field(
+        default_factory=list
+    )
     read_only: bool = True
 
 
@@ -2098,8 +2110,12 @@ class TeacherAssistClassWorkspaceOut(BaseModel):
     class_context: ClassOut = Field(alias="class")
     active_plans: list[TeacherAssistWorkspacePlanSummaryOut] = Field(default_factory=list)
     assignments: list[TeacherAssistWorkspaceAssignmentSummaryOut] = Field(default_factory=list)
-    pending_grading_reviews: list[TeacherAssistWorkspaceGradingReviewSummaryOut] = Field(default_factory=list)
-    recent_submissions: list[TeacherAssistWorkspaceSubmissionSummaryOut] = Field(default_factory=list)
+    pending_grading_reviews: list[TeacherAssistWorkspaceGradingReviewSummaryOut] = Field(
+        default_factory=list
+    )
+    recent_submissions: list[TeacherAssistWorkspaceSubmissionSummaryOut] = Field(
+        default_factory=list
+    )
     workflow_summaries: list[TeacherAssistWorkspaceWorkflowSummaryOut] = Field(default_factory=list)
     packet_summaries: list[TeacherAssistWorkspacePacketSummaryOut] = Field(default_factory=list)
     needs_attention_count: int = 0
@@ -2115,7 +2131,9 @@ class TeacherAssistWorkspaceOut(BaseModel):
     needs_attention: list[TeacherAssistWorkspaceNeedsAttentionOut] = Field(default_factory=list)
     recent_activity: list[TeacherAssistActivityEventOut] = Field(default_factory=list)
     active_workflows: list[TeacherAssistWorkspaceWorkflowSummaryOut] = Field(default_factory=list)
-    review_required_items: list[TeacherAssistWorkspaceReviewRequiredItemOut] = Field(default_factory=list)
+    review_required_items: list[TeacherAssistWorkspaceReviewRequiredItemOut] = Field(
+        default_factory=list
+    )
     workspace_stats: TeacherAssistWorkspaceStatsOut
     mastery_insights: TeacherAssistWorkspaceMasteryInsightsOut | None = None
 

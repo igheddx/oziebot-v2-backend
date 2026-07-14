@@ -8,12 +8,21 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from oziebot_api.services.teacher_assist.assignment_coverage import build_assignment_coverage_view
-from oziebot_api.services.teacher_assist.instructional_reflections import list_instructional_reflections, serialize_instructional_reflection
-from oziebot_api.services.teacher_assist.instructional_week_closure import get_or_create_week_closure, serialize_week_closure
+from oziebot_api.services.teacher_assist.instructional_reflections import (
+    list_instructional_reflections,
+    serialize_instructional_reflection,
+)
+from oziebot_api.services.teacher_assist.instructional_week_closure import (
+    get_or_create_week_closure,
+    serialize_week_closure,
+)
 from oziebot_api.services.teacher_assist.mastery_dashboard_v2 import build_mastery_dashboard_v2
 from oziebot_api.services.teacher_assist.objective_performance import ObjectivePerformanceService
 from oziebot_api.services.teacher_assist.reteach_workspace import build_reteach_workspace
-from oziebot_api.services.teacher_assist.student_support_groups import list_support_groups, serialize_support_group
+from oziebot_api.services.teacher_assist.student_support_groups import (
+    list_support_groups,
+    serialize_support_group,
+)
 
 
 def build_instructional_health_report(

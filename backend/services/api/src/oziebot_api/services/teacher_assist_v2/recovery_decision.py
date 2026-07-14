@@ -18,14 +18,20 @@ from sqlalchemy.orm import Session
 from oziebot_api.models.education_catalog import EducationObjective
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
 from oziebot_api.models.teacher_assist_v2_assignment_grade import TeacherAssistV2AssignmentGrade
-from oziebot_api.models.teacher_assist_v2_instructional_package import TeacherAssistV2InstructionalPackage
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackage,
+)
 from oziebot_api.models.teacher_assist_v2_mastery_evidence import TeacherAssistV2MasteryEvidence
 from oziebot_api.models.user import User
 
 # ── Recovery intent → preferred artifact types (internal only) ─────────────────
 
 _INTENT_ARTIFACT_PREFERENCES: dict[str, tuple[str, ...]] = {
-    "understanding": ("recovery_mini_lesson", "recovery_small_group_packet", "recovery_conference_guide"),
+    "understanding": (
+        "recovery_mini_lesson",
+        "recovery_small_group_packet",
+        "recovery_conference_guide",
+    ),
     "skill": ("recovery_guided_practice", "recovery_assignment", "recovery_small_group_packet"),
     "vocabulary": ("recovery_bell_ringer", "recovery_homework", "recovery_assignment"),
     "fluency": ("recovery_bell_ringer", "recovery_assignment", "recovery_exit_ticket"),
@@ -73,6 +79,7 @@ _STRATEGY_PRIORITY: dict[str, str] = {
 
 # ── Recovery intent inference (internal — never shown to teachers) ─────────────
 
+
 def _infer_recovery_intent(
     *,
     suspected_misconception: str | None,
@@ -105,7 +112,16 @@ def _infer_recovery_intent(
     # Skill: misconception references applying or procedural steps
     if suspected_misconception:
         lower = suspected_misconception.lower()
-        skill_signals = {"apply", "using", "step", "procedur", "how to", "process", "method", "technique"}
+        skill_signals = {
+            "apply",
+            "using",
+            "step",
+            "procedur",
+            "how to",
+            "process",
+            "method",
+            "technique",
+        }
         if any(s in lower for s in skill_signals):
             return "skill"
 
@@ -113,6 +129,7 @@ def _infer_recovery_intent(
 
 
 # ── Strategy selection (10-level hierarchy) ────────────────────────────────────
+
 
 def _select_strategy(
     *,
@@ -205,6 +222,7 @@ def _select_strategy(
 
 # ── Plan context extraction ────────────────────────────────────────────────────
 
+
 def _extract_plan_context(
     package: TeacherAssistV2InstructionalPackage,
     *,
@@ -285,7 +303,9 @@ def _extract_kdg_context(kdg: list[dict], objective_code: str | None) -> dict[st
         if entry.get("objective_code") == objective_code:
             deps = entry.get("dependencies") or []
             gap_consequences = [d["gap_consequence"] for d in deps if d.get("gap_consequence")]
-            activation_strategies = [d["activation_strategy"] for d in deps if d.get("activation_strategy")]
+            activation_strategies = [
+                d["activation_strategy"] for d in deps if d.get("activation_strategy")
+            ]
             may_need_activation = [d for d in deps if d.get("status") == "may_need_activation"]
             return {
                 "has_downstream_risk": bool(may_need_activation),
@@ -297,6 +317,7 @@ def _extract_kdg_context(kdg: list[dict], objective_code: str | None) -> dict[st
 
 
 # ── 4-Stage plan and success criteria ─────────────────────────────────────────
+
 
 def _build_stage_plan(
     *,
@@ -310,11 +331,11 @@ def _build_stage_plan(
 ) -> dict[str, Any]:
     exit_ticket_stem = instructional_contract.get("exit_ticket_stem", "")
     success_target = (
-        observable_mastery_evidence
-        or exit_ticket_stem
-        or "demonstrates mastery of the objective"
+        observable_mastery_evidence or exit_ticket_stem or "demonstrates mastery of the objective"
     )
-    goal_description = f"Address: {misconception}" if misconception else f"Close the gap in {recovery_intent}"
+    goal_description = (
+        f"Address: {misconception}" if misconception else f"Close the gap in {recovery_intent}"
+    )
     activity_label = strategy.replace("_", " ").title()
 
     return {
@@ -378,6 +399,7 @@ def _build_success_criteria_template(
 
 
 # ── Main public function ───────────────────────────────────────────────────────
+
 
 def build_recovery_decision(
     db: Session,
@@ -450,7 +472,11 @@ def build_recovery_decision(
 
     # ── Extract plan context ────────────────────────────────────────────────────
     plan_context: dict[str, Any] = {}
-    kdg_context: dict[str, Any] = {"has_downstream_risk": False, "gap_consequence": None, "activation_strategy": None}
+    kdg_context: dict[str, Any] = {
+        "has_downstream_risk": False,
+        "gap_consequence": None,
+        "activation_strategy": None,
+    }
     objective_code: str | None = None
 
     if package is not None:
@@ -498,7 +524,9 @@ def build_recovery_decision(
     )
 
     # ── Select recommended artifact type from intent ────────────────────────────
-    preferred_artifacts = _INTENT_ARTIFACT_PREFERENCES.get(recovery_intent, ("recovery_mini_lesson",))
+    preferred_artifacts = _INTENT_ARTIFACT_PREFERENCES.get(
+        recovery_intent, ("recovery_mini_lesson",)
+    )
     recommended_artifact_type = preferred_artifacts[0]
 
     # Strategy-level override takes precedence over intent
@@ -544,16 +572,16 @@ def build_recovery_decision(
     )
 
     students_below = [
-        e.student_number
-        for e in evidence_rows
-        if e.mastery_level in ("developing", "beginning")
+        e.student_number for e in evidence_rows if e.mastery_level in ("developing", "beginning")
     ]
 
     return {
         "available": True,
         "assignment_id": str(assignment_id),
         "instructional_package_id": (
-            str(assignment.instructional_package_id) if assignment.instructional_package_id else None
+            str(assignment.instructional_package_id)
+            if assignment.instructional_package_id
+            else None
         ),
         "objective_code": objective_code,
         "strategy": strategy,

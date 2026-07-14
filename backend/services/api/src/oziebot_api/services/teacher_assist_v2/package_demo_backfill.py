@@ -15,7 +15,9 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2InstructionalPackageArtifact,
 )
 from oziebot_api.models.user import User
-from oziebot_api.services.teacher_assist_v2.assignment_print_packets import generate_assignment_print_packet
+from oziebot_api.services.teacher_assist_v2.assignment_print_packets import (
+    generate_assignment_print_packet,
+)
 from oziebot_api.services.teacher_assist_v2.demo_content.ela_week1_main_idea import (
     CONTENT_BUILDERS,
     PACKAGE_TITLE,
@@ -80,7 +82,9 @@ def backfill_package_demo_content(
     package.title = PACKAGE_TITLE
     package.provider_name = "demo"
     metadata = dict(package.metadata_json or {})
-    metadata.update({"is_mock": False, "demo_backfill": True, "content_profile": "ela_week1_main_idea"})
+    metadata.update(
+        {"is_mock": False, "demo_backfill": True, "content_profile": "ela_week1_main_idea"}
+    )
     package.metadata_json = metadata
     package.updated_at = now
 
@@ -92,7 +96,9 @@ def backfill_package_demo_content(
         content = _resolve_content(artifact)
         artifact.title = str(content["title"])
         artifact.content_json = content
-        artifact.preview_html = render_artifact_preview_html(artifact_type=artifact.artifact_type, content=content)
+        artifact.preview_html = render_artifact_preview_html(
+            artifact_type=artifact.artifact_type, content=content
+        )
         artifact.status = "ready"
         artifact.metadata_json = {
             "provider": "demo",
@@ -111,16 +117,25 @@ def backfill_package_demo_content(
         artifact.export_format = export_format
         artifact.updated_at = now
 
-        if artifact.artifact_type in {"quiz", "assignment", "writing_response"} and artifact.assignment_id:
-            from oziebot_api.services.teacher_assist_v2.assessment_student_exports import refresh_assessment_student_exports
+        if (
+            artifact.artifact_type in {"quiz", "assignment", "writing_response"}
+            and artifact.assignment_id
+        ):
+            from oziebot_api.services.teacher_assist_v2.assessment_student_exports import (
+                refresh_assessment_student_exports,
+            )
 
-            refresh_assessment_student_exports(db, settings=settings, package=package, artifact=artifact)
+            refresh_assessment_student_exports(
+                db, settings=settings, package=package, artifact=artifact
+            )
 
         if artifact.assignment_id:
             assignment = db.get(TeacherAssistV2Assignment, artifact.assignment_id)
             if assignment is not None:
                 assignment.title = artifact.title
-                assignment.description = str(content.get("summary") or content.get("description") or "")
+                assignment.description = str(
+                    content.get("summary") or content.get("description") or ""
+                )
                 assignment.updated_at = now
                 if artifact.artifact_type == "assignment":
                     assignment_artifact = artifact

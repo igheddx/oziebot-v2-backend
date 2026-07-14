@@ -70,7 +70,9 @@ def state_archive_dependencies(db: Session, *, state_id: uuid.UUID) -> list[str]
         db,
         select(func.count())
         .select_from(TeacherSchoolAssignment)
-        .where(TeacherSchoolAssignment.state_id == state_id, TeacherSchoolAssignment.active.is_(True)),
+        .where(
+            TeacherSchoolAssignment.state_id == state_id, TeacherSchoolAssignment.active.is_(True)
+        ),
     ):
         deps.append("teacher assignments")
     return deps
@@ -90,7 +92,10 @@ def district_archive_dependencies(db: Session, *, district_id: uuid.UUID) -> lis
         db,
         select(func.count())
         .select_from(TeacherSchoolAssignment)
-        .where(TeacherSchoolAssignment.district_id == district_id, TeacherSchoolAssignment.active.is_(True)),
+        .where(
+            TeacherSchoolAssignment.district_id == district_id,
+            TeacherSchoolAssignment.active.is_(True),
+        ),
     ):
         deps.append("teacher assignments")
     return deps
@@ -110,7 +115,9 @@ def school_archive_dependencies(db: Session, *, school_id: uuid.UUID) -> list[st
         db,
         select(func.count())
         .select_from(TeacherSchoolAssignment)
-        .where(TeacherSchoolAssignment.school_id == school_id, TeacherSchoolAssignment.active.is_(True)),
+        .where(
+            TeacherSchoolAssignment.school_id == school_id, TeacherSchoolAssignment.active.is_(True)
+        ),
     ):
         deps.append("teacher assignments")
     return deps
@@ -302,7 +309,9 @@ def build_v2_context(db: Session, *, user: User) -> dict[str, Any]:
             allowed_routes.append("/teacher-assist-v2/teach")
             allowed_routes.append("/teacher-assist-v2/assignments")
 
-    feature_locked = requires_password_change or not onboarding_complete or not pacing_guide_setup_complete
+    feature_locked = (
+        requires_password_change or not onboarding_complete or not pacing_guide_setup_complete
+    )
     feature_lock_message = None
     if feature_locked:
         if requires_password_change:
@@ -344,11 +353,15 @@ def build_admin_dashboard(db: Session) -> dict[str, int]:
         )
         or 0,
         "districts": db.scalar(
-            select(func.count()).select_from(EducationDistrict).where(EducationDistrict.active.is_(True))
+            select(func.count())
+            .select_from(EducationDistrict)
+            .where(EducationDistrict.active.is_(True))
         )
         or 0,
         "schools": db.scalar(
-            select(func.count()).select_from(EducationSchool).where(EducationSchool.active.is_(True))
+            select(func.count())
+            .select_from(EducationSchool)
+            .where(EducationSchool.active.is_(True))
         )
         or 0,
         "grades": db.scalar(
@@ -356,7 +369,9 @@ def build_admin_dashboard(db: Session) -> dict[str, int]:
         )
         or 0,
         "subjects": db.scalar(
-            select(func.count()).select_from(EducationSubject).where(EducationSubject.active.is_(True))
+            select(func.count())
+            .select_from(EducationSubject)
+            .where(EducationSubject.active.is_(True))
         )
         or 0,
     }

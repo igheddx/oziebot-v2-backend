@@ -27,7 +27,9 @@ def serialize_support_group(row: TeacherAssistStudentSupportGroup) -> dict[str, 
         "status": row.status,
         "class_id": str(row.class_id),
         "subject_id": str(row.subject_id),
-        "instructional_week_id": str(row.instructional_week_id) if row.instructional_week_id else None,
+        "instructional_week_id": str(row.instructional_week_id)
+        if row.instructional_week_id
+        else None,
         "objective_id": str(row.objective_id) if row.objective_id else None,
         "standard_id": str(row.standard_id) if row.standard_id else None,
         "notes": row.notes,
@@ -57,7 +59,9 @@ def list_support_groups(
     if class_id is not None:
         query = query.where(TeacherAssistStudentSupportGroup.class_id == class_id)
     if instructional_week_id is not None:
-        query = query.where(TeacherAssistStudentSupportGroup.instructional_week_id == instructional_week_id)
+        query = query.where(
+            TeacherAssistStudentSupportGroup.instructional_week_id == instructional_week_id
+        )
     if status is not None:
         query = query.where(
             TeacherAssistStudentSupportGroup.status == validate_student_support_group_status(status)

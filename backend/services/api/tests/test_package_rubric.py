@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from oziebot_api.services.teacher_assist_v2.deterministic_package_content import build_rubric_for_writing_response
+from oziebot_api.services.teacher_assist_v2.deterministic_package_content import (
+    build_rubric_for_writing_response,
+)
 from oziebot_api.services.teacher_assist_v2.package_artifact_update import _validate_rubric_content
 
 

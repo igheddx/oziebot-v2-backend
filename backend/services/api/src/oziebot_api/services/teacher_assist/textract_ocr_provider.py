@@ -21,7 +21,9 @@ def _resolve_textract_region(settings: Settings) -> str:
     )
 
 
-def _extract_textract_text_and_confidence(blocks: list[dict[str, Any]]) -> tuple[str, float | None, int]:
+def _extract_textract_text_and_confidence(
+    blocks: list[dict[str, Any]],
+) -> tuple[str, float | None, int]:
     lines: list[str] = []
     confidences: list[float] = []
     page_numbers: set[int] = set()
@@ -52,7 +54,11 @@ def _map_textract_error(exc: Exception) -> TeacherAssistOCRProviderError:
         code = str(error.get("Code") or "")
         message = str(error.get("Message") or str(exc))
         lowered = code.lower()
-        if "throttl" in lowered or "limitexceeded" in lowered or lowered in {"provisionedthroughputexceededexception"}:
+        if (
+            "throttl" in lowered
+            or "limitexceeded" in lowered
+            or lowered in {"provisionedthroughputexceededexception"}
+        ):
             return TeacherAssistOCRProviderError(
                 message or "TeacherAssist Textract rate limit exceeded",
                 error_code="provider_quota_exceeded",
@@ -109,7 +115,9 @@ class TextractTeacherAssistOCRProvider:
     ) -> TeacherAssistOCRProviderResult:
         import boto3
 
-        model_name = get_teacher_assist_ocr_provider_model(settings, provider_name=self.provider_name)
+        model_name = get_teacher_assist_ocr_provider_model(
+            settings, provider_name=self.provider_name
+        )
         max_pages = max(1, int(settings.teacher_assist_ocr_max_pages))
         timeout_seconds = max(5, int(settings.teacher_assist_ocr_provider_timeout_seconds))
         client = boto3.client("textract", region_name=_resolve_textract_region(settings))
@@ -128,7 +136,9 @@ class TextractTeacherAssistOCRProvider:
                 metadata={"provider": self.provider_name},
             )
 
-        extracted_text, average_confidence, page_count = _extract_textract_text_and_confidence(blocks)
+        extracted_text, average_confidence, page_count = _extract_textract_text_and_confidence(
+            blocks
+        )
         if page_count > max_pages:
             raise TeacherAssistOCRProviderError(
                 f"Artifact exceeds TeacherAssist OCR max page count ({max_pages})",

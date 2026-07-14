@@ -68,7 +68,9 @@ def build_mastery_dashboard_v2(
             "objective_health": objective_health,
             "objective_coverage": {
                 "total_objectives": len(objectives),
-                "assessed_objectives": sum(1 for row in objectives if (row.get("students_assessed") or 0) > 0),
+                "assessed_objectives": sum(
+                    1 for row in objectives if (row.get("students_assessed") or 0) > 0
+                ),
             },
             "students_needing_support": performance.get("students_needing_support") or [],
             "students_near_mastery": performance.get("students_near_mastery") or [],

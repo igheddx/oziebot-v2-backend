@@ -10,7 +10,10 @@ from sqlalchemy.orm import Session, selectinload
 from oziebot_api.models.teacher_assist_generated_artifact import TeacherAssistGeneratedArtifact
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
-from oziebot_api.models.teacher_assist_time_savings import TeacherAssistPlanningGroupMember, TeacherAssistWeekTemplate
+from oziebot_api.models.teacher_assist_time_savings import (
+    TeacherAssistPlanningGroupMember,
+    TeacherAssistWeekTemplate,
+)
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.week_context_service import WeekContextService
@@ -69,8 +72,12 @@ def compute_reuse_score(
     target_resources: set[str],
     target_title: str | None,
 ) -> ReuseScore:
-    subject_match = bool(source_subject and target_subject and source_subject.lower() == target_subject.lower())
-    grade_match = bool(source_grade and target_grade and source_grade.lower() == target_grade.lower())
+    subject_match = bool(
+        source_subject and target_subject and source_subject.lower() == target_subject.lower()
+    )
+    grade_match = bool(
+        source_grade and target_grade and source_grade.lower() == target_grade.lower()
+    )
     objective_ratio = (
         len(source_objectives & target_objectives) / len(source_objectives | target_objectives)
         if source_objectives or target_objectives
@@ -110,7 +117,9 @@ class InstructionalAssetReuseService:
         limit: int = 12,
     ) -> list[dict[str, Any]]:
         context = WeekContextService.build(db, tenant_id=tenant_id, user=user, period_id=period_id)
-        target_objectives = {row.get("objective_code") for row in context.objectives if row.get("objective_code")}
+        target_objectives = {
+            row.get("objective_code") for row in context.objectives if row.get("objective_code")
+        }
         target_resources = {
             str(row.get("catalog_resource_id") or row.get("resource_library_item_id"))
             for row in context.resources
@@ -119,7 +128,9 @@ class InstructionalAssetReuseService:
         group_ids = [
             row.group_id
             for row in db.scalars(
-                select(TeacherAssistPlanningGroupMember).where(TeacherAssistPlanningGroupMember.user_id == user.id)
+                select(TeacherAssistPlanningGroupMember).where(
+                    TeacherAssistPlanningGroupMember.user_id == user.id
+                )
             ).all()
         ]
 
@@ -127,13 +138,19 @@ class InstructionalAssetReuseService:
 
         periods = db.scalars(
             select(TeacherAssistPacingGuidePeriod)
-            .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id)
+            .join(
+                TeacherAssistPacingGuide,
+                TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id,
+            )
             .where(
                 TeacherAssistPacingGuide.tenant_id == tenant_id,
                 TeacherAssistPacingGuidePeriod.period_type == "WEEK",
                 TeacherAssistPacingGuidePeriod.id != period_id,
             )
-            .options(selectinload(TeacherAssistPacingGuidePeriod.objectives), selectinload(TeacherAssistPacingGuidePeriod.resources))
+            .options(
+                selectinload(TeacherAssistPacingGuidePeriod.objectives),
+                selectinload(TeacherAssistPacingGuidePeriod.resources),
+            )
             .limit(50)
         ).all()
         for period in periods:
@@ -240,11 +257,14 @@ class InstructionalAssetReuseService:
             )
 
         plans = db.scalars(
-            select(TeacherAssistWeeklyPlan).where(
+            select(TeacherAssistWeeklyPlan)
+            .where(
                 TeacherAssistWeeklyPlan.tenant_id == tenant_id,
                 or_(
                     TeacherAssistWeeklyPlan.user_id == user.id,
-                    TeacherAssistWeeklyPlan.visibility_scope.in_(("shared", "grade_team", "school", "district")),
+                    TeacherAssistWeeklyPlan.visibility_scope.in_(
+                        ("shared", "grade_team", "school", "district")
+                    ),
                 ),
             )
             .limit(30)
@@ -268,7 +288,9 @@ class InstructionalAssetReuseService:
                     "entity_id": str(plan.id),
                     "title": plan.title,
                     "artifact_type": "LESSON_PLAN",
-                    "source": "PRIOR_SCHOOL_YEAR" if plan.school_year_origin_id else "CURRENT_TEACHER",
+                    "source": "PRIOR_SCHOOL_YEAR"
+                    if plan.school_year_origin_id
+                    else "CURRENT_TEACHER",
                     "reuse_score": reuse_score.serialize(),
                     "navigation_href": f"/teacher-assist/weekly-planning/plans?id={plan.id}",
                 }

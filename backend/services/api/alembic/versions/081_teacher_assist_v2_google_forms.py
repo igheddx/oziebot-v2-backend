@@ -53,21 +53,41 @@ def upgrade() -> None:
         sa.Column("google_response_url", sa.String(length=1024), nullable=True),
         sa.Column("google_created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("google_created_by_user_id", sa.Uuid(), nullable=False),
-        sa.Column("google_sync_status", sa.String(length=32), nullable=False, server_default="CREATED"),
+        sa.Column(
+            "google_sync_status", sa.String(length=32), nullable=False, server_default="CREATED"
+        ),
         sa.Column("question_mapping_json", sa.JSON(), nullable=False),
         sa.Column("last_import_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_import_count", sa.Integer(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["artifact_id"], ["teacher_assist_v2_instructional_package_artifacts.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["artifact_id"],
+            ["teacher_assist_v2_instructional_package_artifacts.id"],
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["catalog_grade_id"], ["education_grades.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["catalog_subject_id"], ["education_subjects.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"
+        ),
+        sa.ForeignKeyConstraint(
+            ["catalog_subject_id"], ["education_subjects.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["google_created_by_user_id"], ["users.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["instructional_package_id"], ["teacher_assist_v2_instructional_packages.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["platform_school_year_id"], ["education_school_years.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["instructional_package_id"],
+            ["teacher_assist_v2_instructional_packages.id"],
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["platform_school_year_id"], ["education_school_years.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["teacher_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -87,8 +107,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_ta_v2_assignment_google_forms_teacher", table_name="teacher_assist_v2_assignment_google_forms")
-    op.drop_index("ix_ta_v2_assignment_google_forms_assignment", table_name="teacher_assist_v2_assignment_google_forms")
+    op.drop_index(
+        "ix_ta_v2_assignment_google_forms_teacher",
+        table_name="teacher_assist_v2_assignment_google_forms",
+    )
+    op.drop_index(
+        "ix_ta_v2_assignment_google_forms_assignment",
+        table_name="teacher_assist_v2_assignment_google_forms",
+    )
     op.drop_table("teacher_assist_v2_assignment_google_forms")
-    op.drop_index("ix_ta_v2_teacher_google_connections_teacher", table_name="teacher_assist_v2_teacher_google_connections")
+    op.drop_index(
+        "ix_ta_v2_teacher_google_connections_teacher",
+        table_name="teacher_assist_v2_teacher_google_connections",
+    )
     op.drop_table("teacher_assist_v2_teacher_google_connections")

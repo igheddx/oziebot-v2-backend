@@ -66,6 +66,10 @@ from typing import TYPE_CHECKING  # noqa: E402
 if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
     from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
-    from oziebot_api.models.teacher_assist_pacing_item_resource import TeacherAssistPacingItemResource
-    from oziebot_api.models.teacher_assist_pacing_item_standard import TeacherAssistPacingItemStandard
+    from oziebot_api.models.teacher_assist_pacing_item_resource import (
+        TeacherAssistPacingItemResource,
+    )
+    from oziebot_api.models.teacher_assist_pacing_item_standard import (
+        TeacherAssistPacingItemStandard,
+    )
     from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject

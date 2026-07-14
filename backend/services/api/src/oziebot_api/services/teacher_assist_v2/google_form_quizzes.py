@@ -14,9 +14,13 @@ from sqlalchemy.orm import Session
 from oziebot_api.config import Settings
 from oziebot_api.models.education_catalog import EducationGrade, EducationSubject
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
-from oziebot_api.models.teacher_assist_v2_assignment_google_form import TeacherAssistV2AssignmentGoogleForm
+from oziebot_api.models.teacher_assist_v2_assignment_google_form import (
+    TeacherAssistV2AssignmentGoogleForm,
+)
 from oziebot_api.models.teacher_assist_v2_assignment_grade import TeacherAssistV2AssignmentGrade
-from oziebot_api.models.teacher_assist_v2_instructional_package import TeacherAssistV2InstructionalPackageArtifact
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackageArtifact,
+)
 from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssistV2StudentSubmission
 from oziebot_api.models.teacher_assist_v2_submission_batch import TeacherAssistV2SubmissionBatch
 from oziebot_api.models.user import User
@@ -27,14 +31,19 @@ from oziebot_api.services.teacher_assist_v2.google_forms_client import (
     get_form_with_questions,
     list_form_responses,
 )
-from oziebot_api.services.teacher_assist_v2.google_integration_constants import GOOGLE_FORM_IMPORT_MATCH_METHOD
+from oziebot_api.services.teacher_assist_v2.google_integration_constants import (
+    GOOGLE_FORM_IMPORT_MATCH_METHOD,
+)
 from oziebot_api.services.teacher_assist_v2.google_oauth import (
     get_teacher_google_connection,
     get_valid_access_token,
     google_oauth_configured,
     serialize_teacher_google_connection,
 )
-from oziebot_api.services.teacher_assist_v2.submission_intake import _get_assignment_or_404, _validate_student_number
+from oziebot_api.services.teacher_assist_v2.submission_intake import (
+    _get_assignment_or_404,
+    _validate_student_number,
+)
 from oziebot_api.services.teacher_assist_v2.teacher_onboarding import get_v2_onboarding
 
 
@@ -52,7 +61,9 @@ def get_assignment_google_form(
     ).one_or_none()
 
 
-def serialize_assignment_google_form(row: TeacherAssistV2AssignmentGoogleForm | None) -> dict[str, Any] | None:
+def serialize_assignment_google_form(
+    row: TeacherAssistV2AssignmentGoogleForm | None,
+) -> dict[str, Any] | None:
     if row is None:
         return None
     return {
@@ -102,7 +113,9 @@ def create_google_form_for_assignment(
     assignment_id: uuid.UUID,
 ) -> dict[str, Any]:
     if not google_oauth_configured(settings):
-        raise ValueError("Google integration is not configured on the server. Contact your administrator.")
+        raise ValueError(
+            "Google integration is not configured on the server. Contact your administrator."
+        )
     assignment = _get_assignment_or_404(db, user=user, assignment_id=assignment_id)
     if assignment.assignment_type != "QUIZ":
         raise ValueError("Google Forms can only be created for quiz assignments.")
@@ -127,9 +140,7 @@ def create_google_form_for_assignment(
 
     subject = db.get(EducationSubject, assignment.catalog_subject_id)
     grade = db.get(EducationGrade, assignment.catalog_grade_id)
-    objectives = [
-        str(objective_id) for objective_id in assignment.education_objective_ids_json
-    ]
+    objectives = [str(objective_id) for objective_id in assignment.education_objective_ids_json]
     description = build_assignment_description(
         assignment_id=str(assignment.id),
         package_id=str(assignment.instructional_package_id),
@@ -242,7 +253,10 @@ def _upsert_import_grade(
     import_source: str,
     google_response_id: str | None,
 ) -> TeacherAssistV2AssignmentGrade:
-    from oziebot_api.services.teacher_assist_v2.grade_reviews import _archive_active_grades, _percentage
+    from oziebot_api.services.teacher_assist_v2.grade_reviews import (
+        _archive_active_grades,
+        _percentage,
+    )
     from oziebot_api.services.teacher_assist_v2.mastery_constants import resolve_mastery_level
 
     _archive_active_grades(db, submission_id=submission.id)
@@ -330,10 +344,14 @@ def import_google_form_results(
     for row in rows:
         student_number = row.get("student_number")
         if student_number is None:
-            skipped.append({"reason": "missing_student_number", "response_id": row.get("google_response_id")})
+            skipped.append(
+                {"reason": "missing_student_number", "response_id": row.get("google_response_id")}
+            )
             continue
         try:
-            normalized_student = _validate_student_number(db, user=user, student_number=int(student_number))
+            normalized_student = _validate_student_number(
+                db, user=user, student_number=int(student_number)
+            )
         except ValueError as exc:
             skipped.append(
                 {
@@ -405,7 +423,9 @@ def import_google_form_results_csv(
         raise ValueError("CSV must include a header row.")
 
     normalized_headers = {name.strip().lower(): name for name in reader.fieldnames if name}
-    student_key = normalized_headers.get("student number") or normalized_headers.get("student_number")
+    student_key = normalized_headers.get("student number") or normalized_headers.get(
+        "student_number"
+    )
     score_key = normalized_headers.get("score")
     if not student_key or not score_key:
         raise ValueError("CSV must include Student Number and Score columns.")
@@ -449,7 +469,9 @@ def import_google_form_results_csv(
             continue
         try:
             student_number = int(raw_student.lstrip("#").strip())
-            normalized_student = _validate_student_number(db, user=user, student_number=student_number)
+            normalized_student = _validate_student_number(
+                db, user=user, student_number=student_number
+            )
             score = float(raw_score)
         except ValueError as exc:
             row_errors.append({"line": line_number, "error": str(exc)})

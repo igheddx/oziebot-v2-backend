@@ -49,7 +49,9 @@ def upgrade() -> None:
         sa.Column("teacher_confirmed_feedback", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["ai_usage_event_id"], ["teacher_assist_ai_usage_events.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["ai_usage_event_id"], ["teacher_assist_ai_usage_events.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["assignment_id"], ["assignments.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["class_id"], ["classes.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["grading_period_id"], ["grading_periods.id"], ondelete="SET NULL"),
@@ -97,7 +99,9 @@ def upgrade() -> None:
         sa.Column("sort_order", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["grading_review_id"], ["assignment_grading_reviews.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["grading_review_id"], ["assignment_grading_reviews.id"], ondelete="CASCADE"
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(

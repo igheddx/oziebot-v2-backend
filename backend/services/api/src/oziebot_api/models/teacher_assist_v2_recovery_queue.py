@@ -68,7 +68,9 @@ class TeacherAssistV2RecoveryQueue(Base):
     # Phase 8 stubs — nullable, unused in Phase 7
     success_criteria_json: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)
     timeline_phase: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    post_recovery_mastery_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)
+    post_recovery_mastery_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON(), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

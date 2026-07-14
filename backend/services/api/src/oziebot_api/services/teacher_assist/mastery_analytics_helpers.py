@@ -170,7 +170,9 @@ def count_recent_assignment_evaluations(
 
 
 def last_assessed_timestamp(active_rows: list[TeacherAssistMasteryEvaluation]) -> datetime | None:
-    timestamps = [_as_utc_datetime(row.confirmed_at) for row in active_rows if row.confirmed_at is not None]
+    timestamps = [
+        _as_utc_datetime(row.confirmed_at) for row in active_rows if row.confirmed_at is not None
+    ]
     return max(timestamps) if timestamps else None
 
 
@@ -211,7 +213,9 @@ def standard_trend_from_commits(
             continue
         if commit.commit_status not in {"active", "superseded"}:
             continue
-        rank_samples.append((created_at, float(MASTERY_LEVEL_RANK.get(commit.new_mastery_level, 0))))
+        rank_samples.append(
+            (created_at, float(MASTERY_LEVEL_RANK.get(commit.new_mastery_level, 0)))
+        )
     if len(rank_samples) < 2:
         return "insufficient_data"
     recent = [item for item in rank_samples if item[0] >= cutoff]
@@ -240,7 +244,9 @@ def student_trend_from_evaluations(
                 continue
             if commit.commit_status not in {"active", "superseded"}:
                 continue
-            rank_samples.append((created_at, float(MASTERY_LEVEL_RANK.get(commit.new_mastery_level, 0))))
+            rank_samples.append(
+                (created_at, float(MASTERY_LEVEL_RANK.get(commit.new_mastery_level, 0)))
+            )
     if len(rank_samples) < 2:
         if active_rows:
             return "stable"

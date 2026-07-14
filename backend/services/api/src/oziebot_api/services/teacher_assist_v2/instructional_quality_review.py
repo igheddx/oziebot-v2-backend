@@ -25,6 +25,7 @@ What the reviewer MUST NOT change:
   - objectives, TEKS codes, pacing guide alignment
   - the core instructional sequence or subject order
 """
+
 from __future__ import annotations
 
 import logging
@@ -81,14 +82,14 @@ QUALITY_REVIEW_SCHEMA: dict[str, Any] = {
         "learning_goal_discipline": False,
     },
     "categories": {
-        "curriculum_fidelity":      {"score": 0, "findings": ["string"]},
+        "curriculum_fidelity": {"score": 0, "findings": ["string"]},
         "instructional_continuity": {"score": 0, "findings": ["string"]},
-        "classroom_authenticity":   {"score": 0, "findings": ["string"]},
-        "instructional_rhythm":     {"score": 0, "findings": ["string"]},
-        "lesson_variety":           {"score": 0, "findings": ["string"]},
-        "images":                   {"score": 0, "findings": ["string"]},
-        "cognitive_load":           {"score": 0, "findings": ["string"]},
-        "teacher_experience":       {"score": 0, "finding": "string"},
+        "classroom_authenticity": {"score": 0, "findings": ["string"]},
+        "instructional_rhythm": {"score": 0, "findings": ["string"]},
+        "lesson_variety": {"score": 0, "findings": ["string"]},
+        "images": {"score": 0, "findings": ["string"]},
+        "cognitive_load": {"score": 0, "findings": ["string"]},
+        "teacher_experience": {"score": 0, "finding": "string"},
     },
     "revisions": {
         "subjects": {
@@ -318,12 +319,13 @@ def _apply_revisions(
     Mutations are in-place on a copy of content.
     """
     import copy
+
     content = copy.deepcopy(content)
     applied: list[str] = []
 
     if artifact_type == "daily_lesson_plan":
-        subject_revisions = (revisions.get("subjects") or {})
-        for block in (content.get("subjects") or []):
+        subject_revisions = revisions.get("subjects") or {}
+        for block in content.get("subjects") or []:
             subject_name = block.get("subject_name") or ""
             block_revisions = subject_revisions.get(subject_name) or {}
             if not block_revisions:
@@ -426,7 +428,8 @@ def review_artifact(
     except Exception:
         logger.exception(
             "package=%s: quality review AI call failed for artifact_type=%s — skipping review",
-            package_id, artifact_type,
+            package_id,
+            artifact_type,
         )
         return {}, None, []
 
@@ -490,8 +493,11 @@ def review_artifact(
 
     logger.info(
         "package=%s: quality review complete for artifact_type=%s score=%s status=%s corrections=%d",
-        package_id, artifact_type,
-        report.get("overall_score"), report.get("review_status"), len(corrections_applied),
+        package_id,
+        artifact_type,
+        report.get("overall_score"),
+        report.get("review_status"),
+        len(corrections_applied),
     )
     return report, revised_content, corrections_applied
 
@@ -501,7 +507,9 @@ def _get_provider_params(settings: Settings) -> tuple[str, str | None, str | Non
     if provider == "openai":
         return provider, settings.teacher_assist_openai_api_key, None
     if provider == "gemini":
-        base_url = (settings.teacher_assist_gemini_base_url or "").strip() or "https://generativelanguage.googleapis.com/v1beta/openai"
+        base_url = (
+            settings.teacher_assist_gemini_base_url or ""
+        ).strip() or "https://generativelanguage.googleapis.com/v1beta/openai"
         return provider, settings.teacher_assist_gemini_api_key, base_url
     return provider, None, None
 
@@ -523,14 +531,17 @@ def _mock_report() -> dict[str, Any]:
             "weak_teacher_experience": False,
         },
         "categories": {
-            "curriculum_fidelity":      {"score": 85, "findings": []},
+            "curriculum_fidelity": {"score": 85, "findings": []},
             "instructional_continuity": {"score": 85, "findings": []},
-            "classroom_authenticity":   {"score": 85, "findings": []},
-            "instructional_rhythm":     {"score": 85, "findings": []},
-            "lesson_variety":           {"score": 85, "findings": []},
-            "images":                   {"score": 85, "findings": []},
-            "cognitive_load":           {"score": 85, "findings": []},
-            "teacher_experience":       {"score": 85, "finding": "Mock review — enable AI for full evaluation."},
+            "classroom_authenticity": {"score": 85, "findings": []},
+            "instructional_rhythm": {"score": 85, "findings": []},
+            "lesson_variety": {"score": 85, "findings": []},
+            "images": {"score": 85, "findings": []},
+            "cognitive_load": {"score": 85, "findings": []},
+            "teacher_experience": {
+                "score": 85,
+                "finding": "Mock review — enable AI for full evaluation.",
+            },
         },
         "reviewed_at": datetime.now(UTC).isoformat(),
         "review_version": QUALITY_REVIEW_VERSION,
@@ -554,14 +565,14 @@ def _fallback_report(artifact_type: str) -> dict[str, Any]:
             "weak_teacher_experience": True,
         },
         "categories": {
-            "curriculum_fidelity":      {"score": 0, "findings": ["Review failed."]},
+            "curriculum_fidelity": {"score": 0, "findings": ["Review failed."]},
             "instructional_continuity": {"score": 0, "findings": ["Review failed."]},
-            "classroom_authenticity":   {"score": 0, "findings": ["Review failed."]},
-            "instructional_rhythm":     {"score": 0, "findings": ["Review failed."]},
-            "lesson_variety":           {"score": 0, "findings": ["Review failed."]},
-            "images":                   {"score": 0, "findings": ["Review failed."]},
-            "cognitive_load":           {"score": 0, "findings": ["Review failed."]},
-            "teacher_experience":       {"score": 0, "finding": "Review failed — manual check needed."},
+            "classroom_authenticity": {"score": 0, "findings": ["Review failed."]},
+            "instructional_rhythm": {"score": 0, "findings": ["Review failed."]},
+            "lesson_variety": {"score": 0, "findings": ["Review failed."]},
+            "images": {"score": 0, "findings": ["Review failed."]},
+            "cognitive_load": {"score": 0, "findings": ["Review failed."]},
+            "teacher_experience": {"score": 0, "finding": "Review failed — manual check needed."},
         },
         "reviewed_at": datetime.now(UTC).isoformat(),
     }

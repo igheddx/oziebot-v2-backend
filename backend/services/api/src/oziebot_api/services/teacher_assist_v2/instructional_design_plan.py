@@ -44,7 +44,9 @@ from sqlalchemy import select as _sa_select
 from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
-from oziebot_api.models.teacher_assist_v2_document_extraction import TeacherAssistV2DocumentExtraction
+from oziebot_api.models.teacher_assist_v2_document_extraction import (
+    TeacherAssistV2DocumentExtraction,
+)
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.ai_mode import is_teacher_assist_real_ai_active
 from oziebot_api.services.teacher_assist.ai_usage import (
@@ -79,6 +81,7 @@ _SINGLE_CALL_MAX_SUBJECT_WEEK_PAIRS = 6
 
 # ── Provider resolution (mirrors instructional_package_ai._provider_api_params) ──────────
 
+
 def _provider_api_params(settings: Settings) -> tuple[str, str | None, str | None]:
     provider = (settings.teacher_assist_ai_provider or "mock").strip().lower()
     if provider == "gemini":
@@ -92,6 +95,7 @@ def _provider_api_params(settings: Settings) -> tuple[str, str | None, str | Non
 
 
 # ── District anchors — programmatic extraction from pacing guide ──────────────────────────
+
 
 def _build_district_anchors_for_week_subject(
     week_subject: dict[str, Any],
@@ -117,7 +121,8 @@ def _build_district_anchors_for_week_subject(
             "teks_code": code,
             "description": description,
             "education_objective_id": str(obj["education_objective_id"])
-            if obj.get("education_objective_id") else None,
+            if obj.get("education_objective_id")
+            else None,
         }
         if obj.get("is_required") or obj.get("is_primary"):
             primary_objectives.append(entry)
@@ -166,7 +171,9 @@ def _build_all_district_anchors(
     for week in generation_context.get("weeks") or []:
         week_num = int(week.get("sequence_number") or 0)
         week_subjects_list = week.get("subjects") or []
-        subject_lookup = {row["subject_id"]: row for row in generation_context.get("subjects") or []}
+        subject_lookup = {
+            row["subject_id"]: row for row in generation_context.get("subjects") or []
+        }
         for ws in week_subjects_list:
             subj_id = ws.get("subject_id") or ""
             subj_meta = subject_lookup.get(subj_id) or {}
@@ -174,13 +181,12 @@ def _build_all_district_anchors(
             if not subj_name:
                 continue
             key = (week_num, subj_name.lower())
-            anchors[key] = _build_district_anchors_for_week_subject(
-                ws, excluded_ids=excluded_ids
-            )
+            anchors[key] = _build_district_anchors_for_week_subject(ws, excluded_ids=excluded_ids)
     return anchors
 
 
 # ── Full curriculum document loading ──────────────────────────────────────────────────────
+
 
 def _load_full_curriculum_docs(
     db: Session,
@@ -218,13 +224,15 @@ def _load_full_curriculum_docs(
             continue
         text = (row.teacher_edited_text or row.extracted_text or "").strip()
         if text:
-            docs.append({
-                "title": mat.get("title"),
-                "filename": mat.get("original_filename"),
-                "resource_type": mat.get("resource_type"),
-                "text": text[:_FULL_DOC_CHAR_LIMIT],
-                "truncated": len(text) > _FULL_DOC_CHAR_LIMIT,
-            })
+            docs.append(
+                {
+                    "title": mat.get("title"),
+                    "filename": mat.get("original_filename"),
+                    "resource_type": mat.get("resource_type"),
+                    "text": text[:_FULL_DOC_CHAR_LIMIT],
+                    "truncated": len(text) > _FULL_DOC_CHAR_LIMIT,
+                }
+            )
     return docs
 
 
@@ -312,6 +320,7 @@ _PLAN_OUTPUT_SCHEMA: dict[str, Any] = {
 
 # ── AI instruction ─────────────────────────────────────────────────────────────────────────
 
+
 def _build_instruction(
     total_weeks: int,
     subjects: list[dict[str, Any]],
@@ -326,15 +335,15 @@ def _build_instruction(
     (used when splitting multi-subject packages into per-subject calls).
     """
     grade_clause = (
-        f" This curriculum is for Grade {grade_code} ({grade_display_name})."
-        if grade_code else ""
+        f" This curriculum is for Grade {grade_code} ({grade_display_name})." if grade_code else ""
     )
     subject_names = [s.get("subject_name", "") for s in subjects if s.get("subject_name")]
     subject_list = ", ".join(subject_names) if subject_names else "the assigned subject"
     target_subject_clause = (
         f"\n\nSUBJECT SCOPE: Generate instructional_design entries ONLY for subject '{subject_filter}'. "
         "Include unit_mastery_arc and knowledge_dependency_graph for all objectives across all subjects."
-        if subject_filter else ""
+        if subject_filter
+        else ""
     )
     week_plural = f"{total_weeks} week" if total_weeks == 1 else f"{total_weeks} weeks"
 
@@ -343,14 +352,12 @@ def _build_instruction(
         f"effective instructional sequence for a {week_plural} package covering {subject_list}.{grade_clause} "
         "You operate by one principle: the district defines WHAT students learn — you determine the most "
         "effective HOW while remaining completely faithful to district intent.\n\n"
-
         "WHAT YOU ARE GIVEN (district-defined — READ ONLY):\n"
         "  district_anchors: per week × subject — primary objectives, supporting objectives, daily topics,\n"
         "    assessment checks, and pacing materials. These are extracted directly from the district pacing\n"
         "    guide. Do not modify, reorder, or substitute any of this data.\n"
         "  curriculum_sequence_plan: week themes, TEKS distribution, and mentor texts.\n"
         "  full_curriculum_documents: complete text of all district curriculum files.\n\n"
-
         "WHAT YOU GENERATE (instructional HOW — your design):\n"
         "  unit_mastery_arc: the terminal mastery target for the full package and per-week mastery gates.\n"
         "    Design this FIRST using backward design — start from what students must be able to do by the\n"
@@ -362,7 +369,6 @@ def _build_instruction(
         "    Design BACKWARD from end_of_week_mastery → learning_journey_rationale → daily_progression.\n"
         "    Monday introduces. Tuesday deepens. Wednesday applies. Thursday extends. Friday assesses.\n"
         "    Each day adds exactly one cognitive layer and removes one scaffold from the previous day.\n\n"
-
         "BACKWARD DESIGN SEQUENCE (follow this order):\n"
         "  1. Write unit_mastery_arc.terminal_mastery — what does mastery look like at the end of Week "
         f"{total_weeks}?\n"
@@ -371,7 +377,6 @@ def _build_instruction(
         "  4. Write learning_journey_rationale — why does this 5-day sequence lead to that mastery?\n"
         "  5. Write daily_progression BACKWARD from Friday, ensuring each prior day is a prerequisite\n"
         "     for the next. Friday's observable_mastery_evidence defines the week's mastery standard.\n\n"
-
         "KNOWLEDGE DEPENDENCY GRAPH:\n"
         "  For each objective_code in district_anchors.primary_objectives (across all weeks):\n"
         "    - List 2-4 dependency nodes that must already exist for instruction to be effective\n"
@@ -381,13 +386,11 @@ def _build_instruction(
         "        'may_need_activation' → likely present but may need a brief activation moment\n"
         "    - gap_consequence: what breaks instructionally if this dependency is absent. Be specific.\n"
         "    - activation_strategy: the exact classroom move to activate or check this dependency.\n\n"
-
         "INSTRUCTIONAL_PURPOSE — required for every day:\n"
         "  Answer: Why is this specific lesson being taught TODAY — not Monday or Thursday, but in this\n"
         "  position in the week? How does mastering today's lesson advance students toward the unit's\n"
         "  terminal mastery? What is the pedagogical cost if this lesson is skipped or shortened?\n"
         "  This field is teacher-facing only. Never expose to students. Do not reference TEKS codes.\n\n"
-
         "INSTRUCTIONAL_CONTRACTS — non-negotiable cross-artifact alignment:\n"
         "  exit_ticket_stem: the exact sentence frame for the weekly exit ticket — other artifacts will\n"
         "    use this verbatim. Must be completable in 3-5 minutes and produce written evidence.\n"
@@ -396,13 +399,11 @@ def _build_instruction(
         "  rubric_primary_criterion: the primary criterion string — rubric artifact uses this verbatim.\n"
         "  core_activity_name: the central instructional activity name for the week — all artifacts use\n"
         "    this exact name when referring to this activity.\n\n"
-
         "DIFFERENTIATION — required for every day:\n"
         "  scaffold: what a teacher does for students who need support — specific, actionable, not\n"
         "    'provide extra help'. Reduces one cognitive demand while preserving the core skill.\n"
         "  extension: what a student does when they've met today's mastery target — adds complexity\n"
         "    without moving to next week's content.\n\n"
-
         "DISTRICT FIDELITY RULES:\n"
         "  - daily_topics in district_anchors are district-defined. Center each day's teacher_modeling,\n"
         "    guided_practice, and independent_practice on that day's district topic.\n"
@@ -413,16 +414,17 @@ def _build_instruction(
         "  - teacher_goal explains what the teacher accomplishes instructionally — not what students do.\n"
         "  - builds_from_yesterday is null on Monday; references specific yesterday content on Tue-Fri.\n"
         "  - prepares_for_tomorrow is null on Friday; previews specific tomorrow content on Mon-Thu.\n\n"
-
         + (
             build_planning_constraint(delivery_profile) + "\n\n"
-            if build_planning_constraint(delivery_profile) else ""
+            if build_planning_constraint(delivery_profile)
+            else ""
         )
         + f"Return exactly {total_weeks} week entries, one per district week in order.{target_subject_clause}"
     )
 
 
 # ── AI call(s) ───────────────────────────────────────────────────────────────────────────
+
 
 def _call_ai_for_plan(
     effective_settings: Settings,
@@ -468,11 +470,13 @@ def _call_ai_for_plan(
                 continue
             key = (week_num, subj_name.lower())
             anchors = district_anchors.get(key) or {}
-            anchors_for_prompt.append({
-                "week": week_num,
-                "subject": subj_name,
-                "district_anchors": anchors,
-            })
+            anchors_for_prompt.append(
+                {
+                    "week": week_num,
+                    "subject": subj_name,
+                    "district_anchors": anchors,
+                }
+            )
 
     prompt_payload: dict[str, Any] = {
         "package_weeks": total_weeks,
@@ -527,6 +531,7 @@ def _call_ai_for_plan(
 
 
 # ── Plan assembly ─────────────────────────────────────────────────────────────────────────
+
 
 def _merge_district_anchors_into_plan(
     plan: dict[str, Any],
@@ -593,6 +598,7 @@ def _merge_per_subject_plans(per_subject_plans: list[dict[str, Any]]) -> dict[st
 
 
 # ── Lookup helpers (used by artifact generators) ──────────────────────────────────────────
+
 
 def get_plan_for_week_subject(
     plan: dict[str, Any] | None,
@@ -752,6 +758,7 @@ def resolve_verified_previous_learning(
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────────────────
+
 
 def generate_instructional_design_plan(
     db: Session,

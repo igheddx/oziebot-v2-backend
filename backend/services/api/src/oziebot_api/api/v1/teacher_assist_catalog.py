@@ -203,7 +203,8 @@ def read_catalog_objectives(
                             **{
                                 **resource,
                                 "reference_links": [
-                                    CatalogResourceLinkItemOut(**link) for link in resource["reference_links"]
+                                    CatalogResourceLinkItemOut(**link)
+                                    for link in resource["reference_links"]
                                 ],
                             }
                         )
@@ -259,7 +260,9 @@ def read_catalog_resources(
             CatalogResourceItemOut(
                 **{
                     **item,
-                    "reference_links": [CatalogResourceLinkItemOut(**link) for link in item["reference_links"]],
+                    "reference_links": [
+                        CatalogResourceLinkItemOut(**link) for link in item["reference_links"]
+                    ],
                     "associated_objectives": [
                         CatalogResourceObjectiveItemOut(**objective)
                         for objective in item["associated_objectives"]

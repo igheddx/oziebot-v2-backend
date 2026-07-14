@@ -8,7 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_activity_event import TeacherAssistActivityEvent
-from oziebot_api.services.teacher_assist.instructional_plan_validator import contains_pii_like_content
+from oziebot_api.services.teacher_assist.instructional_plan_validator import (
+    contains_pii_like_content,
+)
 
 ACTIVITY_EVENT_CATEGORIES = (
     "workflow",

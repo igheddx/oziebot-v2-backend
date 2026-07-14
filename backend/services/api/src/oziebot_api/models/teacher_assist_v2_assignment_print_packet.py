@@ -27,7 +27,9 @@ class TeacherAssistV2AssignmentPrintPacket(Base):
         index=True,
     )
     platform_school_year_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_school_years.id", ondelete="CASCADE"), nullable=False
+        Uuid(as_uuid=True),
+        ForeignKey("education_school_years.id", ondelete="CASCADE"),
+        nullable=False,
     )
     catalog_district_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("education_districts.id", ondelete="CASCADE"), nullable=False
@@ -42,7 +44,9 @@ class TeacherAssistV2AssignmentPrintPacket(Base):
         Uuid(as_uuid=True), ForeignKey("education_subjects.id", ondelete="CASCADE"), nullable=False
     )
     packet_status: Mapped[str] = mapped_column(String(32), nullable=False)
-    packet_kind: Mapped[str] = mapped_column(String(32), nullable=False, default="STUDENT_PACKET", server_default="STUDENT_PACKET")
+    packet_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="STUDENT_PACKET", server_default="STUDENT_PACKET"
+    )
     pages_per_student: Mapped[int] = mapped_column(Integer, nullable=False)
     student_count: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -57,4 +61,6 @@ class TeacherAssistV2AssignmentPrintPacket(Base):
 
 
 if TYPE_CHECKING:
-    from oziebot_api.models.teacher_assist_v2_assignment_print_page import TeacherAssistV2AssignmentPrintPage
+    from oziebot_api.models.teacher_assist_v2_assignment_print_page import (
+        TeacherAssistV2AssignmentPrintPage,
+    )

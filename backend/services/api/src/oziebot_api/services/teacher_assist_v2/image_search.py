@@ -34,11 +34,24 @@ _PIXABAY_MAX_WORKERS = 12  # pure HTTP — no API rate limit concern
 # Keywords that indicate a search term already has age/grade context.
 # If none are present, we inject a grade-level prefix so Pixabay doesn't
 # return adults, office stock, or abstract diagrams.
-_AGE_CONTEXT_KEYWORDS = frozenset([
-    "children", "child", "kids", "kid", "boy", "girl",
-    "elementary", "fifth grade", "5th grade", "middle school", "high school",
-    "student", "pupils", "classroom",
-])
+_AGE_CONTEXT_KEYWORDS = frozenset(
+    [
+        "children",
+        "child",
+        "kids",
+        "kid",
+        "boy",
+        "girl",
+        "elementary",
+        "fifth grade",
+        "5th grade",
+        "middle school",
+        "high school",
+        "student",
+        "pupils",
+        "classroom",
+    ]
+)
 
 
 def _search_pixabay(
@@ -49,7 +62,11 @@ def _search_pixabay(
     per_page: int = 12,
 ) -> list[dict[str, Any]]:
     """Try one Pixabay search query; return list of hits (may be empty)."""
-    image_type = preferred_image_type if preferred_image_type in {"photo", "illustration", "vector"} else "photo"
+    image_type = (
+        preferred_image_type
+        if preferred_image_type in {"photo", "illustration", "vector"}
+        else "photo"
+    )
     try:
         response = httpx.get(
             PIXABAY_API_URL,
@@ -115,58 +132,142 @@ def _has_age_context(term: str) -> bool:
 # fallback_terms → tried after all AI terms fail
 # last_resort    → absolute final fallback
 _GRADE_IMAGE_PROFILE: dict[str, tuple[str, list[str], str]] = {
-    "K":  ("kindergarten children",
-           ["kindergarten children playing learning classroom", "young kids reading books school", "5 year old children classroom teacher"],
-           "young children kindergarten classroom"),
-    "1":  ("first grade children",
-           ["first grade children reading classroom", "6 year old kids learning elementary", "young elementary students teacher"],
-           "young children elementary school"),
-    "2":  ("second grade children",
-           ["second grade children reading books classroom", "7 year old kids elementary school", "young elementary students learning"],
-           "young children elementary school"),
-    "3":  ("third grade elementary students",
-           ["third grade students reading books classroom", "8 year old children elementary school", "elementary kids learning classroom"],
-           "elementary school children reading"),
-    "4":  ("fourth grade elementary students",
-           ["fourth grade students reading books classroom", "9 year old children elementary school", "elementary students learning classroom"],
-           "elementary school students reading books"),
-    "5":  ("fifth grade elementary students",
-           ["fifth grade students reading books classroom", "10 year old children elementary school", "elementary school kids learning"],
-           "elementary school students reading books"),
-    "6":  ("sixth grade middle school students",
-           ["sixth grade middle school students classroom", "11 year old students learning school", "middle school kids reading classroom"],
-           "middle school students learning"),
-    "7":  ("seventh grade middle school students",
-           ["seventh grade middle school students learning", "12 year old tweens school classroom", "middle school students reading books"],
-           "middle school students classroom"),
-    "8":  ("eighth grade middle school students",
-           ["eighth grade middle school students classroom", "13 year old students learning school", "middle school students studying"],
-           "middle school students learning"),
-    "9":  ("ninth grade high school students",
-           ["ninth grade freshman high school students classroom", "14 year old teenagers school learning", "high school freshmen students studying"],
-           "high school students classroom"),
-    "10": ("tenth grade high school students",
-           ["tenth grade high school students learning classroom", "15 year old teenagers school", "high school sophomore students studying"],
-           "high school students learning"),
-    "11": ("eleventh grade high school students",
-           ["eleventh grade high school students classroom", "16 year old teenagers school learning", "high school junior students studying"],
-           "high school students classroom"),
-    "12": ("twelfth grade high school students",
-           ["twelfth grade senior high school students", "17 year old teenagers school graduation", "high school senior students studying"],
-           "high school students learning"),
+    "K": (
+        "kindergarten children",
+        [
+            "kindergarten children playing learning classroom",
+            "young kids reading books school",
+            "5 year old children classroom teacher",
+        ],
+        "young children kindergarten classroom",
+    ),
+    "1": (
+        "first grade children",
+        [
+            "first grade children reading classroom",
+            "6 year old kids learning elementary",
+            "young elementary students teacher",
+        ],
+        "young children elementary school",
+    ),
+    "2": (
+        "second grade children",
+        [
+            "second grade children reading books classroom",
+            "7 year old kids elementary school",
+            "young elementary students learning",
+        ],
+        "young children elementary school",
+    ),
+    "3": (
+        "third grade elementary students",
+        [
+            "third grade students reading books classroom",
+            "8 year old children elementary school",
+            "elementary kids learning classroom",
+        ],
+        "elementary school children reading",
+    ),
+    "4": (
+        "fourth grade elementary students",
+        [
+            "fourth grade students reading books classroom",
+            "9 year old children elementary school",
+            "elementary students learning classroom",
+        ],
+        "elementary school students reading books",
+    ),
+    "5": (
+        "fifth grade elementary students",
+        [
+            "fifth grade students reading books classroom",
+            "10 year old children elementary school",
+            "elementary school kids learning",
+        ],
+        "elementary school students reading books",
+    ),
+    "6": (
+        "sixth grade middle school students",
+        [
+            "sixth grade middle school students classroom",
+            "11 year old students learning school",
+            "middle school kids reading classroom",
+        ],
+        "middle school students learning",
+    ),
+    "7": (
+        "seventh grade middle school students",
+        [
+            "seventh grade middle school students learning",
+            "12 year old tweens school classroom",
+            "middle school students reading books",
+        ],
+        "middle school students classroom",
+    ),
+    "8": (
+        "eighth grade middle school students",
+        [
+            "eighth grade middle school students classroom",
+            "13 year old students learning school",
+            "middle school students studying",
+        ],
+        "middle school students learning",
+    ),
+    "9": (
+        "ninth grade high school students",
+        [
+            "ninth grade freshman high school students classroom",
+            "14 year old teenagers school learning",
+            "high school freshmen students studying",
+        ],
+        "high school students classroom",
+    ),
+    "10": (
+        "tenth grade high school students",
+        [
+            "tenth grade high school students learning classroom",
+            "15 year old teenagers school",
+            "high school sophomore students studying",
+        ],
+        "high school students learning",
+    ),
+    "11": (
+        "eleventh grade high school students",
+        [
+            "eleventh grade high school students classroom",
+            "16 year old teenagers school learning",
+            "high school junior students studying",
+        ],
+        "high school students classroom",
+    ),
+    "12": (
+        "twelfth grade high school students",
+        [
+            "twelfth grade senior high school students",
+            "17 year old teenagers school graduation",
+            "high school senior students studying",
+        ],
+        "high school students learning",
+    ),
 }
 
 # Tier fallbacks when a specific grade code is unknown
 _TIER_FALLBACK = {
-    "elementary": ("elementary school children",
-                   ["elementary school children reading books classroom", "kids learning classroom authentic"],
-                   "children reading books elementary school"),
-    "middle":     ("middle school students",
-                   ["middle school students learning classroom", "tweens reading studying books"],
-                   "middle school students classroom"),
-    "high":       ("high school students",
-                   ["high school students learning classroom", "teenagers studying reading books"],
-                   "high school students classroom"),
+    "elementary": (
+        "elementary school children",
+        ["elementary school children reading books classroom", "kids learning classroom authentic"],
+        "children reading books elementary school",
+    ),
+    "middle": (
+        "middle school students",
+        ["middle school students learning classroom", "tweens reading studying books"],
+        "middle school students classroom",
+    ),
+    "high": (
+        "high school students",
+        ["high school students learning classroom", "teenagers studying reading books"],
+        "high school students classroom",
+    ),
 }
 
 
@@ -254,7 +355,9 @@ def _fetch_one_slide_image(
     if not hit:
         logger.info(
             "artifact=%s slide=%s: no Pixabay image found after %d attempts",
-            artifact_id, slide_id, len(fallback_chain),
+            artifact_id,
+            slide_id,
+            len(fallback_chain),
         )
         return None
 
@@ -334,21 +437,29 @@ def fetch_slide_images_for_artifact(
             search_terms = [t for t in _img_search_raw if isinstance(t, str) and t.strip()]
         else:
             img_search = _img_search_raw if isinstance(_img_search_raw, dict) else {}
-            search_terms = [t for t in (img_search.get("search_terms") or []) if isinstance(t, str) and t.strip()]
+            search_terms = [
+                t
+                for t in (img_search.get("search_terms") or [])
+                if isinstance(t, str) and t.strip()
+            ]
         if not search_terms:
             continue
         preferred_type = str(img_search.get("preferred_image_type") or "photo")
         grade_band = str(img_search.get("target_grade_band") or "elementary")
-        fallback_chain, ptype = _build_fallback_chain(search_terms, preferred_type, grade_band, grade_code=grade_code)
-        tasks.append({
-            "slide_id": slide_id,
-            "slide": slide,
-            "img_search": img_search,
-            "visual": visual,
-            "search_terms": search_terms,
-            "fallback_chain": fallback_chain,
-            "preferred_type": ptype,
-        })
+        fallback_chain, ptype = _build_fallback_chain(
+            search_terms, preferred_type, grade_band, grade_code=grade_code
+        )
+        tasks.append(
+            {
+                "slide_id": slide_id,
+                "slide": slide,
+                "img_search": img_search,
+                "visual": visual,
+                "search_terms": search_terms,
+                "fallback_chain": fallback_chain,
+                "preferred_type": ptype,
+            }
+        )
 
     if not tasks:
         return
@@ -383,7 +494,9 @@ def fetch_slide_images_for_artifact(
 
     logger.info(
         "artifact=%s: fetched %d/%d slide images in parallel",
-        artifact.id, len(results), len(tasks),
+        artifact.id,
+        len(results),
+        len(tasks),
     )
 
     # --- Phase 3: sequential DB upserts -----------------------------------------
@@ -438,7 +551,10 @@ def fetch_slide_images_for_artifact(
 
         logger.info(
             "artifact=%s slide=%s: stored image key=%s attribution=%r",
-            artifact.id, sid, stored_key, attribution,
+            artifact.id,
+            sid,
+            stored_key,
+            attribution,
         )
 
     db.flush()
@@ -488,7 +604,11 @@ def create_pending_image_assets(
             search_terms = [t for t in _img_search_raw if isinstance(t, str) and t.strip()]
         else:
             img_search = _img_search_raw if isinstance(_img_search_raw, dict) else {}
-            search_terms = [t for t in (img_search.get("search_terms") or []) if isinstance(t, str) and t.strip()]
+            search_terms = [
+                t
+                for t in (img_search.get("search_terms") or [])
+                if isinstance(t, str) and t.strip()
+            ]
 
         db.add(
             TeacherAssistV2SlideVisualAsset(

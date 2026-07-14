@@ -8,7 +8,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
-from oziebot_api.models.teacher_assist_time_savings import TeacherAssistReuseEvent, TeacherAssistWeekTemplate
+from oziebot_api.models.teacher_assist_time_savings import (
+    TeacherAssistReuseEvent,
+    TeacherAssistWeekTemplate,
+)
 from oziebot_api.services.teacher_assist.time_savings_constants import TIME_SAVINGS_MINUTES
 
 
@@ -39,7 +42,9 @@ def build_teacher_efficiency_dashboard(
     rollovers = len([row for row in events if row.event_type == "rollover_v2"])
     total_minutes = sum(row.estimated_minutes_saved for row in events)
     total_actions = len(events)
-    reuse_rate = round((artifacts_reused + weeks_duplicated + templates_used) / max(total_actions, 1) * 100, 1)
+    reuse_rate = round(
+        (artifacts_reused + weeks_duplicated + templates_used) / max(total_actions, 1) * 100, 1
+    )
 
     recent_templates = list(
         db.scalars(
@@ -82,7 +87,9 @@ def build_home_time_savings_summary(
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> dict[str, Any]:
-    year_start = datetime.now(UTC).replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    year_start = datetime.now(UTC).replace(
+        month=1, day=1, hour=0, minute=0, second=0, microsecond=0
+    )
     total_minutes = db.scalar(
         select(func.coalesce(func.sum(TeacherAssistReuseEvent.estimated_minutes_saved), 0)).where(
             TeacherAssistReuseEvent.tenant_id == tenant_id,

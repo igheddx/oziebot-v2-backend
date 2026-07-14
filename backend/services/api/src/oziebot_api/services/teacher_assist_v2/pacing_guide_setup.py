@@ -23,8 +23,13 @@ from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
 )
 from oziebot_api.services.teacher_assist.setup import teacher_assist_context_for_user
 from oziebot_api.services.teacher_assist.user_preferences import update_user_preferences
-from oziebot_api.services.teacher_assist_v2.pacing_guides import ensure_tenant_school_year, list_v2_district_pacing_guides
-from oziebot_api.services.teacher_assist_v2.platform_context import resolve_instructional_catalog_tenant_id
+from oziebot_api.services.teacher_assist_v2.pacing_guides import (
+    ensure_tenant_school_year,
+    list_v2_district_pacing_guides,
+)
+from oziebot_api.services.teacher_assist_v2.platform_context import (
+    resolve_instructional_catalog_tenant_id,
+)
 from oziebot_api.services.teacher_assist_v2.school_years import get_platform_school_year_or_404
 from oziebot_api.services.teacher_assist_v2.teacher_onboarding import (
     get_v2_onboarding,
@@ -120,7 +125,9 @@ def _load_guide_summary(
     pacing_guide_id: uuid.UUID,
 ):
     try:
-        return get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id)
+        return get_catalog_pacing_guide_detail(
+            db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id
+        )
     except LookupError:
         return get_catalog_pacing_guide_detail(
             db,
@@ -130,7 +137,9 @@ def _load_guide_summary(
     return datetime.now(UTC)
 
 
-def _require_completed_onboarding(row: TeacherAssistV2Onboarding | None) -> TeacherAssistV2Onboarding:
+def _require_completed_onboarding(
+    row: TeacherAssistV2Onboarding | None,
+) -> TeacherAssistV2Onboarding:
     if row is None or not is_v2_onboarding_complete(row):
         raise ValueError("Complete onboarding before setting up pacing guides.")
     return row
@@ -147,7 +156,9 @@ def _guide_matches_teacher_school_year(guide: TeacherAssistPacingGuide, *, platf
     return True
 
 
-def _guide_matches_teacher_school_scope(guide: TeacherAssistPacingGuide, *, school_id: uuid.UUID | None) -> bool:
+def _guide_matches_teacher_school_scope(
+    guide: TeacherAssistPacingGuide, *, school_id: uuid.UUID | None
+) -> bool:
     if guide.catalog_school_id is None:
         return True
     return school_id is not None and guide.catalog_school_id == school_id
@@ -192,9 +203,13 @@ def build_pacing_guide_setup_form(db: Session, *, user: User) -> dict[str, Any]:
 
     platform_year = get_platform_school_year_or_404(db, school_year_id=onboarding.school_year_id)
     platform_tenant_id = resolve_instructional_catalog_tenant_id(db)
-    tenant_year = ensure_tenant_school_year(db, tenant_id=ctx.tenant_id, platform_year=platform_year)
+    tenant_year = ensure_tenant_school_year(
+        db, tenant_id=ctx.tenant_id, platform_year=platform_year
+    )
 
-    selected_subject_ids = [uuid.UUID(subject_id) for subject_id in (onboarding.selected_subject_ids or [])]
+    selected_subject_ids = [
+        uuid.UUID(subject_id) for subject_id in (onboarding.selected_subject_ids or [])
+    ]
     subjects = db.scalars(
         select(EducationSubject).where(EducationSubject.id.in_(selected_subject_ids))
     ).all()
@@ -289,9 +304,13 @@ def save_pacing_guide_setup(
 
     platform_year = get_platform_school_year_or_404(db, school_year_id=onboarding.school_year_id)
     platform_tenant_id = resolve_instructional_catalog_tenant_id(db)
-    tenant_year = ensure_tenant_school_year(db, tenant_id=ctx.tenant_id, platform_year=platform_year)
+    tenant_year = ensure_tenant_school_year(
+        db, tenant_id=ctx.tenant_id, platform_year=platform_year
+    )
 
-    selected_subject_ids = {str(subject_id) for subject_id in (onboarding.selected_subject_ids or [])}
+    selected_subject_ids = {
+        str(subject_id) for subject_id in (onboarding.selected_subject_ids or [])
+    }
     if not selections:
         raise ValueError({"selections": "Select at least one pacing guide to include in planning."})
 
@@ -325,7 +344,9 @@ def save_pacing_guide_setup(
         source_guide_id = uuid.UUID(str(selection["source_guide_id"]))
         mode = str(selection.get("mode") or "district")
         if str(subject_id) not in selected_subject_ids:
-            raise ValueError({"selections": "One or more subjects are not part of your onboarding profile."})
+            raise ValueError(
+                {"selections": "One or more subjects are not part of your onboarding profile."}
+            )
         if mode not in {"district", "teacher_copy"}:
             raise ValueError({"selections": "Invalid pacing guide option."})
 
@@ -345,7 +366,9 @@ def save_pacing_guide_setup(
         )
         source = next((guide for guide in district_guides if guide.id == resolved_source_id), None)
         if source is None or source.catalog_subject_id != subject_id:
-            raise ValueError({"selections": "Selected pacing guide is not available for this subject."})
+            raise ValueError(
+                {"selections": "Selected pacing guide is not available for this subject."}
+            )
 
         if mode == "teacher_copy":
             pacing_guide_id = _copy_platform_guide_for_teacher(
@@ -436,7 +459,9 @@ def build_teacher_home_summary(db: Session, *, user: User) -> dict[str, Any]:
         grade_name = get_grade_or_404(db, onboarding.grade_id).display_name
 
     subject_ids = [uuid.UUID(subject_id) for subject_id in (onboarding.selected_subject_ids or [])]
-    subjects = db.scalars(select(EducationSubject).where(EducationSubject.id.in_(subject_ids))).all()
+    subjects = db.scalars(
+        select(EducationSubject).where(EducationSubject.id.in_(subject_ids))
+    ).all()
     platform_tenant_id = resolve_instructional_catalog_tenant_id(db)
     assignments = db.scalars(
         select(TeacherAssistV2PacingGuideAssignment).where(
@@ -482,19 +507,25 @@ def build_teacher_home_summary(db: Session, *, user: User) -> dict[str, Any]:
 
 
 def _count_assignments_requiring_review(db: Session, *, user: User) -> int:
-    from oziebot_api.services.teacher_assist_v2.grade_reviews import count_assignments_requiring_review
+    from oziebot_api.services.teacher_assist_v2.grade_reviews import (
+        count_assignments_requiring_review,
+    )
 
     return count_assignments_requiring_review(db, user=user)
 
 
 def _count_recent_confirmed_grades(db: Session, *, user: User) -> int:
-    from oziebot_api.services.teacher_assist_v2.gradebook_workspace import count_recent_confirmed_grades
+    from oziebot_api.services.teacher_assist_v2.gradebook_workspace import (
+        count_recent_confirmed_grades,
+    )
 
     return count_recent_confirmed_grades(db, user=user)
 
 
 def _count_objectives_assessed(db: Session, *, user: User) -> int:
-    from oziebot_api.services.teacher_assist_v2.objective_performance import count_objectives_assessed
+    from oziebot_api.services.teacher_assist_v2.objective_performance import (
+        count_objectives_assessed,
+    )
 
     return count_objectives_assessed(db, user=user)
 

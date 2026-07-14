@@ -35,20 +35,32 @@ def upgrade() -> None:
         sa.Column("original_filename", sa.String(length=512), nullable=True),
         sa.Column("mime_type", sa.String(length=128), nullable=True),
         sa.Column("file_size", sa.Integer(), nullable=True),
-        sa.Column("visibility_scope", sa.String(length=32), nullable=False, server_default="district"),
+        sa.Column(
+            "visibility_scope", sa.String(length=32), nullable=False, server_default="district"
+        ),
         sa.Column("uploaded_by_user_id", sa.Uuid(), nullable=False),
         sa.Column("active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["catalog_district_id"], ["education_districts.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["catalog_grade_id"], ["education_grades.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["catalog_school_id"], ["education_schools.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["catalog_state_id"], ["education_states.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["catalog_subject_id"], ["education_subjects.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["education_objective_id"], ["education_objectives.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["catalog_subject_id"], ["education_subjects.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["education_objective_id"], ["education_objectives.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["pacing_guide_id"], ["pacing_guides.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["period_id"], ["pacing_guide_periods.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["platform_school_year_id"], ["education_school_years.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["platform_school_year_id"], ["education_school_years.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["uploaded_by_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -71,7 +83,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_pacing_guide_supporting_materials_objective", table_name="pacing_guide_supporting_materials")
-    op.drop_index("ix_pacing_guide_supporting_materials_period", table_name="pacing_guide_supporting_materials")
-    op.drop_index("ix_pacing_guide_supporting_materials_guide", table_name="pacing_guide_supporting_materials")
+    op.drop_index(
+        "ix_pacing_guide_supporting_materials_objective",
+        table_name="pacing_guide_supporting_materials",
+    )
+    op.drop_index(
+        "ix_pacing_guide_supporting_materials_period",
+        table_name="pacing_guide_supporting_materials",
+    )
+    op.drop_index(
+        "ix_pacing_guide_supporting_materials_guide", table_name="pacing_guide_supporting_materials"
+    )
     op.drop_table("pacing_guide_supporting_materials")

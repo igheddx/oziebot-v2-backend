@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from oziebot_api.models.education_catalog import EducationSchool, EducationSchoolYear, EducationState
+from oziebot_api.models.education_catalog import (
+    EducationSchool,
+    EducationSchoolYear,
+    EducationState,
+)
 from oziebot_api.models.user import User
 from oziebot_api.scripts.seed_teacher_assist_v2 import seed_teacher_assist_v2
 from oziebot_api.services.teacher_assist_v2.roles import ensure_v2_root_admin_role
@@ -20,7 +24,9 @@ def test_v2_context_root_admin_landing(client, db_session):
     user.teacher_assist_role = "root_admin"
     db_session.commit()
 
-    response = client.get("/v1/teacher-assist-v2/context", headers={"Authorization": f"Bearer {token}"})
+    response = client.get(
+        "/v1/teacher-assist-v2/context", headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["has_access"] is True
@@ -33,7 +39,9 @@ def test_v2_context_teacher_onboarding_landing(client, db_session):
     token = _register_user(client, email=email, tenant_name="V2 Teacher Tenant")
     _grant_teacher_assist_access(db_session, email=email)
 
-    response = client.get("/v1/teacher-assist-v2/context", headers={"Authorization": f"Bearer {token}"})
+    response = client.get(
+        "/v1/teacher-assist-v2/context", headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["has_access"] is True
@@ -43,7 +51,9 @@ def test_v2_context_teacher_onboarding_landing(client, db_session):
 
 def test_v2_context_access_denied_without_product(client):
     token = _register_user(client, email="v2-no-access@example.com", tenant_name="No TA Tenant")
-    response = client.get("/v1/teacher-assist-v2/context", headers={"Authorization": f"Bearer {token}"})
+    response = client.get(
+        "/v1/teacher-assist-v2/context", headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 403
 
 
@@ -68,7 +78,9 @@ def test_v2_archive_state_blocked_with_district(client, db_session):
     )
     assert response.status_code == 409
     detail = response.json()["detail"]
-    assert "district" in detail["message"].lower() or "district" in str(detail["dependencies"]).lower()
+    assert (
+        "district" in detail["message"].lower() or "district" in str(detail["dependencies"]).lower()
+    )
 
 
 def test_v2_hierarchy_explorer(client, db_session):
@@ -84,7 +96,9 @@ def test_v2_hierarchy_explorer(client, db_session):
     seed_teacher_assist_v2(db_session)
     db_session.commit()
 
-    response = client.get("/v1/teacher-assist-v2/admin/hierarchy", headers={"Authorization": f"Bearer {token}"})
+    response = client.get(
+        "/v1/teacher-assist-v2/admin/hierarchy", headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 200, response.text
     tree = response.json()
     assert len(tree) >= 1
@@ -125,7 +139,6 @@ def test_v2_archive_school_blocked_with_grades(client, db_session):
 
     seed_teacher_assist_v2(db_session)
     db_session.commit()
-
 
     school = db_session.scalar(
         select(EducationSchool).where(EducationSchool.name == "Mason Elementary")
@@ -227,4 +240,3 @@ def test_v2_pacing_guides_list(client, db_session):
     guides = response.json()
     assert len(guides) >= 4
     assert all(row["guide_type"] == "DISTRICT" for row in guides)
-

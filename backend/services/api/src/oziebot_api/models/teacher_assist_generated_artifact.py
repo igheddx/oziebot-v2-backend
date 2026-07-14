@@ -78,7 +78,9 @@ class TeacherAssistGeneratedArtifact(Base):
     tenant: Mapped["Tenant"] = relationship("Tenant")
     created_by_user: Mapped["User"] = relationship("User")
     pacing_guide: Mapped["TeacherAssistPacingGuide"] = relationship("TeacherAssistPacingGuide")
-    pacing_guide_period: Mapped["TeacherAssistPacingGuidePeriod"] = relationship("TeacherAssistPacingGuidePeriod")
+    pacing_guide_period: Mapped["TeacherAssistPacingGuidePeriod"] = relationship(
+        "TeacherAssistPacingGuidePeriod"
+    )
 
 
 from typing import TYPE_CHECKING  # noqa: E402

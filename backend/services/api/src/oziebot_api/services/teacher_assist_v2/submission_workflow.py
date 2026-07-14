@@ -15,7 +15,9 @@ from oziebot_api.models.teacher_assist_v2_assignment_grade import TeacherAssistV
 from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssistV2StudentSubmission
 from oziebot_api.models.teacher_assist_v2_submission_batch import TeacherAssistV2SubmissionBatch
 from oziebot_api.models.user import User
-from oziebot_api.services.teacher_assist_v2.grade_review_constants import OFFICIAL_ASSIGNMENT_GRADE_STATUSES
+from oziebot_api.services.teacher_assist_v2.grade_review_constants import (
+    OFFICIAL_ASSIGNMENT_GRADE_STATUSES,
+)
 from oziebot_api.services.teacher_assist_v2.submission_intake_constants import (
     TERMINAL_STUDENT_SUBMISSION_STATUSES,
 )
@@ -126,7 +128,9 @@ def ensure_roster_placeholder_submissions(
     for student_number in range(1, roster_size + 1):
         if student_number in uploaded_student_numbers:
             continue
-        if existing_submission_for_student(db, assignment_id=assignment.id, student_number=student_number):
+        if existing_submission_for_student(
+            db, assignment_id=assignment.id, student_number=student_number
+        ):
             continue
         row = TeacherAssistV2StudentSubmission(
             id=uuid.uuid4(),
@@ -142,7 +146,9 @@ def ensure_roster_placeholder_submissions(
             catalog_subject_id=assignment.catalog_subject_id,
             student_number=student_number,
             status="NOT_UPLOADED",
-            file_key=not_uploaded_file_key(assignment_id=assignment.id, student_number=student_number),
+            file_key=not_uploaded_file_key(
+                assignment_id=assignment.id, student_number=student_number
+            ),
             original_filename="Assignment not uploaded",
             mime_type="application/octet-stream",
             file_size=0,
@@ -163,7 +169,9 @@ def auto_grade_submissions(
     submissions: list[TeacherAssistV2StudentSubmission],
     settings: Settings,
 ) -> dict[str, Any]:
-    from oziebot_api.services.teacher_assist_v2.grading_drafts import create_grading_job_for_submission
+    from oziebot_api.services.teacher_assist_v2.grading_drafts import (
+        create_grading_job_for_submission,
+    )
 
     graded: list[str] = []
     failed: list[dict[str, str]] = []
@@ -189,7 +197,12 @@ def auto_grade_submissions(
                 }
             )
     db.flush()
-    return {"graded_count": len(graded), "failed_count": len(failed), "graded": graded, "failed": failed}
+    return {
+        "graded_count": len(graded),
+        "failed_count": len(failed),
+        "graded": graded,
+        "failed": failed,
+    }
 
 
 def get_or_create_roster_placeholder_batch(
@@ -244,9 +257,13 @@ def ensure_roster_submission_slots(
         return
 
     created_at = now or _now()
-    batch = get_or_create_roster_placeholder_batch(db, user=user, assignment=assignment, now=created_at)
+    batch = get_or_create_roster_placeholder_batch(
+        db, user=user, assignment=assignment, now=created_at
+    )
     for student_number in range(1, roster_size + 1):
-        if existing_submission_for_student(db, assignment_id=assignment.id, student_number=student_number):
+        if existing_submission_for_student(
+            db, assignment_id=assignment.id, student_number=student_number
+        ):
             continue
         row = TeacherAssistV2StudentSubmission(
             id=uuid.uuid4(),
@@ -262,7 +279,9 @@ def ensure_roster_submission_slots(
             catalog_subject_id=assignment.catalog_subject_id,
             student_number=student_number,
             status="NOT_UPLOADED",
-            file_key=not_uploaded_file_key(assignment_id=assignment.id, student_number=student_number),
+            file_key=not_uploaded_file_key(
+                assignment_id=assignment.id, student_number=student_number
+            ),
             original_filename="Assignment not uploaded",
             mime_type="application/octet-stream",
             file_size=0,
@@ -324,7 +343,8 @@ def list_assignment_review_queue(
 
     assignment = _get_assignment_or_404(db, user=user, assignment_id=assignment_id)
     rows = db.scalars(
-        select(TeacherAssistV2StudentSubmission).where(
+        select(TeacherAssistV2StudentSubmission)
+        .where(
             TeacherAssistV2StudentSubmission.assignment_id == assignment.id,
             TeacherAssistV2StudentSubmission.teacher_user_id == user.id,
             TeacherAssistV2StudentSubmission.status != "ARCHIVED",

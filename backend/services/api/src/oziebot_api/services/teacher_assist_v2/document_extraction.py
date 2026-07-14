@@ -20,7 +20,9 @@ from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_pacing_guide_supporting_material import (
     TeacherAssistPacingGuideSupportingMaterial,
 )
-from oziebot_api.models.teacher_assist_v2_document_extraction import TeacherAssistV2DocumentExtraction
+from oziebot_api.models.teacher_assist_v2_document_extraction import (
+    TeacherAssistV2DocumentExtraction,
+)
 from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2PlanningSupplementalMaterial,
 )
@@ -67,7 +69,9 @@ def _now() -> datetime:
 
 
 def _normalize_text(value: str | None) -> str:
-    return "\n".join(line.strip() for line in (value or "").replace("\r", "\n").split("\n") if line.strip()).strip()
+    return "\n".join(
+        line.strip() for line in (value or "").replace("\r", "\n").split("\n") if line.strip()
+    ).strip()
 
 
 def _preview(value: str | None, *, limit: int = DOCUMENT_EXTRACTION_PREVIEW_LIMIT) -> str | None:
@@ -140,7 +144,9 @@ def _extract_pptx(file_bytes: bytes) -> str:
     return "\n".join(parts)
 
 
-def _extract_via_ocr(*, settings: Settings, file_bytes: bytes, mime_type: str, original_filename: str) -> tuple[str, str]:
+def _extract_via_ocr(
+    *, settings: Settings, file_bytes: bytes, mime_type: str, original_filename: str
+) -> tuple[str, str]:
     provider_name = (settings.teacher_assist_ocr_provider or "mock").strip() or "mock"
     if resolve_teacher_assist_ocr_provider_mode(provider_name) != "real":
         raise TeacherAssistOCRProviderError(
@@ -185,7 +191,14 @@ def _extract_file_text(
             return "completed", _extract_docx(file_bytes), "local_docx"
         if normalized_mime in PPTX_MIME_TYPES or suffix == ".pptx":
             return "completed", _extract_pptx(file_bytes), "local_pptx"
-        if normalized_mime in IMAGE_MIME_TYPES or suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".tiff"}:
+        if normalized_mime in IMAGE_MIME_TYPES or suffix in {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".webp",
+            ".tiff",
+        }:
             ocr_text, provider = _extract_via_ocr(
                 settings=settings,
                 file_bytes=file_bytes,
@@ -216,7 +229,9 @@ def serialize_document_extraction(
         "character_count": record.character_count,
         "token_estimate": record.token_estimate,
         "preview": _preview(effective_text) or record.extracted_text_preview,
-        "effective_text_excerpt": effective_text[:DOCUMENT_CONTEXT_ITEM_LIMIT] if effective_text else None,
+        "effective_text_excerpt": effective_text[:DOCUMENT_CONTEXT_ITEM_LIMIT]
+        if effective_text
+        else None,
         "extracted_text_preview": record.extracted_text_preview,
         "teacher_edited_text": record.teacher_edited_text,
         "has_extracted_text": bool(_normalize_text(record.extracted_text)),
@@ -466,9 +481,7 @@ def load_supporting_material_extractions(
         )
     ).all()
     return {
-        row.supporting_material_id: row
-        for row in rows
-        if row.supporting_material_id is not None
+        row.supporting_material_id: row for row in rows if row.supporting_material_id is not None
     }
 
 
@@ -499,11 +512,7 @@ def load_submission_extractions(
             TeacherAssistV2DocumentExtraction.student_submission_id.in_(submission_ids)
         )
     ).all()
-    return {
-        row.student_submission_id: row
-        for row in rows
-        if row.student_submission_id is not None
-    }
+    return {row.student_submission_id: row for row in rows if row.student_submission_id is not None}
 
 
 def build_document_prompt_context(
@@ -544,7 +553,9 @@ def build_document_prompt_context(
             continue
         excerpt = effective_text[: min(item_char_limit, remaining)].strip()
         if not excerpt:
-            skipped.append({**entry, "reason": "Prompt text budget was exhausted before this file."})
+            skipped.append(
+                {**entry, "reason": "Prompt text budget was exhausted before this file."}
+            )
             continue
         used.append(
             {
@@ -570,7 +581,9 @@ def build_ai_readiness_summary(
     district_materials: list[dict[str, Any]],
     teacher_materials: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    file_materials = [row for row in district_materials + teacher_materials if row.get("material_kind") == "file"]
+    file_materials = [
+        row for row in district_materials + teacher_materials if row.get("material_kind") == "file"
+    ]
     completed = 0
     failed = 0
     pending = 0

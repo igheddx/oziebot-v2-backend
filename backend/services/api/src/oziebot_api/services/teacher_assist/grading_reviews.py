@@ -7,7 +7,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.teacher_assist_assignment_grading_review import TeacherAssistAssignmentGradingReview
+from oziebot_api.models.teacher_assist_assignment_grading_review import (
+    TeacherAssistAssignmentGradingReview,
+)
 from oziebot_api.models.teacher_assist_assignment_grading_review_item import (
     TeacherAssistAssignmentGradingReviewItem,
 )
@@ -17,15 +19,39 @@ from oziebot_api.services.teacher_assist.constants import (
     validate_assignment_grading_review_source,
     validate_assignment_grading_review_status,
 )
-from oziebot_api.services.teacher_assist.instructional_plan_validator import contains_pii_like_content
+from oziebot_api.services.teacher_assist.instructional_plan_validator import (
+    contains_pii_like_content,
+)
 from oziebot_api.services.teacher_assist.student_work import get_student_work_submission_or_404
 
 GRADING_REVIEW_STATUS_TRANSITIONS: dict[str, set[str]] = {
-    "draft": {"draft", "teacher_reviewing", "teacher_confirmed", "returned_for_revision", "archived"},
-    "ai_suggested": {"ai_suggested", "teacher_reviewing", "teacher_confirmed", "returned_for_revision", "archived"},
-    "teacher_reviewing": {"teacher_reviewing", "teacher_confirmed", "returned_for_revision", "archived"},
+    "draft": {
+        "draft",
+        "teacher_reviewing",
+        "teacher_confirmed",
+        "returned_for_revision",
+        "archived",
+    },
+    "ai_suggested": {
+        "ai_suggested",
+        "teacher_reviewing",
+        "teacher_confirmed",
+        "returned_for_revision",
+        "archived",
+    },
+    "teacher_reviewing": {
+        "teacher_reviewing",
+        "teacher_confirmed",
+        "returned_for_revision",
+        "archived",
+    },
     "teacher_confirmed": {"teacher_confirmed", "returned_for_revision", "archived"},
-    "returned_for_revision": {"returned_for_revision", "teacher_reviewing", "teacher_confirmed", "archived"},
+    "returned_for_revision": {
+        "returned_for_revision",
+        "teacher_reviewing",
+        "teacher_confirmed",
+        "archived",
+    },
     "archived": {"archived"},
 }
 
@@ -56,7 +82,16 @@ def _validate_grading_review_content(
     teacher_notes: str | None,
     teacher_confirmed_score: float | None,
     teacher_confirmed_feedback: str | None,
-) -> tuple[float | None, float | None, str | None, list[str], list[str], str | None, float | None, str | None]:
+) -> tuple[
+    float | None,
+    float | None,
+    str | None,
+    list[str],
+    list[str],
+    str | None,
+    float | None,
+    str | None,
+]:
     normalized_feedback_summary = _normalize_string(feedback_summary)
     normalized_strengths = _normalize_string_list(strengths)
     normalized_improvement_areas = _normalize_string_list(improvement_areas)
@@ -77,7 +112,9 @@ def _validate_grading_review_content(
             "teacher_confirmed_feedback": normalized_teacher_confirmed_feedback,
         }
     ):
-        raise ValueError("Grading review content cannot include student-identifying or PII-like content")
+        raise ValueError(
+            "Grading review content cannot include student-identifying or PII-like content"
+        )
     return (
         score_suggestion,
         max_score,
@@ -105,8 +142,10 @@ def _validate_review_status_payload(
             raise ValueError(
                 f"Grading review status cannot transition from {normalized_current} to {normalized_next}"
             )
-    if normalized_next == "teacher_confirmed" and teacher_confirmed_score is None and not (
-        teacher_confirmed_feedback and teacher_confirmed_feedback.strip()
+    if (
+        normalized_next == "teacher_confirmed"
+        and teacher_confirmed_score is None
+        and not (teacher_confirmed_feedback and teacher_confirmed_feedback.strip())
     ):
         raise ValueError(
             "Teacher confirmed grading reviews require a teacher confirmed score or teacher confirmed feedback"
@@ -142,7 +181,9 @@ def _normalize_review_item_inputs(
             teacher_confirmed_feedback=None,
         )
         if contains_pii_like_content({"criterion_title": criterion_title}):
-            raise ValueError("Grading review item content cannot include student-identifying or PII-like content")
+            raise ValueError(
+                "Grading review item content cannot include student-identifying or PII-like content"
+            )
         normalized_items.append(
             {
                 "criterion_title": criterion_title,
@@ -403,7 +444,9 @@ def update_grading_review(
         db,
         tenant_id=review.tenant_id,
         user_id=review.teacher_user_id,
-        event_type="grading_review_confirmed" if review.status == "teacher_confirmed" else "grading_review_updated",
+        event_type="grading_review_confirmed"
+        if review.status == "teacher_confirmed"
+        else "grading_review_updated",
         event_category="review",
         entity_type="grading_review",
         entity_id=review.id,
@@ -453,7 +496,9 @@ def update_grading_review_status(
         db,
         tenant_id=review.tenant_id,
         user_id=review.teacher_user_id,
-        event_type="grading_review_confirmed" if review.status == "teacher_confirmed" else "grading_review_updated",
+        event_type="grading_review_confirmed"
+        if review.status == "teacher_confirmed"
+        else "grading_review_updated",
         event_category="review",
         entity_type="grading_review",
         entity_id=review.id,

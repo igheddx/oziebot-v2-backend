@@ -64,7 +64,9 @@ class TeacherCopilotMessage(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    session: Mapped[TeacherCopilotSession] = relationship("TeacherCopilotSession", back_populates="messages")
+    session: Mapped[TeacherCopilotSession] = relationship(
+        "TeacherCopilotSession", back_populates="messages"
+    )
 
 
 from typing import TYPE_CHECKING  # noqa: E402

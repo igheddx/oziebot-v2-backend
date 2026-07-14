@@ -10,7 +10,10 @@ from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
 from oziebot_api.services.teacher_assist.lesson_effectiveness import list_lesson_effectiveness
-from oziebot_api.services.teacher_assist.setup import get_grading_period_or_404, get_school_year_or_404
+from oziebot_api.services.teacher_assist.setup import (
+    get_grading_period_or_404,
+    get_school_year_or_404,
+)
 
 
 def _aggregate_effectiveness_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -35,7 +38,9 @@ def _aggregate_effectiveness_summary(rows: list[dict[str, Any]]) -> dict[str, An
     return {
         "lesson_count": len(rows),
         "classification_counts": classification_counts,
-        "average_mastery_percentage": round(sum(mastery_values) / len(mastery_values), 4) if mastery_values else 0.0,
+        "average_mastery_percentage": round(sum(mastery_values) / len(mastery_values), 4)
+        if mastery_values
+        else 0.0,
         "total_assignments": total_assignments,
         "total_reteach_plans": total_reteach,
     }
@@ -90,10 +95,16 @@ def build_lesson_effectiveness_historical_comparison(
     current_period = None
     prior_period = None
     if grading_period_id is not None:
-        current_period = get_grading_period_or_404(db, tenant_id=tenant_id, grading_period_id=grading_period_id)
-        prior_period = _find_prior_grading_period(db, tenant_id=tenant_id, current_period=current_period)
+        current_period = get_grading_period_or_404(
+            db, tenant_id=tenant_id, grading_period_id=grading_period_id
+        )
+        prior_period = _find_prior_grading_period(
+            db, tenant_id=tenant_id, current_period=current_period
+        )
 
-    prior_school_year = _find_prior_school_year(db, tenant_id=tenant_id, current_school_year=school_year)
+    prior_school_year = _find_prior_school_year(
+        db, tenant_id=tenant_id, current_school_year=school_year
+    )
 
     current_rows = list_lesson_effectiveness(
         db,
@@ -138,7 +149,9 @@ def build_lesson_effectiveness_historical_comparison(
                 "school_year_id": school_year_id,
                 "grading_period_id": grading_period_id,
                 "school_year_title": school_year.title,
-                "grading_period_title": current_period.title if current_period is not None else None,
+                "grading_period_title": current_period.title
+                if current_period is not None
+                else None,
                 "summary": _aggregate_effectiveness_summary(current_rows),
                 "lessons": current_rows,
             }
@@ -160,7 +173,9 @@ def build_lesson_effectiveness_historical_comparison(
                 "school_year_id": prior_school_year.id,
                 "grading_period_id": current_period.id if current_period is not None else None,
                 "school_year_title": prior_school_year.title,
-                "grading_period_title": current_period.title if current_period is not None else None,
+                "grading_period_title": current_period.title
+                if current_period is not None
+                else None,
                 "summary": _aggregate_effectiveness_summary(prior_year_rows),
                 "lessons": prior_year_rows,
             }

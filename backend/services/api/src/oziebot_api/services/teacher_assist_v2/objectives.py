@@ -4,7 +4,11 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.education_catalog import EducationGrade, EducationObjective, EducationSubject
+from oziebot_api.models.education_catalog import (
+    EducationGrade,
+    EducationObjective,
+    EducationSubject,
+)
 from oziebot_api.services.teacher_assist.education_catalog import (
     create_objective,
     get_grade_or_404,

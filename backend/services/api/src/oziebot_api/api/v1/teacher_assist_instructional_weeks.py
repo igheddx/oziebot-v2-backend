@@ -23,7 +23,9 @@ from oziebot_api.services.teacher_assist.instructional_week_snapshots import (
     create_instructional_week_snapshot,
     serialize_snapshot,
 )
-from oziebot_api.services.teacher_assist.instructional_week_workspace import build_instructional_week_workspace
+from oziebot_api.services.teacher_assist.instructional_week_workspace import (
+    build_instructional_week_workspace,
+)
 from oziebot_api.services.teacher_assist.instructional_weeks import (
     create_instructional_week_from_pacing_period,
     deactivate_instructional_week_objective,
@@ -36,7 +38,9 @@ from oziebot_api.services.teacher_assist.instructional_weeks import (
     update_instructional_week,
     upsert_instructional_week_objective,
 )
-from oziebot_api.models.teacher_assist_instructional_week import TeacherAssistInstructionalWeekSnapshot
+from oziebot_api.models.teacher_assist_instructional_week import (
+    TeacherAssistInstructionalWeekSnapshot,
+)
 from sqlalchemy import select
 
 
@@ -81,18 +85,24 @@ def read_instructional_weeks(
 
 
 @router.get("/instructional-weeks/by-period/{period_id}")
-def read_instructional_week_by_period(period_id: uuid.UUID, user: CurrentUser, db: DbSession) -> dict:
+def read_instructional_week_by_period(
+    period_id: uuid.UUID, user: CurrentUser, db: DbSession
+) -> dict:
     tenant_id = _tenant_id(db, user)
     row = find_instructional_week_for_period(
         db, tenant_id=tenant_id, user_id=user.id, pacing_guide_period_id=period_id
     )
     if row is None:
-        raise HTTPException(status_code=404, detail="Instructional week not found for pacing period")
+        raise HTTPException(
+            status_code=404, detail="Instructional week not found for pacing period"
+        )
     return serialize_instructional_week(row)
 
 
 @router.get("/instructional-weeks/{instructional_week_id}")
-def read_instructional_week(instructional_week_id: uuid.UUID, user: CurrentUser, db: DbSession) -> dict:
+def read_instructional_week(
+    instructional_week_id: uuid.UUID, user: CurrentUser, db: DbSession
+) -> dict:
     tenant_id = _tenant_id(db, user)
     row = _handle(
         lambda: get_instructional_week(
@@ -191,7 +201,9 @@ def add_instructional_week_objective(
     return serialize_instructional_week_objective(row)
 
 
-@router.delete("/instructional-weeks/{instructional_week_id}/objectives/{objective_row_id}", status_code=200)
+@router.delete(
+    "/instructional-weeks/{instructional_week_id}/objectives/{objective_row_id}", status_code=200
+)
 def remove_instructional_week_objective(
     instructional_week_id: uuid.UUID,
     objective_row_id: uuid.UUID,
@@ -212,7 +224,9 @@ def remove_instructional_week_objective(
 
 
 @router.post("/instructional-weeks/{instructional_week_id}/generate-next-week")
-def generate_next_week_route(instructional_week_id: uuid.UUID, user: CurrentUser, db: DbSession) -> dict:
+def generate_next_week_route(
+    instructional_week_id: uuid.UUID, user: CurrentUser, db: DbSession
+) -> dict:
     tenant_id = _tenant_id(db, user)
     return _handle(
         lambda: generate_next_instructional_week(
@@ -267,7 +281,9 @@ def create_snapshot_route(
 
 
 @router.get("/instructional-weeks/{instructional_week_id}/snapshots")
-def list_snapshots_route(instructional_week_id: uuid.UUID, user: CurrentUser, db: DbSession) -> list[dict]:
+def list_snapshots_route(
+    instructional_week_id: uuid.UUID, user: CurrentUser, db: DbSession
+) -> list[dict]:
     tenant_id = _tenant_id(db, user)
     _handle(
         lambda: get_instructional_week(
@@ -277,7 +293,10 @@ def list_snapshots_route(instructional_week_id: uuid.UUID, user: CurrentUser, db
     rows = list(
         db.scalars(
             select(TeacherAssistInstructionalWeekSnapshot)
-            .where(TeacherAssistInstructionalWeekSnapshot.instructional_week_id == instructional_week_id)
+            .where(
+                TeacherAssistInstructionalWeekSnapshot.instructional_week_id
+                == instructional_week_id
+            )
             .order_by(TeacherAssistInstructionalWeekSnapshot.created_at.desc())
         ).all()
     )

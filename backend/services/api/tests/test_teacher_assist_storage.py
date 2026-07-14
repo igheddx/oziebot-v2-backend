@@ -160,7 +160,9 @@ def test_s3_storage_provider_save_presign_open_and_delete(monkeypatch):
     assert fake_client.put_calls[0]["Key"] == "teacher-assist/student-work/tenant-a/upload.pdf"
     assert fake_client.put_calls[0]["ContentType"] == "application/pdf"
     assert fake_client.put_calls[0]["ServerSideEncryption"] == "AES256"
-    assert provider.file_exists(storage_key="teacher-assist/student-work/tenant-a/upload.pdf") is True
+    assert (
+        provider.file_exists(storage_key="teacher-assist/student-work/tenant-a/upload.pdf") is True
+    )
 
     stream = provider.open_stream(storage_key="teacher-assist/student-work/tenant-a/upload.pdf")
     assert isinstance(stream, io.BytesIO)

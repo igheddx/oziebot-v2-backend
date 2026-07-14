@@ -39,7 +39,9 @@ class TeacherAssistV2StudentSubmission(Base):
         index=True,
     )
     platform_school_year_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_school_years.id", ondelete="CASCADE"), nullable=False
+        Uuid(as_uuid=True),
+        ForeignKey("education_school_years.id", ondelete="CASCADE"),
+        nullable=False,
     )
     catalog_district_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("education_districts.id", ondelete="CASCADE"), nullable=False

@@ -5,7 +5,9 @@ from typing import Protocol
 
 from oziebot_api.config import Settings
 from oziebot_api.services.teacher_assist.constants import validate_teacher_assist_ocr_provider
-from oziebot_api.services.teacher_assist.ocr_provider_config import TeacherAssistOCRProviderCircuitBreaker
+from oziebot_api.services.teacher_assist.ocr_provider_config import (
+    TeacherAssistOCRProviderCircuitBreaker,
+)
 
 
 @dataclass(frozen=True)
@@ -33,13 +35,17 @@ class TeacherAssistOCRProvider(Protocol):
 def get_teacher_assist_ocr_provider(settings: Settings) -> TeacherAssistOCRProvider:
     provider_name = validate_teacher_assist_ocr_provider(settings.teacher_assist_ocr_provider)
     if provider_name == "mock":
-        from oziebot_api.services.teacher_assist.mock_ocr_provider import MockTeacherAssistOCRProvider
+        from oziebot_api.services.teacher_assist.mock_ocr_provider import (
+            MockTeacherAssistOCRProvider,
+        )
 
         return MockTeacherAssistOCRProvider()
 
     TeacherAssistOCRProviderCircuitBreaker().assert_can_execute(settings, provider_name)
     if provider_name == "textract":
-        from oziebot_api.services.teacher_assist.textract_ocr_provider import TextractTeacherAssistOCRProvider
+        from oziebot_api.services.teacher_assist.textract_ocr_provider import (
+            TextractTeacherAssistOCRProvider,
+        )
 
         return TextractTeacherAssistOCRProvider()
     if provider_name == "openai_vision":

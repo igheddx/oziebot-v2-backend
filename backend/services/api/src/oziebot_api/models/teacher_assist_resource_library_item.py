@@ -70,7 +70,9 @@ if TYPE_CHECKING:
         TeacherAssistExtractedTextRecord,
     )
     from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtractionJob
-    from oziebot_api.models.teacher_assist_pacing_item_resource import TeacherAssistPacingItemResource
+    from oziebot_api.models.teacher_assist_pacing_item_resource import (
+        TeacherAssistPacingItemResource,
+    )
     from oziebot_api.models.teacher_assist_planning_input_draft_resource import (
         TeacherAssistPlanningInputDraftResource,
     )

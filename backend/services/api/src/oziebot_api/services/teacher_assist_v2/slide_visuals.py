@@ -12,8 +12,15 @@ _NO_VISUAL_SLIDE_TYPES = {"strand_separator", "separator", "transition"}
 
 def _visual_profile(slide_type: str, title: str) -> dict[str, Any]:
     if slide_type in _NO_VISUAL_SLIDE_TYPES:
-        return {"visual_type": "none", "layout": "title_full", "placement": "none",
-                "description": "", "purpose": "", "search_terms": [], "sources": []}
+        return {
+            "visual_type": "none",
+            "layout": "title_full",
+            "placement": "none",
+            "description": "",
+            "purpose": "",
+            "search_terms": [],
+            "sources": [],
+        }
     key = f"{slide_type} {title}".lower()
     if "vocab" in key:
         return {
@@ -22,7 +29,11 @@ def _visual_profile(slide_type: str, title: str) -> dict[str, Any]:
             "placement": "full_width",
             "description": "Large classroom vocabulary card with picture cue, definition space, and example sentence.",
             "purpose": "Helps students connect academic vocabulary to meaning and classroom examples.",
-            "search_terms": ["elementary vocabulary card", "picture vocabulary organizer", "word meaning visual"],
+            "search_terms": [
+                "elementary vocabulary card",
+                "picture vocabulary organizer",
+                "word meaning visual",
+            ],
             "sources": ["Teacher-created SVG illustrations", "Openverse"],
         }
     if "exit" in key or "check for understanding" in key:
@@ -32,7 +43,11 @@ def _visual_profile(slide_type: str, title: str) -> dict[str, Any]:
             "placement": "right",
             "description": "Simple response icon set with answer box, pencil, and evidence cue.",
             "purpose": "Signals that students should respond independently and keep the focus on the assessment prompt.",
-            "search_terms": ["exit ticket classroom icon", "student response illustration", "assessment prompt visual"],
+            "search_terms": [
+                "exit ticket classroom icon",
+                "student response illustration",
+                "assessment prompt visual",
+            ],
             "sources": ["Teacher-created SVG illustrations", "Wikimedia Commons"],
         }
     if "guided practice" in key:
@@ -42,7 +57,11 @@ def _visual_profile(slide_type: str, title: str) -> dict[str, Any]:
             "placement": "right",
             "description": "Graphic organizer with modeled example and space for student partner thinking.",
             "purpose": "Shows the steps students should follow during guided practice.",
-            "search_terms": ["guided practice organizer", "student partner work organizer", "modeled example chart"],
+            "search_terms": [
+                "guided practice organizer",
+                "student partner work organizer",
+                "modeled example chart",
+            ],
             "sources": ["Teacher-created SVG illustrations", "Openverse", "Pixabay"],
         }
     if "independent practice" in key:
@@ -52,7 +71,11 @@ def _visual_profile(slide_type: str, title: str) -> dict[str, Any]:
             "placement": "left",
             "description": "Three-step process flow showing read, think, and write independently.",
             "purpose": "Clarifies the sequence students should follow without needing teacher narration.",
-            "search_terms": ["student process flow", "read think write poster", "independent work visual"],
+            "search_terms": [
+                "student process flow",
+                "read think write poster",
+                "independent work visual",
+            ],
             "sources": ["Teacher-created SVG illustrations", "Wikimedia Commons"],
         }
     if "supporting detail" in key:
@@ -62,7 +85,11 @@ def _visual_profile(slide_type: str, title: str) -> dict[str, Any]:
             "placement": "top",
             "description": "Main idea organizer with labeled supporting detail boxes.",
             "purpose": "Helps students distinguish the main idea from details that support it.",
-            "search_terms": ["main idea supporting details organizer", "supporting details chart", "reading organizer"],
+            "search_terms": [
+                "main idea supporting details organizer",
+                "supporting details chart",
+                "reading organizer",
+            ],
             "sources": ["Teacher-created SVG illustrations", "Openverse", "Pixabay"],
         }
     if "main idea" in key or "concept" in key or "objective" in key:
@@ -72,7 +99,11 @@ def _visual_profile(slide_type: str, title: str) -> dict[str, Any]:
             "placement": "right",
             "description": "Central concept map with one main idea node and supporting branches.",
             "purpose": "Makes the relationship between the main idea and supporting details visible for students.",
-            "search_terms": ["main idea concept map", "main idea graphic organizer", "reading concept map"],
+            "search_terms": [
+                "main idea concept map",
+                "main idea graphic organizer",
+                "reading concept map",
+            ],
             "sources": ["Teacher-created SVG illustrations", "Openverse", "Wikimedia Commons"],
         }
     if "timeline" in key or "sequence" in key:
@@ -82,7 +113,11 @@ def _visual_profile(slide_type: str, title: str) -> dict[str, Any]:
             "placement": "full_width",
             "description": "Horizontal classroom timeline showing events or steps in sequence.",
             "purpose": "Helps students see order and sequence at a glance.",
-            "search_terms": ["elementary timeline infographic", "process timeline classroom", "sequence organizer"],
+            "search_terms": [
+                "elementary timeline infographic",
+                "process timeline classroom",
+                "sequence organizer",
+            ],
             "sources": ["Teacher-created SVG illustrations", "Openverse"],
         }
     if "compare" in key:
@@ -92,7 +127,11 @@ def _visual_profile(slide_type: str, title: str) -> dict[str, Any]:
             "placement": "full_width",
             "description": "Two-column comparison table with headers and student-friendly examples.",
             "purpose": "Supports compare-and-contrast thinking with a clean side-by-side structure.",
-            "search_terms": ["compare contrast chart", "two column comparison organizer", "Venn alternative organizer"],
+            "search_terms": [
+                "compare contrast chart",
+                "two column comparison organizer",
+                "Venn alternative organizer",
+            ],
             "sources": ["Teacher-created SVG illustrations", "Openverse"],
         }
     if "title" in slide_type or "wrap-up" in key:
@@ -102,7 +141,11 @@ def _visual_profile(slide_type: str, title: str) -> dict[str, Any]:
             "placement": "background",
             "description": "Friendly classroom illustration that previews the lesson theme.",
             "purpose": "Sets lesson tone and creates an inviting classroom presentation opener.",
-            "search_terms": ["children reading informational text", "elementary classroom reading", "public domain school illustration"],
+            "search_terms": [
+                "children reading informational text",
+                "elementary classroom reading",
+                "public domain school illustration",
+            ],
             "sources": ["Unsplash", "Pixabay", "Wikimedia Commons"],
         }
     return {
@@ -111,7 +154,11 @@ def _visual_profile(slide_type: str, title: str) -> dict[str, Any]:
         "placement": "right",
         "description": "Student-friendly diagram that makes the lesson concept concrete.",
         "purpose": "Adds a visual anchor so students can understand the concept without relying only on narration.",
-        "search_terms": ["elementary lesson diagram", "education concept visual", "classroom anchor chart"],
+        "search_terms": [
+            "elementary lesson diagram",
+            "education concept visual",
+            "classroom anchor chart",
+        ],
         "sources": PUBLIC_VISUAL_SOURCES,
     }
 
@@ -200,13 +247,19 @@ def build_slide_visual_assets(slides: list[dict[str, Any]]) -> list[dict[str, An
                 search_terms = [t for t in _img_search_raw if isinstance(t, str)]
             else:
                 img_search = _img_search_raw if isinstance(_img_search_raw, dict) else {}
-                search_terms = [t for t in (img_search.get("search_terms") or []) if isinstance(t, str)]
+                search_terms = [
+                    t for t in (img_search.get("search_terms") or []) if isinstance(t, str)
+                ]
             assets.append(
                 {
                     "slide_id": slide_id,
                     "visual_type": "image",
                     "title": f"{slide.get('title') or slide_id} — Image",
-                    "description": str(img_search.get("image_alt_text") or img_search.get("educational_purpose") or ""),
+                    "description": str(
+                        img_search.get("image_alt_text")
+                        or img_search.get("educational_purpose")
+                        or ""
+                    ),
                     "source_type": "pixabay",
                     "source_url": visual_block.get("source_url"),
                     "attribution": visual_block.get("attribution"),
@@ -240,7 +293,9 @@ def build_slide_visual_assets(slides: list[dict[str, Any]]) -> list[dict[str, An
                 "educational_purpose": recommendation.get("educational_purpose"),
                 "suggested_placement": recommendation.get("suggested_placement"),
                 "layout_template": recommendation.get("layout_template"),
-                "visual_generation_status": str(recommendation.get("visual_generation_status") or "recommendation_only"),
+                "visual_generation_status": str(
+                    recommendation.get("visual_generation_status") or "recommendation_only"
+                ),
                 "search_terms_json": list(recommendation.get("search_terms") or []),
                 "suggested_sources_json": list(recommendation.get("suggested_sources") or []),
             }

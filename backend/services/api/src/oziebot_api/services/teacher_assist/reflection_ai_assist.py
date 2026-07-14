@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsageEvent
 from oziebot_api.models.teacher_assist_lesson_reflection import TeacherAssistLessonReflection
-from oziebot_api.models.teacher_assist_lesson_reflection_version import TeacherAssistLessonReflectionVersion
+from oziebot_api.models.teacher_assist_lesson_reflection_version import (
+    TeacherAssistLessonReflectionVersion,
+)
 from oziebot_api.services.teacher_assist.activity_events import record_activity_event
 from oziebot_api.services.teacher_assist.lesson_reflections import (
     build_lesson_reflection_prompt_context,
@@ -103,10 +105,17 @@ def generate_lesson_reflection_ai_suggestions(
     if normalized_provider_mode not in {"mock", "real"}:
         raise ValueError("Unsupported lesson reflection AI provider mode")
     if normalized_provider_mode == "real":
-        if not (settings.teacher_assist_real_provider_enabled or settings.teacher_assist_ai_enable_real_provider):
+        if not (
+            settings.teacher_assist_real_provider_enabled
+            or settings.teacher_assist_ai_enable_real_provider
+        ):
             raise ValueError("Real lesson reflection AI is disabled")
-        TeacherAssistProviderCircuitBreaker().assert_can_execute(settings, settings.teacher_assist_ai_provider)
-        raise ValueError("Real lesson reflection AI provider execution is not enabled in this phase")
+        TeacherAssistProviderCircuitBreaker().assert_can_execute(
+            settings, settings.teacher_assist_ai_provider
+        )
+        raise ValueError(
+            "Real lesson reflection AI provider execution is not enabled in this phase"
+        )
 
     prompt_context = build_lesson_reflection_prompt_context(
         db,
@@ -178,8 +187,12 @@ def generate_lesson_reflection_ai_suggestions(
         },
     )
     db.flush()
-    return reflection, version, {
-        "provider_mode": normalized_provider_mode,
-        "teacher_review_required": True,
-        "prompt_version": LESSON_REFLECTION_AI_PROMPT_VERSION,
-    }
+    return (
+        reflection,
+        version,
+        {
+            "provider_mode": normalized_provider_mode,
+            "teacher_review_required": True,
+            "prompt_version": LESSON_REFLECTION_AI_PROMPT_VERSION,
+        },
+    )

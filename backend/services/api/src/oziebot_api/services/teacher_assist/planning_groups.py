@@ -7,7 +7,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from oziebot_api.models.teacher_assist_time_savings import TeacherAssistPlanningGroup, TeacherAssistPlanningGroupMember
+from oziebot_api.models.teacher_assist_time_savings import (
+    TeacherAssistPlanningGroup,
+    TeacherAssistPlanningGroupMember,
+)
 from oziebot_api.models.user import User
 
 
@@ -52,10 +55,16 @@ def create_planning_group(
     return group
 
 
-def list_planning_groups(db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> list[TeacherAssistPlanningGroup]:
+def list_planning_groups(
+    db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUID
+) -> list[TeacherAssistPlanningGroup]:
     group_ids = [
         row.group_id
-        for row in db.scalars(select(TeacherAssistPlanningGroupMember).where(TeacherAssistPlanningGroupMember.user_id == user_id)).all()
+        for row in db.scalars(
+            select(TeacherAssistPlanningGroupMember).where(
+                TeacherAssistPlanningGroupMember.user_id == user_id
+            )
+        ).all()
     ]
     if not group_ids:
         return []

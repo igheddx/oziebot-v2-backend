@@ -17,8 +17,12 @@ from oziebot_api.services.teacher_assist.pilot_feedback import (
     update_pilot_feedback_status,
 )
 from oziebot_api.services.teacher_assist.pilot_seed_validation import validate_pilot_seed_data
-from oziebot_api.services.teacher_assist.product_completion_review import build_product_completion_review
-from oziebot_api.services.teacher_assist.system_health_dashboard import build_system_health_dashboard
+from oziebot_api.services.teacher_assist.product_completion_review import (
+    build_product_completion_review,
+)
+from oziebot_api.services.teacher_assist.system_health_dashboard import (
+    build_system_health_dashboard,
+)
 from oziebot_api.services.teacher_assist.usage_metrics import (
     build_usage_metrics_snapshot,
     record_teacher_login,
@@ -65,12 +69,16 @@ def read_completion_review(user: CurrentUser) -> dict:
 @router.get("/seed-validation")
 def read_seed_validation(user: CurrentUser, db: DbSession) -> dict:
     if not user.is_root_admin:
-        raise HTTPException(status_code=403, detail="Seed validation is restricted to root administrators")
+        raise HTTPException(
+            status_code=403, detail="Seed validation is restricted to root administrators"
+        )
     return validate_pilot_seed_data(db)
 
 
 @router.get("/usage-metrics")
-def read_usage_metrics(user: CurrentUser, db: DbSession, days: int = Query(default=30, ge=1, le=365)) -> dict:
+def read_usage_metrics(
+    user: CurrentUser, db: DbSession, days: int = Query(default=30, ge=1, le=365)
+) -> dict:
     tenant_id = _tenant_id(db, user)
     return build_usage_metrics_snapshot(db, tenant_id=tenant_id, days=days)
 
@@ -104,7 +112,9 @@ def read_pilot_feedback(
 
 
 @router.post("/feedback", status_code=201)
-def create_pilot_feedback_route(user: CurrentUser, db: DbSession, body: PilotFeedbackCreateIn) -> dict:
+def create_pilot_feedback_route(
+    user: CurrentUser, db: DbSession, body: PilotFeedbackCreateIn
+) -> dict:
     tenant_id = _tenant_id(db, user)
 
     def _create():
@@ -151,6 +161,8 @@ def patch_pilot_feedback(
 @router.get("/system-health")
 def read_system_health(user: CurrentUser, db: DbSession) -> dict:
     if not user.is_root_admin:
-        raise HTTPException(status_code=403, detail="System health dashboard is restricted to root administrators")
+        raise HTTPException(
+            status_code=403, detail="System health dashboard is restricted to root administrators"
+        )
     settings = get_settings()
     return build_system_health_dashboard(db, settings=settings)

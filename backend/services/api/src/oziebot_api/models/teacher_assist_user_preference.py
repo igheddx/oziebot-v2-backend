@@ -55,17 +55,23 @@ class TeacherAssistUserPreference(Base):
         ForeignKey("pacing_guide_periods.id", ondelete="SET NULL"),
         nullable=True,
     )
-    preferred_landing: Mapped[str] = mapped_column(String(32), nullable=False, server_default="home")
+    preferred_landing: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="home"
+    )
     recently_viewed_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON(), nullable=False)
     onboarding_progress_json: Mapped[dict[str, Any]] = mapped_column(JSON(), nullable=False)
-    onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    onboarding_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     tenant: Mapped["Tenant"] = relationship("Tenant")
     user: Mapped["User"] = relationship("User")
     last_class: Mapped["TeacherAssistClass | None"] = relationship("TeacherAssistClass")
-    last_grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship("TeacherAssistGradingPeriod")
+    last_grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship(
+        "TeacherAssistGradingPeriod"
+    )
     last_subject: Mapped["TeacherAssistSubject | None"] = relationship("TeacherAssistSubject")
 
 

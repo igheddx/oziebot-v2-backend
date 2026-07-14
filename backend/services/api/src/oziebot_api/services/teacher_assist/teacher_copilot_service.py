@@ -140,7 +140,9 @@ def list_session_messages(
     )
 
 
-def _check_daily_cost_limit(db: Session, *, settings: Settings, tenant_id: uuid.UUID, user_id: uuid.UUID) -> None:
+def _check_daily_cost_limit(
+    db: Session, *, settings: Settings, tenant_id: uuid.UUID, user_id: uuid.UUID
+) -> None:
     limit = max(0, settings.teacher_assist_ai_daily_cost_limit_cents)
     if limit <= 0:
         return
@@ -195,13 +197,20 @@ def send_copilot_message(
     if normalized_mode not in {"mock", "real"}:
         raise ValueError("Unsupported copilot provider mode")
     if normalized_mode == "real":
-        if not (settings.teacher_assist_real_provider_enabled or settings.teacher_assist_ai_enable_real_provider):
+        if not (
+            settings.teacher_assist_real_provider_enabled
+            or settings.teacher_assist_ai_enable_real_provider
+        ):
             raise ValueError("Real Teacher Copilot provider is disabled")
-        TeacherAssistProviderCircuitBreaker().assert_can_execute(settings, settings.teacher_assist_ai_provider)
+        TeacherAssistProviderCircuitBreaker().assert_can_execute(
+            settings, settings.teacher_assist_ai_provider
+        )
         raise ValueError("Real Teacher Copilot provider is not enabled in this phase")
 
     _check_daily_cost_limit(db, settings=settings, tenant_id=tenant_id, user_id=user.id)
-    session = get_copilot_session(db, tenant_id=tenant_id, teacher_id=user.id, session_id=session_id)
+    session = get_copilot_session(
+        db, tenant_id=tenant_id, teacher_id=user.id, session_id=session_id
+    )
     context = build_teacher_context(
         db,
         settings=settings,
@@ -216,14 +225,17 @@ def send_copilot_message(
         session_id=session.id,
         role=_validate_role("teacher"),
         content=question.strip(),
-        context_snapshot={"context_packet_keys": list((context.get("context_packets") or {}).keys())},
+        context_snapshot={
+            "context_packet_keys": list((context.get("context_packets") or {}).keys())
+        },
         created_at=now,
     )
     db.add(teacher_message)
 
     analysis = analyze_copilot_question(question=question, context=context)
     if is_root_admin and any(
-        keyword in question.lower() for keyword in ("catalog", "pacing guide", "mapping", "district", "school")
+        keyword in question.lower()
+        for keyword in ("catalog", "pacing guide", "mapping", "district", "school")
     ):
         analysis = analyze_admin_copilot_question(question=question, context=context)
 

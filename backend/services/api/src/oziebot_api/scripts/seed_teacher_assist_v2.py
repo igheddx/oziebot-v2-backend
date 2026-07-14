@@ -15,10 +15,27 @@ from oziebot_api.models.education_catalog import (
 )
 from oziebot_api.scripts.seed_v2_instructional_foundation import seed_v2_instructional_foundation
 from oziebot_api.scripts.seed_education_catalog import seed_education_catalog
-from oziebot_api.services.product_access import TEACHER_ASSIST_PRODUCT_KEY, TRADING_PRODUCT_KEY, grant_tenant_product_access, set_user_default_product
-from oziebot_api.services.teacher_assist.access_seed import ensure_existing_user_teacher_assist_access, _get_user_by_email, _primary_membership
-from oziebot_api.scripts.seed_education_catalog import GOLDEN_PATH_ELA_OBJECTIVE_DESCRIPTION, GOLDEN_PATH_ELA_OBJECTIVE_ID
-from oziebot_api.services.teacher_assist.education_catalog import create_grade, create_objective, create_school, create_subject
+from oziebot_api.services.product_access import (
+    TEACHER_ASSIST_PRODUCT_KEY,
+    TRADING_PRODUCT_KEY,
+    grant_tenant_product_access,
+    set_user_default_product,
+)
+from oziebot_api.services.teacher_assist.access_seed import (
+    ensure_existing_user_teacher_assist_access,
+    _get_user_by_email,
+    _primary_membership,
+)
+from oziebot_api.scripts.seed_education_catalog import (
+    GOLDEN_PATH_ELA_OBJECTIVE_DESCRIPTION,
+    GOLDEN_PATH_ELA_OBJECTIVE_ID,
+)
+from oziebot_api.services.teacher_assist.education_catalog import (
+    create_grade,
+    create_objective,
+    create_school,
+    create_subject,
+)
 from oziebot_api.services.teacher_assist_v2.roles import ensure_v2_root_admin_role
 
 
@@ -31,9 +48,19 @@ GRADE_5_OBJECTIVES = [
     ("5", "Science", "5.SCI.3", "Students describe interactions in ecosystems."),
     ("5", "Social Studies", "5.SS.1", "Students examine causes of major historical events."),
     ("5", "Social Studies", "5.SS.2", "Students analyze civic responsibilities."),
-    ("5", "Social Studies", "5.SS.3", "Students explain basic economic principles and free enterprise."),
+    (
+        "5",
+        "Social Studies",
+        "5.SS.3",
+        "Students explain basic economic principles and free enterprise.",
+    ),
     ("5", "ELA", GOLDEN_PATH_ELA_OBJECTIVE_ID, GOLDEN_PATH_ELA_OBJECTIVE_DESCRIPTION),
-    ("5", "ELA", "5.ELA.1", "Students identify main idea and supporting details in informational texts."),
+    (
+        "5",
+        "ELA",
+        "5.ELA.1",
+        "Students identify main idea and supporting details in informational texts.",
+    ),
     ("5", "ELA", "5.ELA.2", "Students summarize literary and informational texts."),
     ("5", "ELA", "5.ELA.3", "Students plan, draft, revise, and edit written compositions."),
 ]
@@ -73,7 +100,12 @@ def _ensure_objectives(db: Session, *, state_id, counts: dict) -> None:
 
 
 def _ensure_example_schools(db: Session, *, district_id, counts: dict) -> None:
-    subject_defs = [("Math", "Math"), ("Science", "Science"), ("Social Studies", "Social Studies"), ("ELA", "ELA")]
+    subject_defs = [
+        ("Math", "Math"),
+        ("Science", "Science"),
+        ("Social Studies", "Social Studies"),
+        ("ELA", "ELA"),
+    ]
     for school_name, school_type, grade_codes in SCHOOL_TEMPLATES:
         school = db.scalars(
             select(EducationSchool).where(
@@ -143,8 +175,15 @@ def seed_teacher_assist_v2(db: Session) -> dict:
         ensure_v2_root_admin_role(db, email=dominic_email)
         membership = _primary_membership(db, user_id=dominic.id)
         if membership is not None:
-            grant_tenant_product_access(db, tenant_id=membership.tenant_id, product_key=TRADING_PRODUCT_KEY, status="active")
-            grant_tenant_product_access(db, tenant_id=membership.tenant_id, product_key=TEACHER_ASSIST_PRODUCT_KEY, status="active")
+            grant_tenant_product_access(
+                db, tenant_id=membership.tenant_id, product_key=TRADING_PRODUCT_KEY, status="active"
+            )
+            grant_tenant_product_access(
+                db,
+                tenant_id=membership.tenant_id,
+                product_key=TEACHER_ASSIST_PRODUCT_KEY,
+                status="active",
+            )
             set_user_default_product(db, user=dominic, product_key=TEACHER_ASSIST_PRODUCT_KEY)
         counts["v2_root_admin"] = 1
 

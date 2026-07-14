@@ -8,16 +8,22 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
-from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAssistAssignmentPrintPacket
+from oziebot_api.models.teacher_assist_assignment_print_packet import (
+    TeacherAssistAssignmentPrintPacket,
+)
 from oziebot_api.models.teacher_assist_assignment_print_page import TeacherAssistAssignmentPrintPage
-from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
+from oziebot_api.models.teacher_assist_student_work_submission import (
+    TeacherAssistStudentWorkSubmission,
+)
 from oziebot_api.services.teacher_assist.activity_events import record_activity_event
 from oziebot_api.services.teacher_assist.assignments import get_assignment_or_404
 from oziebot_api.services.teacher_assist.constants import (
     validate_assignment_student_work_processing_status,
     validate_assignment_student_work_upload_status,
 )
-from oziebot_api.services.teacher_assist.instructional_plan_validator import contains_pii_like_content
+from oziebot_api.services.teacher_assist.instructional_plan_validator import (
+    contains_pii_like_content,
+)
 from oziebot_api.services.teacher_assist.print_packets import (
     get_print_packet_or_404,
     get_print_packet_page_or_404,
@@ -37,8 +43,12 @@ PROCESSING_STATUS_TRANSITIONS: dict[str, set[str]] = {
 }
 
 
-def _validate_student_number(*, student_number: int, assignment: TeacherAssistAssignment, db: Session) -> int:
-    teacher_class = get_class_or_404(db, tenant_id=assignment.tenant_id, class_id=assignment.class_id)
+def _validate_student_number(
+    *, student_number: int, assignment: TeacherAssistAssignment, db: Session
+) -> int:
+    teacher_class = get_class_or_404(
+        db, tenant_id=assignment.tenant_id, class_id=assignment.class_id
+    )
     if student_number < 1:
         raise ValueError("Student number must be greater than zero")
     if student_number > teacher_class.student_count:
@@ -116,9 +126,13 @@ def _normalize_context(
 
 def _validate_upload_status_transition(*, current_status: str, next_status: str) -> str:
     normalized_next = validate_assignment_student_work_upload_status(next_status)
-    allowed = UPLOAD_STATUS_TRANSITIONS[validate_assignment_student_work_upload_status(current_status)]
+    allowed = UPLOAD_STATUS_TRANSITIONS[
+        validate_assignment_student_work_upload_status(current_status)
+    ]
     if normalized_next not in allowed:
-        raise ValueError(f"Upload status cannot transition from {current_status} to {normalized_next}")
+        raise ValueError(
+            f"Upload status cannot transition from {current_status} to {normalized_next}"
+        )
     return normalized_next
 
 
@@ -128,7 +142,9 @@ def _validate_processing_status_transition(*, current_status: str, next_status: 
         validate_assignment_student_work_processing_status(current_status)
     ]
     if normalized_next not in allowed:
-        raise ValueError(f"Processing status cannot transition from {current_status} to {normalized_next}")
+        raise ValueError(
+            f"Processing status cannot transition from {current_status} to {normalized_next}"
+        )
     return normalized_next
 
 
@@ -187,7 +203,9 @@ def create_student_work_submission(
     assignment_print_packet_id: uuid.UUID | None = None,
     assignment_print_page_id: uuid.UUID | None = None,
 ) -> TeacherAssistStudentWorkSubmission:
-    assignment = get_assignment_or_404(db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id)
+    assignment = get_assignment_or_404(
+        db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id
+    )
     normalized_student_number = _validate_student_number(
         student_number=student_number,
         assignment=assignment,

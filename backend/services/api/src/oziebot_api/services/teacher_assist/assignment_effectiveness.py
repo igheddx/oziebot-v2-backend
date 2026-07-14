@@ -10,10 +10,15 @@ from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_assignment_gradebook_commit import (
     TeacherAssistAssignmentGradebookCommit,
 )
-from oziebot_api.models.teacher_assist_assignment_grading_review import TeacherAssistAssignmentGradingReview
+from oziebot_api.models.teacher_assist_assignment_grading_review import (
+    TeacherAssistAssignmentGradingReview,
+)
 from oziebot_api.models.teacher_assist_assignment_standard import TeacherAssistAssignmentStandard
 from oziebot_api.models.teacher_assist_mastery_evaluation import TeacherAssistMasteryEvaluation
-from oziebot_api.services.teacher_assist.assignments import get_assignment_or_404, list_assignment_standards
+from oziebot_api.services.teacher_assist.assignments import (
+    get_assignment_or_404,
+    list_assignment_standards,
+)
 from oziebot_api.services.teacher_assist.mastery_analytics_helpers import (
     assignment_effectiveness_status_from_percentages,
     average_mastery_rank,

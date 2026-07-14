@@ -6,7 +6,9 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.user import User
-from oziebot_api.services.teacher_assist.instructional_asset_reuse import InstructionalAssetReuseService
+from oziebot_api.services.teacher_assist.instructional_asset_reuse import (
+    InstructionalAssetReuseService,
+)
 
 
 def build_week_recommendations(
@@ -16,7 +18,9 @@ def build_week_recommendations(
     user: User,
     period_id: uuid.UUID,
 ) -> dict[str, Any]:
-    rows = InstructionalAssetReuseService.search(db, tenant_id=tenant_id, user=user, period_id=period_id, limit=8)
+    rows = InstructionalAssetReuseService.search(
+        db, tenant_id=tenant_id, user=user, period_id=period_id, limit=8
+    )
     grouped = {
         "previous_lessons": [row for row in rows if row.get("artifact_type") == "LESSON_PLAN"],
         "previous_assignments": [row for row in rows if row.get("artifact_type") == "ASSIGNMENT"],

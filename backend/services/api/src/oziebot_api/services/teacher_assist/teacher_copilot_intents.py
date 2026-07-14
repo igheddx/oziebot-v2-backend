@@ -101,7 +101,10 @@ def analyze_copilot_question(*, question: str, context: dict[str, Any]) -> dict[
                 packets_used=["objectives", "mastery", "reteach"],
                 confidence="medium",
             )
-        lines = [f"- {row.get('objective_code') or 'Objective'}: {row.get('mastery_pct', 0)}% mastery" for row in targets]
+        lines = [
+            f"- {row.get('objective_code') or 'Objective'}: {row.get('mastery_pct', 0)}% mastery"
+            for row in targets
+        ]
         return _response(
             intent=intent,
             answer="These objectives may need reteaching:\n" + "\n".join(lines),
@@ -140,7 +143,11 @@ def analyze_copilot_question(*, question: str, context: dict[str, Any]) -> dict[
             source_data=["instructional_evidence"],
             packets_used=["mastery", "objectives"],
             recommendations=[
-                {"action_key": "review_support", "label": "Open reteach workspace", "navigation_href": "/teacher-assist/reteach"}
+                {
+                    "action_key": "review_support",
+                    "label": "Open reteach workspace",
+                    "navigation_href": "/teacher-assist/reteach",
+                }
             ],
         )
 
@@ -164,7 +171,11 @@ def analyze_copilot_question(*, question: str, context: dict[str, Any]) -> dict[
             packets_used=["reteach", "mastery", "objectives"],
             draft_groups=draft_groups,
             recommendations=[
-                {"action_key": "save_support_group", "label": "Review support groups", "navigation_href": "/teacher-assist/reteach"}
+                {
+                    "action_key": "save_support_group",
+                    "label": "Review support groups",
+                    "navigation_href": "/teacher-assist/reteach",
+                }
             ],
         )
 
@@ -216,7 +227,10 @@ def analyze_copilot_question(*, question: str, context: dict[str, Any]) -> dict[
                 packets_used=["assessments"],
                 confidence="low",
             )
-        lines = [f"- {row.get('title')}: {row.get('mastery_pct')}% mastery, {row.get('students_assessed')} students" for row in top]
+        lines = [
+            f"- {row.get('title')}: {row.get('mastery_pct')}% mastery, {row.get('students_assessed')} students"
+            for row in top
+        ]
         return _response(
             intent=intent,
             answer="Assignments with strongest mastery signals:\n" + "\n".join(lines),
@@ -249,7 +263,10 @@ def analyze_copilot_question(*, question: str, context: dict[str, Any]) -> dict[
                 packets_used=["resources"],
                 confidence="low",
             )
-        lines = [f"- {row.get('title', 'Resource')} (score {row.get('reuse_score', {}).get('score', '—')})" for row in resources[:5]]
+        lines = [
+            f"- {row.get('title', 'Resource')} (score {row.get('reuse_score', {}).get('score', '—')})"
+            for row in resources[:5]
+        ]
         return _response(
             intent=intent,
             answer="Recommended resources for this week:\n" + "\n".join(lines),
@@ -258,7 +275,11 @@ def analyze_copilot_question(*, question: str, context: dict[str, Any]) -> dict[
             source_data=["reuse engine", "catalog"],
             packets_used=["resources"],
             recommendations=[
-                {"action_key": "open_resource", "label": row.get("title"), "navigation_href": row.get("navigation_href")}
+                {
+                    "action_key": "open_resource",
+                    "label": row.get("title"),
+                    "navigation_href": row.get("navigation_href"),
+                }
                 for row in resources[:3]
                 if row.get("navigation_href")
             ],
@@ -267,7 +288,12 @@ def analyze_copilot_question(*, question: str, context: dict[str, Any]) -> dict[
     if intent == "reflection_assistant":
         themes: list[str] = []
         for row in reflections:
-            for key in ("what_worked", "what_didnt_work", "student_challenges", "adjustments_needed"):
+            for key in (
+                "what_worked",
+                "what_didnt_work",
+                "student_challenges",
+                "adjustments_needed",
+            ):
                 value = row.get(key)
                 if value:
                     themes.append(str(value)[:120])
@@ -283,7 +309,8 @@ def analyze_copilot_question(*, question: str, context: dict[str, Any]) -> dict[
             )
         return _response(
             intent=intent,
-            answer="Recurring reflection themes:\n" + "\n".join(f"- {theme}" for theme in themes[:5]),
+            answer="Recurring reflection themes:\n"
+            + "\n".join(f"- {theme}" for theme in themes[:5]),
             why="Patterns extracted from teacher-authored reflection fields (not AI-generated).",
             evidence=[{"type": "reflection", "payload": row} for row in reflections[:5]],
             source_data=["instructional_reflections"],
@@ -299,7 +326,8 @@ def analyze_copilot_question(*, question: str, context: dict[str, Any]) -> dict[
             evidence=[{"type": "upcoming_week", "payload": upcoming}],
             source_data=["pacing guide", "reteach workspace"],
             packets_used=["current_week", "reteach", "objectives"],
-            recommendations=(packets.get("recommendations") or {}).get("loop_recommendations") or [],
+            recommendations=(packets.get("recommendations") or {}).get("loop_recommendations")
+            or [],
         )
 
     if intent == "intervention_ideas":
@@ -310,9 +338,13 @@ def analyze_copilot_question(*, question: str, context: dict[str, Any]) -> dict[
             ideas = ["Small-group reteach", "Guided practice checkpoint", "Short reassessment"]
         return _response(
             intent=intent,
-            answer="Intervention ideas (review before using):\n" + "\n".join(f"- {idea}" for idea in ideas[:6]),
+            answer="Intervention ideas (review before using):\n"
+            + "\n".join(f"- {idea}" for idea in ideas[:6]),
             why="Suggestions derived from reteach workspace and objective performance — not auto-applied.",
-            evidence=[{"type": "reteach_objective", "payload": row} for row in (reteach_ws.get("objectives_requiring_reteach") or [])[:5]],
+            evidence=[
+                {"type": "reteach_objective", "payload": row}
+                for row in (reteach_ws.get("objectives_requiring_reteach") or [])[:5]
+            ],
             source_data=["reteach workspace"],
             packets_used=["reteach", "mastery"],
         )

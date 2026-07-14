@@ -89,7 +89,9 @@ def list_pacing_guides(db: Session, *, tenant_id: uuid.UUID) -> list[TeacherAssi
     return db.scalars(
         select(TeacherAssistPacingGuide)
         .where(TeacherAssistPacingGuide.tenant_id == tenant_id)
-        .order_by(TeacherAssistPacingGuide.updated_at.desc(), TeacherAssistPacingGuide.created_at.desc())
+        .order_by(
+            TeacherAssistPacingGuide.updated_at.desc(), TeacherAssistPacingGuide.created_at.desc()
+        )
     ).all()
 
 
@@ -193,7 +195,10 @@ def get_pacing_item_or_404(
 ) -> TeacherAssistPacingItem:
     row = db.scalars(
         select(TeacherAssistPacingItem)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingItem.pacing_guide_id)
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingItem.pacing_guide_id,
+        )
         .where(
             TeacherAssistPacingItem.id == pacing_item_id,
             TeacherAssistPacingGuide.tenant_id == tenant_id,
@@ -220,7 +225,9 @@ def get_standard_or_404(
 
 def _next_pacing_item_sort_order(db: Session, *, pacing_guide_id: uuid.UUID) -> int:
     existing = db.scalars(
-        select(TeacherAssistPacingItem).where(TeacherAssistPacingItem.pacing_guide_id == pacing_guide_id)
+        select(TeacherAssistPacingItem).where(
+            TeacherAssistPacingItem.pacing_guide_id == pacing_guide_id
+        )
     ).all()
     if not existing:
         return 0
@@ -257,7 +264,9 @@ def _validate_pacing_item_relations(
         get_subject_or_404(db, tenant_id=tenant_id, subject_id=subject_id)
     if grading_period_id is None:
         return
-    grading_period = get_grading_period_or_404(db, tenant_id=tenant_id, grading_period_id=grading_period_id)
+    grading_period = get_grading_period_or_404(
+        db, tenant_id=tenant_id, grading_period_id=grading_period_id
+    )
     if grading_period.school_year_id != guide.school_year_id:
         raise ValueError("Grading period must belong to the same school year as the pacing guide")
 
@@ -299,7 +308,9 @@ def create_pacing_item(
         instructional_focus=instructional_focus.strip() if instructional_focus else None,
         objectives=objectives.strip() if objectives else None,
         notes=notes.strip() if notes else None,
-        sort_order=sort_order if sort_order is not None else _next_pacing_item_sort_order(db, pacing_guide_id=guide.id),
+        sort_order=sort_order
+        if sort_order is not None
+        else _next_pacing_item_sort_order(db, pacing_guide_id=guide.id),
         created_at=now,
         updated_at=now,
     )
@@ -354,8 +365,14 @@ def list_pacing_item_standards(
 ) -> list[TeacherAssistPacingItemStandard]:
     stmt = (
         select(TeacherAssistPacingItemStandard)
-        .join(TeacherAssistPacingItem, TeacherAssistPacingItem.id == TeacherAssistPacingItemStandard.pacing_item_id)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingItem.pacing_guide_id)
+        .join(
+            TeacherAssistPacingItem,
+            TeacherAssistPacingItem.id == TeacherAssistPacingItemStandard.pacing_item_id,
+        )
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingItem.pacing_guide_id,
+        )
         .where(TeacherAssistPacingGuide.tenant_id == tenant_id)
         .order_by(TeacherAssistPacingItemStandard.created_at.asc())
     )
@@ -380,10 +397,16 @@ def attach_pacing_item_standard(
     ).one_or_none()
     if standard is None:
         raise LookupError("Standard not found")
-    guide = get_pacing_guide_or_404(db, tenant_id=tenant_id, pacing_guide_id=pacing_item.pacing_guide_id)
+    guide = get_pacing_guide_or_404(
+        db, tenant_id=tenant_id, pacing_guide_id=pacing_item.pacing_guide_id
+    )
     if standard.school_year_id is not None and standard.school_year_id != guide.school_year_id:
         raise ValueError("Standard must belong to the same school year as the pacing guide")
-    if pacing_item.subject_id is not None and standard.subject_id is not None and standard.subject_id != pacing_item.subject_id:
+    if (
+        pacing_item.subject_id is not None
+        and standard.subject_id is not None
+        and standard.subject_id != pacing_item.subject_id
+    ):
         raise ValueError("Standard subject must match the pacing item subject")
     existing = db.scalars(
         select(TeacherAssistPacingItemStandard).where(
@@ -501,8 +524,14 @@ def list_pacing_item_resources(
 ) -> list[TeacherAssistPacingItemResource]:
     stmt = (
         select(TeacherAssistPacingItemResource)
-        .join(TeacherAssistPacingItem, TeacherAssistPacingItem.id == TeacherAssistPacingItemResource.pacing_item_id)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingItem.pacing_guide_id)
+        .join(
+            TeacherAssistPacingItem,
+            TeacherAssistPacingItem.id == TeacherAssistPacingItemResource.pacing_item_id,
+        )
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingItem.pacing_guide_id,
+        )
         .where(TeacherAssistPacingGuide.tenant_id == tenant_id)
         .order_by(TeacherAssistPacingItemResource.created_at.asc())
     )
@@ -545,8 +574,14 @@ def list_resource_link_counts(db: Session, *, tenant_id: uuid.UUID) -> ResourceL
                 TeacherAssistPacingItemResource.resource_library_item_id,
                 func.count(TeacherAssistPacingItemResource.id),
             )
-            .join(TeacherAssistPacingItem, TeacherAssistPacingItem.id == TeacherAssistPacingItemResource.pacing_item_id)
-            .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingItem.pacing_guide_id)
+            .join(
+                TeacherAssistPacingItem,
+                TeacherAssistPacingItem.id == TeacherAssistPacingItemResource.pacing_item_id,
+            )
+            .join(
+                TeacherAssistPacingGuide,
+                TeacherAssistPacingGuide.id == TeacherAssistPacingItem.pacing_guide_id,
+            )
             .where(TeacherAssistPacingGuide.tenant_id == tenant_id)
             .group_by(TeacherAssistPacingItemResource.resource_library_item_id)
         ).all()
@@ -583,7 +618,9 @@ def _dedupe_uuid_values(values: list[uuid.UUID | None]) -> list[uuid.UUID]:
 def _normalize_subject_ids(
     *, subject_id: uuid.UUID | None, subject_ids: list[uuid.UUID] | None
 ) -> list[uuid.UUID]:
-    normalized = _dedupe_uuid_values((subject_ids or []) + ([subject_id] if subject_id is not None else []))
+    normalized = _dedupe_uuid_values(
+        (subject_ids or []) + ([subject_id] if subject_id is not None else [])
+    )
     return normalized
 
 
@@ -801,7 +838,9 @@ def _validate_planning_reference_set(
         else None
     )
     teacher_class = (
-        get_class_or_404(db, tenant_id=tenant_id, class_id=class_id) if class_id is not None else None
+        get_class_or_404(db, tenant_id=tenant_id, class_id=class_id)
+        if class_id is not None
+        else None
     )
     subjects = [
         get_subject_or_404(db, tenant_id=tenant_id, subject_id=current_subject_id)
@@ -842,11 +881,15 @@ def _validate_planning_reference_set(
         class_subject_ids = {
             row.subject_id
             for row in db.scalars(
-                select(TeacherAssistClassSubject).where(TeacherAssistClassSubject.class_id == teacher_class.id)
+                select(TeacherAssistClassSubject).where(
+                    TeacherAssistClassSubject.class_id == teacher_class.id
+                )
             ).all()
         }
         if class_subject_ids:
-            invalid_subject_ids = [subject.id for subject in subjects if subject.id not in class_subject_ids]
+            invalid_subject_ids = [
+                subject.id for subject in subjects if subject.id not in class_subject_ids
+            ]
             if invalid_subject_ids:
                 raise ValueError("Selected subjects must be attached to the selected class")
 
@@ -948,7 +991,9 @@ def _validate_planning_duration_inputs(
         raise ValueError("Weekly planning requires at least one estimated week")
 
 
-def _sorted_pacing_items(pacing_items: list[TeacherAssistPacingItem]) -> list[TeacherAssistPacingItem]:
+def _sorted_pacing_items(
+    pacing_items: list[TeacherAssistPacingItem],
+) -> list[TeacherAssistPacingItem]:
     return sorted(
         pacing_items,
         key=lambda row: (
@@ -982,7 +1027,9 @@ def _derived_instructional_days_count(
 ) -> int | None:
     if draft.instructional_days_count is not None:
         return draft.instructional_days_count
-    instructional_dates = {item.instructional_date for item in pacing_items if item.instructional_date is not None}
+    instructional_dates = {
+        item.instructional_date for item in pacing_items if item.instructional_date is not None
+    }
     if instructional_dates:
         return len(instructional_dates)
     day_numbers = {item.day_number for item in pacing_items if item.day_number is not None}
@@ -1045,7 +1092,10 @@ def _collect_planning_draft_context(
     standard_ids = _get_draft_standard_ids(db, draft=draft)
     resource_ids = _get_draft_resource_ids(db, draft=draft)
 
-    subjects = [get_subject_or_404(db, tenant_id=draft.tenant_id, subject_id=subject_id) for subject_id in subject_ids]
+    subjects = [
+        get_subject_or_404(db, tenant_id=draft.tenant_id, subject_id=subject_id)
+        for subject_id in subject_ids
+    ]
     pacing_items = [
         get_pacing_item_or_404(db, tenant_id=draft.tenant_id, pacing_item_id=pacing_item_id)
         for pacing_item_id in pacing_item_ids
@@ -1217,9 +1267,7 @@ def _apply_planning_draft_changes(
     if normalized_status == "ready":
         readiness = _collect_planning_draft_context(db, draft=row).readiness
         if not readiness.is_ready:
-            raise ValueError(
-                "Planning draft is not ready: " + "; ".join(readiness.missing_items)
-            )
+            raise ValueError("Planning draft is not ready: " + "; ".join(readiness.missing_items))
     row.status = normalized_status
     row.updated_at = datetime.now(UTC)
     db.flush()
@@ -1417,9 +1465,7 @@ def update_planning_draft_status(
     if normalized_status == "ready":
         readiness = _collect_planning_draft_context(db, draft=row).readiness
         if not readiness.is_ready:
-            raise ValueError(
-                "Planning draft is not ready: " + "; ".join(readiness.missing_items)
-            )
+            raise ValueError("Planning draft is not ready: " + "; ".join(readiness.missing_items))
     row.status = normalized_status
     row.updated_at = datetime.now(UTC)
     db.flush()

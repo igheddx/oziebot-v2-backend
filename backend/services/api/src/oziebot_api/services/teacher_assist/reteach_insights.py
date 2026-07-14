@@ -45,7 +45,9 @@ def _build_standard_insight(
         "matrix_standard_id": matrix_standard.id,
         "standard_id": matrix_standard.standard_id,
         "standard_code": matrix_standard.standard.code if matrix_standard.standard else None,
-        "standard_description": matrix_standard.standard.description if matrix_standard.standard else None,
+        "standard_description": matrix_standard.standard.description
+        if matrix_standard.standard
+        else None,
         "display_order": matrix_standard.display_order,
         "target_mastery_level": matrix_standard.target_mastery_level,
         "mastery_percentage": percentages["mastery_percentage"],
@@ -54,7 +56,9 @@ def _build_standard_insight(
         "not_assessed_percentage": percentages["not_assessed_percentage"],
         "total_committed_evaluations": percentages["total_committed_evaluations"],
         "recent_assessment_count": count_recent_evaluations(active_rows, settings=settings),
-        "recent_assignment_count": count_recent_assignment_evaluations(active_rows, settings=settings),
+        "recent_assignment_count": count_recent_assignment_evaluations(
+            active_rows, settings=settings
+        ),
         "last_assessed_at": last_assessed_timestamp(active_rows),
         "operational_status": operational_status,
         "trend": standard_trend_from_commits(standard_commits, settings=settings),
@@ -89,13 +93,17 @@ def build_mastery_matrix_reteach_insights(
         by_standard.setdefault(row.standard_id, []).append(row)
 
     evaluation_ids = [row.id for row in evaluations]
-    commits = db.scalars(
-        select(TeacherAssistMasteryCommit).where(
-            TeacherAssistMasteryCommit.tenant_id == tenant_id,
-            TeacherAssistMasteryCommit.owner_user_id == user_id,
-            TeacherAssistMasteryCommit.mastery_evaluation_id.in_(evaluation_ids),
-        )
-    ).all() if evaluation_ids else []
+    commits = (
+        db.scalars(
+            select(TeacherAssistMasteryCommit).where(
+                TeacherAssistMasteryCommit.tenant_id == tenant_id,
+                TeacherAssistMasteryCommit.owner_user_id == user_id,
+                TeacherAssistMasteryCommit.mastery_evaluation_id.in_(evaluation_ids),
+            )
+        ).all()
+        if evaluation_ids
+        else []
+    )
     commits_by_eval = commits_by_evaluation_id(commits)
 
     standard_insights: list[dict[str, Any]] = []

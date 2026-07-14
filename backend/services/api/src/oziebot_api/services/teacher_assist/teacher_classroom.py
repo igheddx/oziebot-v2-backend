@@ -150,10 +150,14 @@ def build_my_classroom(db: Session, *, tenant_id: uuid.UUID, user_id: uuid.UUID)
         "active_school_year_id": str(active_school_year.id) if active_school_year else None,
         "active_school_year_title": active_school_year.title if active_school_year else None,
         "active_school_year_start_date": (
-            active_school_year.start_date.isoformat() if active_school_year and active_school_year.start_date else None
+            active_school_year.start_date.isoformat()
+            if active_school_year and active_school_year.start_date
+            else None
         ),
         "active_school_year_end_date": (
-            active_school_year.end_date.isoformat() if active_school_year and active_school_year.end_date else None
+            active_school_year.end_date.isoformat()
+            if active_school_year and active_school_year.end_date
+            else None
         ),
     }
 

@@ -103,7 +103,9 @@ def _youtube_video_id(url: str) -> str | None:
         if query.get("v"):
             return query["v"][0]
         if parsed.path.startswith("/shorts/") or parsed.path.startswith("/embed/"):
-            return parsed.path.strip("/").split("/", 1)[1] if "/" in parsed.path.strip("/") else None
+            return (
+                parsed.path.strip("/").split("/", 1)[1] if "/" in parsed.path.strip("/") else None
+            )
     return None
 
 
@@ -177,7 +179,9 @@ def build_link_prompt_context(
             continue
         excerpt = text[: min(item_char_limit, remaining)].strip()
         if not excerpt:
-            skipped.append({**entry, "reason": "Prompt text budget was exhausted before this link."})
+            skipped.append(
+                {**entry, "reason": "Prompt text budget was exhausted before this link."}
+            )
             continue
         used.append({**entry, "included_characters": len(excerpt), "excerpt": excerpt})
         remaining -= len(excerpt)

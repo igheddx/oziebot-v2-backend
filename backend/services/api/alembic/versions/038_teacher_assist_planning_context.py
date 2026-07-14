@@ -81,8 +81,12 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("pacing_item_id", "standard_id", name="uq_pacing_item_standard"),
     )
-    op.create_index("ix_pacing_item_standards_pacing_item_id", "pacing_item_standards", ["pacing_item_id"])
-    op.create_index("ix_pacing_item_standards_standard_id", "pacing_item_standards", ["standard_id"])
+    op.create_index(
+        "ix_pacing_item_standards_pacing_item_id", "pacing_item_standards", ["pacing_item_id"]
+    )
+    op.create_index(
+        "ix_pacing_item_standards_standard_id", "pacing_item_standards", ["standard_id"]
+    )
 
     op.create_table(
         "resource_library_items",
@@ -130,7 +134,9 @@ def upgrade() -> None:
             name="uq_pacing_item_resource",
         ),
     )
-    op.create_index("ix_pacing_item_resources_pacing_item_id", "pacing_item_resources", ["pacing_item_id"])
+    op.create_index(
+        "ix_pacing_item_resources_pacing_item_id", "pacing_item_resources", ["pacing_item_id"]
+    )
     op.create_index(
         "ix_pacing_item_resources_resource_library_item_id",
         "pacing_item_resources",
@@ -161,7 +167,9 @@ def upgrade() -> None:
     )
     op.create_index("ix_planning_input_drafts_tenant_id", "planning_input_drafts", ["tenant_id"])
     op.create_index("ix_planning_input_drafts_user_id", "planning_input_drafts", ["user_id"])
-    op.create_index("ix_planning_input_drafts_school_year_id", "planning_input_drafts", ["school_year_id"])
+    op.create_index(
+        "ix_planning_input_drafts_school_year_id", "planning_input_drafts", ["school_year_id"]
+    )
     op.create_index(
         "ix_planning_input_drafts_grading_period_id",
         "planning_input_drafts",

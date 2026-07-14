@@ -32,9 +32,15 @@ def _default_export_format(*, artifact_type: str, export_format: str | None) -> 
 
 def _validate_export_format_for_artifact(*, artifact_type: str, export_format: str) -> str:
     normalized = validate_teacher_assist_export_format(export_format)
-    if artifact_type in TEACHER_ASSIST_SLIDES_EXPORT_TYPES and normalized not in {"pptx", "printable_html"}:
+    if artifact_type in TEACHER_ASSIST_SLIDES_EXPORT_TYPES and normalized not in {
+        "pptx",
+        "printable_html",
+    }:
         raise ValueError("Slide exports support pptx or printable_html formats")
-    if artifact_type in TEACHER_ASSIST_QUIZ_EXPORT_TYPES and normalized not in {"json", "printable_html"}:
+    if artifact_type in TEACHER_ASSIST_QUIZ_EXPORT_TYPES and normalized not in {
+        "json",
+        "printable_html",
+    }:
         raise ValueError("Quiz exports support json or printable_html formats")
     return normalized
 
@@ -45,7 +51,9 @@ def _artifact_download_filename(row: TeacherAssistExportArtifact) -> str:
         "json": ".json",
         "printable_html": ".html",
     }.get(row.export_format, ".bin")
-    safe_title = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in row.title).strip("-")
+    safe_title = "".join(
+        char if char.isalnum() or char in {"-", "_"} else "-" for char in row.title
+    ).strip("-")
     return f"{safe_title or row.artifact_type}{suffix}"
 
 
@@ -97,7 +105,8 @@ def list_export_artifacts(
     )
     if artifact_type:
         query = query.where(
-            TeacherAssistExportArtifact.artifact_type == validate_teacher_assist_export_artifact_type(artifact_type)
+            TeacherAssistExportArtifact.artifact_type
+            == validate_teacher_assist_export_artifact_type(artifact_type)
         )
     if artifact_status:
         query = query.where(
@@ -201,7 +210,9 @@ def normalize_export_request(
     normalized_type = validate_teacher_assist_export_artifact_type(artifact_type)
     normalized_format = _validate_export_format_for_artifact(
         artifact_type=normalized_type,
-        export_format=_default_export_format(artifact_type=normalized_type, export_format=export_format),
+        export_format=_default_export_format(
+            artifact_type=normalized_type, export_format=export_format
+        ),
     )
     return normalized_type, normalized_format
 

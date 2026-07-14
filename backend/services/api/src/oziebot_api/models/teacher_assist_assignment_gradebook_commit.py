@@ -80,7 +80,9 @@ class TeacherAssistAssignmentGradebookCommit(Base):
     committed_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     committed_feedback: Mapped[str | None] = mapped_column(Text(), nullable=True)
-    teacher_confirmation_checkpoint_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    teacher_confirmation_checkpoint_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     reason: Mapped[str | None] = mapped_column(Text(), nullable=True)
     supersedes_commit_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
@@ -114,7 +116,11 @@ from typing import TYPE_CHECKING  # noqa: E402
 
 if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
-    from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
-    from oziebot_api.models.teacher_assist_assignment_grading_review import TeacherAssistAssignmentGradingReview
+    from oziebot_api.models.teacher_assist_assignment_grade_record import (
+        TeacherAssistAssignmentGradeRecord,
+    )
+    from oziebot_api.models.teacher_assist_assignment_grading_review import (
+        TeacherAssistAssignmentGradingReview,
+    )
     from oziebot_api.models.tenant import Tenant
     from oziebot_api.models.user import User

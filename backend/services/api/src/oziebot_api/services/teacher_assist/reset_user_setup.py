@@ -15,20 +15,28 @@ from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
 from oziebot_api.models.teacher_assist_assignment_grading_review import (
     TeacherAssistAssignmentGradingReview,
 )
-from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAssistAssignmentPrintPacket
+from oziebot_api.models.teacher_assist_assignment_print_packet import (
+    TeacherAssistAssignmentPrintPacket,
+)
 from oziebot_api.models.teacher_assist_class import TeacherAssistClass
 from oziebot_api.models.teacher_assist_class_subject import TeacherAssistClassSubject
 from oziebot_api.models.teacher_assist_export_artifact import TeacherAssistExportArtifact
 from oziebot_api.models.teacher_assist_extracted_text_record import TeacherAssistExtractedTextRecord
 from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtractionJob
 from oziebot_api.models.teacher_assist_generated_artifact import TeacherAssistGeneratedArtifact
-from oziebot_api.models.teacher_assist_instructional_evidence import TeacherAssistInstructionalEvidence
-from oziebot_api.models.teacher_assist_instructional_reflection import TeacherAssistInstructionalReflection
+from oziebot_api.models.teacher_assist_instructional_evidence import (
+    TeacherAssistInstructionalEvidence,
+)
+from oziebot_api.models.teacher_assist_instructional_reflection import (
+    TeacherAssistInstructionalReflection,
+)
 from oziebot_api.models.teacher_assist_instructional_week import TeacherAssistInstructionalWeek
 from oziebot_api.models.teacher_assist_lesson_reflection import TeacherAssistLessonReflection
 from oziebot_api.models.teacher_assist_mastery_matrix import TeacherAssistMasteryMatrix
 from oziebot_api.models.teacher_assist_newsletter import TeacherAssistNewsletter
-from oziebot_api.models.teacher_assist_pacing_guide_period_note import TeacherAssistPacingGuidePeriodNote
+from oziebot_api.models.teacher_assist_pacing_guide_period_note import (
+    TeacherAssistPacingGuidePeriodNote,
+)
 from oziebot_api.models.teacher_assist_pilot_feedback import TeacherAssistPilotFeedback
 from oziebot_api.models.teacher_assist_planning_input_draft import TeacherAssistPlanningInputDraft
 from oziebot_api.models.teacher_assist_profile import TeacherAssistProfile
@@ -46,7 +54,9 @@ from oziebot_api.models.teacher_assist_time_savings import (
     TeacherAssistWeekTemplate,
 )
 from oziebot_api.models.teacher_assist_usage_metric import TeacherAssistUsageMetric
-from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
+from oziebot_api.models.teacher_assist_student_work_submission import (
+    TeacherAssistStudentWorkSubmission,
+)
 from oziebot_api.models.teacher_assist_user_preference import TeacherAssistUserPreference
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
@@ -59,22 +69,36 @@ def _normalized_email(value: str) -> str:
 
 
 def _get_user_by_email(db: Session, email: str) -> User | None:
-    return db.scalars(select(User).where(func.lower(User.email) == _normalized_email(email))).one_or_none()
+    return db.scalars(
+        select(User).where(func.lower(User.email) == _normalized_email(email))
+    ).one_or_none()
 
 
 def _tenant_ids_for_user(db: Session, *, user_id: uuid.UUID) -> list[uuid.UUID]:
     return list(
-        db.scalars(select(TenantMembership.tenant_id).where(TenantMembership.user_id == user_id)).all()
+        db.scalars(
+            select(TenantMembership.tenant_id).where(TenantMembership.user_id == user_id)
+        ).all()
     )
 
 
 def _delete_user_scoped_rows(db: Session, *, user_id: uuid.UUID) -> None:
     """Remove teacher-operational rows keyed by user. Order matters for non-cascading FKs."""
-    db.execute(delete(TeacherAssistPilotFeedback).where(TeacherAssistPilotFeedback.user_id == user_id))
-    db.execute(delete(TeacherAssistActivityEvent).where(TeacherAssistActivityEvent.user_id == user_id))
+    db.execute(
+        delete(TeacherAssistPilotFeedback).where(TeacherAssistPilotFeedback.user_id == user_id)
+    )
+    db.execute(
+        delete(TeacherAssistActivityEvent).where(TeacherAssistActivityEvent.user_id == user_id)
+    )
     db.execute(delete(TeacherCopilotSession).where(TeacherCopilotSession.teacher_id == user_id))
-    db.execute(delete(TeacherAssistExportArtifact).where(TeacherAssistExportArtifact.user_id == user_id))
-    db.execute(delete(TeacherAssistExtractionJob).where(TeacherAssistExtractionJob.teacher_user_id == user_id))
+    db.execute(
+        delete(TeacherAssistExportArtifact).where(TeacherAssistExportArtifact.user_id == user_id)
+    )
+    db.execute(
+        delete(TeacherAssistExtractionJob).where(
+            TeacherAssistExtractionJob.teacher_user_id == user_id
+        )
+    )
     db.execute(
         delete(TeacherAssistExtractedTextRecord).where(
             TeacherAssistExtractedTextRecord.teacher_user_id == user_id
@@ -95,9 +119,15 @@ def _delete_user_scoped_rows(db: Session, *, user_id: uuid.UUID) -> None:
             TeacherAssistStudentWorkSubmission.teacher_user_id == user_id
         )
     )
-    db.execute(delete(TeacherAssistReteachPlan).where(TeacherAssistReteachPlan.owner_user_id == user_id))
+    db.execute(
+        delete(TeacherAssistReteachPlan).where(TeacherAssistReteachPlan.owner_user_id == user_id)
+    )
     db.execute(delete(TeacherAssistReuseEvent).where(TeacherAssistReuseEvent.user_id == user_id))
-    db.execute(delete(TeacherAssistWeekTemplate).where(TeacherAssistWeekTemplate.created_by_user_id == user_id))
+    db.execute(
+        delete(TeacherAssistWeekTemplate).where(
+            TeacherAssistWeekTemplate.created_by_user_id == user_id
+        )
+    )
     planning_group_ids = list(
         db.scalars(
             select(TeacherAssistPlanningGroup.id).where(
@@ -112,11 +142,21 @@ def _delete_user_scoped_rows(db: Session, *, user_id: uuid.UUID) -> None:
             )
         )
         db.execute(
-            delete(TeacherAssistPlanningGroup).where(TeacherAssistPlanningGroup.id.in_(planning_group_ids))
+            delete(TeacherAssistPlanningGroup).where(
+                TeacherAssistPlanningGroup.id.in_(planning_group_ids)
+            )
         )
     db.execute(delete(TeacherAssistUsageMetric).where(TeacherAssistUsageMetric.user_id == user_id))
-    db.execute(delete(TeacherAssistLessonReflection).where(TeacherAssistLessonReflection.owner_user_id == user_id))
-    db.execute(delete(TeacherAssistMasteryMatrix).where(TeacherAssistMasteryMatrix.owner_user_id == user_id))
+    db.execute(
+        delete(TeacherAssistLessonReflection).where(
+            TeacherAssistLessonReflection.owner_user_id == user_id
+        )
+    )
+    db.execute(
+        delete(TeacherAssistMasteryMatrix).where(
+            TeacherAssistMasteryMatrix.owner_user_id == user_id
+        )
+    )
     db.execute(
         delete(TeacherAssistInstructionalReflection).where(
             TeacherAssistInstructionalReflection.owner_user_id == user_id
@@ -154,15 +194,21 @@ def _delete_user_scoped_rows(db: Session, *, user_id: uuid.UUID) -> None:
             )
         )
     )
-    db.execute(delete(TeacherAssistNewsletter).where(TeacherAssistNewsletter.owner_user_id == user_id))
+    db.execute(
+        delete(TeacherAssistNewsletter).where(TeacherAssistNewsletter.owner_user_id == user_id)
+    )
     db.execute(
         delete(TeacherAssistGeneratedArtifact).where(
             TeacherAssistGeneratedArtifact.created_by_user_id == user_id
         )
     )
-    db.execute(delete(TeacherAssistAssignment).where(TeacherAssistAssignment.teacher_user_id == user_id))
     db.execute(
-        delete(TeacherAssistPlanningInputDraft).where(TeacherAssistPlanningInputDraft.user_id == user_id)
+        delete(TeacherAssistAssignment).where(TeacherAssistAssignment.teacher_user_id == user_id)
+    )
+    db.execute(
+        delete(TeacherAssistPlanningInputDraft).where(
+            TeacherAssistPlanningInputDraft.user_id == user_id
+        )
     )
     db.execute(
         delete(TeacherAssistInstructionalWeek).where(
@@ -174,7 +220,9 @@ def _delete_user_scoped_rows(db: Session, *, user_id: uuid.UUID) -> None:
             TeacherAssistPacingGuidePeriodNote.user_id == user_id
         )
     )
-    db.execute(delete(TeacherAssistUserPreference).where(TeacherAssistUserPreference.user_id == user_id))
+    db.execute(
+        delete(TeacherAssistUserPreference).where(TeacherAssistUserPreference.user_id == user_id)
+    )
     db.execute(
         update(TeacherAssistProfile)
         .where(TeacherAssistProfile.user_id == user_id)
@@ -191,10 +239,16 @@ def _delete_user_scoped_rows(db: Session, *, user_id: uuid.UUID) -> None:
 def _reset_tenant_setup(db: Session, *, tenant_id: uuid.UUID) -> None:
     """Clear classroom setup on a tenant. Preserves school years and pacing guides."""
     class_ids = list(
-        db.scalars(select(TeacherAssistClass.id).where(TeacherAssistClass.tenant_id == tenant_id)).all()
+        db.scalars(
+            select(TeacherAssistClass.id).where(TeacherAssistClass.tenant_id == tenant_id)
+        ).all()
     )
     if class_ids:
-        db.execute(delete(TeacherAssistClassSubject).where(TeacherAssistClassSubject.class_id.in_(class_ids)))
+        db.execute(
+            delete(TeacherAssistClassSubject).where(
+                TeacherAssistClassSubject.class_id.in_(class_ids)
+            )
+        )
     db.execute(delete(TeacherAssistClass).where(TeacherAssistClass.tenant_id == tenant_id))
     db.execute(
         update(TeacherAssistUserPreference)
@@ -216,13 +270,21 @@ def _reset_tenant_setup(db: Session, *, tenant_id: uuid.UUID) -> None:
 def _blank_slate_tenant_setup(db: Session, *, tenant_id: uuid.UUID) -> None:
     """Clear teacher-created tenant data while preserving seed school years and pacing guides."""
     class_ids = list(
-        db.scalars(select(TeacherAssistClass.id).where(TeacherAssistClass.tenant_id == tenant_id)).all()
+        db.scalars(
+            select(TeacherAssistClass.id).where(TeacherAssistClass.tenant_id == tenant_id)
+        ).all()
     )
     if class_ids:
-        db.execute(delete(TeacherAssistClassSubject).where(TeacherAssistClassSubject.class_id.in_(class_ids)))
+        db.execute(
+            delete(TeacherAssistClassSubject).where(
+                TeacherAssistClassSubject.class_id.in_(class_ids)
+            )
+        )
     db.execute(delete(TeacherAssistClass).where(TeacherAssistClass.tenant_id == tenant_id))
 
-    db.execute(delete(TeacherAssistWeeklyPlan).where(TeacherAssistWeeklyPlan.tenant_id == tenant_id))
+    db.execute(
+        delete(TeacherAssistWeeklyPlan).where(TeacherAssistWeeklyPlan.tenant_id == tenant_id)
+    )
     db.execute(delete(TeacherAssistWorkflow).where(TeacherAssistWorkflow.tenant_id == tenant_id))
     db.execute(
         delete(TeacherAssistPlanningInputDraft).where(
@@ -239,10 +301,16 @@ def _blank_slate_tenant_setup(db: Session, *, tenant_id: uuid.UUID) -> None:
             TeacherAssistInstructionalWeek.tenant_id == tenant_id
         )
     )
-    db.execute(delete(TeacherAssistAssignment).where(TeacherAssistAssignment.tenant_id == tenant_id))
+    db.execute(
+        delete(TeacherAssistAssignment).where(TeacherAssistAssignment.tenant_id == tenant_id)
+    )
     db.execute(delete(TeacherAssistStandard).where(TeacherAssistStandard.tenant_id == tenant_id))
     db.execute(delete(TeacherAssistSubject).where(TeacherAssistSubject.tenant_id == tenant_id))
-    db.execute(delete(TeacherAssistUserPreference).where(TeacherAssistUserPreference.tenant_id == tenant_id))
+    db.execute(
+        delete(TeacherAssistUserPreference).where(
+            TeacherAssistUserPreference.tenant_id == tenant_id
+        )
+    )
 
 
 def reset_teacher_assist_user_setup(

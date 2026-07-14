@@ -15,7 +15,9 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2InstructionalPackageArtifact,
 )
 from oziebot_api.models.user import User
-from oziebot_api.services.teacher_assist_v2.artifact_persistence import refresh_package_artifact_exports
+from oziebot_api.services.teacher_assist_v2.artifact_persistence import (
+    refresh_package_artifact_exports,
+)
 from oziebot_api.services.teacher_assist_v2.planning_workflow import _assignment_context
 
 
@@ -65,11 +67,7 @@ def _validate_rubric_content(content: dict[str, Any]) -> dict[str, Any]:
             raise ValueError({"criteria": f"Criterion {index} points must be a number."}) from exc
         if points < 0:
             raise ValueError({"criteria": f"Criterion {index} points cannot be negative."})
-        levels = [
-            str(level).strip()
-            for level in (item.get("levels") or [])
-            if str(level).strip()
-        ]
+        levels = [str(level).strip() for level in (item.get("levels") or []) if str(level).strip()]
         if len(levels) < 2:
             levels = ["Meets expectations", "Partially meets", "Does not meet"]
         cleaned.append({"name": name, "points": points, "levels": levels[:4]})
@@ -102,7 +100,9 @@ def update_teacher_package_artifact_content(
     if artifact is None:
         raise LookupError("Package artifact not found")
     if artifact.artifact_type != "rubric":
-        raise ValueError({"artifact_type": "Only rubric artifacts can be edited through this endpoint."})
+        raise ValueError(
+            {"artifact_type": "Only rubric artifacts can be edited through this endpoint."}
+        )
 
     existing = artifact.content_json if isinstance(artifact.content_json, dict) else {}
     merged = {**existing, **content_json}

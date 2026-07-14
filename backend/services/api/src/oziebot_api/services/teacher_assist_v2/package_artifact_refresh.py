@@ -11,7 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
-from oziebot_api.models.teacher_assist_v2_instructional_package import TeacherAssistV2InstructionalPackage
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackage,
+)
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist_v2.artifact_persistence import (
     attach_qr_student_packet,
@@ -27,9 +29,13 @@ from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import (
     resolve_daily_plan_summary,
     resolve_subject_daily_topic,
 )
-from oziebot_api.services.teacher_assist_v2.package_demo_backfill import backfill_package_demo_content
+from oziebot_api.services.teacher_assist_v2.package_demo_backfill import (
+    backfill_package_demo_content,
+)
 from oziebot_api.services.teacher_assist_v2.planning_constants import WEEKDAY_LABELS
-from oziebot_api.services.teacher_assist_v2.planning_context import build_teacher_planning_generation_context
+from oziebot_api.services.teacher_assist_v2.planning_context import (
+    build_teacher_planning_generation_context,
+)
 
 SLIDE_DECK_EXPORT_NOTE = (
     "PowerPoint export is not available yet. Use Present for classroom display "
@@ -63,7 +69,11 @@ def _artifact_needs_refresh(artifact, *, package: TeacherAssistV2InstructionalPa
     if artifact.artifact_type in {"assignment", "writing_response"}:
         exports = metadata.get("additional_exports") or []
         labels = {str(item.get("label", "")).lower() for item in exports if isinstance(item, dict)}
-        expected = "student assignment docx" if artifact.artifact_type == "assignment" else "writing response docx"
+        expected = (
+            "student assignment docx"
+            if artifact.artifact_type == "assignment"
+            else "writing response docx"
+        )
         if not any(expected in label for label in labels):
             return True
     if artifact.artifact_type == "assignment" and not metadata.get("qr_student_packet"):
@@ -113,7 +123,10 @@ def _rebuild_artifact_content(
     week_label = week["title"]
     week_subjects = {row["subject_id"]: row for row in week["subjects"]}
     subject_id = str(artifact.subject_id) if artifact.subject_id else teaching_order_keys[0]
-    subject_meta = subject_lookup.get(subject_id) or {"subject_name": "Instruction", "subject_id": subject_id}
+    subject_meta = subject_lookup.get(subject_id) or {
+        "subject_name": "Instruction",
+        "subject_id": subject_id,
+    }
     week_subject = week_subjects.get(subject_id)
     objective_code = None
     objective_text = f"Students demonstrate understanding in {subject_meta['subject_name']}."
@@ -156,7 +169,9 @@ def _rebuild_artifact_content(
             )
         primary_week_subject = week_subjects.get(subject_id)
         if primary_week_subject:
-            _, week_objective_text, _ = _objective_fields(primary_week_subject, subject_meta["subject_name"])
+            _, week_objective_text, _ = _objective_fields(
+                primary_week_subject, subject_meta["subject_name"]
+            )
         else:
             week_objective_text = objective_text
         daily_topic = resolve_subject_daily_topic(primary_week_subject, day_label=day_label)
@@ -228,11 +243,15 @@ def regenerate_package_artifacts(
             skipped += 1
             if artifact.artifact_type == "assignment":
                 assignment_artifact = artifact
-                assignment_content = artifact.content_json if isinstance(artifact.content_json, dict) else None
+                assignment_content = (
+                    artifact.content_json if isinstance(artifact.content_json, dict) else None
+                )
             continue
 
         content = _rebuild_artifact_content(artifact=artifact, context=context, package=package)
-        export_note = SLIDE_DECK_EXPORT_NOTE if artifact.artifact_type == "subject_slide_deck" else None
+        export_note = (
+            SLIDE_DECK_EXPORT_NOTE if artifact.artifact_type == "subject_slide_deck" else None
+        )
         refresh_package_artifact_exports(
             db,
             settings=settings,
@@ -267,9 +286,13 @@ def regenerate_package_artifacts(
     }
 
 
-def load_package_for_regeneration(db: Session, package_id: uuid.UUID) -> TeacherAssistV2InstructionalPackage:
+def load_package_for_regeneration(
+    db: Session, package_id: uuid.UUID
+) -> TeacherAssistV2InstructionalPackage:
     package = db.scalars(
-        select(TeacherAssistV2InstructionalPackage).where(TeacherAssistV2InstructionalPackage.id == package_id)
+        select(TeacherAssistV2InstructionalPackage).where(
+            TeacherAssistV2InstructionalPackage.id == package_id
+        )
     ).one_or_none()
     if package is None:
         raise LookupError("Instructional package not found")

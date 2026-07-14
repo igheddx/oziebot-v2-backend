@@ -9,16 +9,22 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
-from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
+from oziebot_api.models.teacher_assist_assignment_grade_record import (
+    TeacherAssistAssignmentGradeRecord,
+)
 from oziebot_api.models.teacher_assist_assignment_gradebook_audit_event import (
     TeacherAssistAssignmentGradebookAuditEvent,
 )
-from oziebot_api.models.teacher_assist_assignment_grading_review import TeacherAssistAssignmentGradingReview
+from oziebot_api.models.teacher_assist_assignment_grading_review import (
+    TeacherAssistAssignmentGradingReview,
+)
 from oziebot_api.models.teacher_assist_class import TeacherAssistClass
 from oziebot_api.models.teacher_assist_export_artifact import TeacherAssistExportArtifact
 from oziebot_api.models.teacher_assist_extracted_text_record import TeacherAssistExtractedTextRecord
 from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtractionJob
-from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
+from oziebot_api.models.teacher_assist_student_work_submission import (
+    TeacherAssistStudentWorkSubmission,
+)
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
 from oziebot_api.services.teacher_assist.activity_events import list_recent_activity_events
@@ -28,7 +34,9 @@ from oziebot_api.services.teacher_assist.constants import (
     validate_action_workspace_navigation_href,
 )
 from oziebot_api.services.teacher_assist.extraction_review_service import is_stale_extraction_job
-from oziebot_api.services.teacher_assist.grading_prep_service import GRADING_PREP_APPROVED_REVIEW_STATUSES
+from oziebot_api.services.teacher_assist.grading_prep_service import (
+    GRADING_PREP_APPROVED_REVIEW_STATUSES,
+)
 from oziebot_api.services.teacher_assist.mastery_dashboard import build_mastery_dashboard
 from oziebot_api.services.teacher_assist.workspace_service import (
     _as_utc_datetime,
@@ -136,7 +144,9 @@ def get_teacher_assist_action_workspace(
 ) -> dict[str, Any]:
     now = datetime.now(UTC)
     recent_cutoff = now - timedelta(days=7)
-    stale_heartbeat_cutoff = now - timedelta(seconds=max(1, settings.teacher_assist_worker_lease_seconds))
+    stale_heartbeat_cutoff = now - timedelta(
+        seconds=max(1, settings.teacher_assist_worker_lease_seconds)
+    )
 
     assignments = db.scalars(
         select(TeacherAssistAssignment).where(
@@ -202,17 +212,25 @@ def get_teacher_assist_action_workspace(
         )
     ).all()
 
-    classes = db.scalars(select(TeacherAssistClass).where(TeacherAssistClass.tenant_id == tenant_id)).all()
+    classes = db.scalars(
+        select(TeacherAssistClass).where(TeacherAssistClass.tenant_id == tenant_id)
+    ).all()
     class_names = {row.id: row.name for row in classes}
 
     latest_job_by_submission: dict[uuid.UUID, TeacherAssistExtractionJob] = {}
     for row in sorted(extraction_jobs, key=lambda item: item.updated_at, reverse=True):
-        if row.student_work_submission_id and row.student_work_submission_id not in latest_job_by_submission:
+        if (
+            row.student_work_submission_id
+            and row.student_work_submission_id not in latest_job_by_submission
+        ):
             latest_job_by_submission[row.student_work_submission_id] = row
 
     latest_record_by_submission: dict[uuid.UUID, TeacherAssistExtractedTextRecord] = {}
     for row in sorted(extracted_text_records, key=lambda item: item.updated_at, reverse=True):
-        if row.student_work_submission_id and row.student_work_submission_id not in latest_record_by_submission:
+        if (
+            row.student_work_submission_id
+            and row.student_work_submission_id not in latest_record_by_submission
+        ):
             latest_record_by_submission[row.student_work_submission_id] = row
 
     latest_record_by_job: dict[uuid.UUID, TeacherAssistExtractedTextRecord] = {}
@@ -239,14 +257,19 @@ def get_teacher_assist_action_workspace(
 
     for job in extraction_jobs:
         record = latest_record_by_job.get(job.id)
-        assignment_title = assignment_titles.get(job.assignment_id, "Assignment") if job.assignment_id else "Resource"
+        assignment_title = (
+            assignment_titles.get(job.assignment_id, "Assignment")
+            if job.assignment_id
+            else "Resource"
+        )
         if job.status == "failed":
             add_item(
                 action_key=f"extraction_failed:{job.id}",
                 action_type="extraction_failed",
                 severity="critical",
                 title="Extraction failed",
-                description=job.error_message or f"Extraction failed for {assignment_title}. Retry or review manually.",
+                description=job.error_message
+                or f"Extraction failed for {assignment_title}. Retry or review manually.",
                 school_year_id=job.school_year_id,
                 grading_period_id=job.grading_period_id,
                 class_id=job.class_id,
@@ -333,7 +356,11 @@ def get_teacher_assist_action_workspace(
                 updated_at=record.updated_at,
                 section_key="extractions",
             )
-        if record.confidence_level == "low" and record.review_status not in {"archived", "teacher_approved", "reviewed"}:
+        if record.confidence_level == "low" and record.review_status not in {
+            "archived",
+            "teacher_approved",
+            "reviewed",
+        }:
             add_item(
                 action_key=f"extraction_low_confidence:{record.id}",
                 action_type="extraction_low_confidence",
@@ -354,7 +381,11 @@ def get_teacher_assist_action_workspace(
                 section_key="extractions",
             )
         if record.review_status in {"issue_flagged", "teacher_rejected", "needs_retry"}:
-            severity = "critical" if record.review_status in {"teacher_rejected", "issue_flagged"} else "warning"
+            severity = (
+                "critical"
+                if record.review_status in {"teacher_rejected", "issue_flagged"}
+                else "warning"
+            )
             add_item(
                 action_key=f"extraction_remediation:{record.id}",
                 action_type=f"extraction_{record.review_status}",
@@ -432,11 +463,23 @@ def get_teacher_assist_action_workspace(
         if review.status == "draft":
             review_action = ("warning", "grading_review_draft", "Draft grading review")
         elif review.status == "ai_suggested":
-            review_action = ("review", "grading_review_ai_suggested", "AI suggestion awaiting teacher review")
+            review_action = (
+                "review",
+                "grading_review_ai_suggested",
+                "AI suggestion awaiting teacher review",
+            )
         elif review.status == "teacher_reviewing":
-            review_action = ("review", "grading_review_teacher_reviewing", "Grading review in progress")
+            review_action = (
+                "review",
+                "grading_review_teacher_reviewing",
+                "Grading review in progress",
+            )
         elif review.status == "returned_for_revision":
-            review_action = ("warning", "grading_review_returned_for_revision", "Grading review returned for revision")
+            review_action = (
+                "warning",
+                "grading_review_returned_for_revision",
+                "Grading review returned for revision",
+            )
 
         if review_action is not None:
             severity, action_type, title = review_action
@@ -503,7 +546,9 @@ def get_teacher_assist_action_workspace(
                 updated_at=record.updated_at,
                 section_key="gradebook",
             )
-        elif (_as_utc_datetime(record.updated_at) or datetime.min.replace(tzinfo=UTC)) >= recent_cutoff:
+        elif (
+            _as_utc_datetime(record.updated_at) or datetime.min.replace(tzinfo=UTC)
+        ) >= recent_cutoff:
             add_item(
                 action_key=f"gradebook_recent_commit:{record.id}",
                 action_type="gradebook_recent_activity",
@@ -563,7 +608,8 @@ def get_teacher_assist_action_workspace(
                 action_type="workflow_failed",
                 severity="critical",
                 title="Workflow failed",
-                description=workflow.error_message or "A TeacherAssist workflow failed and needs review.",
+                description=workflow.error_message
+                or "A TeacherAssist workflow failed and needs review.",
                 class_id=class_id,
                 workflow_id=workflow.id,
                 navigation_label="Open weekly planning",
@@ -573,7 +619,11 @@ def get_teacher_assist_action_workspace(
                 section_key="workflows_exports",
             )
         heartbeat_at = _as_utc_datetime(workflow.heartbeat_at)
-        if workflow.status == "running" and heartbeat_at is not None and heartbeat_at < stale_heartbeat_cutoff:
+        if (
+            workflow.status == "running"
+            and heartbeat_at is not None
+            and heartbeat_at < stale_heartbeat_cutoff
+        ):
             add_item(
                 action_key=f"workflow_stale:{workflow.id}",
                 action_type="workflow_stale_running",
@@ -620,7 +670,11 @@ def get_teacher_assist_action_workspace(
                 updated_at=export.updated_at,
                 section_key="workflows_exports",
             )
-        elif export.artifact_status == "ready" and (_as_utc_datetime(export.updated_at) or datetime.min.replace(tzinfo=UTC)) >= recent_cutoff:
+        elif (
+            export.artifact_status == "ready"
+            and (_as_utc_datetime(export.updated_at) or datetime.min.replace(tzinfo=UTC))
+            >= recent_cutoff
+        ):
             add_item(
                 action_key=f"export_ready:{export.id}",
                 action_type="export_ready_for_download",
@@ -751,9 +805,7 @@ def get_teacher_assist_action_workspace(
         "review_count": sum(1 for item in items if item["severity"] == "review"),
         "ready_count": sum(1 for item in items if item["severity"] == "ready"),
         "mastery_alert_count": sum(
-            1
-            for item in items
-            if str(item.get("action_type", "")).startswith("mastery_")
+            1 for item in items if str(item.get("action_type", "")).startswith("mastery_")
         ),
     }
 
@@ -761,14 +813,22 @@ def get_teacher_assist_action_workspace(
         _public_item(item)
         for item in sorted(
             open_items,
-            key=lambda row: (SEVERITY_SORT_ORDER[row["severity"]], -_sort_timestamp(row).timestamp()),
+            key=lambda row: (
+                SEVERITY_SORT_ORDER[row["severity"]],
+                -_sort_timestamp(row).timestamp(),
+            ),
         )[:10]
     ]
 
     sections: list[dict[str, Any]] = []
     for section_key in ACTION_WORKSPACE_SECTION_KEYS:
         section_items = [_public_item(item) for item in items if item["section_key"] == section_key]
-        section_items.sort(key=lambda row: (SEVERITY_SORT_ORDER[row["severity"]], -_sort_timestamp(row).timestamp()))
+        section_items.sort(
+            key=lambda row: (
+                SEVERITY_SORT_ORDER[row["severity"]],
+                -_sort_timestamp(row).timestamp(),
+            )
+        )
         sections.append(
             {
                 "section_key": section_key,
@@ -788,18 +848,28 @@ def get_teacher_assist_action_workspace(
                 "class_id": teacher_class.id,
                 "class_name": class_names.get(teacher_class.id, teacher_class.name),
                 "open_action_count": len(class_items),
-                "extraction_count": sum(1 for item in class_items if item["section_key"] == "extractions"),
+                "extraction_count": sum(
+                    1 for item in class_items if item["section_key"] == "extractions"
+                ),
                 "grading_count": sum(1 for item in class_items if item["section_key"] == "grading"),
-                "gradebook_count": sum(1 for item in class_items if item["section_key"] == "gradebook"),
-                "workflow_export_count": sum(1 for item in class_items if item["section_key"] == "workflows_exports"),
+                "gradebook_count": sum(
+                    1 for item in class_items if item["section_key"] == "gradebook"
+                ),
+                "workflow_export_count": sum(
+                    1 for item in class_items if item["section_key"] == "workflows_exports"
+                ),
                 "planning_assignment_count": sum(
                     1 for item in class_items if item["section_key"] == "planning_assignments"
                 ),
             }
         )
-    class_rollups.sort(key=lambda row: (-int(row["open_action_count"]), str(row["class_name"]).lower()))
+    class_rollups.sort(
+        key=lambda row: (-int(row["open_action_count"]), str(row["class_name"]).lower())
+    )
 
-    recent_activity_rows = list_recent_activity_events(db, tenant_id=tenant_id, user_id=user_id, limit=20)
+    recent_activity_rows = list_recent_activity_events(
+        db, tenant_id=tenant_id, user_id=user_id, limit=20
+    )
     recent_activity = [
         {
             "id": row.id,

@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session, selectinload
 from oziebot_api.models.teacher_assist_generated_artifact import TeacherAssistGeneratedArtifact
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
-from oziebot_api.models.teacher_assist_pacing_guide_period_note import TeacherAssistPacingGuidePeriodNote
+from oziebot_api.models.teacher_assist_pacing_guide_period_note import (
+    TeacherAssistPacingGuidePeriodNote,
+)
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.generated_artifacts import register_generated_artifact
 from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
@@ -27,10 +29,15 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _get_period(db: Session, *, tenant_id: uuid.UUID, period_id: uuid.UUID) -> TeacherAssistPacingGuidePeriod:
+def _get_period(
+    db: Session, *, tenant_id: uuid.UUID, period_id: uuid.UUID
+) -> TeacherAssistPacingGuidePeriod:
     period = db.scalars(
         select(TeacherAssistPacingGuidePeriod)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id)
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id,
+        )
         .where(
             TeacherAssistPacingGuidePeriod.id == period_id,
             TeacherAssistPacingGuide.tenant_id == tenant_id,
@@ -119,7 +126,11 @@ def duplicate_week(
             )
         ).one_or_none()
         combined = "\n\n".join(
-            [part for part in [source.description, source_note.notes if source_note else None] if part]
+            [
+                part
+                for part in [source.description, source_note.notes if source_note else None]
+                if part
+            ]
         )
         if combined.strip():
             now = _now()
@@ -168,7 +179,10 @@ def duplicate_week(
                 export_artifact_id=artifact.export_artifact_id,
                 newsletter_id=artifact.newsletter_id,
                 resource_links=artifact.resource_links_json,
-                metadata={**(artifact.metadata_json or {}), "duplicated_from_period_id": str(source.id)},
+                metadata={
+                    **(artifact.metadata_json or {}),
+                    "duplicated_from_period_id": str(source.id),
+                },
             )
             copied_artifacts.append(str(clone.id))
 

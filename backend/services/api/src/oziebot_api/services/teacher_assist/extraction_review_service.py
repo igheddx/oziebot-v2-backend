@@ -20,7 +20,13 @@ from oziebot_api.services.teacher_assist.constants import (
 
 REVIEW_TRANSITIONS: dict[str, set[str]] = {
     "pending_review": {"teacher_reviewing", "reviewed", "issue_flagged", "archived"},
-    "teacher_reviewing": {"teacher_approved", "reviewed", "teacher_rejected", "issue_flagged", "archived"},
+    "teacher_reviewing": {
+        "teacher_approved",
+        "reviewed",
+        "teacher_rejected",
+        "issue_flagged",
+        "archived",
+    },
     "teacher_rejected": {"needs_retry", "issue_flagged", "archived"},
     "issue_flagged": {"needs_retry", "teacher_reviewing", "archived"},
     "needs_retry": {"archived"},
@@ -83,7 +89,10 @@ def _lineage_jobs(
                 | (TeacherAssistExtractionJob.id == root_id)
             ),
         )
-        .order_by(TeacherAssistExtractionJob.attempt_number.asc(), TeacherAssistExtractionJob.created_at.asc())
+        .order_by(
+            TeacherAssistExtractionJob.attempt_number.asc(),
+            TeacherAssistExtractionJob.created_at.asc(),
+        )
     ).all()
 
 
@@ -105,7 +114,11 @@ def is_extraction_job_retry_eligible(
         return True
     if job.status == "completed" and _is_low_confidence_record(record):
         return True
-    if record is not None and record.review_status in {"teacher_rejected", "needs_retry", "issue_flagged"}:
+    if record is not None and record.review_status in {
+        "teacher_rejected",
+        "needs_retry",
+        "issue_flagged",
+    }:
         return True
     return False
 
@@ -143,7 +156,9 @@ def retry_extraction_job(
         user_id=user_id,
         extraction_job_id=extraction_job_id,
     )
-    source_record = source_job.extracted_text_records[0] if source_job.extracted_text_records else None
+    source_record = (
+        source_job.extracted_text_records[0] if source_job.extracted_text_records else None
+    )
     if not is_extraction_job_retry_eligible(source_job, source_record):
         raise ValueError("Extraction job is not eligible for retry")
 
@@ -154,18 +169,22 @@ def retry_extraction_job(
     )
     if source_job.resource_library_item_id is not None:
         active_query = active_query.where(
-            TeacherAssistExtractionJob.resource_library_item_id == source_job.resource_library_item_id
+            TeacherAssistExtractionJob.resource_library_item_id
+            == source_job.resource_library_item_id
         )
     else:
         active_query = active_query.where(
-            TeacherAssistExtractionJob.student_work_submission_id == source_job.student_work_submission_id
+            TeacherAssistExtractionJob.student_work_submission_id
+            == source_job.student_work_submission_id
         )
     if db.scalars(active_query).first() is not None:
         raise ValueError("An extraction job is already queued or running for this artifact")
 
     retry_root_id = source_job.retry_root_job_id or source_job.id
     lineage = _lineage_jobs(db, tenant_id=tenant_id, user_id=user_id, job=source_job)
-    next_attempt = max((row.attempt_number for row in lineage), default=source_job.attempt_number) + 1
+    next_attempt = (
+        max((row.attempt_number for row in lineage), default=source_job.attempt_number) + 1
+    )
     now = datetime.now(UTC)
     row = TeacherAssistExtractionJob(
         tenant_id=source_job.tenant_id,
@@ -284,7 +303,9 @@ def update_extracted_text_review_status(
     normalized = validate_extraction_review_status(review_status)
     allowed = REVIEW_TRANSITIONS.get(record.review_status, set())
     if normalized not in allowed and normalized != record.review_status:
-        raise ValueError(f"Cannot transition extraction review status from '{record.review_status}' to '{normalized}'")
+        raise ValueError(
+            f"Cannot transition extraction review status from '{record.review_status}' to '{normalized}'"
+        )
     now = datetime.now(UTC)
     record.review_status = normalized
     record.updated_at = now
@@ -293,7 +314,13 @@ def update_extracted_text_review_status(
         teacher_review_notes=teacher_review_notes,
         teacher_issue_reason=teacher_issue_reason if normalized == "issue_flagged" else None,
     )
-    if normalized in {"teacher_reviewing", "teacher_approved", "teacher_rejected", "reviewed", "issue_flagged"}:
+    if normalized in {
+        "teacher_reviewing",
+        "teacher_approved",
+        "teacher_rejected",
+        "reviewed",
+        "issue_flagged",
+    }:
         record.reviewed_at = now
         record.reviewed_by_user_id = user_id
     event_type = {
@@ -419,7 +446,9 @@ def get_extracted_text_detail(
         extracted_text_id=extracted_text_id,
     )
     job = db.scalars(
-        select(TeacherAssistExtractionJob).where(TeacherAssistExtractionJob.id == record.extraction_job_id)
+        select(TeacherAssistExtractionJob).where(
+            TeacherAssistExtractionJob.id == record.extraction_job_id
+        )
     ).one()
     lineage = _lineage_jobs(db, tenant_id=tenant_id, user_id=user_id, job=job)
     return {
@@ -487,7 +516,10 @@ def list_extraction_summaries(
             TeacherAssistExtractionJob.tenant_id == tenant_id,
             TeacherAssistExtractionJob.teacher_user_id == user_id,
         )
-        .order_by(TeacherAssistExtractionJob.updated_at.desc(), TeacherAssistExtractionJob.created_at.desc())
+        .order_by(
+            TeacherAssistExtractionJob.updated_at.desc(),
+            TeacherAssistExtractionJob.created_at.desc(),
+        )
         .limit(max(1, limit))
     ).all()
     summaries: list[dict[str, Any]] = []
@@ -539,7 +571,11 @@ def get_extraction_job_detail(
                     [
                         job.id,
                         *([job.retry_root_job_id] if job.retry_root_job_id is not None else []),
-                        *([job.parent_extraction_job_id] if job.parent_extraction_job_id is not None else []),
+                        *(
+                            [job.parent_extraction_job_id]
+                            if job.parent_extraction_job_id is not None
+                            else []
+                        ),
                     ]
                 ),
             )
@@ -600,7 +636,9 @@ def retry_latest_eligible_extraction_for_submission(
     submission_id: uuid.UUID,
     settings: Settings,
 ) -> TeacherAssistExtractionJob:
-    from oziebot_api.services.teacher_assist.extraction_jobs import list_student_work_extraction_runs
+    from oziebot_api.services.teacher_assist.extraction_jobs import (
+        list_student_work_extraction_runs,
+    )
 
     runs = list_student_work_extraction_runs(
         db,
@@ -622,7 +660,9 @@ def retry_latest_eligible_extraction_for_submission(
     )
 
 
-def is_stale_extraction_job(job: TeacherAssistExtractionJob, *, settings: Settings, now: datetime | None = None) -> bool:
+def is_stale_extraction_job(
+    job: TeacherAssistExtractionJob, *, settings: Settings, now: datetime | None = None
+) -> bool:
     if job.status != "running":
         return False
     current = now or datetime.now(UTC)

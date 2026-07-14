@@ -41,9 +41,7 @@ class ProductAccessSnapshot:
 
 
 def ensure_platform_products(db: Session) -> None:
-    existing = {
-        row.product_key: row for row in db.scalars(select(PlatformProduct)).all()
-    }
+    existing = {row.product_key: row for row in db.scalars(select(PlatformProduct)).all()}
     now = datetime.now(UTC)
     for definition in DEFAULT_PLATFORM_PRODUCTS:
         row = existing.get(definition["product_key"])
@@ -235,11 +233,15 @@ def tenant_ids_for_product(
 
 
 def resolve_tenant_id_for_product(db: Session, *, user: User, product_key: str) -> uuid.UUID | None:
-    tenant_ids = tenant_ids_for_product(db, user=user, product_key=product_key, selectable_only=True)
+    tenant_ids = tenant_ids_for_product(
+        db, user=user, product_key=product_key, selectable_only=True
+    )
     return tenant_ids[0] if tenant_ids else None
 
 
-def set_user_default_product(db: Session, *, user: User, product_key: str) -> tuple[list[ProductAccessSnapshot], str]:
+def set_user_default_product(
+    db: Session, *, user: User, product_key: str
+) -> tuple[list[ProductAccessSnapshot], str]:
     ensure_platform_products(db)
     product = db.scalars(
         select(PlatformProduct).where(

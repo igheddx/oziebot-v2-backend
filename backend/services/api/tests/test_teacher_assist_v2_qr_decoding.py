@@ -21,7 +21,10 @@ def test_parse_qr_identifier_from_json_payload():
         "qr_token": token,
         "student_number": 2,
     }
-    assert parse_qr_identifier_from_content(json.dumps(payload, sort_keys=True, separators=(",", ":"))) == token
+    assert (
+        parse_qr_identifier_from_content(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        == token
+    )
 
 
 def test_extract_qr_identifiers_from_png_image():

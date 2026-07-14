@@ -7,7 +7,9 @@ from sqlalchemy import select
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
 from oziebot_api.models.user import User
 from oziebot_api.scripts.seed_teacher_assist_v2 import seed_teacher_assist_v2
-from oziebot_api.services.teacher_assist.pacing_guide_foundation import get_catalog_pacing_guide_detail
+from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
+    get_catalog_pacing_guide_detail,
+)
 from tests.test_teacher_assist_setup import _grant_teacher_assist_access, _register_user
 
 
@@ -40,7 +42,9 @@ def _first_math_guide(db_session) -> tuple[TeacherAssistPacingGuide, str]:
         )
     ).first()
     assert row is not None
-    guide = get_catalog_pacing_guide_detail(db_session, tenant_id=row.tenant_id, pacing_guide_id=row.id)
+    guide = get_catalog_pacing_guide_detail(
+        db_session, tenant_id=row.tenant_id, pacing_guide_id=row.id
+    )
     period = sorted(guide.periods, key=lambda item: item.sequence_number)[0]
     return guide, str(period.id)
 
@@ -79,8 +83,14 @@ def test_v2_supporting_materials_link_and_planning_context(client, db_session):
     upload = client.post(
         f"/v1/teacher-assist-v2/instructional/pacing-guides/{guide.id}/supporting-materials/upload",
         headers=headers,
-        files={"file": ("week1-overview.txt", io.BytesIO(b"Sample district curriculum"), "text/plain")},
-        data={"resource_type": "curriculum_file", "title": "Week 1 overview", "period_id": period_id},
+        files={
+            "file": ("week1-overview.txt", io.BytesIO(b"Sample district curriculum"), "text/plain")
+        },
+        data={
+            "resource_type": "curriculum_file",
+            "title": "Week 1 overview",
+            "period_id": period_id,
+        },
     )
     assert upload.status_code == 201, upload.text
 

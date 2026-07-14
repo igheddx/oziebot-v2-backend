@@ -21,8 +21,16 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("pacing_guides", sa.Column("ownership_type", sa.String(length=32), nullable=False, server_default="TEACHER"))
-    op.add_column("pacing_guides", sa.Column("visibility_scope", sa.String(length=32), nullable=False, server_default="PRIVATE"))
+    op.add_column(
+        "pacing_guides",
+        sa.Column("ownership_type", sa.String(length=32), nullable=False, server_default="TEACHER"),
+    )
+    op.add_column(
+        "pacing_guides",
+        sa.Column(
+            "visibility_scope", sa.String(length=32), nullable=False, server_default="PRIVATE"
+        ),
+    )
     op.add_column("pacing_guides", sa.Column("planning_group_id", sa.Uuid(), nullable=True))
 
     op.create_table(
@@ -41,7 +49,11 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_teacher_assist_planning_groups_tenant_id", "teacher_assist_planning_groups", ["tenant_id"])
+    op.create_index(
+        "ix_teacher_assist_planning_groups_tenant_id",
+        "teacher_assist_planning_groups",
+        ["tenant_id"],
+    )
 
     op.create_table(
         "teacher_assist_planning_group_members",
@@ -50,12 +62,22 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("role", sa.String(length=32), nullable=False),
         sa.Column("joined_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["group_id"], ["teacher_assist_planning_groups.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["group_id"], ["teacher_assist_planning_groups.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_teacher_assist_planning_group_members_group_id", "teacher_assist_planning_group_members", ["group_id"])
-    op.create_index("ix_teacher_assist_planning_group_members_user_id", "teacher_assist_planning_group_members", ["user_id"])
+    op.create_index(
+        "ix_teacher_assist_planning_group_members_group_id",
+        "teacher_assist_planning_group_members",
+        ["group_id"],
+    )
+    op.create_index(
+        "ix_teacher_assist_planning_group_members_user_id",
+        "teacher_assist_planning_group_members",
+        ["user_id"],
+    )
 
     op.create_foreign_key(
         "fk_pacing_guides_planning_group_id",
@@ -85,12 +107,20 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["school_year_id"], ["school_years.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["source_period_id"], ["pacing_guide_periods.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["source_period_id"], ["pacing_guide_periods.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_teacher_assist_week_templates_tenant_id", "teacher_assist_week_templates", ["tenant_id"])
-    op.create_index("ix_teacher_assist_week_templates_artifact_type", "teacher_assist_week_templates", ["artifact_type"])
+    op.create_index(
+        "ix_teacher_assist_week_templates_tenant_id", "teacher_assist_week_templates", ["tenant_id"]
+    )
+    op.create_index(
+        "ix_teacher_assist_week_templates_artifact_type",
+        "teacher_assist_week_templates",
+        ["artifact_type"],
+    )
 
     op.create_table(
         "teacher_assist_reuse_events",
@@ -109,26 +139,50 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_teacher_assist_reuse_events_tenant_id", "teacher_assist_reuse_events", ["tenant_id"])
-    op.create_index("ix_teacher_assist_reuse_events_user_id", "teacher_assist_reuse_events", ["user_id"])
-    op.create_index("ix_teacher_assist_reuse_events_event_type", "teacher_assist_reuse_events", ["event_type"])
+    op.create_index(
+        "ix_teacher_assist_reuse_events_tenant_id", "teacher_assist_reuse_events", ["tenant_id"]
+    )
+    op.create_index(
+        "ix_teacher_assist_reuse_events_user_id", "teacher_assist_reuse_events", ["user_id"]
+    )
+    op.create_index(
+        "ix_teacher_assist_reuse_events_event_type", "teacher_assist_reuse_events", ["event_type"]
+    )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_teacher_assist_reuse_events_event_type", table_name="teacher_assist_reuse_events")
-    op.drop_index("ix_teacher_assist_reuse_events_user_id", table_name="teacher_assist_reuse_events")
-    op.drop_index("ix_teacher_assist_reuse_events_tenant_id", table_name="teacher_assist_reuse_events")
+    op.drop_index(
+        "ix_teacher_assist_reuse_events_event_type", table_name="teacher_assist_reuse_events"
+    )
+    op.drop_index(
+        "ix_teacher_assist_reuse_events_user_id", table_name="teacher_assist_reuse_events"
+    )
+    op.drop_index(
+        "ix_teacher_assist_reuse_events_tenant_id", table_name="teacher_assist_reuse_events"
+    )
     op.drop_table("teacher_assist_reuse_events")
 
-    op.drop_index("ix_teacher_assist_week_templates_artifact_type", table_name="teacher_assist_week_templates")
-    op.drop_index("ix_teacher_assist_week_templates_tenant_id", table_name="teacher_assist_week_templates")
+    op.drop_index(
+        "ix_teacher_assist_week_templates_artifact_type", table_name="teacher_assist_week_templates"
+    )
+    op.drop_index(
+        "ix_teacher_assist_week_templates_tenant_id", table_name="teacher_assist_week_templates"
+    )
     op.drop_table("teacher_assist_week_templates")
 
     op.drop_constraint("fk_pacing_guides_planning_group_id", "pacing_guides", type_="foreignkey")
-    op.drop_index("ix_teacher_assist_planning_group_members_user_id", table_name="teacher_assist_planning_group_members")
-    op.drop_index("ix_teacher_assist_planning_group_members_group_id", table_name="teacher_assist_planning_group_members")
+    op.drop_index(
+        "ix_teacher_assist_planning_group_members_user_id",
+        table_name="teacher_assist_planning_group_members",
+    )
+    op.drop_index(
+        "ix_teacher_assist_planning_group_members_group_id",
+        table_name="teacher_assist_planning_group_members",
+    )
     op.drop_table("teacher_assist_planning_group_members")
-    op.drop_index("ix_teacher_assist_planning_groups_tenant_id", table_name="teacher_assist_planning_groups")
+    op.drop_index(
+        "ix_teacher_assist_planning_groups_tenant_id", table_name="teacher_assist_planning_groups"
+    )
     op.drop_table("teacher_assist_planning_groups")
 
     op.drop_column("pacing_guides", "planning_group_id")

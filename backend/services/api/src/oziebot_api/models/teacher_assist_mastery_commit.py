@@ -80,7 +80,9 @@ class TeacherAssistMasteryCommit(Base):
         back_populates="commits",
         foreign_keys=[mastery_evaluation_id],
     )
-    mastery_matrix: Mapped["TeacherAssistMasteryMatrix"] = relationship("TeacherAssistMasteryMatrix")
+    mastery_matrix: Mapped["TeacherAssistMasteryMatrix"] = relationship(
+        "TeacherAssistMasteryMatrix"
+    )
     standard: Mapped["TeacherAssistStandard"] = relationship("TeacherAssistStandard")
 
 

@@ -112,11 +112,14 @@ def count_grading_metrics(db: Session, *, assignment_id: uuid.UUID) -> dict[str,
     if not submission_ids:
         return {"grading_complete_count": 0, "teacher_reviewed_count": 0}
 
-    grading_complete_count = db.scalar(
-        select(func.count(func.distinct(TeacherAssistV2GradingDraft.student_submission_id))).where(
-            TeacherAssistV2GradingDraft.student_submission_id.in_(submission_ids)
+    grading_complete_count = (
+        db.scalar(
+            select(
+                func.count(func.distinct(TeacherAssistV2GradingDraft.student_submission_id))
+            ).where(TeacherAssistV2GradingDraft.student_submission_id.in_(submission_ids))
         )
-    ) or 0
+        or 0
+    )
     return {
         "grading_complete_count": int(grading_complete_count),
         "teacher_reviewed_count": 0,
@@ -144,24 +147,39 @@ def get_latest_grading_draft(
 
 
 def count_assignment_grading_activity(db: Session, *, assignment_id: uuid.UUID) -> dict[str, Any]:
-    queued_count = db.scalar(
-        select(func.count()).select_from(TeacherAssistV2GradingJob).where(
-            TeacherAssistV2GradingJob.assignment_id == assignment_id,
-            TeacherAssistV2GradingJob.status == "QUEUED",
+    queued_count = (
+        db.scalar(
+            select(func.count())
+            .select_from(TeacherAssistV2GradingJob)
+            .where(
+                TeacherAssistV2GradingJob.assignment_id == assignment_id,
+                TeacherAssistV2GradingJob.status == "QUEUED",
+            )
         )
-    ) or 0
-    running_count = db.scalar(
-        select(func.count()).select_from(TeacherAssistV2GradingJob).where(
-            TeacherAssistV2GradingJob.assignment_id == assignment_id,
-            TeacherAssistV2GradingJob.status == "RUNNING",
+        or 0
+    )
+    running_count = (
+        db.scalar(
+            select(func.count())
+            .select_from(TeacherAssistV2GradingJob)
+            .where(
+                TeacherAssistV2GradingJob.assignment_id == assignment_id,
+                TeacherAssistV2GradingJob.status == "RUNNING",
+            )
         )
-    ) or 0
-    failed_count = db.scalar(
-        select(func.count()).select_from(TeacherAssistV2GradingJob).where(
-            TeacherAssistV2GradingJob.assignment_id == assignment_id,
-            TeacherAssistV2GradingJob.status == "FAILED",
+        or 0
+    )
+    failed_count = (
+        db.scalar(
+            select(func.count())
+            .select_from(TeacherAssistV2GradingJob)
+            .where(
+                TeacherAssistV2GradingJob.assignment_id == assignment_id,
+                TeacherAssistV2GradingJob.status == "FAILED",
+            )
         )
-    ) or 0
+        or 0
+    )
     latest_failed = db.scalars(
         select(TeacherAssistV2GradingJob)
         .where(
@@ -223,7 +241,9 @@ def _enqueue_grading_job_for_submission(
         return existing, False
 
     effective_settings = resolve_teacher_assist_settings(db, settings)
-    provider_name = validate_teacher_assist_ai_provider(effective_settings.teacher_assist_ai_provider)
+    provider_name = validate_teacher_assist_ai_provider(
+        effective_settings.teacher_assist_ai_provider
+    )
     now = _now()
     job = TeacherAssistV2GradingJob(
         id=uuid.uuid4(),
@@ -270,7 +290,9 @@ def _perform_grading_job(
     user: User,
     job: TeacherAssistV2GradingJob,
 ) -> None:
-    submission = get_student_submission_or_404(db, user=user, submission_id=job.student_submission_id)
+    submission = get_student_submission_or_404(
+        db, user=user, submission_id=job.student_submission_id
+    )
     assignment = _get_assignment_or_404(db, user=user, assignment_id=submission.assignment_id)
     _require_ready_submission(submission)
 
@@ -281,7 +303,9 @@ def _perform_grading_job(
         db.flush()
 
     context = build_grading_context(db, assignment=assignment, submission=submission)
-    if is_teacher_assist_real_ai_active(db, settings) and not context["student_submission"].get("response_text"):
+    if is_teacher_assist_real_ai_active(db, settings) and not context["student_submission"].get(
+        "response_text"
+    ):
         raise ValueError(
             "Student work text is required before AI grading. Extract the submission or enter the student response manually."
         )
@@ -447,7 +471,9 @@ def generate_all_grading_drafts(
         select(TeacherAssistV2StudentSubmission).where(
             TeacherAssistV2StudentSubmission.assignment_id == assignment_id,
             TeacherAssistV2StudentSubmission.teacher_user_id == user.id,
-            TeacherAssistV2StudentSubmission.status.in_({"READY_FOR_REVIEW", "READY_FOR_GRADING", "PROCESSING"}),
+            TeacherAssistV2StudentSubmission.status.in_(
+                {"READY_FOR_REVIEW", "READY_FOR_GRADING", "PROCESSING"}
+            ),
         )
     ).all()
     if not submissions:

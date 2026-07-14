@@ -11,13 +11,19 @@ from sqlalchemy.orm import Session
 from oziebot_api.models.education_catalog import EducationSubject
 from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
-from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
+from oziebot_api.models.teacher_assist_pacing_guide_objective import (
+    TeacherAssistPacingGuideObjective,
+)
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
-from oziebot_api.models.teacher_assist_pacing_guide_period_note import TeacherAssistPacingGuidePeriodNote
+from oziebot_api.models.teacher_assist_pacing_guide_period_note import (
+    TeacherAssistPacingGuidePeriodNote,
+)
 from oziebot_api.models.teacher_assist_pacing_guide_resource import TeacherAssistPacingGuideResource
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
-from oziebot_api.services.teacher_assist.pacing_guide_foundation import get_catalog_pacing_guide_detail
+from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
+    get_catalog_pacing_guide_detail,
+)
 from oziebot_api.services.teacher_assist.user_preferences import get_user_preferences_or_create
 
 
@@ -33,7 +39,9 @@ class ResolvedWeekContext:
     manual_override: bool
 
 
-def _periods_by_type(periods: list[TeacherAssistPacingGuidePeriod]) -> dict[str, list[TeacherAssistPacingGuidePeriod]]:
+def _periods_by_type(
+    periods: list[TeacherAssistPacingGuidePeriod],
+) -> dict[str, list[TeacherAssistPacingGuidePeriod]]:
     grouped: dict[str, list[TeacherAssistPacingGuidePeriod]] = {}
     for period in sorted(periods, key=lambda row: row.sequence_number):
         grouped.setdefault(period.period_type, []).append(period)
@@ -61,7 +69,9 @@ def _resolve_week_period(
     for week in weeks:
         if _contains_date(week, target_date):
             return week, False
-    upcoming = next((week for week in weeks if week.start_date and week.start_date > target_date), None)
+    upcoming = next(
+        (week for week in weeks if week.start_date and week.start_date > target_date), None
+    )
     if upcoming is not None:
         return upcoming, False
     return (weeks[0] if weeks else None), False
@@ -175,7 +185,9 @@ class CurrentWeekResolver:
         )
         upcoming_week = None
         if current_week is not None:
-            later_weeks = [row for row in weeks if row.sequence_number > current_week.sequence_number]
+            later_weeks = [
+                row for row in weeks if row.sequence_number > current_week.sequence_number
+            ]
             upcoming_week = later_weeks[0] if later_weeks else None
         school_year = db.get(TeacherAssistSchoolYear, guide.school_year_id)
         grading_period = _resolve_tenant_grading_period(
@@ -280,7 +292,9 @@ def _serialize_period(
     }
 
 
-def build_teaching_progress(periods: list[TeacherAssistPacingGuidePeriod], *, as_of_date: date) -> dict[str, Any]:
+def build_teaching_progress(
+    periods: list[TeacherAssistPacingGuidePeriod], *, as_of_date: date
+) -> dict[str, Any]:
     weeks = [row for row in periods if row.period_type == "WEEK"]
     completed_weeks = [
         row for row in weeks if row.end_date is not None and row.end_date < as_of_date
@@ -331,7 +345,9 @@ def build_current_week_payload(
         }
     guide = context.guide
     catalog_subject = (
-        db.get(EducationSubject, guide.catalog_subject_id) if guide.catalog_subject_id is not None else None
+        db.get(EducationSubject, guide.catalog_subject_id)
+        if guide.catalog_subject_id is not None
+        else None
     )
     detail = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=guide.id)
     progress = build_teaching_progress(detail.periods, as_of_date=target_date)
@@ -360,22 +376,34 @@ def build_current_week_payload(
         "grading_period": {
             "id": context.grading_period.id,
             "title": context.grading_period.title,
-            "start_date": context.grading_period.start_date.isoformat() if context.grading_period.start_date else None,
-            "end_date": context.grading_period.end_date.isoformat() if context.grading_period.end_date else None,
+            "start_date": context.grading_period.start_date.isoformat()
+            if context.grading_period.start_date
+            else None,
+            "end_date": context.grading_period.end_date.isoformat()
+            if context.grading_period.end_date
+            else None,
         }
         if context.grading_period is not None
         else None,
         "guide_grading_period": _serialize_period(
             db, tenant_id=tenant_id, user_id=user_id, period=context.guide_grading_period
         ),
-        "guide_unit": _serialize_period(db, tenant_id=tenant_id, user_id=user_id, period=context.guide_unit),
-        "current_week": _serialize_period(db, tenant_id=tenant_id, user_id=user_id, period=context.current_week),
-        "upcoming_week": _serialize_period(db, tenant_id=tenant_id, user_id=user_id, period=context.upcoming_week),
+        "guide_unit": _serialize_period(
+            db, tenant_id=tenant_id, user_id=user_id, period=context.guide_unit
+        ),
+        "current_week": _serialize_period(
+            db, tenant_id=tenant_id, user_id=user_id, period=context.current_week
+        ),
+        "upcoming_week": _serialize_period(
+            db, tenant_id=tenant_id, user_id=user_id, period=context.upcoming_week
+        ),
         "teaching_progress": progress,
     }
 
 
-def build_pacing_guide_timeline(periods: list[TeacherAssistPacingGuidePeriod], *, current_period_id: uuid.UUID | None) -> list[dict[str, Any]]:
+def build_pacing_guide_timeline(
+    periods: list[TeacherAssistPacingGuidePeriod], *, current_period_id: uuid.UUID | None
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for period in sorted(periods, key=lambda row: (row.period_type, row.sequence_number)):
         rows.append(
@@ -412,7 +440,9 @@ def build_objective_coverage(
     ).all():
         if plan.pacing_guide_period_id is None:
             continue
-        period = next((row for row in detail.periods if row.id == plan.pacing_guide_period_id), None)
+        period = next(
+            (row for row in detail.periods if row.id == plan.pacing_guide_period_id), None
+        )
         if period is None:
             continue
         for objective in period.objectives:
@@ -448,6 +478,8 @@ def build_objective_coverage(
             "total": len(rows),
             "covered": sum(1 for row in rows if row["coverage_status"] == "covered"),
             "planned": sum(1 for row in rows if row["coverage_status"] == "planned"),
-            "not_yet_scheduled": sum(1 for row in rows if row["coverage_status"] == "not_yet_scheduled"),
+            "not_yet_scheduled": sum(
+                1 for row in rows if row["coverage_status"] == "not_yet_scheduled"
+            ),
         },
     }

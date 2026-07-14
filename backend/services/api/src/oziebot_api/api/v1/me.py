@@ -222,7 +222,9 @@ def update_default_product(
     db: DbSession,
 ) -> ProductsOut:
     try:
-        products, default_product = set_user_default_product(db, user=user, product_key=body.product_key)
+        products, default_product = set_user_default_product(
+            db, user=user, product_key=body.product_key
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:

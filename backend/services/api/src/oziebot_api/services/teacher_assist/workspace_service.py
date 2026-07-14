@@ -9,20 +9,28 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
-from oziebot_api.models.teacher_assist_assignment_grading_review import TeacherAssistAssignmentGradingReview
-from oziebot_api.models.teacher_assist_assignment_print_packet import TeacherAssistAssignmentPrintPacket
+from oziebot_api.models.teacher_assist_assignment_grading_review import (
+    TeacherAssistAssignmentGradingReview,
+)
+from oziebot_api.models.teacher_assist_assignment_print_packet import (
+    TeacherAssistAssignmentPrintPacket,
+)
 from oziebot_api.models.teacher_assist_class import TeacherAssistClass
 from oziebot_api.models.teacher_assist_extracted_text_record import TeacherAssistExtractedTextRecord
 from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtractionJob
 from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
 from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
-from oziebot_api.models.teacher_assist_student_work_submission import TeacherAssistStudentWorkSubmission
+from oziebot_api.models.teacher_assist_student_work_submission import (
+    TeacherAssistStudentWorkSubmission,
+)
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.models.teacher_assist_workflow import TeacherAssistWorkflow
 from oziebot_api.services.teacher_assist.activity_events import list_recent_activity_events
 from oziebot_api.services.teacher_assist.extraction_review_service import is_stale_extraction_job
 from oziebot_api.services.teacher_assist.mastery_dashboard import build_mastery_dashboard
-from oziebot_api.services.teacher_assist.mastery_workspace_insights import build_workspace_mastery_insights
+from oziebot_api.services.teacher_assist.mastery_workspace_insights import (
+    build_workspace_mastery_insights,
+)
 
 
 def _uuid_from_value(value: Any) -> uuid.UUID | None:
@@ -198,7 +206,9 @@ def _submission_ready_for_teacher_review(
         return False
     if latest_record.review_status in {"pending_review", "teacher_reviewing"}:
         return True
-    related_reviews = [row for row in grading_reviews if row.student_work_submission_id == submission.id]
+    related_reviews = [
+        row for row in grading_reviews if row.student_work_submission_id == submission.id
+    ]
     return not any(row.status != "archived" for row in related_reviews)
 
 
@@ -295,18 +305,25 @@ def get_teacher_assist_workspace(
     today = datetime.now(UTC).date()
     now = datetime.now(UTC)
     recent_cutoff = now - timedelta(days=7)
-    stale_heartbeat_cutoff = now - timedelta(seconds=max(1, settings.teacher_assist_worker_lease_seconds))
+    stale_heartbeat_cutoff = now - timedelta(
+        seconds=max(1, settings.teacher_assist_worker_lease_seconds)
+    )
 
     school_years = db.scalars(
         select(TeacherAssistSchoolYear)
         .where(TeacherAssistSchoolYear.tenant_id == tenant_id)
-        .order_by(TeacherAssistSchoolYear.start_date.desc(), TeacherAssistSchoolYear.created_at.desc())
+        .order_by(
+            TeacherAssistSchoolYear.start_date.desc(), TeacherAssistSchoolYear.created_at.desc()
+        )
     ).all()
     current_school_year = _current_school_year(school_years)
 
     grading_periods = db.scalars(
         select(TeacherAssistGradingPeriod)
-        .join(TeacherAssistSchoolYear, TeacherAssistSchoolYear.id == TeacherAssistGradingPeriod.school_year_id)
+        .join(
+            TeacherAssistSchoolYear,
+            TeacherAssistSchoolYear.id == TeacherAssistGradingPeriod.school_year_id,
+        )
         .where(TeacherAssistSchoolYear.tenant_id == tenant_id)
         .order_by(
             TeacherAssistGradingPeriod.start_date.asc(),
@@ -333,7 +350,9 @@ def get_teacher_assist_workspace(
             TeacherAssistAssignment.tenant_id == tenant_id,
             TeacherAssistAssignment.teacher_user_id == user_id,
         )
-        .order_by(TeacherAssistAssignment.updated_at.desc(), TeacherAssistAssignment.created_at.desc())
+        .order_by(
+            TeacherAssistAssignment.updated_at.desc(), TeacherAssistAssignment.created_at.desc()
+        )
     ).all()
 
     submissions = db.scalars(
@@ -366,7 +385,10 @@ def get_teacher_assist_workspace(
             TeacherAssistExtractionJob.tenant_id == tenant_id,
             TeacherAssistExtractionJob.teacher_user_id == user_id,
         )
-        .order_by(TeacherAssistExtractionJob.updated_at.desc(), TeacherAssistExtractionJob.created_at.desc())
+        .order_by(
+            TeacherAssistExtractionJob.updated_at.desc(),
+            TeacherAssistExtractionJob.created_at.desc(),
+        )
     ).all()
 
     extracted_text_records = db.scalars(
@@ -408,15 +430,24 @@ def get_teacher_assist_workspace(
             TeacherAssistWeeklyPlan.tenant_id == tenant_id,
             TeacherAssistWeeklyPlan.user_id == user_id,
         )
-        .order_by(TeacherAssistWeeklyPlan.updated_at.desc(), TeacherAssistWeeklyPlan.created_at.desc())
+        .order_by(
+            TeacherAssistWeeklyPlan.updated_at.desc(), TeacherAssistWeeklyPlan.created_at.desc()
+        )
     ).all()
 
-    recent_activity = list_recent_activity_events(db, tenant_id=tenant_id, user_id=user_id, limit=50)
+    recent_activity = list_recent_activity_events(
+        db, tenant_id=tenant_id, user_id=user_id, limit=50
+    )
     active_workflows = [row for row in workflows if row.status in {"queued", "running"}]
     latest_extraction_job_by_submission_id: dict[uuid.UUID, TeacherAssistExtractionJob] = {}
-    latest_extraction_record_by_submission_id: dict[uuid.UUID, TeacherAssistExtractedTextRecord] = {}
+    latest_extraction_record_by_submission_id: dict[
+        uuid.UUID, TeacherAssistExtractedTextRecord
+    ] = {}
     for row in extraction_jobs:
-        if row.student_work_submission_id is not None and row.student_work_submission_id not in latest_extraction_job_by_submission_id:
+        if (
+            row.student_work_submission_id is not None
+            and row.student_work_submission_id not in latest_extraction_job_by_submission_id
+        ):
             latest_extraction_job_by_submission_id[row.student_work_submission_id] = row
     for row in extracted_text_records:
         if (
@@ -436,7 +467,8 @@ def get_teacher_assist_workspace(
                     item_type="workflow_failed",
                     severity="critical",
                     title="Workflow failed",
-                    message=workflow.error_message or "TeacherAssist workflow failed and needs review.",
+                    message=workflow.error_message
+                    or "TeacherAssist workflow failed and needs review.",
                     entity_type="workflow",
                     entity_id=workflow.id,
                     created_at=workflow.updated_at,
@@ -470,7 +502,11 @@ def get_teacher_assist_workspace(
                 )
             )
         workflow_heartbeat_at = _as_utc_datetime(workflow.heartbeat_at)
-        if workflow.status == "running" and workflow_heartbeat_at is not None and workflow_heartbeat_at < stale_heartbeat_cutoff:
+        if (
+            workflow.status == "running"
+            and workflow_heartbeat_at is not None
+            and workflow_heartbeat_at < stale_heartbeat_cutoff
+        ):
             needs_attention.append(
                 _attention_item(
                     item_type="workflow_stale_heartbeat",
@@ -485,7 +521,11 @@ def get_teacher_assist_workspace(
             )
 
     for extraction_job in extraction_jobs:
-        extraction_record = extraction_job.extracted_text_records[0] if extraction_job.extracted_text_records else None
+        extraction_record = (
+            extraction_job.extracted_text_records[0]
+            if extraction_job.extracted_text_records
+            else None
+        )
         if extraction_job.status == "failed" and extraction_job.artifact_type == "resource":
             needs_attention.append(
                 _attention_item(
@@ -564,7 +604,10 @@ def get_teacher_assist_workspace(
                     class_id=extraction_job.class_id,
                 )
             )
-        if extraction_record is not None and extraction_record.review_status in {"pending_review", "teacher_reviewing"}:
+        if extraction_record is not None and extraction_record.review_status in {
+            "pending_review",
+            "teacher_reviewing",
+        }:
             review_required_items.append(
                 _review_required_item(
                     entity_type="extracted_text",
@@ -680,7 +723,9 @@ def get_teacher_assist_workspace(
                     class_id=submission.class_id,
                 )
             )
-        if _submission_ready_for_extraction(submission, latest_extraction_job, latest_extraction_record):
+        if _submission_ready_for_extraction(
+            submission, latest_extraction_job, latest_extraction_record
+        ):
             needs_attention.append(
                 _attention_item(
                     item_type="student_work_ready_for_extraction",
@@ -693,7 +738,9 @@ def get_teacher_assist_workspace(
                     class_id=submission.class_id,
                 )
             )
-        if _submission_ready_for_teacher_review(submission, latest_extraction_record, grading_reviews):
+        if _submission_ready_for_teacher_review(
+            submission, latest_extraction_record, grading_reviews
+        ):
             needs_attention.append(
                 _attention_item(
                     item_type="extracted_work_ready_for_teacher_review",
@@ -702,7 +749,11 @@ def get_teacher_assist_workspace(
                     message=f"Extraction is complete for STUDENT #{submission.student_number}; teacher review can begin.",
                     entity_type="student_work_submission",
                     entity_id=submission.id,
-                    created_at=(latest_extraction_record.updated_at if latest_extraction_record else submission.updated_at),
+                    created_at=(
+                        latest_extraction_record.updated_at
+                        if latest_extraction_record
+                        else submission.updated_at
+                    ),
                     class_id=submission.class_id,
                 )
             )
@@ -712,9 +763,13 @@ def get_teacher_assist_workspace(
                     entity_id=submission.id,
                     class_id=submission.class_id,
                     title=f"Extracted work for STUDENT #{submission.student_number}",
-                    status=latest_extraction_job.status if latest_extraction_job is not None else "completed",
+                    status=latest_extraction_job.status
+                    if latest_extraction_job is not None
+                    else "completed",
                     review_reason="Extracted text is ready for teacher review.",
-                    updated_at=latest_extraction_record.updated_at if latest_extraction_record else submission.updated_at,
+                    updated_at=latest_extraction_record.updated_at
+                    if latest_extraction_record
+                    else submission.updated_at,
                 )
             )
 
@@ -752,14 +807,18 @@ def get_teacher_assist_workspace(
         class_submissions = [row for row in submissions if row.class_id == teacher_class.id]
         class_workflows = [row for row in workflows if _workflow_class_id(row) == teacher_class.id]
         class_packets = [row for row in packets if row.class_id == teacher_class.id]
-        class_attention_count = sum(1 for item in needs_attention if item.get("class_id") == teacher_class.id)
+        class_attention_count = sum(
+            1 for item in needs_attention if item.get("class_id") == teacher_class.id
+        )
         class_workspaces.append(
             {
                 "class_row": teacher_class,
                 "active_plans": [_plan_summary(row) for row in class_plans],
                 "assignments": [_assignment_summary(row) for row in class_assignments],
                 "pending_grading_reviews": [
-                    _grading_review_summary(row) for row in class_reviews if _grading_review_pending_confirmation(row)
+                    _grading_review_summary(row)
+                    for row in class_reviews
+                    if _grading_review_pending_confirmation(row)
                 ],
                 "recent_submissions": [
                     {
@@ -800,7 +859,9 @@ def get_teacher_assist_workspace(
     )
 
     low_confidence_count = sum(
-        1 for row in extracted_text_records if row.confidence_level == "low" and row.review_status != "archived"
+        1
+        for row in extracted_text_records
+        if row.confidence_level == "low" and row.review_status != "archived"
     )
     rejected_extraction_count = sum(
         1 for row in extracted_text_records if row.review_status == "teacher_rejected"
@@ -809,7 +870,9 @@ def get_teacher_assist_workspace(
         1 for row in extracted_text_records if row.review_status == "needs_retry"
     )
     awaiting_teacher_review_count = sum(
-        1 for row in extracted_text_records if row.review_status in {"pending_review", "teacher_reviewing"}
+        1
+        for row in extracted_text_records
+        if row.review_status in {"pending_review", "teacher_reviewing"}
     )
     stale_extraction_job_count = sum(
         1 for row in extraction_jobs if is_stale_extraction_job(row, settings=settings, now=now)
@@ -835,17 +898,24 @@ def get_teacher_assist_workspace(
         "current_school_year": current_school_year,
         "active_grading_period": active_grading_period,
         "today_summary": {
-            "active_grading_period_title": active_grading_period.title if active_grading_period else None,
+            "active_grading_period_title": active_grading_period.title
+            if active_grading_period
+            else None,
             "active_workflows_count": len(active_workflows),
             "plans_needing_review_count": sum(1 for row in plans if _review_required_for_plan(row)),
             "grading_reviews_pending_confirmation_count": sum(
                 1 for row in grading_reviews if _grading_review_pending_confirmation(row)
             ),
             "recent_uploads_count": sum(
-                1 for row in submissions if (_as_utc_datetime(row.created_at) or datetime.min.replace(tzinfo=UTC)) >= recent_cutoff
+                1
+                for row in submissions
+                if (_as_utc_datetime(row.created_at) or datetime.min.replace(tzinfo=UTC))
+                >= recent_cutoff
             ),
             "workflow_failures_count": sum(1 for row in workflows if row.status == "failed"),
-            "extraction_failures_count": sum(1 for row in extraction_jobs if row.status == "failed"),
+            "extraction_failures_count": sum(
+                1 for row in extraction_jobs if row.status == "failed"
+            ),
             "student_work_ready_for_extraction_count": sum(
                 1
                 for row in submissions
@@ -883,7 +953,10 @@ def get_teacher_assist_workspace(
                 1 for row in grading_reviews if _grading_review_pending_confirmation(row)
             ),
             "recent_upload_count": sum(
-                1 for row in submissions if (_as_utc_datetime(row.created_at) or datetime.min.replace(tzinfo=UTC)) >= recent_cutoff
+                1
+                for row in submissions
+                if (_as_utc_datetime(row.created_at) or datetime.min.replace(tzinfo=UTC))
+                >= recent_cutoff
             ),
             "workflow_failure_count": sum(1 for row in workflows if row.status == "failed"),
             "assignments_in_review_count": sum(

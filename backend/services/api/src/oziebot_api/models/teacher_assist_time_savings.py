@@ -37,7 +37,10 @@ class TeacherAssistPlanningGroupMember(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     group_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("teacher_assist_planning_groups.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("teacher_assist_planning_groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
@@ -45,7 +48,9 @@ class TeacherAssistPlanningGroupMember(Base):
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    group: Mapped["TeacherAssistPlanningGroup"] = relationship("TeacherAssistPlanningGroup", back_populates="members")
+    group: Mapped["TeacherAssistPlanningGroup"] = relationship(
+        "TeacherAssistPlanningGroup", back_populates="members"
+    )
 
 
 class TeacherAssistWeekTemplate(Base):
@@ -69,7 +74,9 @@ class TeacherAssistWeekTemplate(Base):
         Uuid(as_uuid=True), ForeignKey("school_years.id", ondelete="SET NULL"), nullable=True
     )
     source_period_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("pacing_guide_periods.id", ondelete="SET NULL"), nullable=True
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guide_periods.id", ondelete="SET NULL"),
+        nullable=True,
     )
     template_data: Mapped[dict] = mapped_column(JSON(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -15,7 +15,11 @@ def _catalog_scope(client, root_token: str) -> dict[str, str]:
     district = client.post(
         "/v1/teacher-assist/education-catalog/districts",
         headers={"Authorization": f"Bearer {root_token}"},
-        json={"state_id": state["id"], "name": "Leander Independent School District", "active": True},
+        json={
+            "state_id": state["id"],
+            "name": "Leander Independent School District",
+            "active": True,
+        },
     ).json()
     school = client.post(
         "/v1/teacher-assist/education-catalog/schools",
@@ -69,7 +73,9 @@ def _catalog_scope(client, root_token: str) -> dict[str, str]:
 
 def test_teacher_my_school_setup_syncs_catalog_subjects(client, db_session: Session):
     root_token = _root_token(client, db_session)
-    teacher_token = _register_user(client, email="school-setup-teacher@example.com", tenant_name="School Setup Tenant")
+    teacher_token = _register_user(
+        client, email="school-setup-teacher@example.com", tenant_name="School Setup Tenant"
+    )
     _grant_teacher_assist_access(db_session, email="school-setup-teacher@example.com")
     scope = _catalog_scope(client, root_token)
 
@@ -95,7 +101,10 @@ def test_teacher_my_school_setup_syncs_catalog_subjects(client, db_session: Sess
     payload = saved.json()
     assert payload["assignment"]["school_name"] == "Mason Elementary"
     assert payload["catalog_grade_code"] == "5"
-    assert set(payload["selected_catalog_subject_ids"]) == {scope["math_subject_id"], scope["science_subject_id"]}
+    assert set(payload["selected_catalog_subject_ids"]) == {
+        scope["math_subject_id"],
+        scope["science_subject_id"],
+    }
     assert len(payload["synced_subjects"]) == 2
 
     narrowed = client.put(
@@ -136,13 +145,17 @@ def test_teacher_my_school_setup_syncs_catalog_subjects(client, db_session: Sess
     )
     assert home.status_code == 200, home.text
     assert home.json()["onboarding"]["total_count"] == 3
-    school_step = next(row for row in home.json()["onboarding"]["steps"] if row["key"] == "school_placement")
+    school_step = next(
+        row for row in home.json()["onboarding"]["steps"] if row["key"] == "school_placement"
+    )
     assert school_step["complete"] is True
 
 
 def test_classroom_subjects_follow_school_setup_selection(client, db_session: Session):
     root_token = _root_token(client, db_session)
-    teacher_token = _register_user(client, email="classroom-sync@example.com", tenant_name="Classroom Sync Tenant")
+    teacher_token = _register_user(
+        client, email="classroom-sync@example.com", tenant_name="Classroom Sync Tenant"
+    )
     _grant_teacher_assist_access(db_session, email="classroom-sync@example.com")
     scope = _catalog_scope(client, root_token)
 
@@ -179,7 +192,10 @@ def test_classroom_subjects_follow_school_setup_selection(client, db_session: Se
     )
     assert classroom.status_code == 200, classroom.text
     classroom_payload = classroom.json()
-    assert {row["subject_code"] for row in classroom_payload["synced_subjects"]} == {"Math", "Science"}
+    assert {row["subject_code"] for row in classroom_payload["synced_subjects"]} == {
+        "Math",
+        "Science",
+    }
     assert classroom_payload["active_school_year_title"] == "2026-2027"
     assert classroom_payload["class_id"] is not None
 

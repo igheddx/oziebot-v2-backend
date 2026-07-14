@@ -165,9 +165,9 @@ def _build_submission_counts(db: Session, *, assignment_id: uuid.UUID) -> dict[s
         {
             "grading_complete_count": int(
                 db.scalar(
-                    select(func.count(func.distinct(TeacherAssistV2GradingDraft.student_submission_id))).where(
-                        TeacherAssistV2GradingDraft.assignment_id == assignment_id
-                    )
+                    select(
+                        func.count(func.distinct(TeacherAssistV2GradingDraft.student_submission_id))
+                    ).where(TeacherAssistV2GradingDraft.assignment_id == assignment_id)
                 )
                 or 0
             ),
@@ -218,12 +218,18 @@ def serialize_student_submission_detail(
     settings: Settings | None = None,
 ) -> dict[str, Any]:
     objective_ids = [uuid.UUID(str(value)) for value in assignment.education_objective_ids_json]
-    objectives = db.scalars(
-        select(EducationObjective).where(EducationObjective.id.in_(objective_ids))
-    ).all() if objective_ids else []
+    objectives = (
+        db.scalars(select(EducationObjective).where(EducationObjective.id.in_(objective_ids))).all()
+        if objective_ids
+        else []
+    )
     download_url = None
     preview_url = None
-    if row.status != "NOT_UPLOADED" and settings and teacher_assist_file_exists(settings, storage_key=row.file_key):
+    if (
+        row.status != "NOT_UPLOADED"
+        and settings
+        and teacher_assist_file_exists(settings, storage_key=row.file_key)
+    ):
         download_url = get_teacher_assist_download_url(
             settings,
             storage_key=row.file_key,
@@ -234,8 +240,8 @@ def serialize_student_submission_detail(
             settings,
             storage_key=row.file_key,
             original_filename=row.original_filename,
-        mime_type=row.mime_type,
-    )
+            mime_type=row.mime_type,
+        )
     rubric_content = resolve_assignment_rubric_content(db, assignment=assignment)
     extraction = serialize_document_extraction(
         load_submission_extractions(db, submission_ids=[row.id]).get(row.id),
@@ -290,14 +296,20 @@ def serialize_student_submission_detail(
     }
 
 
-def _serialize_assignment_grade(db: Session, *, user: User, submission_id: uuid.UUID) -> dict[str, Any] | None:
-    from oziebot_api.services.teacher_assist_v2.grade_reviews import get_assignment_grade_for_submission
+def _serialize_assignment_grade(
+    db: Session, *, user: User, submission_id: uuid.UUID
+) -> dict[str, Any] | None:
+    from oziebot_api.services.teacher_assist_v2.grade_reviews import (
+        get_assignment_grade_for_submission,
+    )
 
     return get_assignment_grade_for_submission(db, user=user, submission_id=submission_id)
 
 
 def _has_teacher_review_view(db: Session, *, user: User, submission_id: uuid.UUID) -> bool:
-    from oziebot_api.models.teacher_assist_v2_submission_review_view import TeacherAssistV2SubmissionReviewView
+    from oziebot_api.models.teacher_assist_v2_submission_review_view import (
+        TeacherAssistV2SubmissionReviewView,
+    )
 
     row = db.scalars(
         select(TeacherAssistV2SubmissionReviewView).where(
@@ -507,7 +519,9 @@ def _process_submission_batch(
     student_number: int | None,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
-    from oziebot_api.services.teacher_assist_v2.qr_decoding import validate_upload_qr_assignment_match
+    from oziebot_api.services.teacher_assist_v2.qr_decoding import (
+        validate_upload_qr_assignment_match,
+    )
 
     batch.status = "PROCESSING"
     db.flush()
@@ -521,7 +535,9 @@ def _process_submission_batch(
         if existing_submission_for_student(
             db, assignment_id=assignment.id, student_number=normalized_student
         ):
-            raise ValueError(f"Student #{normalized_student} already has a submission for this assignment.")
+            raise ValueError(
+                f"Student #{normalized_student} already has a submission for this assignment."
+            )
         submissions.append(
             _create_student_submission_row(
                 assignment=assignment,
@@ -556,7 +572,9 @@ def _process_submission_batch(
                 ):
                     continue
                 if settings is None:
-                    raise ValueError("Storage settings are required to save per-student PDF extracts.")
+                    raise ValueError(
+                        "Storage settings are required to save per-student PDF extracts."
+                    )
                 segment_stored = persist_student_pdf_segment(
                     settings,
                     tenant_id=assignment.tenant_id,
@@ -597,7 +615,9 @@ def _process_submission_batch(
             matched_by_student: dict[int, QrMatchResult] = {}
             page_numbers_by_student: dict[int, list[int]] = {}
             for qr_identifier in qr_identifiers:
-                match = lookup_qr_match(db, assignment_id=assignment.id, qr_identifier=qr_identifier)
+                match = lookup_qr_match(
+                    db, assignment_id=assignment.id, qr_identifier=qr_identifier
+                )
                 if match is None:
                     continue
                 matched_by_student[match.student_number] = match
@@ -611,7 +631,9 @@ def _process_submission_batch(
                 ):
                     continue
                 match = matched_by_student[matched_student_number]
-                page_numbers = sorted(page_numbers_by_student.get(matched_student_number, [match.page_number]))
+                page_numbers = sorted(
+                    page_numbers_by_student.get(matched_student_number, [match.page_number])
+                )
                 page_range = ",".join(str(page_number) for page_number in page_numbers)
                 submissions.append(
                     _create_student_submission_row(
@@ -732,7 +754,9 @@ def create_assignment_submission_batch(
     db.refresh(batch)
     return {
         **serialize_submission_batch(batch),
-        "submissions": [serialize_student_submission_summary(row) for row in batch.student_submissions],
+        "submissions": [
+            serialize_student_submission_summary(row) for row in batch.student_submissions
+        ],
         "grading_result": grading_result,
     }
 
@@ -844,7 +868,9 @@ def upload_supplement_for_submission(
     if row.status not in {"NOT_UPLOADED", "INCOMPLETE"}:
         raise ValueError("Supplemental uploads are only supported for missing student work.")
     if row.student_number is None:
-        raise ValueError("Submission must have a student number before uploading supplemental work.")
+        raise ValueError(
+            "Submission must have a student number before uploading supplemental work."
+        )
 
     _validate_student_work_mime_type(stored.mime_type)
     row.file_key = stored.storage_key
@@ -881,15 +907,25 @@ def update_student_submission_status(
     if normalized == "READY_FOR_GRADING":
         if row.student_number is None:
             raise ValueError("Assign a student number before marking ready for grading.")
-        if row.status not in {"MATCHED", "MANUAL_MATCH", "NEEDS_REVIEW", "PROCESSING", "READY_FOR_REVIEW"}:
-            raise ValueError("Submission cannot be marked ready for grading from its current status.")
+        if row.status not in {
+            "MATCHED",
+            "MANUAL_MATCH",
+            "NEEDS_REVIEW",
+            "PROCESSING",
+            "READY_FOR_REVIEW",
+        }:
+            raise ValueError(
+                "Submission cannot be marked ready for grading from its current status."
+            )
     elif normalized == "INCOMPLETE":
         return mark_student_submission_incomplete(db, user=user, submission_id=submission_id)
     elif normalized == "ARCHIVED":
         if row.status in {"READY_FOR_GRADING", "PROCESSING"}:
             raise ValueError("In-progress submissions cannot be archived.")
     else:
-        raise ValueError("Only READY_FOR_GRADING, INCOMPLETE, or ARCHIVED status updates are supported.")
+        raise ValueError(
+            "Only READY_FOR_GRADING, INCOMPLETE, or ARCHIVED status updates are supported."
+        )
     row.status = normalized
     row.updated_at = _now()
     db.flush()

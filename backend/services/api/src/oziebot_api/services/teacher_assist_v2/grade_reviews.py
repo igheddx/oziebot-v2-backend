@@ -15,7 +15,9 @@ from oziebot_api.models.teacher_assist_v2_assignment_grade_audit_event import (
 )
 from oziebot_api.models.teacher_assist_v2_grading_draft import TeacherAssistV2GradingDraft
 from oziebot_api.models.teacher_assist_v2_student_submission import TeacherAssistV2StudentSubmission
-from oziebot_api.models.teacher_assist_v2_submission_review_view import TeacherAssistV2SubmissionReviewView
+from oziebot_api.models.teacher_assist_v2_submission_review_view import (
+    TeacherAssistV2SubmissionReviewView,
+)
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist_v2.grade_review_constants import (
     ASSIGNMENT_GRADE_STATUSES,
@@ -23,7 +25,9 @@ from oziebot_api.services.teacher_assist_v2.grade_review_constants import (
     OFFICIAL_ASSIGNMENT_GRADE_STATUSES,
 )
 from oziebot_api.services.teacher_assist_v2.grading_rubric import resolve_final_grade_values
-from oziebot_api.services.teacher_assist_v2.gradebook_sync import sync_confirmed_grade_to_gradebook_and_mastery
+from oziebot_api.services.teacher_assist_v2.gradebook_sync import (
+    sync_confirmed_grade_to_gradebook_and_mastery,
+)
 from oziebot_api.services.teacher_assist_v2.mastery_constants import (
     resolve_mastery_level,
     serialize_mastery_level_fields,
@@ -222,7 +226,9 @@ def _archive_active_grades(
     rows = db.scalars(
         select(TeacherAssistV2AssignmentGrade).where(
             TeacherAssistV2AssignmentGrade.student_submission_id == submission_id,
-            TeacherAssistV2AssignmentGrade.status.in_(OFFICIAL_ASSIGNMENT_GRADE_STATUSES | {"DRAFT"}),
+            TeacherAssistV2AssignmentGrade.status.in_(
+                OFFICIAL_ASSIGNMENT_GRADE_STATUSES | {"DRAFT"}
+            ),
         )
     ).all()
     now = _now()
@@ -310,7 +316,9 @@ def _persist_grade(
         mastery_level=mastery_level,
         rubric_json=rubric_json,
         teacher_comment=teacher_comment.strip(),
-        teacher_override_reason=teacher_override_reason.strip() if teacher_override_reason else None,
+        teacher_override_reason=teacher_override_reason.strip()
+        if teacher_override_reason
+        else None,
         review_action=normalized_action,
         confirmed_by=user.id if normalized_status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES else None,
         confirmed_at=now if normalized_status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES else None,
@@ -406,7 +414,9 @@ def accept_grading_draft(
     draft = _get_latest_grading_draft_row(db, user=user, submission_id=submission.id)
     if draft is None:
         raise ValueError("No AI grading draft exists for this submission.")
-    if _get_latest_active_grade(db, submission_id=submission.id, statuses=OFFICIAL_ASSIGNMENT_GRADE_STATUSES):
+    if _get_latest_active_grade(
+        db, submission_id=submission.id, statuses=OFFICIAL_ASSIGNMENT_GRADE_STATUSES
+    ):
         raise ValueError("An official grade already exists for this submission.")
 
     base_rubric = rubric_json if rubric_json is not None else (draft.rubric_json or {})
@@ -419,9 +429,16 @@ def accept_grading_draft(
     )
     # Carry intelligence fields from draft rubric_json into the grade's rubric_json.
     draft_rubric = draft.rubric_json if isinstance(draft.rubric_json, dict) else {}
-    for key in ("student_facing_feedback", "ai_student_facing_feedback", "teacher_facing_explanation",
-                "suspected_misconception", "recommended_next_step", "uncertainty_flags",
-                "evidence_used", "objective_evidence"):
+    for key in (
+        "student_facing_feedback",
+        "ai_student_facing_feedback",
+        "teacher_facing_explanation",
+        "suspected_misconception",
+        "recommended_next_step",
+        "uncertainty_flags",
+        "evidence_used",
+        "objective_evidence",
+    ):
         if key in draft_rubric and key not in final_rubric:
             final_rubric = {**final_rubric, key: draft_rubric[key]}
     # Teacher's edited student-facing feedback overwrites AI version (AI original preserved).
@@ -474,9 +491,16 @@ def modify_grading_draft(
     )
     # Carry intelligence fields from draft rubric_json.
     draft_rubric = draft.rubric_json if isinstance(draft.rubric_json, dict) else {}
-    for key in ("student_facing_feedback", "ai_student_facing_feedback", "teacher_facing_explanation",
-                "suspected_misconception", "recommended_next_step", "uncertainty_flags",
-                "evidence_used", "objective_evidence"):
+    for key in (
+        "student_facing_feedback",
+        "ai_student_facing_feedback",
+        "teacher_facing_explanation",
+        "suspected_misconception",
+        "recommended_next_step",
+        "uncertainty_flags",
+        "evidence_used",
+        "objective_evidence",
+    ):
         if key in draft_rubric and key not in final_rubric:
             final_rubric = {**final_rubric, key: draft_rubric[key]}
     if student_facing_feedback is not None:
@@ -553,7 +577,9 @@ def save_grade_review_draft(
     draft = _get_latest_grading_draft_row(db, user=user, submission_id=submission.id)
     if draft is None:
         raise ValueError("No AI grading draft exists for this submission.")
-    if _get_latest_active_grade(db, submission_id=submission.id, statuses=OFFICIAL_ASSIGNMENT_GRADE_STATUSES):
+    if _get_latest_active_grade(
+        db, submission_id=submission.id, statuses=OFFICIAL_ASSIGNMENT_GRADE_STATUSES
+    ):
         raise ValueError("An official grade already exists for this submission.")
 
     final_score, final_max, final_rubric = resolve_final_grade_values(
@@ -611,7 +637,9 @@ def accept_all_viewed_drafts(
                 }
             )
             continue
-        if _get_latest_active_grade(db, submission_id=submission.id, statuses=OFFICIAL_ASSIGNMENT_GRADE_STATUSES):
+        if _get_latest_active_grade(
+            db, submission_id=submission.id, statuses=OFFICIAL_ASSIGNMENT_GRADE_STATUSES
+        ):
             skipped.append(
                 {
                     "student_submission_id": str(submission.id),
@@ -642,7 +670,8 @@ def list_assignment_grade_reviews(
 ) -> list[dict[str, Any]]:
     _get_assignment_or_404(db, user=user, assignment_id=assignment_id)
     submissions = db.scalars(
-        select(TeacherAssistV2StudentSubmission).where(
+        select(TeacherAssistV2StudentSubmission)
+        .where(
             TeacherAssistV2StudentSubmission.assignment_id == assignment_id,
             TeacherAssistV2StudentSubmission.teacher_user_id == user.id,
             TeacherAssistV2StudentSubmission.status != "ARCHIVED",
@@ -673,7 +702,9 @@ def list_assignment_grade_reviews(
         select(TeacherAssistV2AssignmentGrade)
         .where(
             TeacherAssistV2AssignmentGrade.student_submission_id.in_(submission_ids),
-            TeacherAssistV2AssignmentGrade.status.in_(OFFICIAL_ASSIGNMENT_GRADE_STATUSES | {"DRAFT"}),
+            TeacherAssistV2AssignmentGrade.status.in_(
+                OFFICIAL_ASSIGNMENT_GRADE_STATUSES | {"DRAFT"}
+            ),
         )
         .order_by(TeacherAssistV2AssignmentGrade.updated_at.desc())
     ).all():
@@ -703,7 +734,9 @@ def list_assignment_grade_reviews(
             else None
         )
         official_mastery = (
-            serialize_mastery_level_fields(percentage=grade.percentage, mastery_level=grade.mastery_level)
+            serialize_mastery_level_fields(
+                percentage=grade.percentage, mastery_level=grade.mastery_level
+            )
             if grade is not None and grade.status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES
             else None
         )
@@ -715,16 +748,30 @@ def list_assignment_grade_reviews(
                 "draft_max_score": draft.max_score if draft is not None else None,
                 "draft_percentage": draft.percentage if draft is not None else None,
                 "draft_mastery_level": draft_mastery["mastery_level"] if draft_mastery else None,
-                "draft_mastery_level_label": draft_mastery["mastery_level_label"] if draft_mastery else None,
+                "draft_mastery_level_label": draft_mastery["mastery_level_label"]
+                if draft_mastery
+                else None,
                 "review_status": review_status,
                 "grade_status": grade.status if grade is not None else None,
                 "confirmed_by": str(grade.confirmed_by) if grade and grade.confirmed_by else None,
-                "confirmed_at": grade.confirmed_at.isoformat() if grade and grade.confirmed_at else None,
-                "official_score": grade.score if grade and grade.status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES else None,
-                "official_max_score": grade.max_score if grade and grade.status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES else None,
-                "official_percentage": grade.percentage if grade and grade.status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES else None,
-                "official_mastery_level": official_mastery["mastery_level"] if official_mastery else None,
-                "official_mastery_level_label": official_mastery["mastery_level_label"] if official_mastery else None,
+                "confirmed_at": grade.confirmed_at.isoformat()
+                if grade and grade.confirmed_at
+                else None,
+                "official_score": grade.score
+                if grade and grade.status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES
+                else None,
+                "official_max_score": grade.max_score
+                if grade and grade.status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES
+                else None,
+                "official_percentage": grade.percentage
+                if grade and grade.status in OFFICIAL_ASSIGNMENT_GRADE_STATUSES
+                else None,
+                "official_mastery_level": official_mastery["mastery_level"]
+                if official_mastery
+                else None,
+                "official_mastery_level_label": official_mastery["mastery_level_label"]
+                if official_mastery
+                else None,
                 "teacher_viewed": submission.id in viewed_ids,
                 "has_grading_draft": draft is not None,
             }

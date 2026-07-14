@@ -73,7 +73,9 @@ def upgrade() -> None:
         sa.Column("default_product_id", sa.Uuid(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["default_product_id"], ["platform_products.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["default_product_id"], ["platform_products.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -162,7 +164,9 @@ def upgrade() -> None:
             ],
         )
 
-    user_ids = sorted({row[0] for row in bind.execute(sa.select(tenant_memberships.c.user_id)).all()})
+    user_ids = sorted(
+        {row[0] for row in bind.execute(sa.select(tenant_memberships.c.user_id)).all()}
+    )
     if user_ids:
         bind.execute(
             sa.insert(user_product_preferences),

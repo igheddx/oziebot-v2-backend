@@ -129,7 +129,9 @@ def test_instructional_loop_endpoints(client, db_session: Session):
     assert report.status_code == 200, report.text
     assert report.json()["exportable"] is True
 
-    home = client.get("/v1/teacher-assist/home", headers={"Authorization": f"Bearer {teacher_token}"})
+    home = client.get(
+        "/v1/teacher-assist/home", headers={"Authorization": f"Bearer {teacher_token}"}
+    )
     assert home.status_code == 200, home.text
     assert "instructional_loop" in home.json()
 

@@ -54,10 +54,16 @@ def upgrade() -> None:
     op.create_index(
         op.f("ix_assignments_grading_period_id"), "assignments", ["grading_period_id"], unique=False
     )
-    op.create_index(op.f("ix_assignments_school_year_id"), "assignments", ["school_year_id"], unique=False)
-    op.create_index(op.f("ix_assignments_source_plan_id"), "assignments", ["source_plan_id"], unique=False)
+    op.create_index(
+        op.f("ix_assignments_school_year_id"), "assignments", ["school_year_id"], unique=False
+    )
+    op.create_index(
+        op.f("ix_assignments_source_plan_id"), "assignments", ["source_plan_id"], unique=False
+    )
     op.create_index(op.f("ix_assignments_subject_id"), "assignments", ["subject_id"], unique=False)
-    op.create_index(op.f("ix_assignments_teacher_user_id"), "assignments", ["teacher_user_id"], unique=False)
+    op.create_index(
+        op.f("ix_assignments_teacher_user_id"), "assignments", ["teacher_user_id"], unique=False
+    )
     op.create_index(op.f("ix_assignments_tenant_id"), "assignments", ["tenant_id"], unique=False)
     op.create_index(
         "ix_assignments_teacher_user_status",

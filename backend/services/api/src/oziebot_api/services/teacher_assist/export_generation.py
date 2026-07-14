@@ -69,9 +69,13 @@ def _touch_workflow_heartbeat(
     now = datetime.now(UTC)
     workflow.leased_by_worker = worker_name
     workflow.heartbeat_at = now
-    workflow.lease_expires_at = now + timedelta(seconds=max(1, settings.teacher_assist_worker_lease_seconds))
+    workflow.lease_expires_at = now + timedelta(
+        seconds=max(1, settings.teacher_assist_worker_lease_seconds)
+    )
     if workflow.timeout_at is None:
-        workflow.timeout_at = now + timedelta(seconds=max(1, settings.teacher_assist_extraction_timeout_seconds))
+        workflow.timeout_at = now + timedelta(
+            seconds=max(1, settings.teacher_assist_extraction_timeout_seconds)
+        )
     workflow.updated_at = now
     if progress_percent is not None:
         workflow.progress_percent = progress_percent
@@ -217,7 +221,9 @@ def create_weekly_plan_export(
         max_retries=max(0, settings.teacher_assist_worker_max_retries),
         timeout_at=None,
         provider_name=normalized_provider_mode,
-        provider_model="mock-export-generator" if normalized_provider_mode == "mock" else settings.teacher_assist_real_provider_model,
+        provider_model="mock-export-generator"
+        if normalized_provider_mode == "mock"
+        else settings.teacher_assist_real_provider_model,
         prompt_version=EXPORT_PROMPT_VERSION,
         last_error_code=None,
         execution_log_json=[],
@@ -314,14 +320,18 @@ def claim_next_export_workflow(
     if workflow is None:
         return None
 
-    _set_workflow_status(workflow, status="running", progress_percent=max(workflow.progress_percent, 5))
+    _set_workflow_status(
+        workflow, status="running", progress_percent=max(workflow.progress_percent, 5)
+    )
     _touch_workflow_heartbeat(
         workflow,
         settings=settings,
         worker_name=worker_name,
         progress_percent=max(workflow.progress_percent, 10),
     )
-    _append_export_log(workflow, event="export_claimed", message="Export workflow claimed by worker")
+    _append_export_log(
+        workflow, event="export_claimed", message="Export workflow claimed by worker"
+    )
     artifact = db.scalars(
         select(TeacherAssistExportArtifact).where(
             TeacherAssistExportArtifact.workflow_id == workflow.id,
@@ -347,14 +357,18 @@ def _mark_export_workflow_for_retry_or_failure(
     workflow.updated_at = datetime.now(UTC)
     _append_export_log(workflow, event="export_failed", message=str(exc))
     artifact = db.scalars(
-        select(TeacherAssistExportArtifact).where(TeacherAssistExportArtifact.workflow_id == workflow.id)
+        select(TeacherAssistExportArtifact).where(
+            TeacherAssistExportArtifact.workflow_id == workflow.id
+        )
     ).one_or_none()
     if artifact is not None:
         metadata = dict(artifact.metadata_json or {})
         metadata.update({"error_code": error_code, "error_message": str(exc)})
         artifact.metadata_json = metadata
     if attempt_number <= workflow.max_retries:
-        _set_workflow_status(workflow, status="queued", progress_percent=min(max(workflow.progress_percent, 5), 95))
+        _set_workflow_status(
+            workflow, status="queued", progress_percent=min(max(workflow.progress_percent, 5), 95)
+        )
         if artifact is not None:
             touch_export_artifact_status(artifact, status="queued")
         return
@@ -381,7 +395,9 @@ def _persist_export_success(
     if workflow.status == "cancelled":
         raise TeacherAssistExportCancelledError("Export workflow was cancelled")
     artifact = db.scalars(
-        select(TeacherAssistExportArtifact).where(TeacherAssistExportArtifact.workflow_id == workflow.id)
+        select(TeacherAssistExportArtifact).where(
+            TeacherAssistExportArtifact.workflow_id == workflow.id
+        )
     ).one()
     plan = db.scalars(
         select(TeacherAssistWeeklyPlan).where(TeacherAssistWeeklyPlan.id == artifact.source_plan_id)
@@ -412,7 +428,9 @@ def _persist_export_success(
     workflow.output_ref_type = ARTIFACT_EXPORT_OUTPUT_REF_TYPE
     workflow.output_ref_id = artifact.id
     _set_workflow_status(workflow, status="completed", progress_percent=100)
-    _append_export_log(workflow, event="export_completed", message="Export artifact generated successfully")
+    _append_export_log(
+        workflow, event="export_completed", message="Export artifact generated successfully"
+    )
     record_activity_event(
         db,
         tenant_id=workflow.tenant_id,

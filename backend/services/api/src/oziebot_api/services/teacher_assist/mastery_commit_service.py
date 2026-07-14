@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 from oziebot_api.models.teacher_assist_mastery_audit_event import TeacherAssistMasteryAuditEvent
 from oziebot_api.models.teacher_assist_mastery_commit import TeacherAssistMasteryCommit
 from oziebot_api.models.teacher_assist_mastery_evaluation import TeacherAssistMasteryEvaluation
-from oziebot_api.models.teacher_assist_mastery_matrix_standard import TeacherAssistMasteryMatrixStandard
+from oziebot_api.models.teacher_assist_mastery_matrix_standard import (
+    TeacherAssistMasteryMatrixStandard,
+)
 from oziebot_api.services.teacher_assist.activity_events import record_activity_event
 from oziebot_api.services.teacher_assist.assignments import get_assignment_or_404
 from oziebot_api.services.teacher_assist.constants import (
@@ -24,7 +26,9 @@ from oziebot_api.services.teacher_assist.constants import (
 )
 from oziebot_api.services.teacher_assist.gradebook_commits import get_gradebook_commit_or_404
 from oziebot_api.services.teacher_assist.grading_reviews import get_grading_review_or_404
-from oziebot_api.services.teacher_assist.instructional_plan_validator import contains_pii_like_content
+from oziebot_api.services.teacher_assist.instructional_plan_validator import (
+    contains_pii_like_content,
+)
 from oziebot_api.services.teacher_assist.mastery_matrix import (
     get_matrix_standard_or_404,
     get_mastery_matrix_or_404,
@@ -86,7 +90,9 @@ def _validate_evidence_source(
             grading_review_id=evidence_source_id,
         )
         if review.class_id != matrix_class_id or review.subject_id != matrix_subject_id:
-            raise ValueError("Grading review evidence must match the mastery matrix class and subject")
+            raise ValueError(
+                "Grading review evidence must match the mastery matrix class and subject"
+            )
     elif normalized_type == "gradebook_commit":
         commit = get_gradebook_commit_or_404(
             db,
@@ -95,7 +101,9 @@ def _validate_evidence_source(
             gradebook_commit_id=evidence_source_id,
         )
         if commit.class_id != matrix_class_id or commit.subject_id != matrix_subject_id:
-            raise ValueError("Gradebook commit evidence must match the mastery matrix class and subject")
+            raise ValueError(
+                "Gradebook commit evidence must match the mastery matrix class and subject"
+            )
     return normalized_type, evidence_source_id
 
 
@@ -174,7 +182,10 @@ def list_mastery_evaluations(
     if standard_id is not None:
         query = query.where(TeacherAssistMasteryEvaluation.standard_id == standard_id)
     if student_number is not None:
-        query = query.where(TeacherAssistMasteryEvaluation.student_number == _validate_student_number(student_number))
+        query = query.where(
+            TeacherAssistMasteryEvaluation.student_number
+            == _validate_student_number(student_number)
+        )
     if evaluation_status is not None:
         query = query.where(
             TeacherAssistMasteryEvaluation.evaluation_status
@@ -334,7 +345,9 @@ def commit_mastery_evaluation(
         mastery_evaluation_id=mastery_evaluation_id,
     )
     if evaluation.evaluation_status not in {"draft", "active"}:
-        raise ValueError("Reversed mastery evaluations cannot be committed again without a new evaluation")
+        raise ValueError(
+            "Reversed mastery evaluations cannot be committed again without a new evaluation"
+        )
     if evaluation.evaluation_status == "active" and evaluation.current_commit_id is not None:
         raise ValueError("Mastery evaluation is already committed")
 
@@ -345,7 +358,9 @@ def commit_mastery_evaluation(
         mastery_matrix_id=evaluation.mastery_matrix_id,
     )
     if evaluation.mastery_level == "not_assessed":
-        raise ValueError("Teacher-confirmed mastery commits require a mastery level beyond not_assessed")
+        raise ValueError(
+            "Teacher-confirmed mastery commits require a mastery level beyond not_assessed"
+        )
 
     now = datetime.now(UTC)
     previous_level = None
@@ -409,7 +424,9 @@ def commit_mastery_evaluation(
         details_json={
             "new_mastery_level": evaluation.mastery_level,
             "evidence_source_type": evaluation.evidence_source_type,
-            "evidence_source_id": str(evaluation.evidence_source_id) if evaluation.evidence_source_id else None,
+            "evidence_source_id": str(evaluation.evidence_source_id)
+            if evaluation.evidence_source_id
+            else None,
         },
     )
     record_activity_event(
@@ -427,7 +444,10 @@ def commit_mastery_evaluation(
         summary_text=(
             f"Teacher confirmed mastery for STUDENT #{evaluation.student_number} in {matrix.title}."
         ),
-        details_json={"mastery_level": evaluation.mastery_level, "standard_id": str(evaluation.standard_id)},
+        details_json={
+            "mastery_level": evaluation.mastery_level,
+            "standard_id": str(evaluation.standard_id),
+        },
     )
     return evaluation, commit
 
@@ -478,10 +498,13 @@ def correct_mastery_evaluation(
         commit_status=validate_mastery_commit_status("active"),
         previous_mastery_level=current_commit.new_mastery_level,
         new_mastery_level=new_level,
-        confidence_level=validate_mastery_confidence_level(confidence_level) or evaluation.confidence_level,
+        confidence_level=validate_mastery_confidence_level(confidence_level)
+        or evaluation.confidence_level,
         evidence_source_type=evaluation.evidence_source_type,
         evidence_source_id=evaluation.evidence_source_id,
-        teacher_notes=_validate_teacher_notes(teacher_notes) if teacher_notes is not None else evaluation.teacher_notes,
+        teacher_notes=_validate_teacher_notes(teacher_notes)
+        if teacher_notes is not None
+        else evaluation.teacher_notes,
         commit_reason=normalized_reason,
         supersedes_commit_id=current_commit.id,
         reversed_by_commit_id=None,
@@ -518,7 +541,10 @@ def correct_mastery_evaluation(
             f"Corrected mastery for STUDENT #{evaluation.student_number} from "
             f"{current_commit.new_mastery_level} to {new_level}."
         ),
-        details_json={"previous_mastery_level": current_commit.new_mastery_level, "new_mastery_level": new_level},
+        details_json={
+            "previous_mastery_level": current_commit.new_mastery_level,
+            "new_mastery_level": new_level,
+        },
     )
     record_activity_event(
         db,

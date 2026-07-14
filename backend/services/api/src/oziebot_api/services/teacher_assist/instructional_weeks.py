@@ -17,7 +17,9 @@ from oziebot_api.models.teacher_assist_instructional_week import (
 from oziebot_api.models.teacher_assist_newsletter import TeacherAssistNewsletter
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
-from oziebot_api.models.teacher_assist_pacing_guide_period_note import TeacherAssistPacingGuidePeriodNote
+from oziebot_api.models.teacher_assist_pacing_guide_period_note import (
+    TeacherAssistPacingGuidePeriodNote,
+)
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.constants import instructional_week_href
@@ -26,7 +28,9 @@ from oziebot_api.services.teacher_assist.instructional_week_constants import (
     INSTRUCTIONAL_WEEK_STATUSES,
     OBJECTIVE_SOURCE_TYPES,
 )
-from oziebot_api.services.teacher_assist.pacing_guide_foundation import get_catalog_pacing_guide_detail
+from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
+    get_catalog_pacing_guide_detail,
+)
 
 
 def _now() -> datetime:
@@ -56,7 +60,9 @@ def serialize_instructional_week(row: TeacherAssistInstructionalWeek) -> dict[st
     }
 
 
-def serialize_instructional_week_objective(row: TeacherAssistInstructionalWeekObjective) -> dict[str, Any]:
+def serialize_instructional_week_objective(
+    row: TeacherAssistInstructionalWeekObjective,
+) -> dict[str, Any]:
     return {
         "id": str(row.id),
         "instructional_week_id": str(row.instructional_week_id),
@@ -69,10 +75,15 @@ def serialize_instructional_week_objective(row: TeacherAssistInstructionalWeekOb
     }
 
 
-def _get_period(db: Session, *, tenant_id: uuid.UUID, period_id: uuid.UUID) -> TeacherAssistPacingGuidePeriod:
+def _get_period(
+    db: Session, *, tenant_id: uuid.UUID, period_id: uuid.UUID
+) -> TeacherAssistPacingGuidePeriod:
     period = db.scalars(
         select(TeacherAssistPacingGuidePeriod)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id)
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id,
+        )
         .where(
             TeacherAssistPacingGuidePeriod.id == period_id,
             TeacherAssistPacingGuide.tenant_id == tenant_id,
@@ -168,7 +179,8 @@ def get_instructional_week(
     instructional_week_id: uuid.UUID,
 ) -> TeacherAssistInstructionalWeek:
     row = db.scalars(
-        select(TeacherAssistInstructionalWeek).where(
+        select(TeacherAssistInstructionalWeek)
+        .where(
             TeacherAssistInstructionalWeek.id == instructional_week_id,
             TeacherAssistInstructionalWeek.tenant_id == tenant_id,
             TeacherAssistInstructionalWeek.created_by_user_id == user_id,
@@ -257,7 +269,9 @@ def ensure_instructional_week_for_current_period(
         return None
     from oziebot_api.services.teacher_assist.current_week_resolver import build_current_week_payload
 
-    current = build_current_week_payload(db, tenant_id=tenant_id, user_id=user.id, guide_id=guide_id)
+    current = build_current_week_payload(
+        db, tenant_id=tenant_id, user_id=user.id, guide_id=guide_id
+    )
     period_id = (current.get("current_week") or {}).get("id")
     if period_id is None:
         return None
@@ -374,7 +388,9 @@ def update_instructional_week(
     title: str | None = None,
     description: str | None = None,
 ) -> TeacherAssistInstructionalWeek:
-    row = get_instructional_week(db, tenant_id=tenant_id, user_id=user_id, instructional_week_id=instructional_week_id)
+    row = get_instructional_week(
+        db, tenant_id=tenant_id, user_id=user_id, instructional_week_id=instructional_week_id
+    )
     if status is not None:
         if status.upper() not in INSTRUCTIONAL_WEEK_STATUSES:
             raise ValueError("Unsupported instructional week status")
@@ -405,7 +421,9 @@ def upsert_instructional_week_objective(
 ) -> TeacherAssistInstructionalWeekObjective:
     if source_type not in OBJECTIVE_SOURCE_TYPES:
         raise ValueError("Unsupported objective source type")
-    get_instructional_week(db, tenant_id=tenant_id, user_id=user_id, instructional_week_id=instructional_week_id)
+    get_instructional_week(
+        db, tenant_id=tenant_id, user_id=user_id, instructional_week_id=instructional_week_id
+    )
     code = objective_code
     if objective_id is not None and not code:
         objective = db.get(EducationObjective, objective_id)
@@ -435,7 +453,9 @@ def deactivate_instructional_week_objective(
     instructional_week_id: uuid.UUID,
     objective_row_id: uuid.UUID,
 ) -> TeacherAssistInstructionalWeekObjective:
-    get_instructional_week(db, tenant_id=tenant_id, user_id=user_id, instructional_week_id=instructional_week_id)
+    get_instructional_week(
+        db, tenant_id=tenant_id, user_id=user_id, instructional_week_id=instructional_week_id
+    )
     row = db.scalars(
         select(TeacherAssistInstructionalWeekObjective).where(
             TeacherAssistInstructionalWeekObjective.id == objective_row_id,
@@ -459,16 +479,24 @@ def preview_instructional_week_from_pacing_period(
 ) -> dict[str, Any]:
     period = _get_period(db, tenant_id=tenant_id, period_id=pacing_guide_period_id)
     guide = db.get(TeacherAssistPacingGuide, period.pacing_guide_id)
-    detail = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=period.pacing_guide_id)
-    from oziebot_api.services.teacher_assist.recommendation_service import build_week_recommendations
+    detail = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=period.pacing_guide_id
+    )
+    from oziebot_api.services.teacher_assist.recommendation_service import (
+        build_week_recommendations,
+    )
 
     detail_period = next((row for row in detail.periods if row.id == period.id), None)
     resources = []
     if detail_period is not None:
         resources = [
             {
-                "catalog_resource_id": str(row.catalog_resource_id) if row.catalog_resource_id else None,
-                "resource_library_item_id": str(row.resource_library_item_id) if row.resource_library_item_id else None,
+                "catalog_resource_id": str(row.catalog_resource_id)
+                if row.catalog_resource_id
+                else None,
+                "resource_library_item_id": str(row.resource_library_item_id)
+                if row.resource_library_item_id
+                else None,
             }
             for row in detail_period.resources
         ]
@@ -493,6 +521,8 @@ def preview_instructional_week_from_pacing_period(
             for row in period.objectives
         ],
         "resources": resources,
-        "recommended_reuse": recommendations.get("recommended_for_this_week", {}).get("top_reusable", []),
+        "recommended_reuse": recommendations.get("recommended_for_this_week", {}).get(
+            "top_reusable", []
+        ),
         "requires_review": True,
     }

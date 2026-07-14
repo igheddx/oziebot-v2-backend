@@ -87,7 +87,9 @@ def upgrade() -> None:
         sa.Column("created_by_user_id", sa.Uuid(), nullable=False),
         sa.Column("change_reason", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["ai_usage_event_id"], ["teacher_assist_ai_usage_events.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["ai_usage_event_id"], ["teacher_assist_ai_usage_events.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["lesson_reflection_id"],

@@ -57,7 +57,9 @@ class TeacherAssistMasteryMatrix(Base):
     tenant: Mapped["Tenant"] = relationship("Tenant")
     owner_user: Mapped["User"] = relationship("User")
     school_year: Mapped["TeacherAssistSchoolYear"] = relationship("TeacherAssistSchoolYear")
-    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship("TeacherAssistGradingPeriod")
+    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship(
+        "TeacherAssistGradingPeriod"
+    )
     teacher_class: Mapped["TeacherAssistClass"] = relationship("TeacherAssistClass")
     subject: Mapped["TeacherAssistSubject"] = relationship("TeacherAssistSubject")
     matrix_standards: Mapped[list["TeacherAssistMasteryMatrixStandard"]] = relationship(
@@ -77,7 +79,9 @@ if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_class import TeacherAssistClass
     from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
     from oziebot_api.models.teacher_assist_mastery_evaluation import TeacherAssistMasteryEvaluation
-    from oziebot_api.models.teacher_assist_mastery_matrix_standard import TeacherAssistMasteryMatrixStandard
+    from oziebot_api.models.teacher_assist_mastery_matrix_standard import (
+        TeacherAssistMasteryMatrixStandard,
+    )
     from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
     from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
     from oziebot_api.models.tenant import Tenant

@@ -25,7 +25,9 @@ def test_education_catalog_root_admin_crud_and_teacher_read_only(client, db_sess
     root_token = _root_token(client, db_session)
 
     teacher_email = "catalog-teacher@example.com"
-    teacher_token = _register_user(client, email=teacher_email, tenant_name="Catalog Teacher Tenant")
+    teacher_token = _register_user(
+        client, email=teacher_email, tenant_name="Catalog Teacher Tenant"
+    )
     ensure_user_teacher_assist_access(
         db_session,
         email=teacher_email,
@@ -57,7 +59,12 @@ def test_education_catalog_root_admin_crud_and_teacher_read_only(client, db_sess
     school = client.post(
         "/v1/teacher-assist/education-catalog/schools",
         headers={"Authorization": f"Bearer {root_token}"},
-        json={"district_id": district["id"], "name": "Mason Elementary", "school_type": "elementary", "active": True},
+        json={
+            "district_id": district["id"],
+            "name": "Mason Elementary",
+            "school_type": "elementary",
+            "active": True,
+        },
     ).json()
     grade = client.post(
         "/v1/teacher-assist/education-catalog/grades",
@@ -67,7 +74,12 @@ def test_education_catalog_root_admin_crud_and_teacher_read_only(client, db_sess
     client.post(
         "/v1/teacher-assist/education-catalog/subjects",
         headers={"Authorization": f"Bearer {root_token}"},
-        json={"grade_id": grade["id"], "subject_code": "Math", "display_name": "Math", "active": True},
+        json={
+            "grade_id": grade["id"],
+            "subject_code": "Math",
+            "display_name": "Math",
+            "active": True,
+        },
     )
     objective = client.post(
         "/v1/teacher-assist/education-catalog/objectives",

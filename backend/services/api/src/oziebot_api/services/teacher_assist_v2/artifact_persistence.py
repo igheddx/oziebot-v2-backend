@@ -15,7 +15,9 @@ from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2InstructionalPackageArtifact,
 )
 from oziebot_api.models.teacher_assist_v2_slide_visual_asset import TeacherAssistV2SlideVisualAsset
-from oziebot_api.services.teacher_assist_v2.assignment_print_packets import generate_assignment_print_packet
+from oziebot_api.services.teacher_assist_v2.assignment_print_packets import (
+    generate_assignment_print_packet,
+)
 from oziebot_api.services.teacher_assist_v2.student_packet_content import compute_pages_per_student
 from oziebot_api.services.teacher_assist_v2.package_export import (
     normalize_objective_mapping,
@@ -113,7 +115,11 @@ def persist_package_artifact(
         period_id=period_id,
         day_label=day_label,
         sequence_number=sequence_number,
-        title=str(content.get("title") or content.get("lesson_title") or artifact_type.replace("_", " ").title()),
+        title=str(
+            content.get("title")
+            or content.get("lesson_title")
+            or artifact_type.replace("_", " ").title()
+        ),
         status=artifact_status,
         content_json=content,
         preview_html=render_artifact_preview_html(artifact_type=artifact_type, content=content),
@@ -121,8 +127,7 @@ def persist_package_artifact(
             "provider": provider_name,
             "description": content.get("description") or content.get("summary"),
             "objective_mapping": content.get("objective_mapping"),
-            "objective_ids": content.get("objective_ids")
-            or objective_mapping.get("objective_ids"),
+            "objective_ids": content.get("objective_ids") or objective_mapping.get("objective_ids"),
             "teks_ids": content.get("teks_ids") or objective_mapping.get("teks_ids"),
             "alignment_summary": content.get("alignment_summary")
             or objective_mapping.get("alignment_summary"),
@@ -131,7 +136,11 @@ def persist_package_artifact(
             **({"export_note": export_note} if export_note else {}),
             **({"alignment": alignment_metadata} if alignment_metadata is not None else {}),
             **({"version": version_metadata} if version_metadata is not None else {}),
-            **({"generation_provenance": generation_provenance} if generation_provenance is not None else {}),
+            **(
+                {"generation_provenance": generation_provenance}
+                if generation_provenance is not None
+                else {}
+            ),
             **(metadata_override or {}),
         },
         created_at=created_at,
@@ -213,7 +222,9 @@ def refresh_package_artifact_exports(
     objective_mapping = normalize_objective_mapping(content)
     artifact.title = str(content["title"])
     artifact.content_json = content
-    artifact.preview_html = render_artifact_preview_html(artifact_type=artifact.artifact_type, content=content)
+    artifact.preview_html = render_artifact_preview_html(
+        artifact_type=artifact.artifact_type, content=content
+    )
     artifact.status = "ready"
     metadata = dict(artifact.metadata_json or {})
     metadata.update(
@@ -221,8 +232,7 @@ def refresh_package_artifact_exports(
             "provider": provider_name,
             "description": content.get("description") or content.get("summary"),
             "objective_mapping": content.get("objective_mapping"),
-            "objective_ids": content.get("objective_ids")
-            or objective_mapping.get("objective_ids"),
+            "objective_ids": content.get("objective_ids") or objective_mapping.get("objective_ids"),
             "teks_ids": content.get("teks_ids") or objective_mapping.get("teks_ids"),
             "alignment_summary": content.get("alignment_summary")
             or objective_mapping.get("alignment_summary"),
@@ -240,7 +250,9 @@ def refresh_package_artifact_exports(
     artifact.storage_key = storage_key
     artifact.export_format = export_format
     if artifact.artifact_type in {"quiz", "assignment", "writing_response"}:
-        from oziebot_api.services.teacher_assist_v2.assessment_student_exports import refresh_assessment_student_exports
+        from oziebot_api.services.teacher_assist_v2.assessment_student_exports import (
+            refresh_assessment_student_exports,
+        )
 
         refresh_assessment_student_exports(
             db,

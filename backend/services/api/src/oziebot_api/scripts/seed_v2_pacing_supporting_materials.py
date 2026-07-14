@@ -22,7 +22,9 @@ from oziebot_api.models.user import User
 from oziebot_api.scripts.seed_education_catalog import GOLDEN_PATH_ELA_OBJECTIVE_ID
 from oziebot_api.scripts.seed_pacing_guides import SUBJECT_GUIDES
 from oziebot_api.services.teacher_assist.access_seed import _get_user_by_email, _primary_membership
-from oziebot_api.services.teacher_assist.pacing_guide_foundation import get_catalog_pacing_guide_detail
+from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
+    get_catalog_pacing_guide_detail,
+)
 from oziebot_api.services.teacher_assist_v2.supporting_materials import (
     create_seed_supporting_material_file,
     create_supporting_link,
@@ -94,7 +96,9 @@ def _ensure_golden_path_ela_supporting_materials(
         def update_file(row: TeacherAssistPacingGuideSupportingMaterial) -> None:
             row.resource_type = "curriculum_file"
             row.material_kind = "file"
-            row.description = "District curriculum guide placeholder for Week 1 inference instruction."
+            row.description = (
+                "District curriculum guide placeholder for Week 1 inference instruction."
+            )
             row.education_objective_id = objective_id
 
         added = _upsert_material(
@@ -199,7 +203,9 @@ def _ensure_golden_path_ela_supporting_materials(
 
 def seed_v2_pacing_supporting_materials(db: Session) -> dict[str, int]:
     counts = {"materials": 0, "materials_updated": 0}
-    state = db.scalars(select(EducationState).where(EducationState.abbreviation == "TX")).one_or_none()
+    state = db.scalars(
+        select(EducationState).where(EducationState.abbreviation == "TX")
+    ).one_or_none()
     if state is None:
         return counts
     district = db.scalars(

@@ -140,7 +140,12 @@ WEEK_CLOSURE_CHECKLIST_KEYS = (
 )
 NEWSLETTER_STATUSES = ("draft", "review", "approved", "archived")
 NEWSLETTER_VERSION_SOURCES = ("initial", "ai_draft", "ai_section_regen", "teacher_edit")
-NEWSLETTER_REGENERATABLE_SECTIONS = ("overview", "upcoming_learning", "teacher_message", "reminders")
+NEWSLETTER_REGENERATABLE_SECTIONS = (
+    "overview",
+    "upcoming_learning",
+    "teacher_message",
+    "reminders",
+)
 NEWSLETTER_EXPORT_FORMATS = ("html", "pdf", "docx")
 LESSON_REFLECTION_STATUSES = ("draft", "review", "archived")
 LESSON_REFLECTION_VERSION_SOURCES = ("initial", "ai_draft", "teacher_edit")
@@ -236,7 +241,22 @@ TEACHER_ASSIST_AI_PROVIDERS = ("mock", "openai", "gemini")
 TEACHER_ASSIST_OCR_PROVIDERS = ("mock", "textract", "openai_vision")
 TEACHER_ASSIST_OCR_REAL_PROVIDERS = frozenset({"textract", "openai_vision"})
 TEACHER_ASSIST_AI_FIXTURE_MODES = ("off", "record", "replay")
-SUPPORTED_GRADE_LEVELS = ("Pre-K", "K", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12")
+SUPPORTED_GRADE_LEVELS = (
+    "Pre-K",
+    "K",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+)
 
 RESOURCE_TYPE_BY_EXTENSION = {
     ".pdf": "pdf",
@@ -387,7 +407,9 @@ def validate_action_workspace_navigation_href(value: str) -> str:
         raise ValueError("Action workspace navigation href must be an absolute path")
     if "://" in normalized:
         raise ValueError("Action workspace navigation href must not include a scheme")
-    if not any(normalized.startswith(prefix) for prefix in ALLOWED_ACTION_WORKSPACE_NAVIGATION_PREFIXES):
+    if not any(
+        normalized.startswith(prefix) for prefix in ALLOWED_ACTION_WORKSPACE_NAVIGATION_PREFIXES
+    ):
         raise ValueError("Action workspace navigation href must stay within TeacherAssist routes")
     return normalized
 

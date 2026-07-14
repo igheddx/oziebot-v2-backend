@@ -175,7 +175,9 @@ class V2PackageCloseOutIn(BaseModel):
 
 
 class V2PackageRegenIn(BaseModel):
-    scope: str = Field(default="full", pattern="^(full|dirty|artifact_types|quality_review|images)$")
+    scope: str = Field(
+        default="full", pattern="^(full|dirty|artifact_types|quality_review|images)$"
+    )
     artifact_types: list[str] = Field(default_factory=list)
     force: bool = False
 

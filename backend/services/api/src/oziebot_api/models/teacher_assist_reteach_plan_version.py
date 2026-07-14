@@ -13,7 +13,9 @@ from oziebot_api.db.base import Base
 class TeacherAssistReteachPlanVersion(Base):
     __tablename__ = "teacher_assist_reteach_plan_versions"
     __table_args__ = (
-        UniqueConstraint("reteach_plan_id", "version_number", name="uq_reteach_plan_version_number"),
+        UniqueConstraint(
+            "reteach_plan_id", "version_number", name="uq_reteach_plan_version_number"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)

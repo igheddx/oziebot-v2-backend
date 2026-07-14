@@ -10,7 +10,9 @@ from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
 from oziebot_api.models.teacher_assist_reteach_plan import TeacherAssistReteachPlan
 from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
-from oziebot_api.services.teacher_assist.assignment_effectiveness import build_assignment_effectiveness
+from oziebot_api.services.teacher_assist.assignment_effectiveness import (
+    build_assignment_effectiveness,
+)
 from oziebot_api.services.teacher_assist.constants import (
     LESSON_EFFECTIVENESS_ADJUSTMENT_THRESHOLD,
     LESSON_EFFECTIVENESS_EFFECTIVE_THRESHOLD,
@@ -37,17 +39,20 @@ def lesson_effectiveness_classification_from_signals(
 
     highly_threshold = (
         settings.teacher_assist_lesson_effectiveness_highly_threshold
-        if settings is not None and hasattr(settings, "teacher_assist_lesson_effectiveness_highly_threshold")
+        if settings is not None
+        and hasattr(settings, "teacher_assist_lesson_effectiveness_highly_threshold")
         else LESSON_EFFECTIVENESS_HIGHLY_THRESHOLD
     )
     effective_threshold = (
         settings.teacher_assist_lesson_effectiveness_effective_threshold
-        if settings is not None and hasattr(settings, "teacher_assist_lesson_effectiveness_effective_threshold")
+        if settings is not None
+        and hasattr(settings, "teacher_assist_lesson_effectiveness_effective_threshold")
         else LESSON_EFFECTIVENESS_EFFECTIVE_THRESHOLD
     )
     adjustment_threshold = (
         settings.teacher_assist_lesson_effectiveness_adjustment_threshold
-        if settings is not None and hasattr(settings, "teacher_assist_lesson_effectiveness_adjustment_threshold")
+        if settings is not None
+        and hasattr(settings, "teacher_assist_lesson_effectiveness_adjustment_threshold")
         else LESSON_EFFECTIVENESS_ADJUSTMENT_THRESHOLD
     )
 
@@ -162,7 +167,9 @@ def build_weekly_plan_lesson_effectiveness(
             mixed_or_reteach_assignments += 1
 
     aggregate_mastery = (
-        round(sum(mastery_percentages) / len(mastery_percentages), 4) if mastery_percentages else 0.0
+        round(sum(mastery_percentages) / len(mastery_percentages), 4)
+        if mastery_percentages
+        else 0.0
     )
     reteach_plan_count = _count_reteach_plans(
         db,
@@ -252,7 +259,9 @@ def list_lesson_effectiveness(
             TeacherAssistWeeklyPlan.status == "completed",
         )
         .options(selectinload(TeacherAssistWeeklyPlan.planning_input_draft))
-        .order_by(TeacherAssistWeeklyPlan.updated_at.desc(), TeacherAssistWeeklyPlan.created_at.desc())
+        .order_by(
+            TeacherAssistWeeklyPlan.updated_at.desc(), TeacherAssistWeeklyPlan.created_at.desc()
+        )
     )
     rows = db.scalars(query).all()
     results: list[dict[str, Any]] = []

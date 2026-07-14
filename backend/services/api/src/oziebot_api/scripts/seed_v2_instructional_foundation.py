@@ -20,10 +20,14 @@ from oziebot_api.scripts.seed_pacing_guides import seed_pacing_guides
 from oziebot_api.services.teacher_assist.access_seed import _get_user_by_email, _primary_membership
 from oziebot_api.services.teacher_assist_v2.pacing_guides import ensure_tenant_school_year
 from oziebot_api.services.teacher_assist_v2.school_years import create_platform_school_year
-from oziebot_api.scripts.seed_v2_pacing_supporting_materials import seed_v2_pacing_supporting_materials
+from oziebot_api.scripts.seed_v2_pacing_supporting_materials import (
+    seed_v2_pacing_supporting_materials,
+)
 
 
-def _ensure_platform_school_year(db: Session, *, state_id, district_id, counts: dict) -> EducationSchoolYear:
+def _ensure_platform_school_year(
+    db: Session, *, state_id, district_id, counts: dict
+) -> EducationSchoolYear:
     existing = db.scalars(
         select(EducationSchoolYear)
         .where(EducationSchoolYear.title == "2026-2027")
@@ -62,7 +66,9 @@ def _backfill_objectives(
 ) -> None:
     subjects = {
         row.subject_code: row
-        for row in db.scalars(select(EducationSubject).where(EducationSubject.grade_id == grade_id)).all()
+        for row in db.scalars(
+            select(EducationSubject).where(EducationSubject.grade_id == grade_id)
+        ).all()
     }
     objectives = db.scalars(
         select(EducationObjective).where(
@@ -113,7 +119,9 @@ def seed_v2_instructional_foundation(db: Session) -> dict[str, int]:
             EducationGrade.grade_code == "5",
         )
     ).one()
-    platform_year = _ensure_platform_school_year(db, state_id=state.id, district_id=district.id, counts=counts)
+    platform_year = _ensure_platform_school_year(
+        db, state_id=state.id, district_id=district.id, counts=counts
+    )
     _backfill_objectives(
         db,
         state_id=state.id,
@@ -128,7 +136,9 @@ def seed_v2_instructional_foundation(db: Session) -> dict[str, int]:
     if dominic is not None:
         membership = _primary_membership(db, user_id=dominic.id)
         if membership is not None:
-            ensure_tenant_school_year(db, tenant_id=membership.tenant_id, platform_year=platform_year)
+            ensure_tenant_school_year(
+                db, tenant_id=membership.tenant_id, platform_year=platform_year
+            )
 
     pacing_counts = seed_pacing_guides(db)
     counts.update({f"pacing_{key}": value for key, value in pacing_counts.items()})

@@ -79,12 +79,18 @@ class TeacherAssistExtractedTextRecord(Base):
     extracted_text: Mapped[str] = mapped_column(Text(), nullable=False)
     preview_text: Mapped[str] = mapped_column(Text(), nullable=False)
     text_char_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    pii_flagged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    pii_flagged: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     redaction_applied: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
     review_status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="pending_review", server_default="pending_review", index=True
+        String(32),
+        nullable=False,
+        default="pending_review",
+        server_default="pending_review",
+        index=True,
     )
     provider_confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     confidence_level: Mapped[str] = mapped_column(
@@ -110,7 +116,9 @@ class TeacherAssistExtractedTextRecord(Base):
 
     tenant: Mapped["Tenant"] = relationship("Tenant")
     teacher_user: Mapped["User"] = relationship("User", foreign_keys=[teacher_user_id])
-    reviewed_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[reviewed_by_user_id])
+    reviewed_by_user: Mapped["User | None"] = relationship(
+        "User", foreign_keys=[reviewed_by_user_id]
+    )
     extraction_job: Mapped["TeacherAssistExtractionJob"] = relationship(
         "TeacherAssistExtractionJob",
         foreign_keys=[extraction_job_id],
@@ -130,7 +138,9 @@ from typing import TYPE_CHECKING  # noqa: E402
 
 if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_extraction_job import TeacherAssistExtractionJob
-    from oziebot_api.models.teacher_assist_resource_library_item import TeacherAssistResourceLibraryItem
+    from oziebot_api.models.teacher_assist_resource_library_item import (
+        TeacherAssistResourceLibraryItem,
+    )
     from oziebot_api.models.teacher_assist_student_work_submission import (
         TeacherAssistStudentWorkSubmission,
     )

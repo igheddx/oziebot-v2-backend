@@ -70,12 +70,16 @@ def increment_usage_metric(
     return row
 
 
-def _count_since(db: Session, model, tenant_id: uuid.UUID, *, column_name: str = "created_at", days: int = 30) -> int:
+def _count_since(
+    db: Session, model, tenant_id: uuid.UUID, *, column_name: str = "created_at", days: int = 30
+) -> int:
     since = _now() - timedelta(days=days)
     column = getattr(model, column_name)
     return int(
         db.scalar(
-            select(func.count()).select_from(model).where(
+            select(func.count())
+            .select_from(model)
+            .where(
                 model.tenant_id == tenant_id,
                 column >= since,
             )
@@ -129,9 +133,13 @@ def build_usage_metrics_snapshot(
     return {
         "period_days": days,
         "metrics": {
-            "instructional_weeks_created": _count_since(db, TeacherAssistInstructionalWeek, tenant_id, days=days),
+            "instructional_weeks_created": _count_since(
+                db, TeacherAssistInstructionalWeek, tenant_id, days=days
+            ),
             "assignments_created": _count_since(db, TeacherAssistAssignment, tenant_id, days=days),
-            "newsletters_generated": _count_since(db, TeacherAssistNewsletter, tenant_id, days=days),
+            "newsletters_generated": _count_since(
+                db, TeacherAssistNewsletter, tenant_id, days=days
+            ),
             "copilot_usage": copilot_messages,
             "feature_usage": ai_events,
             "login_activity": stored_totals.get("login_activity", 0),

@@ -9,7 +9,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.teacher_assist_instructional_evidence import TeacherAssistInstructionalEvidence
+from oziebot_api.models.teacher_assist_instructional_evidence import (
+    TeacherAssistInstructionalEvidence,
+)
 from oziebot_api.services.teacher_assist.constants import (
     validate_instructional_evidence_source_type,
     validate_mastery_level,
@@ -34,7 +36,9 @@ def serialize_instructional_evidence(row: TeacherAssistInstructionalEvidence) ->
         "teacher_notes": row.teacher_notes,
         "class_id": str(row.class_id) if row.class_id else None,
         "subject_id": str(row.subject_id) if row.subject_id else None,
-        "instructional_week_id": str(row.instructional_week_id) if row.instructional_week_id else None,
+        "instructional_week_id": str(row.instructional_week_id)
+        if row.instructional_week_id
+        else None,
         "created_at": row.created_at.isoformat(),
         "updated_at": row.updated_at.isoformat(),
     }
@@ -127,11 +131,18 @@ def list_instructional_evidence(
     if class_id is not None:
         query = query.where(TeacherAssistInstructionalEvidence.class_id == class_id)
     if instructional_week_id is not None:
-        query = query.where(TeacherAssistInstructionalEvidence.instructional_week_id == instructional_week_id)
+        query = query.where(
+            TeacherAssistInstructionalEvidence.instructional_week_id == instructional_week_id
+        )
     if source_type is not None:
         query = query.where(
-            TeacherAssistInstructionalEvidence.source_type == validate_instructional_evidence_source_type(source_type)
+            TeacherAssistInstructionalEvidence.source_type
+            == validate_instructional_evidence_source_type(source_type)
         )
     if teacher_confirmed is not None:
-        query = query.where(TeacherAssistInstructionalEvidence.teacher_confirmed == teacher_confirmed)
-    return list(db.scalars(query.order_by(TeacherAssistInstructionalEvidence.created_at.desc())).all())
+        query = query.where(
+            TeacherAssistInstructionalEvidence.teacher_confirmed == teacher_confirmed
+        )
+    return list(
+        db.scalars(query.order_by(TeacherAssistInstructionalEvidence.created_at.desc())).all()
+    )

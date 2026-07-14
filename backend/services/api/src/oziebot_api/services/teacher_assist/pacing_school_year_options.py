@@ -65,7 +65,9 @@ def build_pacing_school_year_specs(*, today: date | None = None) -> list[dict[st
             }
         )
 
-    default_role: PacingSchoolYearRole = "next" if reference >= date(next_start, 5, 1) else "current"
+    default_role: PacingSchoolYearRole = (
+        "next" if reference >= date(next_start, 5, 1) else "current"
+    )
     for spec in specs:
         spec["is_default"] = spec["role"] == default_role
     return specs

@@ -156,7 +156,14 @@ def _ensure_user_and_membership(
         created_tenant = True
     else:
         _ensure_tenant_integration(db, tenant_id=membership.tenant_id, now=now)
-    return user, membership, created_user, created_tenant, temporary_password_generated, temporary_password
+    return (
+        user,
+        membership,
+        created_user,
+        created_tenant,
+        temporary_password_generated,
+        temporary_password,
+    )
 
 
 TEACHER_ASSIST_ROOT_ADMIN_EMAILS = frozenset(
@@ -228,14 +235,19 @@ def ensure_user_teacher_assist_access(
     password: str | None = None,
 ) -> TeacherAssistAccessSeedResult:
     ensure_platform_products(db)
-    user, membership, created_user, created_tenant, temporary_password_generated, temporary_password = (
-        _ensure_user_and_membership(
-            db,
-            email=email,
-            full_name=full_name,
-            tenant_name=tenant_name,
-            password=password,
-        )
+    (
+        user,
+        membership,
+        created_user,
+        created_tenant,
+        temporary_password_generated,
+        temporary_password,
+    ) = _ensure_user_and_membership(
+        db,
+        email=email,
+        full_name=full_name,
+        tenant_name=tenant_name,
+        password=password,
     )
     access_row = grant_tenant_product_access(
         db,
@@ -261,4 +273,3 @@ def ensure_user_teacher_assist_access(
         temporary_password_generated=temporary_password_generated,
         temporary_password=temporary_password,
     )
-

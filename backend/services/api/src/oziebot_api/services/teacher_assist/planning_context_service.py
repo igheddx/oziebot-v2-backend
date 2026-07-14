@@ -26,7 +26,9 @@ def _serialize_planning_draft_out(preview) -> dict[str, Any]:
         "tenant_id": str(draft.tenant_id),
         "user_id": str(draft.user_id),
         "school_year_id": str(draft.school_year_id) if draft.school_year_id is not None else None,
-        "grading_period_id": str(draft.grading_period_id) if draft.grading_period_id is not None else None,
+        "grading_period_id": str(draft.grading_period_id)
+        if draft.grading_period_id is not None
+        else None,
         "class_id": str(draft.class_id) if draft.class_id is not None else None,
         "subject_id": str(draft.subject_id) if draft.subject_id is not None else None,
         "planning_scope": draft.planning_scope,
@@ -125,7 +127,9 @@ def build_planning_context_snapshot(
             {
                 "id": str(item.id),
                 "pacing_guide_id": str(item.pacing_guide_id),
-                "grading_period_id": str(item.grading_period_id) if item.grading_period_id is not None else None,
+                "grading_period_id": str(item.grading_period_id)
+                if item.grading_period_id is not None
+                else None,
                 "subject_id": str(item.subject_id) if item.subject_id is not None else None,
                 "week_number": item.week_number,
                 "day_number": item.day_number,
@@ -138,7 +142,9 @@ def build_planning_context_snapshot(
                 "notes": item.notes,
                 "sort_order": item.sort_order,
                 "standard_ids": [str(link.standard_id) for link in item.standard_links],
-                "resource_ids": [str(link.resource_library_item_id) for link in item.resource_links],
+                "resource_ids": [
+                    str(link.resource_library_item_id) for link in item.resource_links
+                ],
                 "created_at": item.created_at.isoformat(),
                 "updated_at": item.updated_at.isoformat(),
             }

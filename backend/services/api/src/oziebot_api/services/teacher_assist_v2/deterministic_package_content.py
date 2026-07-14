@@ -110,9 +110,15 @@ def _daily_rows(
     for index in range(max_len):
         rows.append(
             {
-                "topic": str((daily_topics or [])[index]).strip() if index < len(daily_topics or []) else "",
-                "objective": str((daily_objectives or [])[index]).strip() if index < len(daily_objectives or []) else "",
-                "assessment": str((assessment_checks or [])[index]).strip() if index < len(assessment_checks or []) else "",
+                "topic": str((daily_topics or [])[index]).strip()
+                if index < len(daily_topics or [])
+                else "",
+                "objective": str((daily_objectives or [])[index]).strip()
+                if index < len(daily_objectives or [])
+                else "",
+                "assessment": str((assessment_checks or [])[index]).strip()
+                if index < len(assessment_checks or [])
+                else "",
             }
         )
     return [row for row in rows if row["topic"] or row["objective"] or row["assessment"]]
@@ -214,7 +220,9 @@ def build_daily_lesson_plan(
                     "title": f"{block['subject_name']} Objective",
                     "bullets": [str(block.get("objective") or objective_text)],
                     "layout": "concept_map",
-                    "teacherNotes": "\n".join(str(item) for item in (block.get("teacher_actions") or [])[:2]),
+                    "teacherNotes": "\n".join(
+                        str(item) for item in (block.get("teacher_actions") or [])[:2]
+                    ),
                 }
                 for index, block in enumerate(subject_blocks, start=1)
             ],
@@ -234,7 +242,9 @@ def build_daily_lesson_plan(
                     "id": f"{day_label.lower()}-{index}-guided",
                     "slideType": "guided_practice",
                     "title": f"{block['subject_name']} Guided Practice",
-                    "bullets": list(block.get("guided_practice") or block.get("student_activity") or []),
+                    "bullets": list(
+                        block.get("guided_practice") or block.get("student_activity") or []
+                    ),
                     "layout": "guided_practice",
                     "teacherNotes": str(block.get("mini_lesson") or ""),
                 }
@@ -266,14 +276,17 @@ def build_daily_lesson_plan(
         objective_text=objective_text,
         teks_ids=list(mapping.get("teks_ids") or []),
     )
-    return _with_alignment({
-        "title": f"{day_label} Daily Teaching Plan — {package_title}",
-        "summary": focus,
-        "daily_topic": resolved_topic,
-        "description": f"Full-day plan for {day_label} covering all subjects in teaching order.",
-        "subjects": subject_blocks,
-        "slides": slides,
-    }, mapping)
+    return _with_alignment(
+        {
+            "title": f"{day_label} Daily Teaching Plan — {package_title}",
+            "summary": focus,
+            "daily_topic": resolved_topic,
+            "description": f"Full-day plan for {day_label} covering all subjects in teaching order.",
+            "subjects": subject_blocks,
+            "slides": slides,
+        },
+        mapping,
+    )
 
 
 def build_subject_slide_deck(
@@ -361,21 +374,30 @@ def build_subject_slide_deck(
         slides.append(
             {
                 "id": f"day-{index}-focus",
-                "slideType": "guided_practice" if index < len(daily_rows) else "independent_practice",
+                "slideType": "guided_practice"
+                if index < len(daily_rows)
+                else "independent_practice",
                 "title": title,
-                "bullets": bullets[:3] or ["Discuss the weekly objective with evidence from the lesson text."],
+                "bullets": bullets[:3]
+                or ["Discuss the weekly objective with evidence from the lesson text."],
                 "layout": "text_left_visual_right" if index % 2 else "visual_left_text_right",
-                "teacherNotes": row["objective"] or "Guide students to connect the day's text to the objective.",
+                "teacherNotes": row["objective"]
+                or "Guide students to connect the day's text to the objective.",
             }
         )
-    weekly_check = next((item for item in reversed(assessment_checks or []) if str(item).strip()), "")
+    weekly_check = next(
+        (item for item in reversed(assessment_checks or []) if str(item).strip()), ""
+    )
     slides.extend(
         [
             {
                 "id": "check-understanding",
                 "slideType": "check_for_understanding",
                 "title": "Check for Understanding",
-                "bullets": [weekly_check or "Ask students to explain the learning target using evidence from the text."],
+                "bullets": [
+                    weekly_check
+                    or "Ask students to explain the learning target using evidence from the text."
+                ],
                 "layout": "question_prompt",
             },
             {
@@ -394,13 +416,18 @@ def build_subject_slide_deck(
             },
         ]
     )
-    slides = add_slide_visual_metadata(slides, objective_text=objective_text, teks_ids=list(mapping.get("teks_ids") or []))
-    return _with_alignment({
-        "title": f"{subject_name} {week_label} — {package_title}",
-        "summary": f"Classroom slide deck for {subject_name}.",
-        "description": "Presentation-ready slides for one subject block or week overview.",
-        "slides": slides,
-    }, mapping)
+    slides = add_slide_visual_metadata(
+        slides, objective_text=objective_text, teks_ids=list(mapping.get("teks_ids") or [])
+    )
+    return _with_alignment(
+        {
+            "title": f"{subject_name} {week_label} — {package_title}",
+            "summary": f"Classroom slide deck for {subject_name}.",
+            "description": "Presentation-ready slides for one subject block or week overview.",
+            "slides": slides,
+        },
+        mapping,
+    )
 
 
 def _default_passage(subject_name: str, topic: str) -> tuple[str, str]:
@@ -430,8 +457,12 @@ def build_quiz(
     excerpts = _source_excerpts(source_excerpts, limit=2)
     primary_text = source_texts[0] if source_texts else f"{subject_name} class text"
     secondary_text = source_texts[1] if len(source_texts) > 1 else primary_text
-    weekly_check = next((item for item in reversed(assessment_checks or []) if str(item).strip()), "")
-    first_day_objective = next((item for item in daily_objectives or [] if str(item).strip()), objective_text)
+    weekly_check = next(
+        (item for item in reversed(assessment_checks or []) if str(item).strip()), ""
+    )
+    first_day_objective = next(
+        (item for item in daily_objectives or [] if str(item).strip()), objective_text
+    )
     questions = [
         {
             "number": 1,
@@ -464,7 +495,9 @@ def build_quiz(
         {
             "number": 3,
             "type": "short_answer",
-            "prompt": first_day_objective if first_day_objective.endswith("?") else f"State this objective in your own words: {first_day_objective}",
+            "prompt": first_day_objective
+            if first_day_objective.endswith("?")
+            else f"State this objective in your own words: {first_day_objective}",
             "answer": f"Responses should reflect: {objective_text}",
             "explanation": "Accept paraphrases that preserve the learning target.",
             "points": 2,
@@ -474,13 +507,13 @@ def build_quiz(
             "number": 4,
             "type": "evidence_based",
             "prompt": (
-                f"Use this supplied excerpt from {primary_text}: \"{excerpts[0]}\" "
+                f'Use this supplied excerpt from {primary_text}: "{excerpts[0]}" '
                 f"Then answer: {assessment_checks[0] if assessment_checks else objective_text}"
                 if excerpts
                 else (
-                f"Use {primary_text} to answer this question: {assessment_checks[0]}"
-                if assessment_checks
-                else f"Cite one detail from {primary_text} that supports the weekly learning goal and explain why."
+                    f"Use {primary_text} to answer this question: {assessment_checks[0]}"
+                    if assessment_checks
+                    else f"Cite one detail from {primary_text} that supports the weekly learning goal and explain why."
                 )
             ),
             "answer": f"Accept responses that reference {primary_text} with a clear connection to the objective.",
@@ -530,9 +563,9 @@ def build_quiz(
                 f"Compare evidence from the supplied class text excerpts: {excerpts[0]}"
                 if excerpts
                 else (
-                f"Use evidence from {primary_text} and {secondary_text} to respond: {weekly_check}"
-                if weekly_check and source_texts
-                else f"Write one sentence explaining what you learned this week in {subject_name}."
+                    f"Use evidence from {primary_text} and {secondary_text} to respond: {weekly_check}"
+                    if weekly_check and source_texts
+                    else f"Write one sentence explaining what you learned this week in {subject_name}."
                 )
             ),
             "answer": (
@@ -546,23 +579,26 @@ def build_quiz(
     ]
     title = f"{package_title} — {subject_name} Quiz"
     mapping = _objective_mapping(objective_code, objective_text)
-    return _with_alignment({
-        "title": title,
-        "summary": f"Formative quiz for {week_label} {subject_name}.",
-        "description": "Eight-question quiz with mixed item types.",
-        "student_number_field": True,
-        "questions": questions,
-        "answer_key": [
-            {
-                "number": q["number"],
-                "answer": q["answer"],
-                "explanation": q.get("explanation"),
-                "points": q.get("points", 1),
-            }
-            for q in questions
-        ],
-        "google_forms_package": None,
-    }, mapping)
+    return _with_alignment(
+        {
+            "title": title,
+            "summary": f"Formative quiz for {week_label} {subject_name}.",
+            "description": "Eight-question quiz with mixed item types.",
+            "student_number_field": True,
+            "questions": questions,
+            "answer_key": [
+                {
+                    "number": q["number"],
+                    "answer": q["answer"],
+                    "explanation": q.get("explanation"),
+                    "points": q.get("points", 1),
+                }
+                for q in questions
+            ],
+            "google_forms_package": None,
+        },
+        mapping,
+    )
 
 
 def build_exit_ticket(
@@ -573,16 +609,22 @@ def build_exit_ticket(
     objective_text: str,
 ) -> dict[str, Any]:
     mapping = _objective_mapping(objective_code, objective_text)
-    return _with_alignment({
-        "title": f"{package_title} — {subject_name} Exit Ticket",
-        "summary": "End-of-lesson check for understanding.",
-        "description": "Short constructed-response exit ticket.",
-        "questions": [
-            {"prompt": "What was today's learning target?", "response_lines": 2},
-            {"prompt": "Write one detail or example from today's lesson.", "response_lines": 2},
-            {"prompt": "How does that detail support the learning target?", "response_lines": 3},
-        ],
-    }, mapping)
+    return _with_alignment(
+        {
+            "title": f"{package_title} — {subject_name} Exit Ticket",
+            "summary": "End-of-lesson check for understanding.",
+            "description": "Short constructed-response exit ticket.",
+            "questions": [
+                {"prompt": "What was today's learning target?", "response_lines": 2},
+                {"prompt": "Write one detail or example from today's lesson.", "response_lines": 2},
+                {
+                    "prompt": "How does that detail support the learning target?",
+                    "response_lines": 3,
+                },
+            ],
+        },
+        mapping,
+    )
 
 
 def build_writing_response(
@@ -597,20 +639,23 @@ def build_writing_response(
         f"{objective_text}"
     )
     mapping = _objective_mapping(objective_code, objective_text)
-    return _with_alignment({
-        "title": f"{package_title} — {subject_name} Writing Response",
-        "summary": "Constructed writing response aligned to the weekly objective.",
-        "description": "Students write directly on lined response pages.",
-        "prompt": prompt,
-        "instructions": [
-            "Read the writing prompt carefully.",
-            "Write in complete sentences with a clear beginning, middle, and end.",
-            "Use evidence, examples, or details that support the learning objective.",
-            "Revise for clarity, organization, and conventions before submitting.",
-        ],
-        "response_pages": 1,
-        "writing_lines_per_page": 14,
-    }, mapping)
+    return _with_alignment(
+        {
+            "title": f"{package_title} — {subject_name} Writing Response",
+            "summary": "Constructed writing response aligned to the weekly objective.",
+            "description": "Students write directly on lined response pages.",
+            "prompt": prompt,
+            "instructions": [
+                "Read the writing prompt carefully.",
+                "Write in complete sentences with a clear beginning, middle, and end.",
+                "Use evidence, examples, or details that support the learning objective.",
+                "Revise for clarity, organization, and conventions before submitting.",
+            ],
+            "response_pages": 1,
+            "writing_lines_per_page": 14,
+        },
+        mapping,
+    )
 
 
 def build_rubric_for_writing_response(
@@ -679,15 +724,18 @@ def build_rubric_for_writing_response(
     total_points = sum(int(row["points"]) for row in criteria)
     rubric_title = f"{package_title} — {subject_name} Writing Rubric"
     mapping = _objective_mapping(objective_code, objective_text)
-    return _with_alignment({
-        "title": rubric_title,
-        "summary": "Rubric for the writing response assignment.",
-        "description": prompt,
-        "total_points": total_points,
-        "criteria": criteria,
-        "writing_prompt": prompt,
-        "writing_response_title": writing_content.get("title"),
-    }, mapping)
+    return _with_alignment(
+        {
+            "title": rubric_title,
+            "summary": "Rubric for the writing response assignment.",
+            "description": prompt,
+            "total_points": total_points,
+            "criteria": criteria,
+            "writing_prompt": prompt,
+            "writing_response_title": writing_content.get("title"),
+        },
+        mapping,
+    )
 
 
 def build_written_assignment(
@@ -706,7 +754,9 @@ def build_written_assignment(
     topic = daily_topic or f"{subject_name} weekly focus"
     source_texts = _source_texts_from_materials(source_materials)
     excerpts = _source_excerpts(source_excerpts, limit=4)
-    weekly_check = next((item for item in reversed(assessment_checks or []) if str(item).strip()), "")
+    weekly_check = next(
+        (item for item in reversed(assessment_checks or []) if str(item).strip()), ""
+    )
     passage_title = "Source Text Set"
     if excerpts:
         passage_text = "\n\n".join(excerpts)
@@ -720,53 +770,56 @@ def build_written_assignment(
         passage_title, passage_text = _default_passage(subject_name, topic)
     rubric_title = f"{package_title} — {subject_name} Rubric"
     mapping = _objective_mapping(objective_code, objective_text)
-    return _with_alignment({
-        "title": f"{package_title} — {subject_name} Written Assignment",
-        "summary": "Written response aligned to the weekly objective.",
-        "description": (
-            f"Students use class texts and evidence to respond to {objective_text}."
-            if source_texts
-            else "Students read a passage and write a paragraph with supporting details."
-        ),
-        "passage_title": passage_title,
-        "passage_text": passage_text,
-        "student_instructions": [
-            (
-                "Reread the supplied source excerpt(s) and choose evidence that matches the objective."
-                if excerpts
-                else f"Reread {_join_human_list(source_texts[:3])} and choose evidence that matches the objective."
+    return _with_alignment(
+        {
+            "title": f"{package_title} — {subject_name} Written Assignment",
+            "summary": "Written response aligned to the weekly objective.",
+            "description": (
+                f"Students use class texts and evidence to respond to {objective_text}."
                 if source_texts
-                else "Read the passage carefully."
+                else "Students read a passage and write a paragraph with supporting details."
             ),
-            (
-                weekly_check
-                if weekly_check
-                else "Write one paragraph explaining the main idea or learning target."
-            ),
-            (
-                "Include at least two supporting details from the supplied source excerpt(s)."
-                if excerpts
-                else f"Include at least two supporting details from {source_texts[0]} or another class text."
-                if source_texts
-                else "Include at least two supporting details from the text."
-            ),
-            "Use complete sentences and clear organization.",
-        ],
-        "success_criteria": [
-            "Clear statement of the learning target or claim",
-            (
-                "At least two accurate supporting details from the supplied source excerpt(s)"
-                if excerpts
-                else f"At least two accurate supporting details from {_join_human_list(source_texts[:2])}"
-                if source_texts
-                else "At least two accurate supporting details"
-            ),
-            "Evidence clearly connected to the objective",
-            "Organized paragraph with conventions",
-        ],
-        "rubric_reference": rubric_title,
-        "writing_lines": 12,
-    }, mapping)
+            "passage_title": passage_title,
+            "passage_text": passage_text,
+            "student_instructions": [
+                (
+                    "Reread the supplied source excerpt(s) and choose evidence that matches the objective."
+                    if excerpts
+                    else f"Reread {_join_human_list(source_texts[:3])} and choose evidence that matches the objective."
+                    if source_texts
+                    else "Read the passage carefully."
+                ),
+                (
+                    weekly_check
+                    if weekly_check
+                    else "Write one paragraph explaining the main idea or learning target."
+                ),
+                (
+                    "Include at least two supporting details from the supplied source excerpt(s)."
+                    if excerpts
+                    else f"Include at least two supporting details from {source_texts[0]} or another class text."
+                    if source_texts
+                    else "Include at least two supporting details from the text."
+                ),
+                "Use complete sentences and clear organization.",
+            ],
+            "success_criteria": [
+                "Clear statement of the learning target or claim",
+                (
+                    "At least two accurate supporting details from the supplied source excerpt(s)"
+                    if excerpts
+                    else f"At least two accurate supporting details from {_join_human_list(source_texts[:2])}"
+                    if source_texts
+                    else "At least two accurate supporting details"
+                ),
+                "Evidence clearly connected to the objective",
+                "Organized paragraph with conventions",
+            ],
+            "rubric_reference": rubric_title,
+            "writing_lines": 12,
+        },
+        mapping,
+    )
 
 
 def build_rubric_for_written_assignment(
@@ -777,7 +830,9 @@ def build_rubric_for_written_assignment(
     objective_code: str | None,
     objective_text: str,
 ) -> dict[str, Any]:
-    passage_title = str(assignment_content.get("passage_title") or f"{subject_name} passage").strip()
+    passage_title = str(
+        assignment_content.get("passage_title") or f"{subject_name} passage"
+    ).strip()
     success_criteria = [
         str(item).strip()
         for item in (assignment_content.get("success_criteria") or [])
@@ -788,7 +843,9 @@ def build_rubric_for_written_assignment(
             "name": "Main idea / learning target",
             "points": 5,
             "levels": [
-                success_criteria[0] if success_criteria else "Clear statement of the learning target",
+                success_criteria[0]
+                if success_criteria
+                else "Clear statement of the learning target",
                 "Partial statement of the learning target",
                 "Missing or inaccurate main idea",
             ],
@@ -797,7 +854,9 @@ def build_rubric_for_written_assignment(
             "name": "Text evidence and support",
             "points": 5,
             "levels": [
-                success_criteria[1] if len(success_criteria) > 1 else "Two or more accurate supporting details",
+                success_criteria[1]
+                if len(success_criteria) > 1
+                else "Two or more accurate supporting details",
                 "Some supporting details with gaps",
                 "Details missing or unrelated",
             ],
@@ -806,7 +865,9 @@ def build_rubric_for_written_assignment(
             "name": "Explanation",
             "points": 4,
             "levels": [
-                success_criteria[2] if len(success_criteria) > 2 else "Explains how evidence supports the target",
+                success_criteria[2]
+                if len(success_criteria) > 2
+                else "Explains how evidence supports the target",
                 "Partial explanation",
                 "No explanation",
             ],
@@ -815,7 +876,9 @@ def build_rubric_for_written_assignment(
             "name": "Organization",
             "points": 3,
             "levels": [
-                success_criteria[3] if len(success_criteria) > 3 else "Organized paragraph with clear flow",
+                success_criteria[3]
+                if len(success_criteria) > 3
+                else "Organized paragraph with clear flow",
                 "Some organization with lapses",
                 "Disorganized or difficult to follow",
             ],
@@ -832,15 +895,18 @@ def build_rubric_for_written_assignment(
     ]
     total_points = sum(int(row["points"]) for row in criteria)
     mapping = _objective_mapping(objective_code, objective_text)
-    return _with_alignment({
-        "title": f"{package_title} — {subject_name} Written Assignment Rubric",
-        "summary": "Rubric for the written assignment.",
-        "description": f"Rubric aligned to {passage_title} and {objective_text}",
-        "total_points": total_points,
-        "criteria": criteria,
-        "assignment_title": assignment_content.get("title"),
-        "passage_title": passage_title,
-    }, mapping)
+    return _with_alignment(
+        {
+            "title": f"{package_title} — {subject_name} Written Assignment Rubric",
+            "summary": "Rubric for the written assignment.",
+            "description": f"Rubric aligned to {passage_title} and {objective_text}",
+            "total_points": total_points,
+            "criteria": criteria,
+            "assignment_title": assignment_content.get("title"),
+            "passage_title": passage_title,
+        },
+        mapping,
+    )
 
 
 def build_rubric(
@@ -851,20 +917,55 @@ def build_rubric(
     objective_text: str,
 ) -> dict[str, Any]:
     criteria = [
-        {"name": "Learning Target", "points": 4, "levels": ["Meets the objective clearly", "Partial understanding", "Does not meet the objective"]},
-        {"name": "Supporting Details", "points": 4, "levels": ["Two or more relevant details", "One relevant detail", "Details missing or unrelated"]},
-        {"name": "Evidence and Explanation", "points": 4, "levels": ["Explains how details support the target", "Partial explanation", "No explanation"]},
-        {"name": "Organization", "points": 4, "levels": ["Logical structure", "Some organization", "Disorganized"]},
-        {"name": "Grammar / Conventions", "points": 4, "levels": ["Strong conventions", "Minor errors", "Frequent errors affecting meaning"]},
+        {
+            "name": "Learning Target",
+            "points": 4,
+            "levels": [
+                "Meets the objective clearly",
+                "Partial understanding",
+                "Does not meet the objective",
+            ],
+        },
+        {
+            "name": "Supporting Details",
+            "points": 4,
+            "levels": [
+                "Two or more relevant details",
+                "One relevant detail",
+                "Details missing or unrelated",
+            ],
+        },
+        {
+            "name": "Evidence and Explanation",
+            "points": 4,
+            "levels": [
+                "Explains how details support the target",
+                "Partial explanation",
+                "No explanation",
+            ],
+        },
+        {
+            "name": "Organization",
+            "points": 4,
+            "levels": ["Logical structure", "Some organization", "Disorganized"],
+        },
+        {
+            "name": "Grammar / Conventions",
+            "points": 4,
+            "levels": ["Strong conventions", "Minor errors", "Frequent errors affecting meaning"],
+        },
     ]
     mapping = _objective_mapping(objective_code, objective_text)
-    return _with_alignment({
-        "title": f"{package_title} — {subject_name} Rubric",
-        "summary": "20-point rubric for the written assignment.",
-        "description": f"Rubric aligned to {objective_text}",
-        "total_points": 20,
-        "criteria": criteria,
-    }, mapping)
+    return _with_alignment(
+        {
+            "title": f"{package_title} — {subject_name} Rubric",
+            "summary": "20-point rubric for the written assignment.",
+            "description": f"Rubric aligned to {objective_text}",
+            "total_points": 20,
+            "criteria": criteria,
+        },
+        mapping,
+    )
 
 
 def build_parent_newsletter(
@@ -876,53 +977,93 @@ def build_parent_newsletter(
     objective_text: str,
 ) -> dict[str, Any]:
     mapping = _objective_mapping(objective_code, objective_text)
-    return _with_alignment({
-        "title": f"{package_title} — Parent Newsletter Summary",
-        "summary": f"Weekly family update for {subject_name}.",
-        "description": "Parent-friendly summary of learning and home practice.",
-        "sections": [
-            {"heading": "What We Are Learning", "body": f"In {subject_name} this week, students are working on: {objective_text}"},
-            {"heading": "In Family-Friendly Language", "body": "Ask your child to explain what they practiced and give an example from class."},
-            {
-                "heading": "Practice at Home",
-                "bullets": [
-                    "Read together for 20 minutes.",
-                    f"Ask: What was the main idea of today's {subject_name} lesson?",
-                ],
-            },
-            {"heading": "Upcoming Assessment", "body": f"Students will complete a {week_label} check aligned to the objective."},
-            {"heading": "Reminders", "bullets": ["Return signed forms by Friday.", "Contact the teacher with questions about assignments."]},
-        ],
-    }, mapping)
+    return _with_alignment(
+        {
+            "title": f"{package_title} — Parent Newsletter Summary",
+            "summary": f"Weekly family update for {subject_name}.",
+            "description": "Parent-friendly summary of learning and home practice.",
+            "sections": [
+                {
+                    "heading": "What We Are Learning",
+                    "body": f"In {subject_name} this week, students are working on: {objective_text}",
+                },
+                {
+                    "heading": "In Family-Friendly Language",
+                    "body": "Ask your child to explain what they practiced and give an example from class.",
+                },
+                {
+                    "heading": "Practice at Home",
+                    "bullets": [
+                        "Read together for 20 minutes.",
+                        f"Ask: What was the main idea of today's {subject_name} lesson?",
+                    ],
+                },
+                {
+                    "heading": "Upcoming Assessment",
+                    "body": f"Students will complete a {week_label} check aligned to the objective.",
+                },
+                {
+                    "heading": "Reminders",
+                    "bullets": [
+                        "Return signed forms by Friday.",
+                        "Contact the teacher with questions about assignments.",
+                    ],
+                },
+            ],
+        },
+        mapping,
+    )
 
 
-def build_bell_ringer(*, subject_name: str, package_title: str, objective_text: str, objective_code: str | None) -> dict[str, Any]:
+def build_bell_ringer(
+    *, subject_name: str, package_title: str, objective_text: str, objective_code: str | None
+) -> dict[str, Any]:
     mapping = _objective_mapping(objective_code, objective_text)
-    return _with_alignment({
-        "title": f"{package_title} — {subject_name} Bell Ringer",
-        "summary": "Daily warm-up prompts.",
-        "description": "Short opener activities for the week.",
-        "sections": [
-            {"heading": "Monday", "body": "Define the week's objective in your own words."},
-            {"heading": "Tuesday", "body": "List two details from yesterday's lesson."},
-            {"heading": "Wednesday", "body": "Explain how one detail supports the learning target."},
-        ],
-    }, mapping)
+    return _with_alignment(
+        {
+            "title": f"{package_title} — {subject_name} Bell Ringer",
+            "summary": "Daily warm-up prompts.",
+            "description": "Short opener activities for the week.",
+            "sections": [
+                {"heading": "Monday", "body": "Define the week's objective in your own words."},
+                {"heading": "Tuesday", "body": "List two details from yesterday's lesson."},
+                {
+                    "heading": "Wednesday",
+                    "body": "Explain how one detail supports the learning target.",
+                },
+            ],
+        },
+        mapping,
+    )
 
 
-def build_vocabulary_list(*, subject_name: str, package_title: str, objective_text: str, objective_code: str | None) -> dict[str, Any]:
+def build_vocabulary_list(
+    *, subject_name: str, package_title: str, objective_text: str, objective_code: str | None
+) -> dict[str, Any]:
     mapping = _objective_mapping(objective_code, objective_text)
-    return _with_alignment({
-        "title": f"{package_title} — {subject_name} Vocabulary",
-        "summary": "Key terms for the week.",
-        "description": "Vocabulary connected to the weekly objective.",
-        "terms": [
-            {"term": "objective", "definition": "What students should learn this week."},
-            {"term": "evidence", "definition": "Proof from the text or lesson that supports your thinking."},
-            {"term": "main idea", "definition": "The most important point the author or lesson wants you to understand."},
-            {"term": "supporting detail", "definition": "A fact or example that explains the main idea."},
-        ],
-    }, mapping)
+    return _with_alignment(
+        {
+            "title": f"{package_title} — {subject_name} Vocabulary",
+            "summary": "Key terms for the week.",
+            "description": "Vocabulary connected to the weekly objective.",
+            "terms": [
+                {"term": "objective", "definition": "What students should learn this week."},
+                {
+                    "term": "evidence",
+                    "definition": "Proof from the text or lesson that supports your thinking.",
+                },
+                {
+                    "term": "main idea",
+                    "definition": "The most important point the author or lesson wants you to understand.",
+                },
+                {
+                    "term": "supporting detail",
+                    "definition": "A fact or example that explains the main idea.",
+                },
+            ],
+        },
+        mapping,
+    )
 
 
 def _student_deck_visual(
@@ -987,200 +1128,291 @@ def build_student_lesson_deck(
     if source_texts:
         hook_body += f" We will work with {source_texts[0]}."
     hook_body += " Get ready to think and discover!"
-    slides.append({
-        "id": next_id(),
-        "slide_type": "hook",
-        "layout": "hook_full_image",
-        "title": f"Ready to Learn About {subj}?",
-        "body": hook_body,
-        "bullets": [f"Subject: {subj}", f"Week: {week_label}"],
-        "engagement": {
-            "type": "think_pair_share",
-            "prompt": "What do you already know about this topic? Share with a partner!",
-        },
-        "visual": _student_deck_visual(
-            search_terms=[f"{subj} students learning classroom", "elementary students excited classroom", "classroom discovery learning"],
-            purpose=f"Sets an inviting tone and connects {subj} to students' experience.",
-            alt_text=f"Students learning about {subj} in an elementary classroom",
-            placement="full_width",
-            fallback_organizer="concept_map",
-        ),
-    })
+    slides.append(
+        {
+            "id": next_id(),
+            "slide_type": "hook",
+            "layout": "hook_full_image",
+            "title": f"Ready to Learn About {subj}?",
+            "body": hook_body,
+            "bullets": [f"Subject: {subj}", f"Week: {week_label}"],
+            "engagement": {
+                "type": "think_pair_share",
+                "prompt": "What do you already know about this topic? Share with a partner!",
+            },
+            "visual": _student_deck_visual(
+                search_terms=[
+                    f"{subj} students learning classroom",
+                    "elementary students excited classroom",
+                    "classroom discovery learning",
+                ],
+                purpose=f"Sets an inviting tone and connects {subj} to students' experience.",
+                alt_text=f"Students learning about {subj} in an elementary classroom",
+                placement="full_width",
+                fallback_organizer="concept_map",
+            ),
+        }
+    )
 
     # Today we learn
     obj_body = objective_text
     if len(obj_body.split()) > 30:
         obj_body = " ".join(obj_body.split()[:30]) + "..."
-    slides.append({
-        "id": next_id(),
-        "slide_type": "today_we_learn",
-        "layout": "objective_image",
-        "title": "Today You Will Learn To...",
-        "body": obj_body,
-        "bullets": obj_bullets,
-        "engagement": {
-            "type": "turn_and_talk",
-            "prompt": "Read the learning goal with your partner. Can you say it in your own words?",
-        },
-        "visual": _student_deck_visual(
-            search_terms=["students reading classroom discussion", "learning goal target education elementary", "classroom reading lesson"],
-            purpose="Shows students engaged in learning to connect the objective to real classroom experience.",
-            alt_text="Students engaged in classroom learning activity",
-            placement="right",
-            fallback_organizer="concept_map",
-        ),
-    })
+    slides.append(
+        {
+            "id": next_id(),
+            "slide_type": "today_we_learn",
+            "layout": "objective_image",
+            "title": "Today You Will Learn To...",
+            "body": obj_body,
+            "bullets": obj_bullets,
+            "engagement": {
+                "type": "turn_and_talk",
+                "prompt": "Read the learning goal with your partner. Can you say it in your own words?",
+            },
+            "visual": _student_deck_visual(
+                search_terms=[
+                    "students reading classroom discussion",
+                    "learning goal target education elementary",
+                    "classroom reading lesson",
+                ],
+                purpose="Shows students engaged in learning to connect the objective to real classroom experience.",
+                alt_text="Students engaged in classroom learning activity",
+                placement="right",
+                fallback_organizer="concept_map",
+            ),
+        }
+    )
 
     # Vocabulary
     if source_texts:
         vocab_bullets = [f"{text}" for text in source_texts[:4]]
-        slides.append({
-            "id": next_id(),
-            "slide_type": "vocabulary",
-            "layout": "vocabulary_showcase",
-            "title": "Words to Know",
-            "body": f"These key words will help you understand {subj} today.",
-            "bullets": vocab_bullets,
-            "engagement": {
-                "type": "whiteboard",
-                "prompt": "Point to a word you know. Tell your neighbor what it means!",
-            },
-            "visual": _student_deck_visual(
-                search_terms=[f"{subj} vocabulary words elementary", "word wall classroom vocabulary", "vocabulary flashcards students"],
-                purpose="Visual word wall helps students connect vocabulary terms to meaning.",
-                alt_text="Vocabulary word wall with key lesson terms",
-                placement="right",
-                fallback_organizer="vocabulary_card",
-            ),
-        })
+        slides.append(
+            {
+                "id": next_id(),
+                "slide_type": "vocabulary",
+                "layout": "vocabulary_showcase",
+                "title": "Words to Know",
+                "body": f"These key words will help you understand {subj} today.",
+                "bullets": vocab_bullets,
+                "engagement": {
+                    "type": "whiteboard",
+                    "prompt": "Point to a word you know. Tell your neighbor what it means!",
+                },
+                "visual": _student_deck_visual(
+                    search_terms=[
+                        f"{subj} vocabulary words elementary",
+                        "word wall classroom vocabulary",
+                        "vocabulary flashcards students",
+                    ],
+                    purpose="Visual word wall helps students connect vocabulary terms to meaning.",
+                    alt_text="Vocabulary word wall with key lesson terms",
+                    placement="right",
+                    fallback_organizer="vocabulary_card",
+                ),
+            }
+        )
 
     # Concept slides
     concept_topics = (daily_topics or [])[:3]
     if concept_topics:
         for index, topic in enumerate(concept_topics, start=1):
-            slides.append({
+            slides.append(
+                {
+                    "id": next_id(),
+                    "slide_type": "concept",
+                    "layout": "teacher_modeling",
+                    "title": topic,
+                    "body": f"In {subj}, we focus on: {topic}.",
+                    "bullets": [
+                        f"Key idea {index}: {topic}",
+                        "Look for evidence.",
+                        "Ask: How does this connect?",
+                    ],
+                    "engagement": {
+                        "type": "turn_and_talk",
+                        "prompt": f"How does '{topic}' connect to what you already know? Discuss with your partner.",
+                    },
+                    "visual": _student_deck_visual(
+                        search_terms=[
+                            f"{topic} {subj} elementary illustration",
+                            f"{topic} classroom visual",
+                            f"{subj} students lesson",
+                        ],
+                        purpose=f"Visual anchor for the concept '{topic}' in {subj}.",
+                        alt_text=f"Educational illustration showing {topic}",
+                        placement="right",
+                        fallback_organizer="concept_map",
+                    ),
+                }
+            )
+    else:
+        slides.append(
+            {
                 "id": next_id(),
                 "slide_type": "concept",
                 "layout": "teacher_modeling",
-                "title": topic,
-                "body": f"In {subj}, we focus on: {topic}.",
-                "bullets": [f"Key idea {index}: {topic}", "Look for evidence.", "Ask: How does this connect?"],
+                "title": f"The Big Idea in {subj}",
+                "body": f"The main idea: {obj_body}",
+                "bullets": [
+                    "Find the main idea.",
+                    "Support it with details.",
+                    "Connect it to what you know.",
+                ],
                 "engagement": {
-                    "type": "turn_and_talk",
-                    "prompt": f"How does '{topic}' connect to what you already know? Discuss with your partner.",
+                    "type": "think_pair_share",
+                    "prompt": "What is the main idea? Write it in your own words.",
                 },
                 "visual": _student_deck_visual(
-                    search_terms=[f"{topic} {subj} elementary illustration", f"{topic} classroom visual", f"{subj} students lesson"],
-                    purpose=f"Visual anchor for the concept '{topic}' in {subj}.",
-                    alt_text=f"Educational illustration showing {topic}",
+                    search_terms=[
+                        f"{subj} main idea graphic organizer",
+                        f"{subj} concept map students",
+                        "main idea supporting details elementary",
+                    ],
+                    purpose=f"Helps students visualize the central concept of {subj}.",
+                    alt_text=f"Graphic organizer showing the main idea of {subj}",
                     placement="right",
                     fallback_organizer="concept_map",
                 ),
-            })
-    else:
-        slides.append({
+            }
+        )
+
+    # Your turn
+    slides.append(
+        {
             "id": next_id(),
-            "slide_type": "concept",
-            "layout": "teacher_modeling",
-            "title": f"The Big Idea in {subj}",
-            "body": f"The main idea: {obj_body}",
-            "bullets": ["Find the main idea.", "Support it with details.", "Connect it to what you know."],
+            "slide_type": "your_turn",
+            "layout": "guided_practice_image",
+            "title": "Your Turn — Let's Practice!",
+            "body": f"Show what you know about {subj}. Work with a partner to complete the activity.",
+            "bullets": [
+                "Read the prompt carefully.",
+                "Use evidence from the lesson.",
+                "Be ready to share!",
+            ],
             "engagement": {
                 "type": "think_pair_share",
-                "prompt": "What is the main idea? Write it in your own words.",
+                "prompt": "Complete the practice activity with your partner. You have 5 minutes — go!",
             },
             "visual": _student_deck_visual(
-                search_terms=[f"{subj} main idea graphic organizer", f"{subj} concept map students", "main idea supporting details elementary"],
-                purpose=f"Helps students visualize the central concept of {subj}.",
-                alt_text=f"Graphic organizer showing the main idea of {subj}",
+                search_terms=[
+                    "students working together classroom elementary",
+                    "partner activity collaborative learning",
+                    "students discussing classroom",
+                ],
+                purpose="Shows collaborative learning to motivate students during practice.",
+                alt_text="Elementary students working together on a classroom activity",
+                placement="right",
+                fallback_organizer="process_flow",
+            ),
+        }
+    )
+
+    # Check in
+    slides.append(
+        {
+            "id": next_id(),
+            "slide_type": "check_in",
+            "layout": "exit_ticket_image",
+            "title": "Check In — How Are You Doing?",
+            "body": "Let's see how well you understand today's lesson.",
+            "bullets": [
+                "1 finger = I need help",
+                "3 fingers = I'm getting it",
+                "5 fingers = I've got this!",
+            ],
+            "engagement": {
+                "type": "show_fingers",
+                "prompt": f"Hold up fingers to show your confidence. Can you explain the main idea of {subj}?",
+            },
+            "visual": _student_deck_visual(
+                search_terms=[
+                    "student confidence check elementary classroom",
+                    "students showing understanding hands",
+                    "self assessment elementary",
+                ],
+                purpose="Confidence check visual prompts honest student self-reflection.",
+                alt_text="Students showing hand signals for understanding in classroom",
                 placement="right",
                 fallback_organizer="concept_map",
             ),
-        })
-
-    # Your turn
-    slides.append({
-        "id": next_id(),
-        "slide_type": "your_turn",
-        "layout": "guided_practice_image",
-        "title": "Your Turn — Let's Practice!",
-        "body": f"Show what you know about {subj}. Work with a partner to complete the activity.",
-        "bullets": ["Read the prompt carefully.", "Use evidence from the lesson.", "Be ready to share!"],
-        "engagement": {
-            "type": "think_pair_share",
-            "prompt": "Complete the practice activity with your partner. You have 5 minutes — go!",
-        },
-        "visual": _student_deck_visual(
-            search_terms=["students working together classroom elementary", "partner activity collaborative learning", "students discussing classroom"],
-            purpose="Shows collaborative learning to motivate students during practice.",
-            alt_text="Elementary students working together on a classroom activity",
-            placement="right",
-            fallback_organizer="process_flow",
-        ),
-    })
-
-    # Check in
-    slides.append({
-        "id": next_id(),
-        "slide_type": "check_in",
-        "layout": "exit_ticket_image",
-        "title": "Check In — How Are You Doing?",
-        "body": "Let's see how well you understand today's lesson.",
-        "bullets": ["1 finger = I need help", "3 fingers = I'm getting it", "5 fingers = I've got this!"],
-        "engagement": {
-            "type": "show_fingers",
-            "prompt": f"Hold up fingers to show your confidence. Can you explain the main idea of {subj}?",
-        },
-        "visual": _student_deck_visual(
-            search_terms=["student confidence check elementary classroom", "students showing understanding hands", "self assessment elementary"],
-            purpose="Confidence check visual prompts honest student self-reflection.",
-            alt_text="Students showing hand signals for understanding in classroom",
-            placement="right",
-            fallback_organizer="concept_map",
-        ),
-    })
+        }
+    )
 
     # Wrap up
-    slides.append({
-        "id": next_id(),
-        "slide_type": "wrap_up",
-        "layout": "title_full",
-        "title": "Great Work Today!",
-        "body": f"You explored {subj} and practiced the key ideas. Keep thinking about this!",
-        "bullets": [f"We explored: {subj}", "You practiced with a partner.", "Next time we go deeper!"],
-        "engagement": {
-            "type": "exit_ticket",
-            "prompt": "Write your exit thought: 'Today I learned...' Share it before you leave!",
+    slides.append(
+        {
+            "id": next_id(),
+            "slide_type": "wrap_up",
+            "layout": "title_full",
+            "title": "Great Work Today!",
+            "body": f"You explored {subj} and practiced the key ideas. Keep thinking about this!",
+            "bullets": [
+                f"We explored: {subj}",
+                "You practiced with a partner.",
+                "Next time we go deeper!",
+            ],
+            "engagement": {
+                "type": "exit_ticket",
+                "prompt": "Write your exit thought: 'Today I learned...' Share it before you leave!",
+            },
+            "visual": _student_deck_visual(
+                search_terms=[
+                    "students celebrating learning classroom achievement",
+                    "classroom success celebration elementary",
+                    "happy students school achievement",
+                ],
+                purpose="Celebrates student effort and closes the lesson on a positive note.",
+                alt_text="Students celebrating their learning achievement in classroom",
+                placement="full_width",
+                fallback_organizer="concept_map",
+            ),
+        }
+    )
+
+    return _with_alignment(
+        {
+            "title": f"{title_label} — Student Lesson",
+            "summary": f"Student-facing lesson presentation for {subject_name}.",
+            "description": "Projected student lesson deck for classroom display.",
+            "slides": slides,
         },
-        "visual": _student_deck_visual(
-            search_terms=["students celebrating learning classroom achievement", "classroom success celebration elementary", "happy students school achievement"],
-            purpose="Celebrates student effort and closes the lesson on a positive note.",
-            alt_text="Students celebrating their learning achievement in classroom",
-            placement="full_width",
-            fallback_organizer="concept_map",
-        ),
-    })
-
-    return _with_alignment({
-        "title": f"{title_label} — Student Lesson",
-        "summary": f"Student-facing lesson presentation for {subject_name}.",
-        "description": "Projected student lesson deck for classroom display.",
-        "slides": slides,
-    }, mapping)
+        mapping,
+    )
 
 
-def build_study_guide(*, subject_name: str, week_label: str, package_title: str, objective_text: str, objective_code: str | None) -> dict[str, Any]:
+def build_study_guide(
+    *,
+    subject_name: str,
+    week_label: str,
+    package_title: str,
+    objective_text: str,
+    objective_code: str | None,
+) -> dict[str, Any]:
     mapping = _objective_mapping(objective_code, objective_text)
-    return _with_alignment({
-        "title": f"{package_title} — {subject_name} Study Guide",
-        "summary": f"Review guide for {week_label}.",
-        "description": "Student review before the weekly assessment.",
-        "sections": [
-            {"heading": "Learning Target", "body": objective_text},
-            {"heading": "Review Steps", "bullets": ["Reread your notes.", "Practice explaining the objective.", "Find two supporting details."]},
-            {"heading": "Practice", "body": f"Prepare for the {subject_name} quiz and written assignment."},
-        ],
-    }, mapping)
+    return _with_alignment(
+        {
+            "title": f"{package_title} — {subject_name} Study Guide",
+            "summary": f"Review guide for {week_label}.",
+            "description": "Student review before the weekly assessment.",
+            "sections": [
+                {"heading": "Learning Target", "body": objective_text},
+                {
+                    "heading": "Review Steps",
+                    "bullets": [
+                        "Reread your notes.",
+                        "Practice explaining the objective.",
+                        "Find two supporting details.",
+                    ],
+                },
+                {
+                    "heading": "Practice",
+                    "body": f"Prepare for the {subject_name} quiz and written assignment.",
+                },
+            ],
+        },
+        mapping,
+    )
 
 
 def build_deterministic_fallback(
@@ -1320,12 +1552,15 @@ def build_deterministic_fallback(
             objective_ids=objective_ids,
             teks_ids=teks_ids,
         )
-        return _with_alignment({
-            "title": f"{package_title} — {subject_name} Resource",
-            "summary": f"Instructional resource for {week_label}.",
-            "description": f"Supports {objective_text}",
-            "sections": [{"heading": "Overview", "body": objective_text}],
-        }, mapping)
+        return _with_alignment(
+            {
+                "title": f"{package_title} — {subject_name} Resource",
+                "summary": f"Instructional resource for {week_label}.",
+                "description": f"Supports {objective_text}",
+                "sections": [{"heading": "Overview", "body": objective_text}],
+            },
+            mapping,
+        )
     content = builder()
     if objective_ids is not None and "objective_ids" not in content:
         content["objective_ids"] = list(objective_ids)
@@ -1343,7 +1578,9 @@ def build_deterministic_fallback(
         if content["objective_mapping"].get("alignment_summary") is None:
             content["objective_mapping"]["alignment_summary"] = content["alignment_summary"]
     if artifact_type == "quiz" and content.get("google_forms_package") is None:
-        from oziebot_api.services.teacher_assist_v2.package_export import build_google_forms_package_payload
+        from oziebot_api.services.teacher_assist_v2.package_export import (
+            build_google_forms_package_payload,
+        )
 
         content["google_forms_package"] = build_google_forms_package_payload(content)
     return content

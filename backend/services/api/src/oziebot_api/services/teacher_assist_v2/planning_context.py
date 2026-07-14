@@ -117,9 +117,15 @@ def build_teacher_planning_generation_context(
         "weeks": review["weeks"],
         "pacing_materials": pacing_materials,
         "district_materials_summary": pacing_materials,
-        "teacher_supplemental_files": [row for row in supplemental if row["material_kind"] == "file"],
-        "teacher_supplemental_links": [row for row in supplemental if row["material_kind"] == "link"],
-        "teacher_supplemental_notes": [row for row in supplemental if row["material_kind"] == "note"],
+        "teacher_supplemental_files": [
+            row for row in supplemental if row["material_kind"] == "file"
+        ],
+        "teacher_supplemental_links": [
+            row for row in supplemental if row["material_kind"] == "link"
+        ],
+        "teacher_supplemental_notes": [
+            row for row in supplemental if row["material_kind"] == "note"
+        ],
         "district_document_context": district_document_context,
         "teacher_document_context": teacher_document_context,
         "district_link_context": district_link_context,

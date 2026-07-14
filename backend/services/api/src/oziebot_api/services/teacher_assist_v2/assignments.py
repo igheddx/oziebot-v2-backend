@@ -24,9 +24,15 @@ from oziebot_api.services.teacher_assist_v2.assignment_constants import (
     ASSIGNMENT_TYPES,
 )
 from oziebot_api.services.teacher_assist_v2.package_export import artifact_download_url
-from oziebot_api.services.teacher_assist_v2.assignment_print_packets import get_assignment_cover_sheets
-from oziebot_api.services.teacher_assist_v2.submission_intake import get_assignment_submission_summary
-from oziebot_api.services.teacher_assist_v2.gradebook_workspace import build_assignment_gradebook_summary
+from oziebot_api.services.teacher_assist_v2.assignment_print_packets import (
+    get_assignment_cover_sheets,
+)
+from oziebot_api.services.teacher_assist_v2.submission_intake import (
+    get_assignment_submission_summary,
+)
+from oziebot_api.services.teacher_assist_v2.gradebook_workspace import (
+    build_assignment_gradebook_summary,
+)
 from oziebot_api.services.teacher_assist_v2.objective_performance import ObjectivePerformanceService
 from oziebot_api.services.teacher_assist_v2.grade_reviews import (
     build_assignment_completion_summary,
@@ -38,8 +44,12 @@ from oziebot_api.services.teacher_assist_v2.grading_rubric import (
     resolve_assignment_rubric_content,
 )
 from oziebot_api.services.teacher_assist_v2.planning_workflow import _require_planning_ready
-from oziebot_api.services.teacher_assist_v2.rubric_score_exports import assignment_rubric_score_report_status
-from oziebot_api.services.teacher_assist_v2.submission_workflow import refresh_assignment_completion_status
+from oziebot_api.services.teacher_assist_v2.rubric_score_exports import (
+    assignment_rubric_score_report_status,
+)
+from oziebot_api.services.teacher_assist_v2.submission_workflow import (
+    refresh_assignment_completion_status,
+)
 
 
 def _now() -> datetime:
@@ -216,10 +226,16 @@ def list_teacher_assignments(
     )
     rows = db.scalars(stmt).all()
     subject_ids = {row.catalog_subject_id for row in rows}
-    subjects = {
-        row.id: row.display_name
-        for row in db.scalars(select(EducationSubject).where(EducationSubject.id.in_(subject_ids))).all()
-    } if subject_ids else {}
+    subjects = (
+        {
+            row.id: row.display_name
+            for row in db.scalars(
+                select(EducationSubject).where(EducationSubject.id.in_(subject_ids))
+            ).all()
+        }
+        if subject_ids
+        else {}
+    )
 
     summaries: list[dict[str, Any]] = []
     for row in rows:
@@ -266,9 +282,11 @@ def get_teacher_assignment_detail(
         raise ValueError("Assignment is missing its instructional plan.")
 
     objective_ids = [uuid.UUID(str(value)) for value in row.education_objective_ids_json]
-    objectives = db.scalars(
-        select(EducationObjective).where(EducationObjective.id.in_(objective_ids))
-    ).all() if objective_ids else []
+    objectives = (
+        db.scalars(select(EducationObjective).where(EducationObjective.id.in_(objective_ids))).all()
+        if objective_ids
+        else []
+    )
 
     artifacts = []
     for artifact in sorted(row.artifacts, key=lambda item: item.sequence_number):
@@ -278,7 +296,9 @@ def get_teacher_assignment_detail(
                 "artifact_type": artifact.artifact_type,
                 "title": artifact.title,
                 "preview_html": artifact.preview_html,
-                "download_url": artifact_download_url(artifact, settings=settings) if settings else None,
+                "download_url": artifact_download_url(artifact, settings=settings)
+                if settings
+                else None,
             }
         )
 
@@ -302,7 +322,9 @@ def get_teacher_assignment_detail(
         )
 
         google_connection = build_teacher_google_status(db, user=user, settings=settings)
-        google_form = serialize_assignment_google_form(get_assignment_google_form(db, assignment_id=row.id))
+        google_form = serialize_assignment_google_form(
+            get_assignment_google_form(db, assignment_id=row.id)
+        )
 
     rubric_content = resolve_assignment_rubric_content(db, assignment=row)
     rubric_template = grading_template_from_package_rubric(rubric_content)
@@ -345,7 +367,9 @@ def get_teacher_assignment_detail(
         "completion_summary": completion_summary,
         "grading_activity": grading_activity,
         "grade_reviews": list_assignment_grade_reviews(db, user=user, assignment_id=row.id),
-        "gradebook_summary": build_assignment_gradebook_summary(db, user=user, assignment_id=row.id),
+        "gradebook_summary": build_assignment_gradebook_summary(
+            db, user=user, assignment_id=row.id
+        ),
         "objective_performance": ObjectivePerformanceService.summarize_assignment_objectives(
             db, user=user, assignment_id=row.id
         ),

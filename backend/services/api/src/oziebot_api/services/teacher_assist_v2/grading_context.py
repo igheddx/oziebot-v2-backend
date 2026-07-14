@@ -8,7 +8,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.education_catalog import EducationGrade, EducationObjective, EducationSchoolYear, EducationSubject
+from oziebot_api.models.education_catalog import (
+    EducationGrade,
+    EducationObjective,
+    EducationSchoolYear,
+    EducationSubject,
+)
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
 from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2InstructionalPackage,
@@ -76,9 +81,11 @@ def build_grading_context(
     school_year = db.get(EducationSchoolYear, assignment.platform_school_year_id)
 
     objective_ids = [uuid.UUID(str(value)) for value in assignment.education_objective_ids_json]
-    objectives = db.scalars(
-        select(EducationObjective).where(EducationObjective.id.in_(objective_ids))
-    ).all() if objective_ids else []
+    objectives = (
+        db.scalars(select(EducationObjective).where(EducationObjective.id.in_(objective_ids))).all()
+        if objective_ids
+        else []
+    )
 
     artifacts = db.scalars(
         select(TeacherAssistV2InstructionalPackageArtifact).where(
@@ -87,7 +94,9 @@ def build_grading_context(
     ).all()
 
     assignment_instructions = assignment.description
-    rubric_content: dict[str, Any] | None = resolve_linked_rubric_content(artifacts, assignment=assignment)
+    rubric_content: dict[str, Any] | None = resolve_linked_rubric_content(
+        artifacts, assignment=assignment
+    )
     for artifact in artifacts:
         content = artifact.content_json if isinstance(artifact.content_json, dict) else None
         if artifact.assignment_id == assignment.id and artifact.artifact_type == "writing_response":
@@ -108,16 +117,15 @@ def build_grading_context(
 
     teacher_notes = db.scalars(
         select(TeacherAssistV2PlanningSupplementalMaterial).where(
-            TeacherAssistV2PlanningSupplementalMaterial.teacher_user_id == assignment.teacher_user_id,
+            TeacherAssistV2PlanningSupplementalMaterial.teacher_user_id
+            == assignment.teacher_user_id,
             TeacherAssistV2PlanningSupplementalMaterial.week_start <= assignment.week_number,
             TeacherAssistV2PlanningSupplementalMaterial.week_end >= assignment.week_number,
             TeacherAssistV2PlanningSupplementalMaterial.material_kind == "note",
         )
     ).all()
     teacher_note_bodies = [
-        row.note_body.strip()
-        for row in teacher_notes
-        if row.note_body and row.note_body.strip()
+        row.note_body.strip() for row in teacher_notes if row.note_body and row.note_body.strip()
     ]
     if package.close_out_notes:
         teacher_note_bodies.append(package.close_out_notes.strip())
@@ -129,10 +137,18 @@ def build_grading_context(
     student_response_text = (extraction or {}).get("effective_text")
 
     # Pull instructional contract and observable mastery evidence from the design plan.
-    plan = (package.instructional_design_plan_json or {}) if isinstance(package.instructional_design_plan_json, dict) else {}
+    plan = (
+        (package.instructional_design_plan_json or {})
+        if isinstance(package.instructional_design_plan_json, dict)
+        else {}
+    )
     plan_weeks = plan.get("weeks") or []
     week_match = next(
-        (w for w in plan_weeks if isinstance(w, dict) and w.get("week_number") == assignment.week_number),
+        (
+            w
+            for w in plan_weeks
+            if isinstance(w, dict) and w.get("week_number") == assignment.week_number
+        ),
         None,
     )
     instructional_contract: dict[str, Any] | None = None
@@ -140,7 +156,7 @@ def build_grading_context(
     if week_match:
         # Contract may sit at week level or inside a subject entry
         instructional_contract = week_match.get("instructional_contracts")
-        for subj_entry in (week_match.get("subjects") or []):
+        for subj_entry in week_match.get("subjects") or []:
             if not isinstance(subj_entry, dict):
                 continue
             if instructional_contract is None:

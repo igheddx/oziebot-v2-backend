@@ -50,14 +50,18 @@ def list_school_years(
     stmt = (
         select(TeacherAssistSchoolYear)
         .where(TeacherAssistSchoolYear.tenant_id == tenant_id)
-        .order_by(TeacherAssistSchoolYear.start_date.desc(), TeacherAssistSchoolYear.created_at.desc())
+        .order_by(
+            TeacherAssistSchoolYear.start_date.desc(), TeacherAssistSchoolYear.created_at.desc()
+        )
     )
     if not include_templates:
         stmt = stmt.where(TeacherAssistSchoolYear.is_template.is_(False))
     return db.scalars(stmt).all()
 
 
-def list_teacher_school_years(db: Session, *, tenant_id: uuid.UUID) -> list[TeacherAssistSchoolYear]:
+def list_teacher_school_years(
+    db: Session, *, tenant_id: uuid.UUID
+) -> list[TeacherAssistSchoolYear]:
     return list_school_years(db, tenant_id=tenant_id, include_templates=False)
 
 
@@ -164,7 +168,9 @@ def _validate_date_window(start_date: date, end_date: date, *, label: str) -> No
         raise ValueError(f"{label} start date must be on or before end date")
 
 
-def _enforce_active_school_year(db: Session, *, tenant_id: uuid.UUID, school_year_id: uuid.UUID) -> None:
+def _enforce_active_school_year(
+    db: Session, *, tenant_id: uuid.UUID, school_year_id: uuid.UUID
+) -> None:
     for row in db.scalars(
         select(TeacherAssistSchoolYear).where(TeacherAssistSchoolYear.tenant_id == tenant_id)
     ).all():
@@ -263,7 +269,10 @@ def _validate_grading_period_window(
 
 
 def _validate_school_year_grading_periods(school_year: TeacherAssistSchoolYear) -> None:
-    rows = sorted(school_year.grading_periods, key=lambda item: (item.start_date, item.sort_order, item.created_at))
+    rows = sorted(
+        school_year.grading_periods,
+        key=lambda item: (item.start_date, item.sort_order, item.created_at),
+    )
     for index, row in enumerate(rows):
         if row.start_date < school_year.start_date or row.end_date > school_year.end_date:
             raise ValueError("Existing grading period falls outside the updated school year dates")
@@ -382,7 +391,9 @@ def create_subject(
     return row
 
 
-def get_subject_or_404(db: Session, *, tenant_id: uuid.UUID, subject_id: uuid.UUID) -> TeacherAssistSubject:
+def get_subject_or_404(
+    db: Session, *, tenant_id: uuid.UUID, subject_id: uuid.UUID
+) -> TeacherAssistSubject:
     row = db.scalars(
         select(TeacherAssistSubject).where(
             TeacherAssistSubject.id == subject_id,
@@ -421,7 +432,9 @@ def create_class(
     return row
 
 
-def get_class_or_404(db: Session, *, tenant_id: uuid.UUID, class_id: uuid.UUID) -> TeacherAssistClass:
+def get_class_or_404(
+    db: Session, *, tenant_id: uuid.UUID, class_id: uuid.UUID
+) -> TeacherAssistClass:
     row = db.scalars(
         select(TeacherAssistClass).where(
             TeacherAssistClass.id == class_id,
@@ -660,7 +673,9 @@ class StandardImportCommitResult:
 STANDARD_IMPORT_REQUIRED_HEADERS = ("code", "type", "subject", "description")
 
 
-def _parse_standards_csv_rows(csv_content: str) -> tuple[list[dict[str, str]], list[StandardImportRowError]]:
+def _parse_standards_csv_rows(
+    csv_content: str,
+) -> tuple[list[dict[str, str]], list[StandardImportRowError]]:
     reader = csv.DictReader(io.StringIO(csv_content.strip()))
     if reader.fieldnames is None:
         raise ValueError("CSV file is empty or missing a header row")
@@ -708,11 +723,15 @@ def preview_standards_import(
         row_errors: list[StandardImportRowError] = []
         if not code:
             row_errors.append(
-                StandardImportRowError(row_number=row_number, field="code", message="Code is required.")
+                StandardImportRowError(
+                    row_number=row_number, field="code", message="Code is required."
+                )
             )
         if not standard_type:
             row_errors.append(
-                StandardImportRowError(row_number=row_number, field="type", message="Type is required.")
+                StandardImportRowError(
+                    row_number=row_number, field="type", message="Type is required."
+                )
             )
         else:
             try:

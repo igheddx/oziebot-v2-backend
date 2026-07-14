@@ -36,11 +36,17 @@ class TeacherAssistWorkflow(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     input_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON(), nullable=False)
     output_ref_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    output_ref_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
+    output_ref_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True, index=True
+    )
     error_message: Mapped[str | None] = mapped_column(Text(), nullable=True)
-    progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    progress_percent: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     leased_by_worker: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
@@ -48,8 +54,12 @@ class TeacherAssistWorkflow(Base):
     provider_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     provider_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    input_tokens_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    output_tokens_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    input_tokens_total: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    output_tokens_total: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     estimated_cost_cents_total: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
@@ -85,7 +95,9 @@ from typing import TYPE_CHECKING  # noqa: E402
 
 if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsageEvent
-    from oziebot_api.models.teacher_assist_planning_input_draft import TeacherAssistPlanningInputDraft
+    from oziebot_api.models.teacher_assist_planning_input_draft import (
+        TeacherAssistPlanningInputDraft,
+    )
     from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan
     from oziebot_api.models.teacher_assist_workflow_step import TeacherAssistWorkflowStep
     from oziebot_api.models.tenant import Tenant

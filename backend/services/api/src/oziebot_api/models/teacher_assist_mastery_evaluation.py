@@ -61,7 +61,9 @@ class TeacherAssistMasteryEvaluation(Base):
 
     tenant: Mapped["Tenant"] = relationship("Tenant")
     owner_user: Mapped["User"] = relationship("User", foreign_keys=[owner_user_id])
-    confirmed_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[confirmed_by_user_id])
+    confirmed_by_user: Mapped["User | None"] = relationship(
+        "User", foreign_keys=[confirmed_by_user_id]
+    )
     mastery_matrix: Mapped["TeacherAssistMasteryMatrix"] = relationship(
         "TeacherAssistMasteryMatrix",
         back_populates="evaluations",

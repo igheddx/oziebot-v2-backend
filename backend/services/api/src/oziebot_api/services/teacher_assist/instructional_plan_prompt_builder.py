@@ -49,7 +49,9 @@ def instructional_plan_output_schema() -> dict[str, Any]:
     }
 
 
-def instructional_plan_section_output_schema(section_key: str, *, section_path: str | None = None) -> dict[str, Any]:
+def instructional_plan_section_output_schema(
+    section_key: str, *, section_path: str | None = None
+) -> dict[str, Any]:
     top_level_array_sections = {
         "instructional_arc",
         "weekly_segments",
@@ -109,7 +111,8 @@ def build_instructional_plan_prompt(context_preview: dict[str, Any]) -> dict[str
         "duration": {
             "start_date": draft.get("start_date"),
             "end_date": draft.get("end_date"),
-            "estimated_weeks": draft.get("estimated_weeks") or duration_summary.get("estimated_weeks"),
+            "estimated_weeks": draft.get("estimated_weeks")
+            or duration_summary.get("estimated_weeks"),
             "instructional_days_count": draft.get("instructional_days_count")
             or duration_summary.get("instructional_days_count"),
             "summary": duration_summary.get("summary"),
@@ -173,13 +176,17 @@ def build_instructional_plan_section_regeneration_prompt(
         "section_path": section_path,
         "teacher_instruction": teacher_instruction,
         "preserve_existing_context": preserve_existing_context,
-        "planning_scope": current_plan_content.get("planning_scope") or draft.get("planning_scope", "weekly"),
-        "plan_title": current_plan_content.get("plan_title") or draft.get("plan_title") or draft.get("title"),
+        "planning_scope": current_plan_content.get("planning_scope")
+        or draft.get("planning_scope", "weekly"),
+        "plan_title": current_plan_content.get("plan_title")
+        or draft.get("plan_title")
+        or draft.get("title"),
         "module_title": current_plan_content.get("module_title") or draft.get("module_title"),
         "duration": {
             "start_date": current_plan_content.get("duration", {}).get("start_date")
             or draft.get("start_date"),
-            "end_date": current_plan_content.get("duration", {}).get("end_date") or draft.get("end_date"),
+            "end_date": current_plan_content.get("duration", {}).get("end_date")
+            or draft.get("end_date"),
             "estimated_weeks": current_plan_content.get("duration", {}).get("estimated_weeks")
             or draft.get("estimated_weeks")
             or duration_summary.get("estimated_weeks"),
@@ -208,7 +215,9 @@ def build_instructional_plan_section_regeneration_prompt(
         "current_section_content": current_section_content if preserve_existing_context else None,
         "output_contract": {
             "format": "JSON object only",
-            "schema": instructional_plan_section_output_schema(section_key, section_path=section_path),
+            "schema": instructional_plan_section_output_schema(
+                section_key, section_path=section_path
+            ),
             "required_wrapper": {"section_content": "..."},
         },
         "instructions": [

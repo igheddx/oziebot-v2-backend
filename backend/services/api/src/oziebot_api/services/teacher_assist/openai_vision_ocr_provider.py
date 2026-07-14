@@ -35,7 +35,9 @@ class OpenAIVisionTeacherAssistOCRProvider:
         file_bytes: bytes,
         settings: Settings,
     ) -> TeacherAssistOCRProviderResult:
-        model_name = get_teacher_assist_ocr_provider_model(settings, provider_name=self.provider_name)
+        model_name = get_teacher_assist_ocr_provider_model(
+            settings, provider_name=self.provider_name
+        )
         timeout_seconds = max(5, int(settings.teacher_assist_ocr_provider_timeout_seconds))
         normalized_mime = (mime_type or "application/octet-stream").strip().lower()
         image_data_url = (

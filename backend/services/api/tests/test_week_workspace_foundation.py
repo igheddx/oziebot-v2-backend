@@ -42,7 +42,12 @@ def test_week_workspace_context_generate_and_history(client, db_session: Session
     school_class = client.post(
         "/v1/teacher-assist/classes",
         headers={"Authorization": f"Bearer {teacher_token}"},
-        json={"name": "Week Workspace Class", "grade_level": "5", "student_count": 20, "school_year_id": school_year["id"]},
+        json={
+            "name": "Week Workspace Class",
+            "grade_level": "5",
+            "student_count": 20,
+            "school_year_id": school_year["id"],
+        },
     )
     assert school_class.status_code == 201, school_class.text
     class_id = school_class.json()["id"]

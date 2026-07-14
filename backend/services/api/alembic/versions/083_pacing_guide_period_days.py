@@ -32,7 +32,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["period_id"], ["pacing_guide_periods.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_pacing_guide_period_days_period_id", "pacing_guide_period_days", ["period_id"])
+    op.create_index(
+        "ix_pacing_guide_period_days_period_id", "pacing_guide_period_days", ["period_id"]
+    )
 
     op.add_column(
         "pacing_guide_supporting_materials",
@@ -88,7 +90,9 @@ def upgrade() -> None:
     ).fetchall()
     now = datetime.now(UTC)
     for period_id, metadata_json in periods:
-        metadata = metadata_json if isinstance(metadata_json, dict) else json.loads(metadata_json or "{}")
+        metadata = (
+            metadata_json if isinstance(metadata_json, dict) else json.loads(metadata_json or "{}")
+        )
         daily_plans = metadata.get("daily_plans") or []
         if not isinstance(daily_plans, list):
             continue
@@ -130,7 +134,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_pacing_guide_supporting_materials_period_day_id", "pacing_guide_supporting_materials")
+    op.drop_index(
+        "ix_pacing_guide_supporting_materials_period_day_id", "pacing_guide_supporting_materials"
+    )
     op.drop_constraint(
         "fk_pacing_guide_supporting_materials_source_pacing_guide_id",
         "pacing_guide_supporting_materials",

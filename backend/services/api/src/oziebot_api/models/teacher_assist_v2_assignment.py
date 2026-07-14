@@ -26,7 +26,9 @@ class TeacherAssistV2Assignment(Base):
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     platform_school_year_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_school_years.id", ondelete="CASCADE"), nullable=False
+        Uuid(as_uuid=True),
+        ForeignKey("education_school_years.id", ondelete="CASCADE"),
+        nullable=False,
     )
     catalog_district_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("education_districts.id", ondelete="CASCADE"), nullable=False
@@ -53,8 +55,12 @@ class TeacherAssistV2Assignment(Base):
     assignment_type: Mapped[str] = mapped_column(String(32), nullable=False)
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str | None] = mapped_column(Text(), nullable=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT", server_default="DRAFT")
-    creation_origin: Mapped[str] = mapped_column(String(32), nullable=False, default="PACKAGE", server_default="PACKAGE")
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="DRAFT", server_default="DRAFT"
+    )
+    creation_origin: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="PACKAGE", server_default="PACKAGE"
+    )
     education_objective_ids_json: Mapped[list[Any]] = mapped_column(JSON(), nullable=False)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False

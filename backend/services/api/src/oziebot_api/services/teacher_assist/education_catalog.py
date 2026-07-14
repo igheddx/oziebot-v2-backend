@@ -72,7 +72,9 @@ def _parse_csv(csv_content: str) -> tuple[list[dict[str, str]], list[str]]:
     return rows, list(normalized_headers.keys())
 
 
-def list_states(db: Session, *, q: str | None = None, active_only: bool = False) -> list[EducationState]:
+def list_states(
+    db: Session, *, q: str | None = None, active_only: bool = False
+) -> list[EducationState]:
     stmt = select(EducationState).order_by(EducationState.name.asc())
     if active_only:
         stmt = stmt.where(EducationState.active.is_(True))
@@ -91,7 +93,9 @@ def get_state_or_404(db: Session, state_id: uuid.UUID) -> EducationState:
     return row
 
 
-def create_state(db: Session, *, name: str, abbreviation: str, active: bool = True) -> EducationState:
+def create_state(
+    db: Session, *, name: str, abbreviation: str, active: bool = True
+) -> EducationState:
     now = _now()
     row = EducationState(
         name=name.strip(),
@@ -118,7 +122,11 @@ def update_state(
 
 
 def list_districts(
-    db: Session, *, state_id: uuid.UUID | None = None, q: str | None = None, active_only: bool = False
+    db: Session,
+    *,
+    state_id: uuid.UUID | None = None,
+    q: str | None = None,
+    active_only: bool = False,
 ) -> list[EducationDistrict]:
     stmt = select(EducationDistrict).order_by(EducationDistrict.name.asc())
     if state_id is not None:
@@ -546,7 +554,9 @@ def list_curriculum_resources(
     return db.scalars(stmt).all()
 
 
-def get_curriculum_resource_or_404(db: Session, resource_id: uuid.UUID) -> EducationCurriculumResource:
+def get_curriculum_resource_or_404(
+    db: Session, resource_id: uuid.UUID
+) -> EducationCurriculumResource:
     row = db.get(EducationCurriculumResource, resource_id)
     if row is None:
         raise LookupError("Curriculum resource not found")
@@ -687,7 +697,11 @@ def update_resource_link(
 
 
 def list_teacher_assignments(
-    db: Session, *, user_id: uuid.UUID | None = None, school_id: uuid.UUID | None = None, active_only: bool = False
+    db: Session,
+    *,
+    user_id: uuid.UUID | None = None,
+    school_id: uuid.UUID | None = None,
+    active_only: bool = False,
 ) -> list[TeacherSchoolAssignment]:
     stmt = select(TeacherSchoolAssignment).order_by(TeacherSchoolAssignment.created_at.desc())
     if user_id is not None:
@@ -771,7 +785,9 @@ def update_teacher_assignment(
     return row
 
 
-def get_active_teacher_assignment(db: Session, *, user_id: uuid.UUID) -> TeacherSchoolAssignment | None:
+def get_active_teacher_assignment(
+    db: Session, *, user_id: uuid.UUID
+) -> TeacherSchoolAssignment | None:
     return db.scalars(
         select(TeacherSchoolAssignment)
         .where(TeacherSchoolAssignment.user_id == user_id, TeacherSchoolAssignment.active.is_(True))
@@ -782,13 +798,23 @@ def get_active_teacher_assignment(db: Session, *, user_id: uuid.UUID) -> Teacher
 
 def _state_by_abbreviation(db: Session, abbreviation: str) -> EducationState | None:
     return db.scalars(
-        select(EducationState).where(func.upper(EducationState.abbreviation) == abbreviation.strip().upper())
+        select(EducationState).where(
+            func.upper(EducationState.abbreviation) == abbreviation.strip().upper()
+        )
     ).one_or_none()
 
 
 def preview_objectives_import(db: Session, *, csv_content: str) -> CatalogImportPreviewResult:
     rows, headers = _parse_csv(csv_content)
-    required = {"state_abbreviation", "grade_level", "subject_code", "objective_type", "objective_id", "description", "coverage_type"}
+    required = {
+        "state_abbreviation",
+        "grade_level",
+        "subject_code",
+        "objective_type",
+        "objective_id",
+        "description",
+        "coverage_type",
+    }
     if not required.issubset(set(headers)):
         missing = ", ".join(sorted(required - set(headers)))
         raise ValueError(f"CSV headers must include: {missing}")
@@ -797,13 +823,25 @@ def preview_objectives_import(db: Session, *, csv_content: str) -> CatalogImport
     duplicate_count = 0
     for row in rows:
         row_number = int(row["_row_number"])
-        state = _state_by_abbreviation(db, row["state_abbreviation"]) if row["state_abbreviation"] else None
+        state = (
+            _state_by_abbreviation(db, row["state_abbreviation"])
+            if row["state_abbreviation"]
+            else None
+        )
         row_errors: list[CatalogImportRowError] = []
         if not row["state_abbreviation"]:
-            row_errors.append(CatalogImportRowError(row_number, "State abbreviation is required.", "state_abbreviation"))
+            row_errors.append(
+                CatalogImportRowError(
+                    row_number, "State abbreviation is required.", "state_abbreviation"
+                )
+            )
         elif state is None:
             row_errors.append(
-                CatalogImportRowError(row_number, f"State '{row['state_abbreviation']}' not found.", "state_abbreviation")
+                CatalogImportRowError(
+                    row_number,
+                    f"State '{row['state_abbreviation']}' not found.",
+                    "state_abbreviation",
+                )
             )
         for field in ("grade_level", "subject_code", "objective_id", "description"):
             if not row[field]:
@@ -841,7 +879,9 @@ def preview_objectives_import(db: Session, *, csv_content: str) -> CatalogImport
     )
 
 
-def commit_objectives_import(db: Session, *, rows: list[dict[str, str]]) -> CatalogImportCommitResult:
+def commit_objectives_import(
+    db: Session, *, rows: list[dict[str, str]]
+) -> CatalogImportCommitResult:
     created_count = 0
     skipped_duplicate_count = 0
     errors: list[CatalogImportRowError] = []
@@ -908,10 +948,18 @@ def build_teacher_catalog_context(db: Session, *, user_id: uuid.UUID) -> dict:
             "id": str(assignment.id),
             "state": {"id": str(state.id), "name": state.name, "abbreviation": state.abbreviation},
             "district": {"id": str(district.id), "name": district.name},
-            "school": {"id": str(school.id), "name": school.name, "school_type": school.school_type},
+            "school": {
+                "id": str(school.id),
+                "name": school.name,
+                "school_type": school.school_type,
+            },
         },
         "grades": [
-            {"id": str(grade.id), "grade_code": grade.grade_code, "display_name": grade.display_name}
+            {
+                "id": str(grade.id),
+                "grade_code": grade.grade_code,
+                "display_name": grade.display_name,
+            }
             for grade in grades
         ],
         "subjects": [

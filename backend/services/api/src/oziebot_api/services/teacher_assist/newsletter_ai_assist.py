@@ -175,9 +175,14 @@ def generate_newsletter_ai_draft(
     if normalized_provider_mode not in {"mock", "real"}:
         raise ValueError("Unsupported newsletter AI provider mode")
     if normalized_provider_mode == "real":
-        if not (settings.teacher_assist_real_provider_enabled or settings.teacher_assist_ai_enable_real_provider):
+        if not (
+            settings.teacher_assist_real_provider_enabled
+            or settings.teacher_assist_ai_enable_real_provider
+        ):
             raise ValueError("Real newsletter AI is disabled")
-        TeacherAssistProviderCircuitBreaker().assert_can_execute(settings, settings.teacher_assist_ai_provider)
+        TeacherAssistProviderCircuitBreaker().assert_can_execute(
+            settings, settings.teacher_assist_ai_provider
+        )
         raise ValueError("Real newsletter AI provider execution is not enabled in this phase")
 
     prompt_context = build_newsletter_prompt_context(
@@ -277,7 +282,9 @@ def regenerate_newsletter_section(
     if normalized_provider_mode == "real":
         raise ValueError("Real newsletter section regeneration is not enabled in this phase")
 
-    base_content = dict((newsletter.current_version.content_json if newsletter.current_version else {}) or {})
+    base_content = dict(
+        (newsletter.current_version.content_json if newsletter.current_version else {}) or {}
+    )
     if newsletter.current_version is None and normalized_section != "overview":
         raise ValueError("Generate a full AI draft before regenerating individual sections")
     prompt_context = build_newsletter_prompt_context(

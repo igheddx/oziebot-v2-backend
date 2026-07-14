@@ -88,7 +88,9 @@ class TeacherAssistAssignment(Base):
     tenant: Mapped["Tenant"] = relationship("Tenant")
     teacher_user: Mapped["User"] = relationship("User")
     school_year: Mapped["TeacherAssistSchoolYear"] = relationship("TeacherAssistSchoolYear")
-    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship("TeacherAssistGradingPeriod")
+    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship(
+        "TeacherAssistGradingPeriod"
+    )
     teacher_class: Mapped["TeacherAssistClass"] = relationship("TeacherAssistClass")
     subject: Mapped["TeacherAssistSubject"] = relationship("TeacherAssistSubject")
     source_plan: Mapped["TeacherAssistWeeklyPlan | None"] = relationship("TeacherAssistWeeklyPlan")
@@ -133,8 +135,12 @@ if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_assignment_grading_review import (
         TeacherAssistAssignmentGradingReview,
     )
-    from oziebot_api.models.teacher_assist_assignment_resource import TeacherAssistAssignmentResource
-    from oziebot_api.models.teacher_assist_assignment_standard import TeacherAssistAssignmentStandard
+    from oziebot_api.models.teacher_assist_assignment_resource import (
+        TeacherAssistAssignmentResource,
+    )
+    from oziebot_api.models.teacher_assist_assignment_standard import (
+        TeacherAssistAssignmentStandard,
+    )
     from oziebot_api.models.teacher_assist_student_work_submission import (
         TeacherAssistStudentWorkSubmission,
     )

@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from oziebot_api.services.teacher_assist.constants import instructional_week_href, weekly_planning_href
+from oziebot_api.services.teacher_assist.constants import (
+    instructional_week_href,
+    weekly_planning_href,
+)
 
 from tests.test_current_week_foundation import _align_teacher_tenant, _create_week_guide
 from tests.test_education_catalog import _root_token
@@ -34,12 +37,18 @@ def test_active_selection_auto_creates_instructional_week(client, db_session: Se
     week_id = by_period.json()["id"]
     assert by_period.json()["status"] == "DRAFT"
 
-    home = client.get("/v1/teacher-assist/home", headers={"Authorization": f"Bearer {teacher_token}"})
+    home = client.get(
+        "/v1/teacher-assist/home", headers={"Authorization": f"Bearer {teacher_token}"}
+    )
     assert home.status_code == 200, home.text
     home_payload = home.json()
     assert home_payload["instructional_week_id"] == week_id
-    assert home_payload["continue_planning"]["current_week_href"] == weekly_planning_href(str(period_id))
-    assert home_payload["continue_planning"]["instructional_week_href"] == instructional_week_href(week_id)
+    assert home_payload["continue_planning"]["current_week_href"] == weekly_planning_href(
+        str(period_id)
+    )
+    assert home_payload["continue_planning"]["instructional_week_href"] == instructional_week_href(
+        week_id
+    )
 
     workspace = client.get(
         "/v1/teacher-assist/pacing-guide-workspace",
@@ -51,7 +60,9 @@ def test_active_selection_auto_creates_instructional_week(client, db_session: Se
 
 def test_generated_artifact_links_instructional_week(client, db_session: Session):
     root_token = _root_token(client, db_session)
-    teacher_token = _teacher_token(client, db_session, tenant_name="Instructional Week Artifact Tenant")
+    teacher_token = _teacher_token(
+        client, db_session, tenant_name="Instructional Week Artifact Tenant"
+    )
     _align_teacher_tenant(db_session, teacher_email="pacing-guide-teacher@example.com")
     scope = _catalog_scope(client, root_token)
     school_year = _school_year(client, root_token)
@@ -74,7 +85,12 @@ def test_generated_artifact_links_instructional_week(client, db_session: Session
     school_class = client.post(
         "/v1/teacher-assist/classes",
         headers={"Authorization": f"Bearer {teacher_token}"},
-        json={"name": "Instructional Week Class", "grade_level": "5", "student_count": 20, "school_year_id": school_year["id"]},
+        json={
+            "name": "Instructional Week Class",
+            "grade_level": "5",
+            "student_count": 20,
+            "school_year_id": school_year["id"],
+        },
     )
     assert school_class.status_code == 201, school_class.text
 
@@ -114,7 +130,9 @@ def test_instructional_week_create_workspace_snapshot_and_next_week(client, db_s
     scope = _catalog_scope(client, root_token)
     school_year = _school_year(client, root_token)
     guide, period_id = _create_week_guide(client, root_token, scope, school_year)
-    next_period_id = _add_week_period(client, root_token, guide["id"], title="Week 2", sequence_number=2)
+    next_period_id = _add_week_period(
+        client, root_token, guide["id"], title="Week 2", sequence_number=2
+    )
 
     preview = client.get(
         f"/v1/teacher-assist/pacing-guide-periods/{period_id}/instructional-week-preview",
@@ -179,6 +197,8 @@ def test_instructional_week_create_workspace_snapshot_and_next_week(client, db_s
     assert next_week.json()["next_period_id"] == next_period_id
     assert next_week.json()["instructional_week_id"]
 
-    home = client.get("/v1/teacher-assist/home", headers={"Authorization": f"Bearer {teacher_token}"})
+    home = client.get(
+        "/v1/teacher-assist/home", headers={"Authorization": f"Bearer {teacher_token}"}
+    )
     assert home.status_code == 200, home.text
     assert home.json().get("instructional_week_id") == week_id

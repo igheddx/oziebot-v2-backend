@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from oziebot_api.models.teacher_assist_mastery_evaluation import TeacherAssistMasteryEvaluation
 from oziebot_api.models.teacher_assist_mastery_matrix import TeacherAssistMasteryMatrix
-from oziebot_api.models.teacher_assist_mastery_matrix_standard import TeacherAssistMasteryMatrixStandard
+from oziebot_api.models.teacher_assist_mastery_matrix_standard import (
+    TeacherAssistMasteryMatrixStandard,
+)
 from oziebot_api.services.teacher_assist.constants import MASTERY_LEVEL_RANK, MASTERY_LEVELS
 from oziebot_api.services.teacher_assist.mastery_commit_service import list_mastery_evaluations
 from oziebot_api.services.teacher_assist.mastery_matrix import get_mastery_matrix_or_404
@@ -128,8 +130,12 @@ def build_mastery_matrix_standards_summary(
             {
                 "matrix_standard_id": matrix_standard.id,
                 "standard_id": matrix_standard.standard_id,
-                "standard_code": matrix_standard.standard.code if matrix_standard.standard else None,
-                "standard_description": matrix_standard.standard.description if matrix_standard.standard else None,
+                "standard_code": matrix_standard.standard.code
+                if matrix_standard.standard
+                else None,
+                "standard_description": matrix_standard.standard.description
+                if matrix_standard.standard
+                else None,
                 "display_order": matrix_standard.display_order,
                 "target_mastery_level": matrix_standard.target_mastery_level,
                 "assessment_count": matrix_standard.assessment_count,
@@ -181,7 +187,9 @@ def build_mastery_matrix_students_summary(
         for row in rows:
             matrix_standard = standards_by_id.get(row.standard_id)
             target_level = matrix_standard.target_mastery_level if matrix_standard else "mastery"
-            needs_reteach = row.evaluation_status == "active" and _needs_reteach(row.mastery_level, target_level)
+            needs_reteach = row.evaluation_status == "active" and _needs_reteach(
+                row.mastery_level, target_level
+            )
             if needs_reteach:
                 reteach_count += 1
             cells.append(
@@ -254,7 +262,9 @@ def build_mastery_matrix_reteach_summary(
                 "evaluation_id": row.id,
                 "student_number": row.student_number,
                 "standard_id": row.standard_id,
-                "standard_code": matrix_standard.standard.code if matrix_standard and matrix_standard.standard else None,
+                "standard_code": matrix_standard.standard.code
+                if matrix_standard and matrix_standard.standard
+                else None,
                 "current_mastery_level": row.mastery_level,
                 "target_mastery_level": target_level,
                 "evidence_source_type": row.evidence_source_type,

@@ -6,8 +6,13 @@ import html
 from typing import Any
 
 from oziebot_api.config import Settings
-from oziebot_api.models.teacher_assist_v2_instructional_package import TeacherAssistV2InstructionalPackageArtifact
-from oziebot_api.services.teacher_assist.storage import get_teacher_assist_download_url, save_teacher_assist_bytes
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackageArtifact,
+)
+from oziebot_api.services.teacher_assist.storage import (
+    get_teacher_assist_download_url,
+    save_teacher_assist_bytes,
+)
 from oziebot_api.services.teacher_assist_v2.planning_constants import PACKAGE_ARTIFACT_GROUPS
 from oziebot_api.services.teacher_assist_v2.slide_visuals import render_visual_svg
 
@@ -107,10 +112,7 @@ def render_answer_key_html(content: dict[str, Any]) -> str:
         block += "</section>"
         blocks.append(block)
     title = f"{content.get('title')} — Answer Key"
-    body = (
-        f"{_print_button()}<h1>{_esc(title)}</h1>{_objective_block(content)}"
-        + "".join(blocks)
-    )
+    body = f"{_print_button()}<h1>{_esc(title)}</h1>{_objective_block(content)}" + "".join(blocks)
     return _html_document(title=title, body=body)
 
 
@@ -169,7 +171,9 @@ def render_daily_lesson_plan_html(content: dict[str, Any]) -> str:
     daily_topic = content.get("daily_topic")
     topic_block = ""
     if daily_topic:
-        topic_block = f"<section class='meta'><h2>Today's focus</h2><p>{_esc(daily_topic)}</p></section>"
+        topic_block = (
+            f"<section class='meta'><h2>Today's focus</h2><p>{_esc(daily_topic)}</p></section>"
+        )
     for subject in content.get("subjects") or []:
         if not isinstance(subject, dict):
             continue
@@ -181,16 +185,21 @@ def render_daily_lesson_plan_html(content: dict[str, Any]) -> str:
             ("Teacher modeling", subject.get("teacher_modeling") or subject.get("teacher_actions")),
             ("Guided practice", subject.get("guided_practice")),
             ("Independent practice", subject.get("independent_practice")),
-            ("Check for understanding", subject.get("check_for_understanding") or subject.get("assessment")),
+            (
+                "Check for understanding",
+                subject.get("check_for_understanding") or subject.get("assessment"),
+            ),
             ("Closure", subject.get("closure")),
             ("Teacher notes", subject.get("notes")),
         ]
         body = ""
         for heading, value in sections:
             if isinstance(value, list):
-                body += f"<p><strong>{_esc(heading)}:</strong></p><ul>" + "".join(
-                    f"<li>{_esc(item)}</li>" for item in value if item
-                ) + "</ul>"
+                body += (
+                    f"<p><strong>{_esc(heading)}:</strong></p><ul>"
+                    + "".join(f"<li>{_esc(item)}</li>" for item in value if item)
+                    + "</ul>"
+                )
             elif value:
                 body += f"<p><strong>{_esc(heading)}:</strong> {_esc(value)}</p>"
         blocks.append(f"<section><h2>{_esc(subject.get('subject_name'))}</h2>{body}</section>")
@@ -268,7 +277,9 @@ def render_quiz_html(content: dict[str, Any], *, include_answers: bool = False) 
     if intro and not include_answers:
         blocks.append(f"<section><h2>Instructions</h2><p>{_esc(intro)}</p></section>")
     if content.get("student_number_field") and not include_answers:
-        blocks.append("<section><p><strong>Student Number:</strong> ________________________________</p></section>")
+        blocks.append(
+            "<section><p><strong>Student Number:</strong> ________________________________</p></section>"
+        )
     for question in questions:
         if not isinstance(question, dict):
             continue
@@ -279,9 +290,11 @@ def render_quiz_html(content: dict[str, Any], *, include_answers: bool = False) 
             f"<p>{_esc(question.get('prompt'))}</p>"
         )
         if question.get("type") == "multiple_choice":
-            block += "<ol type='A'>" + "".join(
-                f"<li>{_esc(choice)}</li>" for choice in question.get("choices") or []
-            ) + "</ol>"
+            block += (
+                "<ol type='A'>"
+                + "".join(f"<li>{_esc(choice)}</li>" for choice in question.get("choices") or [])
+                + "</ol>"
+            )
         else:
             block += "".join(
                 "<div style='border-bottom:1px solid #cbd5e1;height:1.75rem;margin:.5rem 0'></div>"
@@ -312,7 +325,10 @@ def render_exit_ticket_html(content: dict[str, Any]) -> str:
         lines = int(question.get("response_lines") or 3)
         blocks.append(
             f"<section><h2>Question {index}</h2><p>{_esc(question.get('prompt'))}</p>"
-            + "".join("<div style='border-bottom:1px solid #cbd5e1;height:1.75rem;margin:.5rem 0'></div>" for _ in range(lines))
+            + "".join(
+                "<div style='border-bottom:1px solid #cbd5e1;height:1.75rem;margin:.5rem 0'></div>"
+                for _ in range(lines)
+            )
             + "</section>"
         )
     return (
@@ -330,7 +346,9 @@ def render_assignment_html(content: dict[str, Any]) -> str:
     lines = int(content.get("writing_lines") or 10)
     return (
         f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>{_esc(content.get('title'))}</title>"
-        "<style>" + _BASE_STYLE + " .passage{background:#f8fafc;padding:1rem;border-radius:12px}</style></head><body>"
+        "<style>"
+        + _BASE_STYLE
+        + " .passage{background:#f8fafc;padding:1rem;border-radius:12px}</style></head><body>"
         f"{_print_button()}<h1>{_esc(content.get('title'))}</h1>{_objective_block(content)}"
         f"<section><h2>Student Instructions</h2><ul>"
         + "".join(f"<li>{_esc(item)}</li>" for item in instructions)
@@ -340,7 +358,10 @@ def render_assignment_html(content: dict[str, Any]) -> str:
         + f"</ul><p><strong>Rubric:</strong> {_esc(content.get('rubric_reference'))}</p></section>"
         f"<section><h2>{_esc(content.get('passage_title'))}</h2><div class='passage'>{_esc(content.get('passage_text'))}</div></section>"
         f"<section><h2>Your Response</h2>"
-        + "".join("<div style='border-bottom:1px solid #cbd5e1;height:1.75rem;margin:.5rem 0'></div>" for _ in range(lines))
+        + "".join(
+            "<div style='border-bottom:1px solid #cbd5e1;height:1.75rem;margin:.5rem 0'></div>"
+            for _ in range(lines)
+        )
         + "</section></body></html>"
     )
 
@@ -361,7 +382,10 @@ def render_writing_response_html(content: dict[str, Any]) -> str:
     for page_index in range(response_pages):
         blocks.append(
             f"<section><h2>Writing Response {page_index + 1}</h2>"
-            + "".join("<div style='border-bottom:1px solid #cbd5e1;height:1.75rem;margin:.5rem 0'></div>" for _ in range(lines))
+            + "".join(
+                "<div style='border-bottom:1px solid #cbd5e1;height:1.75rem;margin:.5rem 0'></div>"
+                for _ in range(lines)
+            )
             + "</section>"
         )
     return (
@@ -407,7 +431,9 @@ def render_newsletter_html(content: dict[str, Any]) -> str:
             f"<section><h2>{_esc(section.get('heading'))}</h2>"
             f"<p>{_esc(section.get('body'))}</p>"
             + (
-                "<ul>" + "".join(f"<li>{_esc(item)}</li>" for item in section.get("bullets") or []) + "</ul>"
+                "<ul>"
+                + "".join(f"<li>{_esc(item)}</li>" for item in section.get("bullets") or [])
+                + "</ul>"
                 if section.get("bullets")
                 else ""
             )
@@ -447,7 +473,9 @@ def render_generic_document_html(content: dict[str, Any]) -> str:
             f"<section><h2>{_esc(section.get('heading'))}</h2>"
             f"<p>{_esc(section.get('body'))}</p>"
             + (
-                "<ul>" + "".join(f"<li>{_esc(item)}</li>" for item in section.get("bullets") or []) + "</ul>"
+                "<ul>"
+                + "".join(f"<li>{_esc(item)}</li>" for item in section.get("bullets") or [])
+                + "</ul>"
                 if section.get("bullets")
                 else ""
             )

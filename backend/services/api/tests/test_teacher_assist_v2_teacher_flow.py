@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from oziebot_api.models.education_catalog import EducationGrade, EducationSchool, EducationSchoolYear, EducationState
+from oziebot_api.models.education_catalog import (
+    EducationGrade,
+    EducationSchool,
+    EducationSchoolYear,
+    EducationState,
+)
 from oziebot_api.models.user import User
 from oziebot_api.scripts.seed_teacher_assist_v2 import seed_teacher_assist_v2
-from oziebot_api.services.teacher_assist.teacher_assignment_provisioning import provision_teacher_school_assignment
+from oziebot_api.services.teacher_assist.teacher_assignment_provisioning import (
+    provision_teacher_school_assignment,
+)
 from tests.test_teacher_assist_setup import _grant_teacher_assist_access, _register_user
 
 
@@ -27,10 +34,16 @@ def test_v2_teacher_temp_password_and_onboarding_flow(client, db_session):
     db_session.commit()
 
     state = db_session.scalar(select(EducationState).where(EducationState.abbreviation == "TX"))
-    school = db_session.scalar(select(EducationSchool).where(EducationSchool.name == "Mason Elementary"))
-    school_year = db_session.scalar(select(EducationSchoolYear).where(EducationSchoolYear.title == "2026-2027"))
+    school = db_session.scalar(
+        select(EducationSchool).where(EducationSchool.name == "Mason Elementary")
+    )
+    school_year = db_session.scalar(
+        select(EducationSchoolYear).where(EducationSchoolYear.title == "2026-2027")
+    )
     grade = db_session.scalar(
-        select(EducationGrade).where(EducationGrade.school_id == school.id, EducationGrade.grade_code == "5")
+        select(EducationGrade).where(
+            EducationGrade.school_id == school.id, EducationGrade.grade_code == "5"
+        )
     )
     assert state and school and school_year and grade
 
@@ -58,7 +71,9 @@ def test_v2_teacher_temp_password_and_onboarding_flow(client, db_session):
     assert login.status_code == 200, login.text
     token = login.json()["access_token"]
 
-    context = client.get("/v1/teacher-assist-v2/context", headers={"Authorization": f"Bearer {token}"})
+    context = client.get(
+        "/v1/teacher-assist-v2/context", headers={"Authorization": f"Bearer {token}"}
+    )
     assert context.status_code == 200, context.text
     assert context.json()["landing_route"] == "/teacher-assist-v2/reset-password"
     assert context.json()["requires_password_change"] is True
@@ -138,7 +153,9 @@ def test_v2_teacher_temp_password_and_onboarding_flow(client, db_session):
     )
     assert resaved.status_code == 200, resaved.text
 
-    home = client.get("/v1/teacher-assist-v2/teacher/home", headers={"Authorization": f"Bearer {token}"})
+    home = client.get(
+        "/v1/teacher-assist-v2/teacher/home", headers={"Authorization": f"Bearer {token}"}
+    )
     assert home.status_code == 200, home.text
     assert home.json()["ready_to_plan"] is True
 
@@ -149,9 +166,13 @@ def test_v2_admin_provision_teacher(client, db_session):
     db_session.commit()
 
     state = db_session.scalar(select(EducationState).where(EducationState.abbreviation == "TX"))
-    school = db_session.scalar(select(EducationSchool).where(EducationSchool.name == "Mason Elementary"))
+    school = db_session.scalar(
+        select(EducationSchool).where(EducationSchool.name == "Mason Elementary")
+    )
     grade = db_session.scalar(
-        select(EducationGrade).where(EducationGrade.school_id == school.id, EducationGrade.grade_code == "5")
+        select(EducationGrade).where(
+            EducationGrade.school_id == school.id, EducationGrade.grade_code == "5"
+        )
     )
     assert state and school and grade
 

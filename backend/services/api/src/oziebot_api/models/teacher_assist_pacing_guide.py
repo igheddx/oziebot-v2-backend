@@ -42,30 +42,53 @@ class TeacherAssistPacingGuide(Base):
     guide_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="TEACHER")
     school_year_label: Mapped[str | None] = mapped_column(String(32), nullable=True)
     catalog_state_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_states.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_states.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     catalog_district_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_districts.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_districts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     catalog_school_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_schools.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_schools.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     catalog_grade_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_grades.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_grades.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     catalog_subject_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_subjects.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_subjects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
-    is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    ownership_type: Mapped[str] = mapped_column(String(32), nullable=False, default="TEACHER", server_default="TEACHER")
-    visibility_scope: Mapped[str] = mapped_column(String(32), nullable=False, default="PRIVATE", server_default="PRIVATE")
+    is_template: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    ownership_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="TEACHER", server_default="TEACHER"
+    )
+    visibility_scope: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="PRIVATE", server_default="PRIVATE"
+    )
     planning_group_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("teacher_assist_planning_groups.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON(), nullable=True)
     updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True

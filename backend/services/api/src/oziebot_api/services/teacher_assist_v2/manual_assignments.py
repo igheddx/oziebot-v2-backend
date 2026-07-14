@@ -12,7 +12,9 @@ from sqlalchemy.orm import Session
 from oziebot_api.config import Settings
 from oziebot_api.models.education_catalog import EducationObjective
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
-from oziebot_api.models.teacher_assist_v2_instructional_package import TeacherAssistV2InstructionalPackage
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackage,
+)
 from oziebot_api.models.teacher_assist_v2_onboarding import TeacherAssistV2PacingGuideAssignment
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist_v2.assignment_constants import (
@@ -45,7 +47,9 @@ def _field_errors(**errors: str) -> ValueError:
     return ValueError({key: value for key, value in errors.items() if value})
 
 
-def _ensure_manual_shell_package(db: Session, *, user: User, base: dict[str, Any]) -> TeacherAssistV2InstructionalPackage:
+def _ensure_manual_shell_package(
+    db: Session, *, user: User, base: dict[str, Any]
+) -> TeacherAssistV2InstructionalPackage:
     onboarding = base["onboarding"]
     ctx = base["ctx"]
     platform_year = base["platform_year"]
@@ -192,7 +196,9 @@ def create_teacher_manual_assignment(
     allowed_objective_ids = {row["education_objective_id"] for row in available_objectives}
     normalized_objective_ids = [str(value) for value in education_objective_ids]
     if any(value not in allowed_objective_ids for value in normalized_objective_ids):
-        raise _field_errors(education_objective_ids="Selected objectives must belong to the chosen week and subject.")
+        raise _field_errors(
+            education_objective_ids="Selected objectives must belong to the chosen week and subject."
+        )
 
     objectives = db.scalars(
         select(EducationObjective).where(EducationObjective.id.in_(education_objective_ids))
@@ -243,7 +249,9 @@ def create_teacher_manual_assignment(
     if generate_cover_sheets:
         cover_sheet = generate_assignment_cover_sheets(db, settings=settings, assignment=assignment)
 
-    detail = get_teacher_assignment_detail(db, user=user, assignment_id=assignment.id, settings=settings)
+    detail = get_teacher_assignment_detail(
+        db, user=user, assignment_id=assignment.id, settings=settings
+    )
     detail["cover_sheet"] = cover_sheet
     return detail
 

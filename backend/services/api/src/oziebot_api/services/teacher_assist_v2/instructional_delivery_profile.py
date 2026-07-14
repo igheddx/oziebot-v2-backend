@@ -49,55 +49,65 @@ PROFILE_MODE_DAILY_BALANCED = "daily_balanced"
 PROFILE_MODE_BLOCK_SCHEDULE = "block_schedule"
 PROFILE_MODE_CUSTOM = "custom"
 
-_ALL_MODES = frozenset({
-    PROFILE_MODE_AI_OPTIMIZED,
-    PROFILE_MODE_DAILY_BALANCED,
-    PROFILE_MODE_BLOCK_SCHEDULE,
-    PROFILE_MODE_CUSTOM,
-})
+_ALL_MODES = frozenset(
+    {
+        PROFILE_MODE_AI_OPTIMIZED,
+        PROFILE_MODE_DAILY_BALANCED,
+        PROFILE_MODE_BLOCK_SCHEDULE,
+        PROFILE_MODE_CUSTOM,
+    }
+)
 _ALL_WEEKDAYS = set(WEEKDAY_LABELS)
 
 # Classroom Instruction Profile — delivery mode options per strand
-STRAND_DELIVERY_MODES_READING = frozenset({
-    "teacher_read_aloud",            # Teacher reads aloud; students listen, discuss, respond in notebooks
-    "shared_reading",                # Whole class reads together (projected or class copies)
-    "students_have_individual_copies", # Each student has their own physical copy
-    "small_group_reading",           # Teacher-led small group instruction
-    "independent_reading",           # Students read independently from their own chosen texts
-    "teacher_choice",                # Teacher determines mode each session
-})
+STRAND_DELIVERY_MODES_READING = frozenset(
+    {
+        "teacher_read_aloud",  # Teacher reads aloud; students listen, discuss, respond in notebooks
+        "shared_reading",  # Whole class reads together (projected or class copies)
+        "students_have_individual_copies",  # Each student has their own physical copy
+        "small_group_reading",  # Teacher-led small group instruction
+        "independent_reading",  # Students read independently from their own chosen texts
+        "teacher_choice",  # Teacher determines mode each session
+    }
+)
 
-STRAND_DELIVERY_MODES_WRITING = frozenset({
-    "guided_writing",      # Teacher models writing; students write alongside
-    "independent_writing", # Students write independently after mini-lesson
-    "shared_writing",      # Whole class composes together with teacher as scribe
-    "teacher_choice",      # Teacher determines mode each session
-})
+STRAND_DELIVERY_MODES_WRITING = frozenset(
+    {
+        "guided_writing",  # Teacher models writing; students write alongside
+        "independent_writing",  # Students write independently after mini-lesson
+        "shared_writing",  # Whole class composes together with teacher as scribe
+        "teacher_choice",  # Teacher determines mode each session
+    }
+)
 
 STRAND_DELIVERY_MODES_ALL = STRAND_DELIVERY_MODES_READING | STRAND_DELIVERY_MODES_WRITING
 
 # How students physically access the CURRICULUM-SELECTED lesson text.
 # This is about the specific district/curriculum-assigned text (e.g. "The Crane Girl").
 # Separate from whether students have books for independent reading.
-CURRICULUM_TEXT_ACCESS_MODES = frozenset({
-    "teacher_copy_only",         # ONLY the teacher has the curriculum text; students never open/read it
-    "projected_shared_display",  # Text displayed on projector/smartboard for whole class to see
-    "class_set",                 # Every student has their own individual copy of the curriculum text
-    "small_group_sets",          # Copies available for small group rotation only
-    "digital_student_access",    # Students access curriculum text on individual devices
-    "student_choice_text",       # No single curriculum text; students choose their own
-})
+CURRICULUM_TEXT_ACCESS_MODES = frozenset(
+    {
+        "teacher_copy_only",  # ONLY the teacher has the curriculum text; students never open/read it
+        "projected_shared_display",  # Text displayed on projector/smartboard for whole class to see
+        "class_set",  # Every student has their own individual copy of the curriculum text
+        "small_group_sets",  # Copies available for small group rotation only
+        "digital_student_access",  # Students access curriculum text on individual devices
+        "student_choice_text",  # No single curriculum text; students choose their own
+    }
+)
 
 # Whether and how students access books for INDEPENDENT READING TIME.
 # Completely separate from curriculum_text_access — students may have classroom_library books
 # even when they cannot access the curriculum text (teacher_copy_only).
-INDEPENDENT_READING_ACCESS_MODES = frozenset({
-    "classroom_library_available",  # Classroom library books available for student choice
-    "school_library_available",     # School library books (checked out)
-    "student_brought_books",        # Students bring books from home
-    "digital_library",              # Digital library (Epic, Sora, etc.)
-    "none",                         # No independent reading time in this strand configuration
-})
+INDEPENDENT_READING_ACCESS_MODES = frozenset(
+    {
+        "classroom_library_available",  # Classroom library books available for student choice
+        "school_library_available",  # School library books (checked out)
+        "student_brought_books",  # Students bring books from home
+        "digital_library",  # Digital library (Epic, Sora, etc.)
+        "none",  # No independent reading time in this strand configuration
+    }
+)
 
 _DELIVERY_MODE_LABELS: dict[str, str] = {
     "teacher_read_aloud": "Teacher Read Aloud",
@@ -162,7 +172,9 @@ def check_curriculum_text_access_violations(
     for text in flat:
         for pattern in _TEACHER_COPY_ONLY_VIOLATION_PATTERNS:
             if pattern.search(text):
-                violations.append(f"always-forbidden: {pattern.pattern!r} matched in: {text[:80]!r}")
+                violations.append(
+                    f"always-forbidden: {pattern.pattern!r} matched in: {text[:80]!r}"
+                )
                 break
 
     # Text-name-specific patterns

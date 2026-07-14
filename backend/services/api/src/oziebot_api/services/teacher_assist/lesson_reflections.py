@@ -8,13 +8,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from oziebot_api.models.teacher_assist_lesson_reflection import TeacherAssistLessonReflection
-from oziebot_api.models.teacher_assist_lesson_reflection_version import TeacherAssistLessonReflectionVersion
+from oziebot_api.models.teacher_assist_lesson_reflection_version import (
+    TeacherAssistLessonReflectionVersion,
+)
 from oziebot_api.services.teacher_assist.activity_events import record_activity_event
 from oziebot_api.services.teacher_assist.constants import (
     validate_lesson_reflection_status,
     validate_lesson_reflection_version_source,
 )
-from oziebot_api.services.teacher_assist.lesson_effectiveness import build_weekly_plan_lesson_effectiveness_by_id
+from oziebot_api.services.teacher_assist.lesson_effectiveness import (
+    build_weekly_plan_lesson_effectiveness_by_id,
+)
 from oziebot_api.services.teacher_assist.setup import (
     get_class_or_404,
     get_grading_period_or_404,
@@ -142,7 +146,9 @@ def _validate_reflection_context(
 ) -> None:
     get_school_year_or_404(db, tenant_id=tenant_id, school_year_id=school_year_id)
     if grading_period_id is not None:
-        period = get_grading_period_or_404(db, tenant_id=tenant_id, grading_period_id=grading_period_id)
+        period = get_grading_period_or_404(
+            db, tenant_id=tenant_id, grading_period_id=grading_period_id
+        )
         if period.school_year_id != school_year_id:
             raise ValueError("Grading period does not belong to the selected school year")
     teacher_class = get_class_or_404(db, tenant_id=tenant_id, class_id=class_id)
@@ -251,7 +257,9 @@ def create_lesson_reflection_version(
     next_version = (
         db.scalar(
             select(TeacherAssistLessonReflectionVersion.version_number)
-            .where(TeacherAssistLessonReflectionVersion.lesson_reflection_id == lesson_reflection.id)
+            .where(
+                TeacherAssistLessonReflectionVersion.lesson_reflection_id == lesson_reflection.id
+            )
             .order_by(TeacherAssistLessonReflectionVersion.version_number.desc())
         )
         or 0
@@ -463,7 +471,9 @@ def serialize_lesson_reflection(reflection: TeacherAssistLessonReflection) -> di
     }
 
 
-def serialize_lesson_reflection_version(version: TeacherAssistLessonReflectionVersion) -> dict[str, Any]:
+def serialize_lesson_reflection_version(
+    version: TeacherAssistLessonReflectionVersion,
+) -> dict[str, Any]:
     return {
         "id": version.id,
         "lesson_reflection_id": version.lesson_reflection_id,

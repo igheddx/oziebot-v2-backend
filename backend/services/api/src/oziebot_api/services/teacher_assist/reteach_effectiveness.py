@@ -9,7 +9,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.teacher_assist_reteach_effectiveness import TeacherAssistReteachEffectivenessRecord
+from oziebot_api.models.teacher_assist_reteach_effectiveness import (
+    TeacherAssistReteachEffectivenessRecord,
+)
 from oziebot_api.services.teacher_assist.reteach_plans import get_reteach_plan_or_404
 
 
@@ -62,8 +64,12 @@ def list_reteach_effectiveness(
         TeacherAssistReteachEffectivenessRecord.owner_user_id == user_id,
     )
     if reteach_plan_id is not None:
-        query = query.where(TeacherAssistReteachEffectivenessRecord.reteach_plan_id == reteach_plan_id)
-    return list(db.scalars(query.order_by(TeacherAssistReteachEffectivenessRecord.recorded_at.desc())).all())
+        query = query.where(
+            TeacherAssistReteachEffectivenessRecord.reteach_plan_id == reteach_plan_id
+        )
+    return list(
+        db.scalars(query.order_by(TeacherAssistReteachEffectivenessRecord.recorded_at.desc())).all()
+    )
 
 
 def serialize_reteach_effectiveness(row: TeacherAssistReteachEffectivenessRecord) -> dict[str, Any]:

@@ -54,5 +54,7 @@ class TeacherAssistAIProvider(ABC):
     ) -> TeacherAssistAIProviderResult:
         raise NotImplementedError
 
-    def generate_weekly_plan(self, context_preview: dict[str, Any]) -> TeacherAssistAIProviderResult:
+    def generate_weekly_plan(
+        self, context_preview: dict[str, Any]
+    ) -> TeacherAssistAIProviderResult:
         return self.generate_instructional_plan(context_preview)

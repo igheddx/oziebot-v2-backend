@@ -261,7 +261,7 @@ class Settings(BaseSettings):
     teacher_assist_pixabay_api_key: str | None = Field(
         default=None,
         description="Pixabay API key for fetching royalty-free educational images for slide decks. "
-                    "Get a free key at https://pixabay.com/api/docs/",
+        "Get a free key at https://pixabay.com/api/docs/",
     )
 
 

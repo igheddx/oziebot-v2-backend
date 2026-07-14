@@ -19,7 +19,10 @@ def seed_week_generated_artifacts(db: Session) -> dict[str, int]:
     actor, tenant_id = _seed_actor(db)
     week = db.scalars(
         select(TeacherAssistPacingGuidePeriod)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id)
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id,
+        )
         .where(
             TeacherAssistPacingGuide.tenant_id == tenant_id,
             TeacherAssistPacingGuidePeriod.period_type == "WEEK",

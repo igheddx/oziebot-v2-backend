@@ -27,7 +27,9 @@ def _reflection_note_snippets(reflections: list) -> list[dict[str, Any]]:
             {
                 "reflection_id": str(reflection.id),
                 "title": reflection.title,
-                "weekly_plan_id": str(reflection.weekly_plan_id) if reflection.weekly_plan_id else None,
+                "weekly_plan_id": str(reflection.weekly_plan_id)
+                if reflection.weekly_plan_id
+                else None,
                 "what_worked": content.get("what_worked") or [],
                 "what_failed": content.get("what_failed") or [],
                 "notes_for_next_year": content.get("notes_for_next_year") or [],

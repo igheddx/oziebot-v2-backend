@@ -27,8 +27,14 @@ def upgrade() -> None:
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["student_submission_id"], ["teacher_assist_v2_student_submissions.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["student_submission_id"],
+            ["teacher_assist_v2_student_submissions.id"],
+            ondelete="CASCADE",
+        ),
         sa.ForeignKeyConstraint(["teacher_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -59,9 +65,17 @@ def upgrade() -> None:
         sa.Column("provider", sa.String(length=64), nullable=False),
         sa.Column("model", sa.String(length=128), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["grading_job_id"], ["teacher_assist_v2_grading_jobs.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["student_submission_id"], ["teacher_assist_v2_student_submissions.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["assignment_id"], ["teacher_assist_v2_assignments.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["grading_job_id"], ["teacher_assist_v2_grading_jobs.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["student_submission_id"],
+            ["teacher_assist_v2_student_submissions.id"],
+            ondelete="CASCADE",
+        ),
         sa.ForeignKeyConstraint(["teacher_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -75,7 +89,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_ta_v2_grading_drafts_submission", table_name="teacher_assist_v2_grading_drafts")
+    op.drop_index(
+        "ix_ta_v2_grading_drafts_submission", table_name="teacher_assist_v2_grading_drafts"
+    )
     op.drop_table("teacher_assist_v2_grading_drafts")
     op.drop_index("ix_ta_v2_grading_jobs_submission", table_name="teacher_assist_v2_grading_jobs")
     op.drop_table("teacher_assist_v2_grading_jobs")

@@ -76,11 +76,13 @@ def compute_planning_hash(
     """Hash of all Tier-1 planning stage outputs.
     Changes when any planning-stage AI output changes; invalidates all per-artifact
     Tier-2 slots downstream."""
-    return _stable_hash({
-        "csp": curriculum_sequence_plan,
-        "idp": instructional_design_plan,
-        "slj": strand_learning_journeys,
-    })
+    return _stable_hash(
+        {
+            "csp": curriculum_sequence_plan,
+            "idp": instructional_design_plan,
+            "slj": strand_learning_journeys,
+        }
+    )
 
 
 def compute_delivery_hash(delivery_profile: dict[str, Any] | None) -> str:
@@ -197,11 +199,8 @@ def compute_planning_cache_key(
     _link_hash = _stable_hash(
         sorted(
             str(link.get("external_url", "")) + str(link.get("title", ""))
-            for link in (
-                (context.get("district_link_context") or {}).get("used_links") or []
-            ) + (
-                (context.get("teacher_link_context") or {}).get("used_links") or []
-            )
+            for link in ((context.get("district_link_context") or {}).get("used_links") or [])
+            + ((context.get("teacher_link_context") or {}).get("used_links") or [])
         )
     )
     key = {

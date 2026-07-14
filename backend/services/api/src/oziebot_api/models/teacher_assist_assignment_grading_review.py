@@ -95,10 +95,14 @@ class TeacherAssistAssignmentGradingReview(Base):
         back_populates="grading_reviews",
     )
     school_year: Mapped["TeacherAssistSchoolYear"] = relationship("TeacherAssistSchoolYear")
-    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship("TeacherAssistGradingPeriod")
+    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship(
+        "TeacherAssistGradingPeriod"
+    )
     teacher_class: Mapped["TeacherAssistClass"] = relationship("TeacherAssistClass")
     subject: Mapped["TeacherAssistSubject"] = relationship("TeacherAssistSubject")
-    ai_usage_event: Mapped["TeacherAssistAIUsageEvent | None"] = relationship("TeacherAssistAIUsageEvent")
+    ai_usage_event: Mapped["TeacherAssistAIUsageEvent | None"] = relationship(
+        "TeacherAssistAIUsageEvent"
+    )
     items: Mapped[list["TeacherAssistAssignmentGradingReviewItem"]] = relationship(
         "TeacherAssistAssignmentGradingReviewItem",
         back_populates="grading_review",

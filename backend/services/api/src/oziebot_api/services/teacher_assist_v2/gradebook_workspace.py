@@ -18,7 +18,9 @@ from oziebot_api.services.teacher_assist_v2.gradebook_sync import (
     serialize_gradebook_record,
     serialize_mastery_evidence,
 )
-from oziebot_api.services.teacher_assist_v2.grade_review_constants import OFFICIAL_ASSIGNMENT_GRADE_STATUSES
+from oziebot_api.services.teacher_assist_v2.grade_review_constants import (
+    OFFICIAL_ASSIGNMENT_GRADE_STATUSES,
+)
 
 
 def list_gradebook_records(
@@ -44,17 +46,25 @@ def list_gradebook_records(
         objective_key = str(objective_id)
         rows = [row for row in rows if objective_key in (row.education_objective_ids_json or [])]
     assignment_ids = {row.assignment_id for row in rows}
-    assignments = {
-        row.id: row
-        for row in db.scalars(
-            select(TeacherAssistV2Assignment).where(TeacherAssistV2Assignment.id.in_(assignment_ids))
-        ).all()
-    } if assignment_ids else {}
+    assignments = (
+        {
+            row.id: row
+            for row in db.scalars(
+                select(TeacherAssistV2Assignment).where(
+                    TeacherAssistV2Assignment.id.in_(assignment_ids)
+                )
+            ).all()
+        }
+        if assignment_ids
+        else {}
+    )
 
     return [
         serialize_gradebook_record(
             row,
-            assignment_title=assignments.get(row.assignment_id).title if assignments.get(row.assignment_id) else None,
+            assignment_title=assignments.get(row.assignment_id).title
+            if assignments.get(row.assignment_id)
+            else None,
         )
         for row in rows
     ]
@@ -83,12 +93,16 @@ def list_mastery_evidence(
 
     rows = db.scalars(stmt.order_by(TeacherAssistV2MasteryEvidence.created_at.desc())).all()
     objective_ids = {row.education_objective_id for row in rows}
-    objectives = {
-        row.id: row
-        for row in db.scalars(
-            select(EducationObjective).where(EducationObjective.id.in_(objective_ids))
-        ).all()
-    } if objective_ids else {}
+    objectives = (
+        {
+            row.id: row
+            for row in db.scalars(
+                select(EducationObjective).where(EducationObjective.id.in_(objective_ids))
+            ).all()
+        }
+        if objective_ids
+        else {}
+    )
 
     return [
         serialize_mastery_evidence(
@@ -103,10 +117,13 @@ def list_mastery_evidence(
 
 def count_recent_confirmed_grades(db: Session, *, user: User, limit: int = 5) -> int:
     rows = db.scalars(
-        select(TeacherAssistV2AssignmentGrade).where(
+        select(TeacherAssistV2AssignmentGrade)
+        .where(
             TeacherAssistV2AssignmentGrade.teacher_user_id == user.id,
             TeacherAssistV2AssignmentGrade.status.in_(OFFICIAL_ASSIGNMENT_GRADE_STATUSES),
-        ).order_by(TeacherAssistV2AssignmentGrade.confirmed_at.desc()).limit(limit)
+        )
+        .order_by(TeacherAssistV2AssignmentGrade.confirmed_at.desc())
+        .limit(limit)
     ).all()
     return len(rows)
 

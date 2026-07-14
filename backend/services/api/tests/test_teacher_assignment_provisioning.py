@@ -25,17 +25,32 @@ def _seed_catalog(client, root_token: str) -> dict[str, str]:
     school = client.post(
         "/v1/teacher-assist/education-catalog/schools",
         headers={"Authorization": f"Bearer {root_token}"},
-        json={"district_id": district["id"], "name": "Mason Elementary", "school_type": "elementary", "active": True},
+        json={
+            "district_id": district["id"],
+            "name": "Mason Elementary",
+            "school_type": "elementary",
+            "active": True,
+        },
     ).json()
     grade = client.post(
         "/v1/teacher-assist/education-catalog/grades",
         headers={"Authorization": f"Bearer {root_token}"},
-        json={"school_id": school["id"], "grade_code": "5", "display_name": "Grade 5", "active": True},
+        json={
+            "school_id": school["id"],
+            "grade_code": "5",
+            "display_name": "Grade 5",
+            "active": True,
+        },
     ).json()
     client.post(
         "/v1/teacher-assist/education-catalog/subjects",
         headers={"Authorization": f"Bearer {root_token}"},
-        json={"grade_id": grade["id"], "subject_code": "Math", "display_name": "Math", "active": True},
+        json={
+            "grade_id": grade["id"],
+            "subject_code": "Math",
+            "display_name": "Math",
+            "active": True,
+        },
     )
     return {
         "state_id": state_id,

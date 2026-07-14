@@ -11,8 +11,12 @@ from oziebot_api.models.membership import TenantMembership
 from oziebot_api.models.platform_product import PlatformProduct
 from oziebot_api.models.teacher_assist_activity_event import TeacherAssistActivityEvent
 from oziebot_api.models.teacher_assist_ai_usage_event import TeacherAssistAIUsageEvent
-from oziebot_api.models.teacher_assist_assignment_grading_review import TeacherAssistAssignmentGradingReview
-from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
+from oziebot_api.models.teacher_assist_assignment_grading_review import (
+    TeacherAssistAssignmentGradingReview,
+)
+from oziebot_api.models.teacher_assist_assignment_grade_record import (
+    TeacherAssistAssignmentGradeRecord,
+)
 from oziebot_api.models.teacher_assist_assignment_gradebook_audit_event import (
     TeacherAssistAssignmentGradebookAuditEvent,
 )
@@ -57,7 +61,9 @@ def _register_user(client, *, email: str, tenant_name: str) -> str:
     return response.json()["access_token"]
 
 
-def _grant_teacher_assist_access(db_session: Session, *, email: str, status: str = "active") -> None:
+def _grant_teacher_assist_access(
+    db_session: Session, *, email: str, status: str = "active"
+) -> None:
     user = db_session.scalar(select(User).where(User.email == email))
     assert user is not None
     membership = db_session.scalar(
@@ -151,7 +157,9 @@ def _share_teacher_assist_tenant(
     member = db_session.scalar(select(User).where(User.email == member_email))
     assert owner is not None
     assert member is not None
-    owner_membership = db_session.scalar(select(TenantMembership).where(TenantMembership.user_id == owner.id))
+    owner_membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == owner.id)
+    )
     assert owner_membership is not None
     existing = db_session.scalar(
         select(TenantMembership).where(
@@ -226,7 +234,9 @@ def _real_provider_result(*, planning_scope: str = "weekly") -> TeacherAssistAIP
                 "intervention": ["Teacher conference"],
             },
             "assessment_checkpoints": ["Entry check", "Exit ticket"],
-            "resources_used": [{"id": "resource-1", "title": "Anchor text", "resource_type": "doc"}],
+            "resources_used": [
+                {"id": "resource-1", "title": "Anchor text", "resource_type": "doc"}
+            ],
             "teacher_notes_used": "Focus on text evidence and concise writing.",
             "review_notes": "",
         },
@@ -1049,7 +1059,9 @@ def test_real_provider_requires_api_key_and_allowed_model():
         )
 
 
-def test_worker_claims_queued_teacher_assist_workflow_and_sets_lease_fields(client, db_session: Session):
+def test_worker_claims_queued_teacher_assist_workflow_and_sets_lease_fields(
+    client, db_session: Session
+):
     email = "teacher-worker-lease@example.com"
     token = _register_user(client, email=email, tenant_name="Worker Lease Tenant")
     _grant_teacher_assist_access(db_session, email=email)
@@ -1164,8 +1176,13 @@ def test_weekly_plan_workflow_creates_persisted_output(client, db_session: Sessi
     assert weekly_plan_payload["content_json"]["teacher_review_checklist"]
     assert weekly_plan_payload["content_json"]["weekly_objectives"]
     assert weekly_plan_payload["content_json"]["subjects"][0]["vocabulary"]
-    assert weekly_plan_payload["content_json"]["subjects"][0]["daily_breakdown"][0]["day_label"] == "Monday"
-    assert weekly_plan_payload["content_json"]["subjects"][0]["daily_breakdown"][0]["materials_needed"]
+    assert (
+        weekly_plan_payload["content_json"]["subjects"][0]["daily_breakdown"][0]["day_label"]
+        == "Monday"
+    )
+    assert weekly_plan_payload["content_json"]["subjects"][0]["daily_breakdown"][0][
+        "materials_needed"
+    ]
     assert weekly_plan_payload["content_json"]["subjects"][0]["differentiation"]["support"]
     versions = client.get(
         f"/v1/teacher-assist/weekly-plans/{weekly_plan_id}/versions",
@@ -1460,7 +1477,9 @@ def test_copy_weekly_plan_does_not_call_ai(client, db_session: Session, monkeypa
     assert copied_payload["content_json"]["metadata"]["copy_mode"] == "personal_copy"
 
 
-def test_worker_retries_failed_workflow_until_retry_exhaustion(client, db_session: Session, monkeypatch):
+def test_worker_retries_failed_workflow_until_retry_exhaustion(
+    client, db_session: Session, monkeypatch
+):
     email = "teacher-worker-retry@example.com"
     token = _register_user(client, email=email, tenant_name="Worker Retry Tenant")
     _grant_teacher_assist_access(db_session, email=email)
@@ -1603,7 +1622,9 @@ def test_malformed_provider_output_fails_gracefully(client, db_session: Session,
         provider_name = "mock"
 
         def generate_instructional_plan(self, _: dict):
-            from oziebot_api.services.teacher_assist.ai_provider import TeacherAssistAIProviderResult
+            from oziebot_api.services.teacher_assist.ai_provider import (
+                TeacherAssistAIProviderResult,
+            )
 
             return TeacherAssistAIProviderResult(
                 content_json={"overview": "missing required structure"},
@@ -1703,10 +1724,13 @@ def test_invalid_real_provider_output_fails_without_creating_artifact(
     assert workflow.json()["status"] == "failed"
     assert workflow.json()["last_error_code"] == "execution_failed"
     assert "instructional_arc" in workflow.json()["error_message"]
-    assert client.get(
-        "/v1/teacher-assist/weekly-plans",
-        headers={"Authorization": f"Bearer {token}"},
-    ).json() == []
+    assert (
+        client.get(
+            "/v1/teacher-assist/weekly-plans",
+            headers={"Authorization": f"Bearer {token}"},
+        ).json()
+        == []
+    )
 
 
 def test_library_listing_only_returns_tenant_visible_plans_and_private_plans_stay_owner_only(
@@ -1722,7 +1746,9 @@ def test_library_listing_only_returns_tenant_visible_plans_and_private_plans_sta
     _grant_teacher_assist_access(db_session, email=outsider_email)
     _share_teacher_assist_tenant(db_session, owner_email=owner_email, member_email=teammate_email)
 
-    owner_context = _create_ready_planning_draft_context(client, token=owner_token, subject_name="Library")
+    owner_context = _create_ready_planning_draft_context(
+        client, token=owner_token, subject_name="Library"
+    )
     workflow = client.post(
         f"/v1/teacher-assist/planning-drafts/{owner_context['draft']['id']}/workflows/weekly-plan",
         headers={"Authorization": f"Bearer {owner_token}"},
@@ -1774,18 +1800,24 @@ def test_owner_can_update_sharing_fields_and_non_owner_cannot(client, db_session
     owner_email = "teacher-sharing-owner@example.com"
     teammate_email = "teacher-sharing-teammate@example.com"
     owner_token = _register_user(client, email=owner_email, tenant_name="Sharing Tenant")
-    teammate_token = _register_user(client, email=teammate_email, tenant_name="Sharing Member Tenant")
+    teammate_token = _register_user(
+        client, email=teammate_email, tenant_name="Sharing Member Tenant"
+    )
     _grant_teacher_assist_access(db_session, email=owner_email)
     _share_teacher_assist_tenant(db_session, owner_email=owner_email, member_email=teammate_email)
 
-    context = _create_ready_planning_draft_context(client, token=owner_token, subject_name="Sharing")
+    context = _create_ready_planning_draft_context(
+        client, token=owner_token, subject_name="Sharing"
+    )
     start = client.post(
         f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
         headers={"Authorization": f"Bearer {owner_token}"},
     )
     assert start.status_code == 202, start.text
     _run_teacher_assist_worker(db_session)
-    plan = client.get("/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {owner_token}"}).json()[0]
+    plan = client.get(
+        "/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {owner_token}"}
+    ).json()[0]
 
     owner_update = client.patch(
         f"/v1/teacher-assist/weekly-plans/{plan['id']}/sharing",
@@ -1817,7 +1849,9 @@ def test_copy_endpoint_preserves_lineage_and_can_patch_target_year(client, db_se
     )
     assert start.status_code == 202, start.text
     _run_teacher_assist_worker(db_session)
-    source_plan = client.get("/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {token}"}).json()[0]
+    source_plan = client.get(
+        "/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {token}"}
+    ).json()[0]
 
     next_school_year = client.post(
         "/v1/teacher-assist/school-years",
@@ -1861,7 +1895,9 @@ def test_rollover_candidates_find_prior_year_reusable_plans(client, db_session: 
     )
     assert start.status_code == 202, start.text
     _run_teacher_assist_worker(db_session)
-    source_plan = client.get("/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {token}"}).json()[0]
+    source_plan = client.get(
+        "/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {token}"}
+    ).json()[0]
     sharing = client.patch(
         f"/v1/teacher-assist/weekly-plans/{source_plan['id']}/sharing",
         headers={"Authorization": f"Bearer {token}"},
@@ -1911,7 +1947,9 @@ def test_rollover_copy_creates_target_year_copies_and_duplicate_rollover_is_warn
     )
     assert start.status_code == 202, start.text
     _run_teacher_assist_worker(db_session)
-    source_plan = client.get("/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {token}"}).json()[0]
+    source_plan = client.get(
+        "/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {token}"}
+    ).json()[0]
     sharing = client.patch(
         f"/v1/teacher-assist/weekly-plans/{source_plan['id']}/sharing",
         headers={"Authorization": f"Bearer {token}"},
@@ -1968,18 +2006,24 @@ def test_cross_tenant_rollover_access_is_blocked(client, db_session: Session):
     owner_email = "teacher-rollover-owner@example.com"
     outsider_email = "teacher-rollover-outsider@example.com"
     owner_token = _register_user(client, email=owner_email, tenant_name="Owner Rollover Tenant")
-    outsider_token = _register_user(client, email=outsider_email, tenant_name="Outsider Rollover Tenant")
+    outsider_token = _register_user(
+        client, email=outsider_email, tenant_name="Outsider Rollover Tenant"
+    )
     _grant_teacher_assist_access(db_session, email=owner_email)
     _grant_teacher_assist_access(db_session, email=outsider_email)
 
-    context = _create_ready_planning_draft_context(client, token=owner_token, subject_name="Blocked")
+    context = _create_ready_planning_draft_context(
+        client, token=owner_token, subject_name="Blocked"
+    )
     start = client.post(
         f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
         headers={"Authorization": f"Bearer {owner_token}"},
     )
     assert start.status_code == 202, start.text
     _run_teacher_assist_worker(db_session)
-    source_plan = client.get("/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {owner_token}"}).json()[0]
+    source_plan = client.get(
+        "/v1/teacher-assist/weekly-plans", headers={"Authorization": f"Bearer {owner_token}"}
+    ).json()[0]
     sharing = client.patch(
         f"/v1/teacher-assist/weekly-plans/{source_plan['id']}/sharing",
         headers={"Authorization": f"Bearer {owner_token}"},
@@ -2033,7 +2077,9 @@ def test_workflow_and_weekly_plan_retrieval_are_tenant_isolated(client, db_sessi
     _grant_teacher_assist_access(db_session, email=first_email)
     _grant_teacher_assist_access(db_session, email=second_email)
 
-    first_context = _create_ready_planning_draft_context(client, token=first_token, subject_name="History")
+    first_context = _create_ready_planning_draft_context(
+        client, token=first_token, subject_name="History"
+    )
     start = client.post(
         f"/v1/teacher-assist/planning-drafts/{first_context['draft']['id']}/workflows/weekly-plan",
         headers={"Authorization": f"Bearer {first_token}"},
@@ -2073,14 +2119,20 @@ def test_workflow_and_weekly_plan_retrieval_are_tenant_isolated(client, db_sessi
     )
     assert foreign_update.status_code == 404
 
-    assert client.get(
-        "/v1/teacher-assist/workflows",
-        headers={"Authorization": f"Bearer {second_token}"},
-    ).json() == []
-    assert client.get(
-        "/v1/teacher-assist/weekly-plans",
-        headers={"Authorization": f"Bearer {second_token}"},
-    ).json() == []
+    assert (
+        client.get(
+            "/v1/teacher-assist/workflows",
+            headers={"Authorization": f"Bearer {second_token}"},
+        ).json()
+        == []
+    )
+    assert (
+        client.get(
+            "/v1/teacher-assist/weekly-plans",
+            headers={"Authorization": f"Bearer {second_token}"},
+        ).json()
+        == []
+    )
 
 
 def test_cancel_workflow_rejects_completed_workflow(client, db_session: Session):
@@ -2165,7 +2217,9 @@ def test_weekly_plan_edit_creates_new_version_and_completed_status(client, db_se
     assert version_detail.json()["content_json"]["review_notes"] == updated_content["review_notes"]
 
 
-def test_regenerate_overview_only_creates_new_version_and_preserves_original(client, db_session: Session):
+def test_regenerate_overview_only_creates_new_version_and_preserves_original(
+    client, db_session: Session
+):
     email = "teacher-regen-overview@example.com"
     token = _register_user(client, email=email, tenant_name="Regenerate Overview Tenant")
     _grant_teacher_assist_access(db_session, email=email)
@@ -2206,7 +2260,9 @@ def test_regenerate_overview_only_creates_new_version_and_preserves_original(cli
     assert version_payload[1]["content_json"]["overview"] == original_overview
 
 
-def test_regenerate_specific_weekly_segment_only_updates_target_segment(client, db_session: Session):
+def test_regenerate_specific_weekly_segment_only_updates_target_segment(
+    client, db_session: Session
+):
     email = "teacher-regen-segment@example.com"
     token = _register_user(client, email=email, tenant_name="Regenerate Segment Tenant")
     _grant_teacher_assist_access(db_session, email=email)
@@ -2254,12 +2310,16 @@ def test_regenerate_invalid_section_key_is_rejected(client, db_session: Session)
     assert regenerated.status_code == 422, regenerated.text
 
 
-def test_regenerate_malformed_provider_output_fails_safely(client, db_session: Session, monkeypatch):
+def test_regenerate_malformed_provider_output_fails_safely(
+    client, db_session: Session, monkeypatch
+):
     email = "teacher-regen-malformed@example.com"
     token = _register_user(client, email=email, tenant_name="Regenerate Malformed Tenant")
     _grant_teacher_assist_access(db_session, email=email)
 
-    _, weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Malformed")
+    _, weekly_plan = _generate_weekly_plan(
+        client, db_session, token=token, subject_name="Malformed"
+    )
     original_overview = weekly_plan["content_json"]["overview"]
 
     class _MalformedProvider:
@@ -2273,7 +2333,11 @@ def test_regenerate_malformed_provider_output_fails_safely(client, db_session: S
                 input_tokens=0,
                 output_tokens=0,
                 estimated_cost_cents=0,
-                metadata_json={"is_mock": True, "provider_mode": "mock", "prompt_version": "instructional-plan-section-v1"},
+                metadata_json={
+                    "is_mock": True,
+                    "provider_mode": "mock",
+                    "prompt_version": "instructional-plan-section-v1",
+                },
             )
 
     monkeypatch.setattr(
@@ -2305,7 +2369,9 @@ def test_regenerate_copied_plan_records_zero_cost_usage_event_without_workflow_i
     token = _register_user(client, email=email, tenant_name="Regenerate Copy Tenant")
     _grant_teacher_assist_access(db_session, email=email)
 
-    _, source_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Copy Regen")
+    _, source_plan = _generate_weekly_plan(
+        client, db_session, token=token, subject_name="Copy Regen"
+    )
     copied = client.post(
         f"/v1/teacher-assist/weekly-plans/{source_plan['id']}/copy",
         headers={"Authorization": f"Bearer {token}"},
@@ -2322,9 +2388,14 @@ def test_regenerate_copied_plan_records_zero_cost_usage_event_without_workflow_i
     assert regenerated.status_code == 200, regenerated.text
     regenerated_payload = regenerated.json()
     assert regenerated_payload["workflow_id"] is None
-    assert regenerated_payload["latest_usage_event"]["feature"] == "weekly_plan_section_regeneration"
+    assert (
+        regenerated_payload["latest_usage_event"]["feature"] == "weekly_plan_section_regeneration"
+    )
     assert regenerated_payload["latest_usage_event"]["estimated_cost_cents"] == 0
-    assert regenerated_payload["latest_usage_event"]["metadata_json"]["weekly_plan_id"] == copied_payload["id"]
+    assert (
+        regenerated_payload["latest_usage_event"]["metadata_json"]["weekly_plan_id"]
+        == copied_payload["id"]
+    )
 
 
 def test_regenerate_real_provider_is_blocked_by_default(client, db_session: Session):
@@ -2332,7 +2403,9 @@ def test_regenerate_real_provider_is_blocked_by_default(client, db_session: Sess
     token = _register_user(client, email=email, tenant_name="Regenerate Real Blocked Tenant")
     _grant_teacher_assist_access(db_session, email=email)
 
-    _, weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Blocked Real")
+    _, weekly_plan = _generate_weekly_plan(
+        client, db_session, token=token, subject_name="Blocked Real"
+    )
 
     regenerated = client.post(
         f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/regenerate-section",
@@ -2664,7 +2737,10 @@ def test_assignment_attach_standard_is_idempotent(client, db_session: Session):
         json={"standard_id": second_standard.json()["id"]},
     )
     assert attach.status_code == 200, attach.text
-    assert attach.json()["standard_ids"] == [context["standard"]["id"], second_standard.json()["id"]]
+    assert attach.json()["standard_ids"] == [
+        context["standard"]["id"],
+        second_standard.json()["id"],
+    ]
 
     reattach = client.post(
         f"/v1/teacher-assist/assignments/{assignment_id}/standards",
@@ -2672,7 +2748,10 @@ def test_assignment_attach_standard_is_idempotent(client, db_session: Session):
         json={"standard_id": second_standard.json()["id"]},
     )
     assert reattach.status_code == 200, reattach.text
-    assert reattach.json()["standard_ids"] == [context["standard"]["id"], second_standard.json()["id"]]
+    assert reattach.json()["standard_ids"] == [
+        context["standard"]["id"],
+        second_standard.json()["id"],
+    ]
 
 
 def test_assignment_tenant_isolation(client, db_session: Session):
@@ -2683,7 +2762,9 @@ def test_assignment_tenant_isolation(client, db_session: Session):
     _grant_teacher_assist_access(db_session, email=first_email)
     _grant_teacher_assist_access(db_session, email=second_email)
 
-    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="History")
+    context = _create_ready_planning_draft_context(
+        client, token=first_token, subject_name="History"
+    )
     created = client.post(
         "/v1/teacher-assist/assignments",
         headers={"Authorization": f"Bearer {first_token}"},
@@ -2714,12 +2795,16 @@ def test_assignment_tenant_isolation(client, db_session: Session):
     assert foreign_update.status_code == 404
 
 
-def test_assignment_rejects_invalid_class_subject_school_year_relationships(client, db_session: Session):
+def test_assignment_rejects_invalid_class_subject_school_year_relationships(
+    client, db_session: Session
+):
     email = "teacher-assignment-invalid@example.com"
     token = _register_user(client, email=email, tenant_name="Assignment Invalid Tenant")
     _grant_teacher_assist_access(db_session, email=email)
 
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="Social Studies")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="Social Studies"
+    )
     extra_school_year = client.post(
         "/v1/teacher-assist/school-years",
         headers={"Authorization": f"Bearer {token}"},
@@ -2771,13 +2856,19 @@ def test_assignment_rejects_invalid_class_subject_school_year_relationships(clie
     assert "selected subject" in mismatched_subject.json()["detail"].lower()
 
 
-def test_weekly_plan_assignment_starter_copies_context_without_ai_usage(client, db_session: Session):
+def test_weekly_plan_assignment_starter_copies_context_without_ai_usage(
+    client, db_session: Session
+):
     email = "teacher-assignment-starter@example.com"
     token = _register_user(client, email=email, tenant_name="Assignment Starter Tenant")
     _grant_teacher_assist_access(db_session, email=email)
 
-    context, weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Starter")
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    context, weekly_plan = _generate_weekly_plan(
+        client, db_session, token=token, subject_name="Starter"
+    )
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
 
     starter = client.post(
         f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/assignments",
@@ -2794,7 +2885,9 @@ def test_weekly_plan_assignment_starter_copies_context_without_ai_usage(client, 
     assert payload["standard_ids"] == [context["standard"]["id"]]
     assert payload["resource_ids"] == [context["resource"]["id"]]
 
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     assert after_usage_count == before_usage_count
 
 
@@ -2823,7 +2916,11 @@ def test_assignment_print_packet_create_and_page_count(client, db_session: Sessi
     created = client.post(
         f"/v1/teacher-assist/assignments/{assignment_id}/print-packets",
         headers={"Authorization": f"Bearer {token}"},
-        json={"pages_per_student": 2, "template_type": "lined_writing_page", "output_format": "html"},
+        json={
+            "pages_per_student": 2,
+            "template_type": "lined_writing_page",
+            "output_format": "html",
+        },
     )
     assert created.status_code == 201, created.text
     packet = created.json()
@@ -2905,7 +3002,9 @@ def test_assignment_print_packet_tenant_isolation(client, db_session: Session):
     _grant_teacher_assist_access(db_session, email=first_email)
     _grant_teacher_assist_access(db_session, email=second_email)
 
-    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Isolation")
+    context = _create_ready_planning_draft_context(
+        client, token=first_token, subject_name="Isolation"
+    )
     assignment = client.post(
         "/v1/teacher-assist/assignments",
         headers={"Authorization": f"Bearer {first_token}"},
@@ -2976,14 +3075,18 @@ def test_assignment_print_packet_does_not_create_ai_usage_event(client, db_sessi
     )
     assert assignment.status_code == 201, assignment.text
 
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     packet = client.post(
         f"/v1/teacher-assist/assignments/{assignment.json()['id']}/print-packets",
         headers={"Authorization": f"Bearer {token}"},
         json={"pages_per_student": 3, "template_type": "blank_writing_page"},
     )
     assert packet.status_code == 201, packet.text
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     assert after_usage_count == before_usage_count
 
 
@@ -3118,7 +3221,9 @@ def test_assignment_student_work_link_context_and_update_status(client, db_sessi
     assert ready.json()["upload_status"] == "uploaded"
 
 
-def test_assignment_student_work_rejects_invalid_student_number_and_page_context(client, db_session: Session):
+def test_assignment_student_work_rejects_invalid_student_number_and_page_context(
+    client, db_session: Session
+):
     email = "teacher-student-work-invalid@example.com"
     token = _register_user(client, email=email, tenant_name="Student Work Invalid Tenant")
     _grant_teacher_assist_access(db_session, email=email)
@@ -3191,7 +3296,9 @@ def test_assignment_student_work_tenant_isolation(client, db_session: Session):
     _grant_teacher_assist_access(db_session, email=first_email)
     _grant_teacher_assist_access(db_session, email=second_email)
 
-    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Isolation")
+    context = _create_ready_planning_draft_context(
+        client, token=first_token, subject_name="Isolation"
+    )
     assignment = client.post(
         "/v1/teacher-assist/assignments",
         headers={"Authorization": f"Bearer {first_token}"},
@@ -3239,12 +3346,18 @@ def test_assignment_student_work_tenant_isolation(client, db_session: Session):
 def test_assignment_student_work_download_url_is_tenant_scoped(client, db_session: Session):
     first_email = "teacher-student-work-download-a@example.com"
     second_email = "teacher-student-work-download-b@example.com"
-    first_token = _register_user(client, email=first_email, tenant_name="Student Work Download Tenant A")
-    second_token = _register_user(client, email=second_email, tenant_name="Student Work Download Tenant B")
+    first_token = _register_user(
+        client, email=first_email, tenant_name="Student Work Download Tenant A"
+    )
+    second_token = _register_user(
+        client, email=second_email, tenant_name="Student Work Download Tenant B"
+    )
     _grant_teacher_assist_access(db_session, email=first_email)
     _grant_teacher_assist_access(db_session, email=second_email)
 
-    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Downloads")
+    context = _create_ready_planning_draft_context(
+        client, token=first_token, subject_name="Downloads"
+    )
     assignment = client.post(
         "/v1/teacher-assist/assignments",
         headers={"Authorization": f"Bearer {first_token}"},
@@ -3291,7 +3404,9 @@ def test_assignment_student_work_does_not_create_ai_usage_event(client, db_sessi
     token = _register_user(client, email=email, tenant_name="Student Work No AI Tenant")
     _grant_teacher_assist_access(db_session, email=email)
 
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="No AI Student Work")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="No AI Student Work"
+    )
     assignment = client.post(
         "/v1/teacher-assist/assignments",
         headers={"Authorization": f"Bearer {token}"},
@@ -3307,7 +3422,9 @@ def test_assignment_student_work_does_not_create_ai_usage_event(client, db_sessi
     )
     assert assignment.status_code == 201, assignment.text
 
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     uploaded = client.post(
         f"/v1/teacher-assist/assignments/{assignment.json()['id']}/student-work",
         headers={"Authorization": f"Bearer {token}"},
@@ -3315,7 +3432,9 @@ def test_assignment_student_work_does_not_create_ai_usage_event(client, db_sessi
         data={"student_number": "1"},
     )
     assert uploaded.status_code == 201, uploaded.text
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     assert after_usage_count == before_usage_count
 
 
@@ -3334,7 +3453,9 @@ def test_resource_extraction_job_completion_uses_storage_and_persists_preview(
     assert uploaded.status_code == 201, uploaded.text
     resource = uploaded.json()
 
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     opened_keys: list[str] = []
     from oziebot_api.services.teacher_assist import extraction_jobs as extraction_jobs_module
 
@@ -3376,7 +3497,9 @@ def test_resource_extraction_job_completion_uses_storage_and_persists_preview(
     assert resource_detail.json()["latest_extraction_job"]["status"] == "completed"
     assert resource_detail.json()["latest_extracted_text"]["preview_text"].startswith("[MOCK OCR]")
 
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     assert after_usage_count == before_usage_count
     event_types = db_session.scalars(
         select(TeacherAssistActivityEvent.event_type).where(
@@ -3419,7 +3542,9 @@ def test_student_work_extraction_completion_updates_workspace_without_ai_or_grad
     assert uploaded.status_code == 201, uploaded.text
     submission = uploaded.json()
 
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     before_review_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradingReview)
     )
@@ -3455,7 +3580,10 @@ def test_student_work_extraction_completion_updates_workspace_without_ai_or_grad
     assert workspace.status_code == 200, workspace.text
     workspace_payload = workspace.json()
     assert workspace_payload["today_summary"]["student_work_ready_for_extraction_count"] == 0
-    assert workspace_payload["today_summary"]["extracted_artifacts_ready_for_teacher_review_count"] == 1
+    assert (
+        workspace_payload["today_summary"]["extracted_artifacts_ready_for_teacher_review_count"]
+        == 1
+    )
     assert "extracted_work_ready_for_teacher_review" in {
         item["type"] for item in workspace_payload["needs_attention"]
     }
@@ -3463,25 +3591,45 @@ def test_student_work_extraction_completion_updates_workspace_without_ai_or_grad
         item["entity_type"] == "student_work_submission"
         for item in workspace_payload["review_required_items"]
     )
-    assert workspace_payload["class_workspaces"][0]["recent_submissions"][0]["latest_extraction_status"] == "completed"
-    assert workspace_payload["class_workspaces"][0]["recent_submissions"][0][
-        "extraction_ready_for_teacher_review"
-    ] is True
+    assert (
+        workspace_payload["class_workspaces"][0]["recent_submissions"][0][
+            "latest_extraction_status"
+        ]
+        == "completed"
+    )
+    assert (
+        workspace_payload["class_workspaces"][0]["recent_submissions"][0][
+            "extraction_ready_for_teacher_review"
+        ]
+        is True
+    )
 
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
-    after_review_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAssignmentGradingReview))
-    extracted_count = db_session.scalar(select(func.count()).select_from(TeacherAssistExtractedTextRecord))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
+    after_review_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAssignmentGradingReview)
+    )
+    extracted_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistExtractedTextRecord)
+    )
     assert after_usage_count == before_usage_count
     assert after_review_count == before_review_count
     assert extracted_count >= 1
 
 
-def test_student_work_extraction_failure_and_cancellation_rules(client, db_session: Session, monkeypatch):
+def test_student_work_extraction_failure_and_cancellation_rules(
+    client, db_session: Session, monkeypatch
+):
     email = "teacher-student-work-extraction-failure@example.com"
-    token = _register_user(client, email=email, tenant_name="Student Work Extraction Failure Tenant")
+    token = _register_user(
+        client, email=email, tenant_name="Student Work Extraction Failure Tenant"
+    )
     _grant_teacher_assist_access(db_session, email=email)
 
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="Extraction Failures")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="Extraction Failures"
+    )
     assignment = client.post(
         "/v1/teacher-assist/assignments",
         headers={"Authorization": f"Bearer {token}"},
@@ -3517,11 +3665,14 @@ def test_student_work_extraction_failure_and_cancellation_rules(client, db_sessi
     )
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "cancelled"
-    assert client.patch(
-        f"/v1/teacher-assist/extraction-jobs/{cancelled_job.json()['id']}/cancel",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"status": "cancelled"},
-    ).status_code == 400
+    assert (
+        client.patch(
+            f"/v1/teacher-assist/extraction-jobs/{cancelled_job.json()['id']}/cancel",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"status": "cancelled"},
+        ).status_code
+        == 400
+    )
 
     class _FailingProvider:
         provider_name = "mock"
@@ -3773,7 +3924,9 @@ def test_assignment_grading_review_rejects_pii_like_content(client, db_session: 
     assert "pii" in rejected.json()["detail"].lower()
 
 
-def test_assignment_grading_review_tenant_isolation_and_foreign_submission_blocked(client, db_session: Session):
+def test_assignment_grading_review_tenant_isolation_and_foreign_submission_blocked(
+    client, db_session: Session
+):
     first_email = "teacher-grading-a@example.com"
     second_email = "teacher-grading-b@example.com"
     first_token = _register_user(client, email=first_email, tenant_name="Grading Tenant A")
@@ -3781,7 +3934,9 @@ def test_assignment_grading_review_tenant_isolation_and_foreign_submission_block
     _grant_teacher_assist_access(db_session, email=first_email)
     _grant_teacher_assist_access(db_session, email=second_email)
 
-    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Isolation")
+    context = _create_ready_planning_draft_context(
+        client, token=first_token, subject_name="Isolation"
+    )
     assignment = client.post(
         "/v1/teacher-assist/assignments",
         headers={"Authorization": f"Bearer {first_token}"},
@@ -3826,7 +3981,9 @@ def test_assignment_grading_review_tenant_isolation_and_foreign_submission_block
     assert foreign_get.status_code == 404
 
 
-def test_assignment_grading_review_does_not_create_ai_usage_or_other_side_effects(client, db_session: Session):
+def test_assignment_grading_review_does_not_create_ai_usage_or_other_side_effects(
+    client, db_session: Session
+):
     email = "teacher-grading-no-ai@example.com"
     token = _register_user(client, email=email, tenant_name="Grading No AI Tenant")
     _grant_teacher_assist_access(db_session, email=email)
@@ -3855,21 +4012,27 @@ def test_assignment_grading_review_does_not_create_ai_usage_or_other_side_effect
     )
     assert uploaded.status_code == 201, uploaded.text
 
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     created = client.post(
         f"/v1/teacher-assist/student-work/{uploaded.json()['id']}/grading-review",
         headers={"Authorization": f"Bearer {token}"},
         json={"student_number": 4, "max_score": 5},
     )
     assert created.status_code == 201, created.text
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     assert after_usage_count == before_usage_count
     assert created.json()["review_source"] == "manual"
     assert created.json()["ai_usage_event_id"] is None
     assert created.json()["provider_name"] is None
 
 
-def test_teacher_assist_workspace_aggregates_operational_state_and_activity(client, db_session: Session):
+def test_teacher_assist_workspace_aggregates_operational_state_and_activity(
+    client, db_session: Session
+):
     email = "teacher-workspace@example.com"
     token = _register_user(client, email=email, tenant_name="Workspace Tenant")
     _grant_teacher_assist_access(db_session, email=email)
@@ -4041,7 +4204,9 @@ def test_teacher_assist_workspace_is_tenant_scoped(client, db_session: Session):
     _grant_teacher_assist_access(db_session, email=first_email)
     _grant_teacher_assist_access(db_session, email=second_email)
 
-    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Scoped Workspace")
+    context = _create_ready_planning_draft_context(
+        client, token=first_token, subject_name="Scoped Workspace"
+    )
     workflow = client.post(
         f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
         headers={"Authorization": f"Bearer {first_token}"},
@@ -4226,7 +4391,9 @@ def test_extraction_retry_creates_new_job_with_lineage(client, db_session: Sessi
     assert workspace.json()["today_summary"]["extraction_failures_count"] >= 1
 
 
-def test_extraction_job_detail_includes_eligibility_and_artifact_metadata(client, db_session: Session):
+def test_extraction_job_detail_includes_eligibility_and_artifact_metadata(
+    client, db_session: Session
+):
     email = "teacher-extraction-detail@example.com"
     token = _register_user(client, email=email, tenant_name="Extraction Detail Tenant")
     _grant_teacher_assist_access(db_session, email=email)
@@ -4302,7 +4469,9 @@ def test_extraction_issue_flagging_and_mark_reviewed_without_grading_side_effect
     )
     assert flagged.status_code == 200, flagged.text
     assert flagged.json()["review_status"] == "issue_flagged"
-    assert flagged.json()["teacher_issue_reason"] == "Preview text looks incomplete for classroom use."
+    assert (
+        flagged.json()["teacher_issue_reason"] == "Preview text looks incomplete for classroom use."
+    )
 
     blocked_from_issue = client.patch(
         f"/v1/teacher-assist/extracted-text/{extracted['id']}/review-status",
@@ -4311,7 +4480,9 @@ def test_extraction_issue_flagging_and_mark_reviewed_without_grading_side_effect
     )
     assert blocked_from_issue.status_code == 400, blocked_from_issue.text
 
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     before_grading_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradingReview)
     )
@@ -4326,12 +4497,17 @@ def test_extraction_issue_flagging_and_mark_reviewed_without_grading_side_effect
     reviewed_ok = client.patch(
         f"/v1/teacher-assist/extracted-text/{extracted['id']}/review-status",
         headers={"Authorization": f"Bearer {token}"},
-        json={"review_status": "reviewed", "teacher_review_notes": "Acceptable after manual check."},
+        json={
+            "review_status": "reviewed",
+            "teacher_review_notes": "Acceptable after manual check.",
+        },
     )
     assert reviewed_ok.status_code == 200, reviewed_ok.text
     assert reviewed_ok.json()["review_status"] == "reviewed"
 
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     after_grading_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradingReview)
     )
@@ -4339,7 +4515,9 @@ def test_extraction_issue_flagging_and_mark_reviewed_without_grading_side_effect
     assert after_grading_count == before_grading_count
 
 
-def _create_resource_extraction_job(client, token: str, *, filename: str = "ocr-handout.pdf", content: bytes | None = None):
+def _create_resource_extraction_job(
+    client, token: str, *, filename: str = "ocr-handout.pdf", content: bytes | None = None
+):
     uploaded = client.post(
         "/v1/teacher-assist/resources/upload",
         headers={"Authorization": f"Bearer {token}"},
@@ -4358,13 +4536,17 @@ def _create_resource_extraction_job(client, token: str, *, filename: str = "ocr-
 class _FakeRealOCRProvider:
     provider_name = "textract"
 
-    def __init__(self, *, confidence_score: float = 0.92, text: str = "Real OCR extracted classroom text."):
+    def __init__(
+        self, *, confidence_score: float = 0.92, text: str = "Real OCR extracted classroom text."
+    ):
         self._confidence_score = confidence_score
         self._text = text
 
     def extract_text(self, **_kwargs):
         from oziebot_api.services.teacher_assist.ocr_provider import TeacherAssistOCRProviderResult
-        from oziebot_api.services.teacher_assist.ocr_provider_config import confidence_level_from_score
+        from oziebot_api.services.teacher_assist.ocr_provider_config import (
+            confidence_level_from_score,
+        )
 
         confidence_level = confidence_level_from_score(self._confidence_score)
         return TeacherAssistOCRProviderResult(
@@ -4421,7 +4603,9 @@ def test_real_ocr_blocked_without_enable_flag(client, db_session: Session):
         teacher_assist_ocr_daily_cost_limit_cents=500,
         teacher_assist_worker_max_retries=0,
     )
-    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job["id"], settings=settings)
+    _run_teacher_assist_extraction_worker(
+        db_session, extraction_job_id=created_job["id"], settings=settings
+    )
 
     detail = client.get(
         f"/v1/teacher-assist/extraction-jobs/{created_job['id']}",
@@ -4444,7 +4628,9 @@ def test_real_ocr_missing_cost_limit_fails_safe(client, db_session: Session):
         teacher_assist_ocr_daily_cost_limit_cents=0,
         teacher_assist_worker_max_retries=0,
     )
-    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job["id"], settings=settings)
+    _run_teacher_assist_extraction_worker(
+        db_session, extraction_job_id=created_job["id"], settings=settings
+    )
 
     detail = client.get(
         f"/v1/teacher-assist/extraction-jobs/{created_job['id']}",
@@ -4507,7 +4693,9 @@ def test_real_ocr_provider_metadata_persists(client, db_session: Session, monkey
         teacher_assist_ocr_daily_cost_limit_cents=500,
         teacher_assist_worker_max_retries=0,
     )
-    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job["id"], settings=settings)
+    _run_teacher_assist_extraction_worker(
+        db_session, extraction_job_id=created_job["id"], settings=settings
+    )
 
     detail = client.get(
         f"/v1/teacher-assist/extraction-jobs/{created_job['id']}",
@@ -4544,7 +4732,9 @@ def test_low_confidence_real_ocr_stays_pending_review(client, db_session: Sessio
         teacher_assist_ocr_daily_cost_limit_cents=500,
         teacher_assist_worker_max_retries=0,
     )
-    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job["id"], settings=settings)
+    _run_teacher_assist_extraction_worker(
+        db_session, extraction_job_id=created_job["id"], settings=settings
+    )
 
     detail = client.get(
         f"/v1/teacher-assist/extraction-jobs/{created_job['id']}",
@@ -4593,7 +4783,9 @@ def test_ocr_retry_lineage_preserves_provider_attempts(client, db_session: Sessi
         teacher_assist_ocr_daily_cost_limit_cents=500,
         teacher_assist_worker_max_retries=0,
     )
-    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=original_job_id, settings=settings)
+    _run_teacher_assist_extraction_worker(
+        db_session, extraction_job_id=original_job_id, settings=settings
+    )
 
     failed = client.get(
         f"/v1/teacher-assist/extraction-jobs/{original_job_id}",
@@ -4611,7 +4803,9 @@ def test_ocr_retry_lineage_preserves_provider_attempts(client, db_session: Sessi
     )
     assert retried.status_code == 201, retried.text
     retry_job_id = retried.json()["id"]
-    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=retry_job_id, settings=settings)
+    _run_teacher_assist_extraction_worker(
+        db_session, extraction_job_id=retry_job_id, settings=settings
+    )
 
     retry_detail = client.get(
         f"/v1/teacher-assist/extraction-jobs/{retry_job_id}",
@@ -4625,14 +4819,20 @@ def test_ocr_retry_lineage_preserves_provider_attempts(client, db_session: Sessi
     assert len(retry_payload["lineage_jobs"]) == 2
 
 
-def test_real_ocr_does_not_trigger_grading_mastery_or_ai_usage(client, db_session: Session, monkeypatch):
+def test_real_ocr_does_not_trigger_grading_mastery_or_ai_usage(
+    client, db_session: Session, monkeypatch
+):
     email = "teacher-ocr-no-side-effects@example.com"
     token = _register_user(client, email=email, tenant_name="OCR Side Effects Tenant")
     _grant_teacher_assist_access(db_session, email=email)
     _, created_job = _create_resource_extraction_job(client, token)
 
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
-    before_review_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAssignmentGradingReview))
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
+    before_review_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAssignmentGradingReview)
+    )
 
     monkeypatch.setattr(
         "oziebot_api.services.teacher_assist.extraction_jobs.get_teacher_assist_ocr_provider",
@@ -4644,10 +4844,16 @@ def test_real_ocr_does_not_trigger_grading_mastery_or_ai_usage(client, db_sessio
         teacher_assist_ocr_daily_cost_limit_cents=500,
         teacher_assist_worker_max_retries=0,
     )
-    _run_teacher_assist_extraction_worker(db_session, extraction_job_id=created_job["id"], settings=settings)
+    _run_teacher_assist_extraction_worker(
+        db_session, extraction_job_id=created_job["id"], settings=settings
+    )
 
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
-    after_review_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAssignmentGradingReview))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
+    after_review_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAssignmentGradingReview)
+    )
     assert after_usage_count == before_usage_count
     assert after_review_count == before_review_count
 
@@ -4659,7 +4865,13 @@ def test_unsupported_mime_type_blocks_ocr(client, db_session: Session):
     uploaded = client.post(
         "/v1/teacher-assist/resources/upload",
         headers={"Authorization": f"Bearer {token}"},
-        files={"file": ("notes.docx", b"PK docx bytes", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        files={
+            "file": (
+                "notes.docx",
+                b"PK docx bytes",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
     )
     assert uploaded.status_code == 201, uploaded.text
     created_job = client.post(
@@ -4730,7 +4942,9 @@ def _create_student_work_submission_with_extraction(client, db_session: Session,
 
 
 def test_grading_prep_approved_text_priority():
-    from oziebot_api.services.teacher_assist.grading_prep_service import resolve_approved_text_from_record
+    from oziebot_api.services.teacher_assist.grading_prep_service import (
+        resolve_approved_text_from_record,
+    )
 
     record = TeacherAssistExtractedTextRecord()
     record.id = uuid.uuid4()
@@ -4785,7 +4999,9 @@ def test_grading_prep_blocks_unapproved_review_statuses():
     assert resolution.approved_text == "Some extracted text"
 
 
-def test_student_work_grading_prep_context_ready_after_teacher_approval(client, db_session: Session):
+def test_student_work_grading_prep_context_ready_after_teacher_approval(
+    client, db_session: Session
+):
     email = "teacher-grading-prep-ready@example.com"
     token = _register_user(client, email=email, tenant_name="Grading Prep Ready Tenant")
     _grant_teacher_assist_access(db_session, email=email)
@@ -4819,7 +5035,9 @@ def test_student_work_grading_prep_context_ready_after_teacher_approval(client, 
     )
     assert approved.status_code == 200, approved.text
 
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     before_grading_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradingReview)
     )
@@ -4848,7 +5066,9 @@ def test_student_work_grading_prep_context_ready_after_teacher_approval(client, 
     assert summary_payload["submissions"][0]["ready_for_grading_prep"] is True
     assert summary_payload["ai_grading_enabled"] is False
 
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     after_grading_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradingReview)
     )
@@ -4927,7 +5147,9 @@ def _create_grading_review_for_submission(
     return created
 
 
-def test_grading_review_ai_suggestion_blocked_when_extraction_not_approved(client, db_session: Session):
+def test_grading_review_ai_suggestion_blocked_when_extraction_not_approved(
+    client, db_session: Session
+):
     email = "teacher-ai-suggest-blocked@example.com"
     token = _register_user(client, email=email, tenant_name="AI Suggest Blocked Tenant")
     _grant_teacher_assist_access(db_session, email=email)
@@ -4957,8 +5179,12 @@ def test_grading_review_ai_suggestion_mock_populates_review_fields(client, db_se
     _approve_extraction_for_grading_prep(client, token, extracted["id"])
     created = _create_grading_review_for_submission(client, token, submission["id"])
 
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
-    before_workflow_count = db_session.scalar(select(func.count()).select_from(TeacherAssistWorkflow))
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
+    before_workflow_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistWorkflow)
+    )
 
     suggested = client.post(
         f"/v1/teacher-assist/grading-reviews/{created.json()['id']}/ai-suggestions",
@@ -4987,8 +5213,12 @@ def test_grading_review_ai_suggestion_mock_populates_review_fields(client, db_se
     assert review["teacher_confirmed_score"] is None
     assert review["teacher_confirmed_feedback"] is None
 
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
-    after_workflow_count = db_session.scalar(select(func.count()).select_from(TeacherAssistWorkflow))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
+    after_workflow_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistWorkflow)
+    )
     assert after_usage_count == before_usage_count + 1
     assert after_workflow_count == before_workflow_count
 
@@ -5044,7 +5274,9 @@ def test_grading_review_ai_suggestion_uses_approved_text_priority(client, db_ses
         headers={"Authorization": f"Bearer {token}"},
     )
     assert prep_context.status_code == 200, prep_context.text
-    assert prep_context.json()["approved_text"] == "Final approved priority text for grading assist."
+    assert (
+        prep_context.json()["approved_text"] == "Final approved priority text for grading assist."
+    )
 
 
 def test_grading_review_ai_suggestion_never_auto_confirms(client, db_session: Session):
@@ -5074,7 +5306,9 @@ def test_grading_review_ai_suggestion_never_auto_confirms(client, db_session: Se
     assert invalid_confirm.status_code == 400, invalid_confirm.text
 
 
-def test_grading_review_ai_suggestion_no_mastery_gradebook_parent_side_effects(client, db_session: Session):
+def test_grading_review_ai_suggestion_no_mastery_gradebook_parent_side_effects(
+    client, db_session: Session
+):
     email = "teacher-ai-suggest-side-effects@example.com"
     token = _register_user(client, email=email, tenant_name="AI Suggest Side Effects Tenant")
     _grant_teacher_assist_access(db_session, email=email)
@@ -5085,8 +5319,12 @@ def test_grading_review_ai_suggestion_no_mastery_gradebook_parent_side_effects(c
     _approve_extraction_for_grading_prep(client, token, extracted["id"])
     created = _create_grading_review_for_submission(client, token, submission["id"])
 
-    before_activity_count = db_session.scalar(select(func.count()).select_from(TeacherAssistActivityEvent))
-    before_workflow_count = db_session.scalar(select(func.count()).select_from(TeacherAssistWorkflow))
+    before_activity_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistActivityEvent)
+    )
+    before_workflow_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistWorkflow)
+    )
 
     suggested = client.post(
         f"/v1/teacher-assist/grading-reviews/{created.json()['id']}/ai-suggestions",
@@ -5095,8 +5333,12 @@ def test_grading_review_ai_suggestion_no_mastery_gradebook_parent_side_effects(c
     )
     assert suggested.status_code == 200, suggested.text
 
-    after_activity_count = db_session.scalar(select(func.count()).select_from(TeacherAssistActivityEvent))
-    after_workflow_count = db_session.scalar(select(func.count()).select_from(TeacherAssistWorkflow))
+    after_activity_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistActivityEvent)
+    )
+    after_workflow_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistWorkflow)
+    )
     assert after_workflow_count == before_workflow_count
 
     new_events = db_session.scalars(
@@ -5131,7 +5373,9 @@ def test_grading_review_ai_suggestion_tenant_isolation(client, db_session: Sessi
     assert foreign.status_code == 404, foreign.text
 
 
-def test_grading_review_ai_suggestion_real_provider_guarded(client, db_session: Session, monkeypatch):
+def test_grading_review_ai_suggestion_real_provider_guarded(
+    client, db_session: Session, monkeypatch
+):
     email = "teacher-ai-suggest-real@example.com"
     token = _register_user(client, email=email, tenant_name="AI Suggest Real Tenant")
     _grant_teacher_assist_access(db_session, email=email)
@@ -5151,7 +5395,9 @@ def test_grading_review_ai_suggestion_real_provider_guarded(client, db_session: 
     assert "disabled" in blocked.json()["detail"].lower()
 
 
-def _confirm_grading_review(client, token: str, grading_review_id: str, *, score: float = 18, max_score: float = 20):
+def _confirm_grading_review(
+    client, token: str, grading_review_id: str, *, score: float = 18, max_score: float = 20
+):
     confirmed = client.put(
         f"/v1/teacher-assist/grading-reviews/{grading_review_id}",
         headers={"Authorization": f"Bearer {token}"},
@@ -5198,14 +5444,18 @@ def test_teacher_confirmed_review_does_not_auto_commit_gradebook(client, db_sess
     _approve_extraction_for_grading_prep(client, token, extracted["id"])
     created = _create_grading_review_for_submission(client, token, submission["id"])
 
-    before_record_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAssignmentGradeRecord))
+    before_record_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAssignmentGradeRecord)
+    )
     before_commit_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradebookCommit)
     )
 
     _confirm_grading_review(client, token, created.json()["id"])
 
-    after_record_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAssignmentGradeRecord))
+    after_record_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAssignmentGradeRecord)
+    )
     after_commit_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradebookCommit)
     )
@@ -5363,7 +5613,9 @@ def test_gradebook_commit_tenant_isolation(client, db_session: Session):
     assert foreign_detail.status_code == 404, foreign_detail.text
 
 
-def test_gradebook_commit_does_not_create_mastery_or_parent_side_effects(client, db_session: Session):
+def test_gradebook_commit_does_not_create_mastery_or_parent_side_effects(
+    client, db_session: Session
+):
     email = "teacher-gradebook-side-effects@example.com"
     token = _register_user(client, email=email, tenant_name="Gradebook Side Effects Tenant")
     _grant_teacher_assist_access(db_session, email=email)
@@ -5375,8 +5627,12 @@ def test_gradebook_commit_does_not_create_mastery_or_parent_side_effects(client,
     created = _create_grading_review_for_submission(client, token, submission["id"])
     _confirm_grading_review(client, token, created.json()["id"])
 
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
-    before_workflow_count = db_session.scalar(select(func.count()).select_from(TeacherAssistWorkflow))
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
+    before_workflow_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistWorkflow)
+    )
 
     committed = client.post(
         f"/v1/teacher-assist/grading-reviews/{created.json()['id']}/gradebook-commit",
@@ -5385,8 +5641,12 @@ def test_gradebook_commit_does_not_create_mastery_or_parent_side_effects(client,
     )
     assert committed.status_code == 201, committed.text
 
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
-    after_workflow_count = db_session.scalar(select(func.count()).select_from(TeacherAssistWorkflow))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
+    after_workflow_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistWorkflow)
+    )
     assert after_usage_count == before_usage_count
     assert after_workflow_count == before_workflow_count
 
@@ -5402,9 +5662,13 @@ def test_weekly_plan_export_creates_workflow_and_persists_pptx(client, db_sessio
     email = "teacher-export-ready@example.com"
     token = _register_user(client, email=email, tenant_name="Export Ready Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    _, weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Export Science")
+    _, weekly_plan = _generate_weekly_plan(
+        client, db_session, token=token, subject_name="Export Science"
+    )
 
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     before_grading_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradingReview)
     )
@@ -5450,7 +5714,9 @@ def test_weekly_plan_export_creates_workflow_and_persists_pptx(client, db_sessio
     assert listed.status_code == 200, listed.text
     assert listed.json()[0]["id"] == payload["id"]
 
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     after_grading_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradingReview)
     )
@@ -5462,12 +5728,18 @@ def test_weekly_plan_export_quiz_preview_structure(client, db_session: Session):
     email = "teacher-export-quiz@example.com"
     token = _register_user(client, email=email, tenant_name="Export Quiz Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    _, weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Export Quiz")
+    _, weekly_plan = _generate_weekly_plan(
+        client, db_session, token=token, subject_name="Export Quiz"
+    )
 
     queued = client.post(
         f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/exports",
         headers={"Authorization": f"Bearer {token}"},
-        json={"artifact_type": "multiple_choice_quiz", "export_format": "json", "provider_mode": "mock"},
+        json={
+            "artifact_type": "multiple_choice_quiz",
+            "export_format": "json",
+            "provider_mode": "mock",
+        },
     )
     assert queued.status_code == 202, queued.text
     export_id = queued.json()["id"]
@@ -5493,7 +5765,9 @@ def test_weekly_plan_export_tenant_isolation(client, db_session: Session):
     second_token = _register_user(client, email=second_email, tenant_name="Export Tenant B")
     _grant_teacher_assist_access(db_session, email=first_email)
     _grant_teacher_assist_access(db_session, email=second_email)
-    _, weekly_plan = _generate_weekly_plan(client, db_session, token=first_token, subject_name="Export Isolation")
+    _, weekly_plan = _generate_weekly_plan(
+        client, db_session, token=first_token, subject_name="Export Isolation"
+    )
 
     queued = client.post(
         f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/exports",
@@ -5521,7 +5795,9 @@ def test_weekly_plan_export_failure_persists_error(client, db_session: Session, 
     email = "teacher-export-failure@example.com"
     token = _register_user(client, email=email, tenant_name="Export Failure Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    _, weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Export Failure")
+    _, weekly_plan = _generate_weekly_plan(
+        client, db_session, token=token, subject_name="Export Failure"
+    )
 
     queued = client.post(
         f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/exports",
@@ -5577,7 +5853,9 @@ def _action_workspace_navigation_hrefs(payload: dict) -> set[str]:
 
 
 def test_teacher_assist_action_workspace_requires_product_access(client):
-    token = _register_user(client, email="teacher-action-no-access@example.com", tenant_name="Action No Access")
+    token = _register_user(
+        client, email="teacher-action-no-access@example.com", tenant_name="Action No Access"
+    )
     response = client.get(
         "/v1/teacher-assist/action-workspace",
         headers={"Authorization": f"Bearer {token}"},
@@ -5623,24 +5901,29 @@ def test_teacher_assist_action_workspace_aggregates_operational_actions(
     token = _register_user(client, email=email, tenant_name="Action Workspace Tenant")
     _grant_teacher_assist_access(db_session, email=email)
 
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="Action Workspace")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="Action Workspace"
+    )
     failed_workflow = client.post(
         f"/v1/teacher-assist/planning-drafts/{context['draft']['id']}/workflows/weekly-plan",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert failed_workflow.status_code == 202, failed_workflow.text
-    failed_workflow_row = db_session.get(TeacherAssistWorkflow, uuid.UUID(failed_workflow.json()["id"]))
+    failed_workflow_row = db_session.get(
+        TeacherAssistWorkflow, uuid.UUID(failed_workflow.json()["id"])
+    )
     assert failed_workflow_row is not None
     failed_workflow_row.status = "failed"
     failed_workflow_row.error_message = "Action workspace workflow failure."
     db_session.commit()
 
-    assignment_id, pending_submission, pending_extracted = _create_student_work_submission_with_extraction(
-        client, db_session, token
+    assignment_id, pending_submission, pending_extracted = (
+        _create_student_work_submission_with_extraction(client, db_session, token)
     )
     failed_job = db_session.scalar(
         select(TeacherAssistExtractionJob).where(
-            TeacherAssistExtractionJob.student_work_submission_id == uuid.UUID(pending_submission["id"])
+            TeacherAssistExtractionJob.student_work_submission_id
+            == uuid.UUID(pending_submission["id"])
         )
     )
     assert failed_job is not None
@@ -5667,7 +5950,9 @@ def test_teacher_assist_action_workspace_aggregates_operational_actions(
     commit_review = _create_grading_review_for_submission(client, token, commit_submission["id"])
     _confirm_grading_review(client, token, commit_review.json()["id"])
 
-    _, weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Action Export")
+    _, weekly_plan = _generate_weekly_plan(
+        client, db_session, token=token, subject_name="Action Export"
+    )
     queued_export = client.post(
         f"/v1/teacher-assist/weekly-plans/{weekly_plan['id']}/exports",
         headers={"Authorization": f"Bearer {token}"},
@@ -5710,8 +5995,12 @@ def test_teacher_assist_action_workspace_aggregates_operational_actions(
     extraction_section = next(
         section for section in payload["sections"] if section["section_key"] == "extractions"
     )
-    grading_section = next(section for section in payload["sections"] if section["section_key"] == "grading")
-    gradebook_section = next(section for section in payload["sections"] if section["section_key"] == "gradebook")
+    grading_section = next(
+        section for section in payload["sections"] if section["section_key"] == "grading"
+    )
+    gradebook_section = next(
+        section for section in payload["sections"] if section["section_key"] == "gradebook"
+    )
     workflow_section = next(
         section for section in payload["sections"] if section["section_key"] == "workflows_exports"
     )
@@ -5731,29 +6020,43 @@ def test_teacher_assist_action_workspace_aggregates_operational_actions(
     assert any(href.startswith("/teacher-assist/assignments") for href in hrefs)
     assert any(href.startswith("/teacher-assist/exports") for href in hrefs)
 
-    failed_item = next(item for item in _collect_action_workspace_items(payload) if item["action_type"] == "extraction_failed")
+    failed_item = next(
+        item
+        for item in _collect_action_workspace_items(payload)
+        if item["action_type"] == "extraction_failed"
+    )
     assert failed_item["severity"] == "critical"
     assert failed_item["extracted_text_id"] == pending_extracted["id"]
 
     pending_item = next(
-        item for item in _collect_action_workspace_items(payload) if item["action_type"] == "extraction_pending_review"
+        item
+        for item in _collect_action_workspace_items(payload)
+        if item["action_type"] == "extraction_pending_review"
     )
     assert pending_item["severity"] == "review"
     assert pending_item["extracted_text_id"] == pending_extracted["id"]
 
     ai_item = next(
-        item for item in _collect_action_workspace_items(payload) if item["action_type"] == "grading_review_ai_suggested"
+        item
+        for item in _collect_action_workspace_items(payload)
+        if item["action_type"] == "grading_review_ai_suggested"
     )
     assert ai_item["severity"] == "review"
     assert ai_item["grading_review_id"] == ai_review.json()["id"]
 
     ready_item = next(
-        item for item in _collect_action_workspace_items(payload) if item["action_type"] == "gradebook_ready_to_commit"
+        item
+        for item in _collect_action_workspace_items(payload)
+        if item["action_type"] == "gradebook_ready_to_commit"
     )
     assert ready_item["severity"] == "ready"
     assert ready_item["grading_review_id"] == commit_review.json()["id"]
 
-    export_item = next(item for item in _collect_action_workspace_items(payload) if item["action_type"] == "export_failed")
+    export_item = next(
+        item
+        for item in _collect_action_workspace_items(payload)
+        if item["action_type"] == "export_failed"
+    )
     assert export_item["severity"] == "critical"
 
 
@@ -5762,13 +6065,19 @@ def test_teacher_assist_action_workspace_read_only_no_side_effects(client, db_se
     token = _register_user(client, email=email, tenant_name="Action Readonly Tenant")
     _grant_teacher_assist_access(db_session, email=email)
 
-    _, submission, extracted = _create_student_work_submission_with_extraction(client, db_session, token)
+    _, submission, extracted = _create_student_work_submission_with_extraction(
+        client, db_session, token
+    )
     _approve_extraction_for_grading_prep(client, token, extracted["id"])
     created = _create_grading_review_for_submission(client, token, submission["id"])
     _confirm_grading_review(client, token, created.json()["id"])
 
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
-    before_workflow_count = db_session.scalar(select(func.count()).select_from(TeacherAssistWorkflow))
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
+    before_workflow_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistWorkflow)
+    )
     before_grade_record_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradeRecord)
     )
@@ -5778,7 +6087,9 @@ def test_teacher_assist_action_workspace_read_only_no_side_effects(client, db_se
     before_audit_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradebookAuditEvent)
     )
-    before_activity_count = db_session.scalar(select(func.count()).select_from(TeacherAssistActivityEvent))
+    before_activity_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistActivityEvent)
+    )
 
     response = client.get(
         "/v1/teacher-assist/action-workspace",
@@ -5787,8 +6098,12 @@ def test_teacher_assist_action_workspace_read_only_no_side_effects(client, db_se
     assert response.status_code == 200, response.text
     assert response.json()["summary"]["ready_count"] >= 1
 
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
-    after_workflow_count = db_session.scalar(select(func.count()).select_from(TeacherAssistWorkflow))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
+    after_workflow_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistWorkflow)
+    )
     after_grade_record_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradeRecord)
     )
@@ -5798,7 +6113,9 @@ def test_teacher_assist_action_workspace_read_only_no_side_effects(client, db_se
     after_audit_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradebookAuditEvent)
     )
-    after_activity_count = db_session.scalar(select(func.count()).select_from(TeacherAssistActivityEvent))
+    after_activity_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistActivityEvent)
+    )
 
     assert after_usage_count == before_usage_count
     assert after_workflow_count == before_workflow_count
@@ -5827,7 +6144,9 @@ def _create_mastery_matrix(client, token: str, context: dict) -> dict:
 
 
 def test_mastery_matrix_requires_product_access(client):
-    token = _register_user(client, email="teacher-mastery-no-access@example.com", tenant_name="Mastery No Access")
+    token = _register_user(
+        client, email="teacher-mastery-no-access@example.com", tenant_name="Mastery No Access"
+    )
     response = client.get(
         "/v1/teacher-assist/mastery-matrices",
         headers={"Authorization": f"Bearer {token}"},
@@ -5843,7 +6162,9 @@ def test_mastery_matrix_creation_and_tenant_isolation(client, db_session: Sessio
     _grant_teacher_assist_access(db_session, email=first_email)
     _grant_teacher_assist_access(db_session, email=second_email)
 
-    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Mastery Science")
+    context = _create_ready_planning_draft_context(
+        client, token=first_token, subject_name="Mastery Science"
+    )
     matrix = _create_mastery_matrix(client, first_token, context)
     assert matrix["title"] == "Phase 26 Mastery Matrix"
     assert len(matrix["standards"]) == 1
@@ -5866,7 +6187,9 @@ def test_mastery_commit_requires_teacher_confirmation(client, db_session: Sessio
     email = "teacher-mastery-commit@example.com"
     token = _register_user(client, email=email, tenant_name="Mastery Commit Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="Mastery Commit")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="Mastery Commit"
+    )
     matrix = _create_mastery_matrix(client, token, context)
 
     created = client.post(
@@ -5918,7 +6241,9 @@ def test_mastery_correction_and_reversal_lineage(client, db_session: Session):
     email = "teacher-mastery-lineage@example.com"
     token = _register_user(client, email=email, tenant_name="Mastery Lineage Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="Mastery Lineage")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="Mastery Lineage"
+    )
     matrix = _create_mastery_matrix(client, token, context)
 
     created = client.post(
@@ -5986,7 +6311,9 @@ def test_mastery_standards_ownership_validation(client, db_session: Session):
     email = "teacher-mastery-standards@example.com"
     token = _register_user(client, email=email, tenant_name="Mastery Standards Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="Mastery Primary")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="Mastery Primary"
+    )
     other_subject = client.post(
         "/v1/teacher-assist/subjects",
         headers={"Authorization": f"Bearer {token}"},
@@ -6027,7 +6354,9 @@ def test_mastery_no_gradebook_ai_parent_side_effects(client, db_session: Session
     email = "teacher-mastery-side-effects@example.com"
     token = _register_user(client, email=email, tenant_name="Mastery Side Effects Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="Mastery Side Effects")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="Mastery Side Effects"
+    )
     matrix = _create_mastery_matrix(client, token, context)
 
     created = client.post(
@@ -6043,11 +6372,15 @@ def test_mastery_no_gradebook_ai_parent_side_effects(client, db_session: Session
     )
     assert created.status_code == 201, created.text
 
-    before_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    before_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     before_grade_record_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradeRecord)
     )
-    before_workflow_count = db_session.scalar(select(func.count()).select_from(TeacherAssistWorkflow))
+    before_workflow_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistWorkflow)
+    )
 
     committed = client.post(
         f"/v1/teacher-assist/mastery-evaluations/{created.json()['id']}/commit",
@@ -6056,11 +6389,15 @@ def test_mastery_no_gradebook_ai_parent_side_effects(client, db_session: Session
     )
     assert committed.status_code == 201, committed.text
 
-    after_usage_count = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
+    after_usage_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistAIUsageEvent)
+    )
     after_grade_record_count = db_session.scalar(
         select(func.count()).select_from(TeacherAssistAssignmentGradeRecord)
     )
-    after_workflow_count = db_session.scalar(select(func.count()).select_from(TeacherAssistWorkflow))
+    after_workflow_count = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistWorkflow)
+    )
     assert after_usage_count == before_usage_count
     assert after_grade_record_count == before_grade_record_count
     assert after_workflow_count == before_workflow_count
@@ -6100,7 +6437,9 @@ def test_mastery_heatmap_uses_committed_evaluations_only(client, db_session: Ses
     email = "teacher-mastery-heatmap@example.com"
     token = _register_user(client, email=email, tenant_name="Mastery Heatmap Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="Mastery Heatmap")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="Mastery Heatmap"
+    )
     matrix = _create_mastery_matrix(client, token, context)
 
     draft = client.post(
@@ -6145,10 +6484,17 @@ def test_mastery_reteach_insights_thresholds(client, db_session: Session):
     email = "teacher-mastery-reteach@example.com"
     token = _register_user(client, email=email, tenant_name="Mastery Reteach Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="Mastery Reteach")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="Mastery Reteach"
+    )
     matrix = _create_mastery_matrix(client, token, context)
 
-    for student_number, level in [(1, "mastery"), (2, "mastery"), (3, "developing"), (4, "beginning")]:
+    for student_number, level in [
+        (1, "mastery"),
+        (2, "mastery"),
+        (3, "developing"),
+        (4, "beginning"),
+    ]:
         _commit_mastery_evaluation(
             client,
             token,
@@ -6179,7 +6525,9 @@ def test_mastery_analytics_tenant_isolation(client, db_session: Session):
     second_token = _register_user(client, email=second_email, tenant_name="Mastery Analytics B")
     _grant_teacher_assist_access(db_session, email=first_email)
     _grant_teacher_assist_access(db_session, email=second_email)
-    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Mastery Analytics")
+    context = _create_ready_planning_draft_context(
+        client, token=first_token, subject_name="Mastery Analytics"
+    )
     matrix = _create_mastery_matrix(client, first_token, context)
 
     foreign = client.get(
@@ -6193,7 +6541,9 @@ def test_student_mastery_summary_and_trend(client, db_session: Session):
     email = "teacher-mastery-student@example.com"
     token = _register_user(client, email=email, tenant_name="Mastery Student Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="Mastery Student")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="Mastery Student"
+    )
     matrix = _create_mastery_matrix(client, token, context)
 
     evaluation = _commit_mastery_evaluation(
@@ -6233,7 +6583,9 @@ def test_mastery_dashboard_and_analytics_no_side_effects(client, db_session: Ses
     email = "teacher-mastery-dashboard@example.com"
     token = _register_user(client, email=email, tenant_name="Mastery Dashboard Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="Mastery Dashboard")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="Mastery Dashboard"
+    )
     matrix = _create_mastery_matrix(client, token, context)
     _commit_mastery_evaluation(
         client,
@@ -6248,12 +6600,20 @@ def test_mastery_dashboard_and_analytics_no_side_effects(client, db_session: Ses
         },
     )
 
-    before_audit = db_session.scalar(select(func.count()).select_from(TeacherAssistMasteryAuditEvent))
+    before_audit = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistMasteryAuditEvent)
+    )
     before_ai = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
 
-    dashboard = client.get("/v1/teacher-assist/mastery-dashboard", headers={"Authorization": f"Bearer {token}"})
-    workspace = client.get("/v1/teacher-assist/workspace", headers={"Authorization": f"Bearer {token}"})
-    actions = client.get("/v1/teacher-assist/action-workspace", headers={"Authorization": f"Bearer {token}"})
+    dashboard = client.get(
+        "/v1/teacher-assist/mastery-dashboard", headers={"Authorization": f"Bearer {token}"}
+    )
+    workspace = client.get(
+        "/v1/teacher-assist/workspace", headers={"Authorization": f"Bearer {token}"}
+    )
+    actions = client.get(
+        "/v1/teacher-assist/action-workspace", headers={"Authorization": f"Bearer {token}"}
+    )
 
     assert dashboard.status_code == 200, dashboard.text
     assert dashboard.json()["matrix_count"] >= 1
@@ -6261,7 +6621,9 @@ def test_mastery_dashboard_and_analytics_no_side_effects(client, db_session: Ses
     assert workspace.json().get("mastery_insights") is not None
     assert actions.status_code == 200, actions.text
 
-    after_audit = db_session.scalar(select(func.count()).select_from(TeacherAssistMasteryAuditEvent))
+    after_audit = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistMasteryAuditEvent)
+    )
     after_ai = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
     assert after_audit == before_audit
     assert after_ai == before_ai
@@ -6272,7 +6634,9 @@ def test_today_workspace_read_only_no_side_effects(client, db_session: Session):
     token = _register_user(client, email=email, tenant_name="Today Workspace Tenant")
     _grant_teacher_assist_access(db_session, email=email)
 
-    before_audit = db_session.scalar(select(func.count()).select_from(TeacherAssistMasteryAuditEvent))
+    before_audit = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistMasteryAuditEvent)
+    )
     before_ai = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
 
     response = client.get("/v1/teacher-assist/today", headers={"Authorization": f"Bearer {token}"})
@@ -6283,7 +6647,9 @@ def test_today_workspace_read_only_no_side_effects(client, db_session: Session):
     assert "onboarding_checklist" in payload
     assert payload["onboarding_checklist"]["total_count"] == 3
 
-    after_audit = db_session.scalar(select(func.count()).select_from(TeacherAssistMasteryAuditEvent))
+    after_audit = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistMasteryAuditEvent)
+    )
     after_ai = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
     assert after_audit == before_audit
     assert after_ai == before_ai
@@ -6309,7 +6675,9 @@ def test_reteach_plan_create_ai_draft_and_teacher_version(client, db_session: Se
     )
 
     before_usage = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
-    before_audit = db_session.scalar(select(func.count()).select_from(TeacherAssistMasteryAuditEvent))
+    before_audit = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistMasteryAuditEvent)
+    )
 
     created = client.post(
         "/v1/teacher-assist/reteach-plans",
@@ -6387,7 +6755,9 @@ def test_reteach_plan_create_ai_draft_and_teacher_version(client, db_session: Se
     assert len(versions.json()) == 2
 
     after_usage = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
-    after_audit = db_session.scalar(select(func.count()).select_from(TeacherAssistMasteryAuditEvent))
+    after_audit = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistMasteryAuditEvent)
+    )
     assert after_usage == before_usage + 1
     assert after_audit == before_audit
 
@@ -6417,7 +6787,9 @@ def test_reteach_plan_tenant_isolation(client, db_session: Session):
     _grant_teacher_assist_access(db_session, email=first_email)
     _grant_teacher_assist_access(db_session, email=second_email)
 
-    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Reteach A")
+    context = _create_ready_planning_draft_context(
+        client, token=first_token, subject_name="Reteach A"
+    )
     matrix = _create_mastery_matrix(client, first_token, context)
     created = client.post(
         "/v1/teacher-assist/reteach-plans",
@@ -6444,11 +6816,15 @@ def test_reteach_plan_tenant_isolation(client, db_session: Session):
     assert foreign_draft.status_code == 404, foreign_draft.text
 
 
-def test_newsletter_create_ai_draft_section_regen_export_and_teacher_version(client, db_session: Session):
+def test_newsletter_create_ai_draft_section_regen_export_and_teacher_version(
+    client, db_session: Session
+):
     email = "teacher-newsletter@example.com"
     token = _register_user(client, email=email, tenant_name="Newsletter Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    context, _weekly_plan = _generate_weekly_plan(client, db_session, token=token, subject_name="Newsletter Science")
+    context, _weekly_plan = _generate_weekly_plan(
+        client, db_session, token=token, subject_name="Newsletter Science"
+    )
 
     before_usage = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
 
@@ -6553,7 +6929,9 @@ def test_newsletter_tenant_isolation(client, db_session: Session):
     second_token = _register_user(client, email=second_email, tenant_name="Newsletter Tenant B")
     _grant_teacher_assist_access(db_session, email=first_email)
     _grant_teacher_assist_access(db_session, email=second_email)
-    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Newsletter A")
+    context = _create_ready_planning_draft_context(
+        client, token=first_token, subject_name="Newsletter A"
+    )
     created = client.post(
         "/v1/teacher-assist/newsletters",
         headers={"Authorization": f"Bearer {first_token}"},
@@ -6578,7 +6956,9 @@ def test_lesson_reflection_create_ai_suggestions_and_teacher_version(client, db_
     email = "teacher-reflection@example.com"
     token = _register_user(client, email=email, tenant_name="Reflection Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="Reflection Science")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="Reflection Science"
+    )
 
     before_usage = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
 
@@ -6669,7 +7049,9 @@ def test_lesson_reflection_tenant_isolation(client, db_session: Session):
     second_token = _register_user(client, email=second_email, tenant_name="Reflection Tenant B")
     _grant_teacher_assist_access(db_session, email=first_email)
     _grant_teacher_assist_access(db_session, email=second_email)
-    context = _create_ready_planning_draft_context(client, token=first_token, subject_name="Reflection A")
+    context = _create_ready_planning_draft_context(
+        client, token=first_token, subject_name="Reflection A"
+    )
     created = client.post(
         "/v1/teacher-assist/reflections",
         headers={"Authorization": f"Bearer {first_token}"},
@@ -6694,20 +7076,34 @@ def test_home_workspace_and_work_queue_read_only(client, db_session: Session):
     token = _register_user(client, email=email, tenant_name="Home Workspace Tenant")
     _grant_teacher_assist_access(db_session, email=email)
 
-    before_audit = db_session.scalar(select(func.count()).select_from(TeacherAssistMasteryAuditEvent))
+    before_audit = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistMasteryAuditEvent)
+    )
     before_ai = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
 
     home = client.get("/v1/teacher-assist/home", headers={"Authorization": f"Bearer {token}"})
-    priorities = client.get("/v1/teacher-assist/home/priorities", headers={"Authorization": f"Bearer {token}"})
-    classes = client.get("/v1/teacher-assist/home/classes", headers={"Authorization": f"Bearer {token}"})
-    timeline = client.get("/v1/teacher-assist/home/timeline", headers={"Authorization": f"Bearer {token}"})
+    priorities = client.get(
+        "/v1/teacher-assist/home/priorities", headers={"Authorization": f"Bearer {token}"}
+    )
+    classes = client.get(
+        "/v1/teacher-assist/home/classes", headers={"Authorization": f"Bearer {token}"}
+    )
+    timeline = client.get(
+        "/v1/teacher-assist/home/timeline", headers={"Authorization": f"Bearer {token}"}
+    )
     mastery_alerts = client.get(
         "/v1/teacher-assist/home/mastery-alerts",
         headers={"Authorization": f"Bearer {token}"},
     )
-    quick_actions = client.get("/v1/teacher-assist/home/quick-actions", headers={"Authorization": f"Bearer {token}"})
-    work_queue = client.get("/v1/teacher-assist/work-queue", headers={"Authorization": f"Bearer {token}"})
-    preferences = client.get("/v1/teacher-assist/user-preferences", headers={"Authorization": f"Bearer {token}"})
+    quick_actions = client.get(
+        "/v1/teacher-assist/home/quick-actions", headers={"Authorization": f"Bearer {token}"}
+    )
+    work_queue = client.get(
+        "/v1/teacher-assist/work-queue", headers={"Authorization": f"Bearer {token}"}
+    )
+    preferences = client.get(
+        "/v1/teacher-assist/user-preferences", headers={"Authorization": f"Bearer {token}"}
+    )
 
     assert home.status_code == 200, home.text
     home_payload = home.json()
@@ -6747,7 +7143,9 @@ def test_home_workspace_and_work_queue_read_only(client, db_session: Session):
     assert patched.status_code == 200, patched.text
     assert patched.json()["preferred_landing"] == "work_queue"
 
-    after_audit = db_session.scalar(select(func.count()).select_from(TeacherAssistMasteryAuditEvent))
+    after_audit = db_session.scalar(
+        select(func.count()).select_from(TeacherAssistMasteryAuditEvent)
+    )
     after_ai = db_session.scalar(select(func.count()).select_from(TeacherAssistAIUsageEvent))
     assert after_audit == before_audit
     assert after_ai == before_ai
@@ -6757,7 +7155,9 @@ def test_class_operational_workspace(client, db_session: Session):
     email = "teacher-class-workspace@example.com"
     token = _register_user(client, email=email, tenant_name="Class Workspace Tenant")
     _grant_teacher_assist_access(db_session, email=email)
-    context = _create_ready_planning_draft_context(client, token=token, subject_name="Class Workspace")
+    context = _create_ready_planning_draft_context(
+        client, token=token, subject_name="Class Workspace"
+    )
 
     response = client.get(
         f"/v1/teacher-assist/classes/{context['teacher_class']['id']}/workspace",
@@ -6771,11 +7171,12 @@ def test_class_operational_workspace(client, db_session: Session):
     assert "overview" in payload["tabs"]
     assert "assignments" in payload["tabs"]
 
-    second_token = _register_user(client, email="foreign-class@example.com", tenant_name="Foreign Tenant")
+    second_token = _register_user(
+        client, email="foreign-class@example.com", tenant_name="Foreign Tenant"
+    )
     _grant_teacher_assist_access(db_session, email="foreign-class@example.com")
     foreign = client.get(
         f"/v1/teacher-assist/classes/{context['teacher_class']['id']}/workspace",
         headers={"Authorization": f"Bearer {second_token}"},
     )
     assert foreign.status_code == 404, foreign.text
-

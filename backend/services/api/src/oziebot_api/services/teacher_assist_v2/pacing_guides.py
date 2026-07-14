@@ -6,9 +6,15 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.education_catalog import EducationGrade, EducationSchoolYear, EducationSubject
+from oziebot_api.models.education_catalog import (
+    EducationGrade,
+    EducationSchoolYear,
+    EducationSubject,
+)
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
-from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
+from oziebot_api.models.teacher_assist_pacing_guide_objective import (
+    TeacherAssistPacingGuideObjective,
+)
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
 from oziebot_api.models.teacher_assist_pacing_guide_supporting_material import (
     TeacherAssistPacingGuideSupportingMaterial,
@@ -32,7 +38,9 @@ from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
     update_pacing_guide_period,
 )
 from oziebot_api.services.teacher_assist.setup import create_school_year
-from oziebot_api.services.teacher_assist_v2.pacing_guide_period_days import serialize_period_daily_plans
+from oziebot_api.services.teacher_assist_v2.pacing_guide_period_days import (
+    serialize_period_daily_plans,
+)
 
 
 def enrich_pacing_guide_summary(
@@ -61,7 +69,9 @@ def enrich_pacing_guide_summary(
         subject = db.get(EducationSubject, guide.catalog_subject_id)
         subject_name = subject.display_name if subject else None
     metadata = guide.metadata_json if isinstance(guide.metadata_json, dict) else {}
-    ownership_scope = metadata.get("ownership_scope") or ("school" if guide.catalog_school_id else "district")
+    ownership_scope = metadata.get("ownership_scope") or (
+        "school" if guide.catalog_school_id else "district"
+    )
     return {
         "objective_count": int(objective_count or 0),
         "resource_count": int(resource_count or 0),
@@ -105,9 +115,13 @@ def ensure_tenant_school_year(
 def _guide_builder_metadata(guide: TeacherAssistPacingGuide) -> dict:
     metadata = guide.metadata_json if isinstance(guide.metadata_json, dict) else {}
     platform_school_year_id = metadata.get("platform_school_year_id")
-    ownership_scope = metadata.get("ownership_scope") or ("school" if guide.catalog_school_id else "district")
+    ownership_scope = metadata.get("ownership_scope") or (
+        "school" if guide.catalog_school_id else "district"
+    )
     return {
-        "platform_school_year_id": uuid.UUID(str(platform_school_year_id)) if platform_school_year_id else None,
+        "platform_school_year_id": uuid.UUID(str(platform_school_year_id))
+        if platform_school_year_id
+        else None,
         "ownership_scope": ownership_scope if ownership_scope in {"district", "school"} else None,
         "unit_title": metadata.get("unit_title"),
         "estimated_duration_weeks": metadata.get("estimated_duration_weeks"),
@@ -116,8 +130,14 @@ def _guide_builder_metadata(guide: TeacherAssistPacingGuide) -> dict:
     }
 
 
-def serialize_pacing_guide_summary(guide, *, period_count: int, db: Session | None = None) -> CatalogPacingGuideSummaryOut:
-    extras = enrich_pacing_guide_summary(db, guide=guide, period_count=period_count) if db is not None else {}
+def serialize_pacing_guide_summary(
+    guide, *, period_count: int, db: Session | None = None
+) -> CatalogPacingGuideSummaryOut:
+    extras = (
+        enrich_pacing_guide_summary(db, guide=guide, period_count=period_count)
+        if db is not None
+        else {}
+    )
     builder_metadata = _guide_builder_metadata(guide)
     return CatalogPacingGuideSummaryOut(
         id=guide.id,
@@ -154,11 +174,15 @@ def serialize_pacing_guide_summary(guide, *, period_count: int, db: Session | No
     )
 
 
-def serialize_pacing_guide_detail(guide, *, db: Session | None = None) -> CatalogPacingGuideDetailOut:
+def serialize_pacing_guide_detail(
+    guide, *, db: Session | None = None
+) -> CatalogPacingGuideDetailOut:
     summary = serialize_pacing_guide_summary(guide, period_count=len(guide.periods), db=db)
     periods: list[CatalogPacingGuidePeriodOut] = []
     for period in guide.periods:
-        metadata = period.metadata_json if isinstance(getattr(period, "metadata_json", None), dict) else {}
+        metadata = (
+            period.metadata_json if isinstance(getattr(period, "metadata_json", None), dict) else {}
+        )
         periods.append(
             CatalogPacingGuidePeriodOut(
                 id=period.id,
@@ -169,7 +193,9 @@ def serialize_pacing_guide_detail(guide, *, db: Session | None = None) -> Catalo
                 sequence_number=period.sequence_number,
                 start_date=period.start_date,
                 end_date=period.end_date,
-                daily_plans=serialize_period_daily_plans(db, period=period) if db is not None else [],
+                daily_plans=serialize_period_daily_plans(db, period=period)
+                if db is not None
+                else [],
                 unit_title=metadata.get("unit_title"),
                 objectives=[
                     CatalogPacingGuideObjectiveOut(
@@ -177,8 +203,12 @@ def serialize_pacing_guide_detail(guide, *, db: Session | None = None) -> Catalo
                         objective_id=row.objective_id,
                         is_required=row.is_required,
                         notes=row.notes,
-                        objective_code=getattr(getattr(row, "objective", None), "objective_id", None),
-                        objective_description=getattr(getattr(row, "objective", None), "description", None),
+                        objective_code=getattr(
+                            getattr(row, "objective", None), "objective_id", None
+                        ),
+                        objective_description=getattr(
+                            getattr(row, "objective", None), "description", None
+                        ),
                     )
                     for row in period.objectives
                 ],
@@ -189,8 +219,12 @@ def serialize_pacing_guide_detail(guide, *, db: Session | None = None) -> Catalo
                         resource_library_item_id=row.resource_library_item_id,
                         is_primary=row.is_primary,
                         notes=row.notes,
-                        resource_title=getattr(getattr(row, "catalog_resource", None), "title", None),
-                        resource_type=getattr(getattr(row, "catalog_resource", None), "resource_type", None),
+                        resource_title=getattr(
+                            getattr(row, "catalog_resource", None), "title", None
+                        ),
+                        resource_type=getattr(
+                            getattr(row, "catalog_resource", None), "resource_type", None
+                        ),
                     )
                     for row in period.resources
                 ],
@@ -279,7 +313,9 @@ def clone_v2_pacing_guide(
     )
 
 
-def archive_v2_pacing_guide(db: Session, *, tenant_id: uuid.UUID, pacing_guide_id: uuid.UUID, actor: User):
+def archive_v2_pacing_guide(
+    db: Session, *, tenant_id: uuid.UUID, pacing_guide_id: uuid.UUID, actor: User
+):
     return deactivate_catalog_pacing_guide(
         db,
         tenant_id=tenant_id,
@@ -301,7 +337,10 @@ def update_v2_pacing_guide_period(
 
     period = db.scalars(
         select(TeacherAssistPacingGuidePeriod)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id)
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id,
+        )
         .where(
             TeacherAssistPacingGuidePeriod.id == period_id,
             TeacherAssistPacingGuide.tenant_id == tenant_id,

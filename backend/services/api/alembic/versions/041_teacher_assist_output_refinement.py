@@ -34,9 +34,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["weekly_plan_id"], ["weekly_plans.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("weekly_plan_id", "version_number", name="uq_weekly_plan_version_number"),
+        sa.UniqueConstraint(
+            "weekly_plan_id", "version_number", name="uq_weekly_plan_version_number"
+        ),
     )
-    op.create_index("ix_weekly_plan_versions_weekly_plan_id", "weekly_plan_versions", ["weekly_plan_id"])
+    op.create_index(
+        "ix_weekly_plan_versions_weekly_plan_id", "weekly_plan_versions", ["weekly_plan_id"]
+    )
     op.create_index(
         "ix_weekly_plan_versions_created_by_user_id",
         "weekly_plan_versions",
@@ -59,7 +63,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["workflow_id"], ["teacher_assist_workflows.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["workflow_id"], ["teacher_assist_workflows.id"], ondelete="SET NULL"
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(

@@ -14,14 +14,20 @@ from tests.test_pacing_guide_foundation import _catalog_scope, _school_year, _te
 def _align_teacher_tenant(db_session: Session, *, teacher_email: str) -> None:
     root_user = db_session.scalar(select(User).where(User.email == "catalog-root@example.com"))
     teacher_user = db_session.scalar(select(User).where(User.email == teacher_email))
-    root_membership = db_session.scalar(select(TenantMembership).where(TenantMembership.user_id == root_user.id))
-    teacher_membership = db_session.scalar(select(TenantMembership).where(TenantMembership.user_id == teacher_user.id))
+    root_membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == root_user.id)
+    )
+    teacher_membership = db_session.scalar(
+        select(TenantMembership).where(TenantMembership.user_id == teacher_user.id)
+    )
     assert root_membership is not None and teacher_membership is not None
     teacher_membership.tenant_id = root_membership.tenant_id
     db_session.commit()
 
 
-def _create_week_guide(client, root_token: str, scope: dict[str, str], school_year: dict) -> tuple[dict, str]:
+def _create_week_guide(
+    client, root_token: str, scope: dict[str, str], school_year: dict
+) -> tuple[dict, str]:
     today = date.today()
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=4)

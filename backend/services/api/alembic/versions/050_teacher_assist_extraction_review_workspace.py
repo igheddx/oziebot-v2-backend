@@ -64,7 +64,9 @@ def upgrade() -> None:
 
     op.add_column(
         "teacher_assist_extracted_text_records",
-        sa.Column("review_status", sa.String(length=32), nullable=False, server_default="pending_review"),
+        sa.Column(
+            "review_status", sa.String(length=32), nullable=False, server_default="pending_review"
+        ),
     )
     op.add_column(
         "teacher_assist_extracted_text_records",
@@ -72,7 +74,9 @@ def upgrade() -> None:
     )
     op.add_column(
         "teacher_assist_extracted_text_records",
-        sa.Column("confidence_level", sa.String(length=16), nullable=False, server_default="unknown"),
+        sa.Column(
+            "confidence_level", sa.String(length=16), nullable=False, server_default="unknown"
+        ),
     )
     op.add_column(
         "teacher_assist_extracted_text_records",

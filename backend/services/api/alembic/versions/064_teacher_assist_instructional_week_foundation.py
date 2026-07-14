@@ -43,15 +43,23 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["grading_period_id"], ["grading_periods.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["pacing_guide_id"], ["pacing_guides.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["pacing_guide_period_id"], ["pacing_guide_periods.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["pacing_guide_period_id"], ["pacing_guide_periods.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["school_year_id"], ["school_years.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["updated_by_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_instructional_weeks_tenant_id", "instructional_weeks", ["tenant_id"])
-    op.create_index("ix_instructional_weeks_pacing_guide_period_id", "instructional_weeks", ["pacing_guide_period_id"])
-    op.create_index("ix_instructional_weeks_created_by_user_id", "instructional_weeks", ["created_by_user_id"])
+    op.create_index(
+        "ix_instructional_weeks_pacing_guide_period_id",
+        "instructional_weeks",
+        ["pacing_guide_period_id"],
+    )
+    op.create_index(
+        "ix_instructional_weeks_created_by_user_id", "instructional_weeks", ["created_by_user_id"]
+    )
     op.create_index(
         "uq_instructional_weeks_teacher_period",
         "instructional_weeks",
@@ -71,7 +79,9 @@ def upgrade() -> None:
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["instructional_week_id"], ["instructional_weeks.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["instructional_week_id"], ["instructional_weeks.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["objective_id"], ["education_objectives.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -90,7 +100,9 @@ def upgrade() -> None:
         sa.Column("created_by_user_id", sa.Uuid(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["instructional_week_id"], ["instructional_weeks.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["instructional_week_id"], ["instructional_weeks.id"], ondelete="CASCADE"
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -99,7 +111,12 @@ def upgrade() -> None:
         ["instructional_week_id"],
     )
 
-    for table in ("weekly_plans", "assignments", "teacher_assist_newsletters", "teacher_assist_generated_artifacts"):
+    for table in (
+        "weekly_plans",
+        "assignments",
+        "teacher_assist_newsletters",
+        "teacher_assist_generated_artifacts",
+    ):
         op.add_column(table, sa.Column("instructional_week_id", sa.Uuid(), nullable=True))
         op.create_index(f"ix_{table}_instructional_week_id", table, ["instructional_week_id"])
         op.create_foreign_key(
@@ -113,14 +130,23 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    for table in ("teacher_assist_generated_artifacts", "teacher_assist_newsletters", "assignments", "weekly_plans"):
+    for table in (
+        "teacher_assist_generated_artifacts",
+        "teacher_assist_newsletters",
+        "assignments",
+        "weekly_plans",
+    ):
         op.drop_constraint(f"fk_{table}_instructional_week_id", table, type_="foreignkey")
         op.drop_index(f"ix_{table}_instructional_week_id", table_name=table)
         op.drop_column(table, "instructional_week_id")
 
-    op.drop_index("ix_instructional_week_snapshots_week_id", table_name="instructional_week_snapshots")
+    op.drop_index(
+        "ix_instructional_week_snapshots_week_id", table_name="instructional_week_snapshots"
+    )
     op.drop_table("instructional_week_snapshots")
-    op.drop_index("ix_instructional_week_objectives_week_id", table_name="instructional_week_objectives")
+    op.drop_index(
+        "ix_instructional_week_objectives_week_id", table_name="instructional_week_objectives"
+    )
     op.drop_table("instructional_week_objectives")
     op.drop_index("uq_instructional_weeks_teacher_period", table_name="instructional_weeks")
     op.drop_index("ix_instructional_weeks_created_by_user_id", table_name="instructional_weeks")

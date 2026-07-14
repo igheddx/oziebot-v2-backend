@@ -10,7 +10,9 @@ from oziebot_api.models.education_catalog import (
     EducationCurriculumResource,
 )
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
-from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
+from oziebot_api.models.teacher_assist_pacing_guide_objective import (
+    TeacherAssistPacingGuideObjective,
+)
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
 from oziebot_api.models.teacher_assist_pacing_guide_resource import TeacherAssistPacingGuideResource
 from oziebot_api.models.user import User
@@ -73,7 +75,9 @@ def list_catalog_pacing_guides(
     if active_only:
         stmt = stmt.where(TeacherAssistPacingGuide.is_active.is_(True))
     if guide_type:
-        stmt = stmt.where(TeacherAssistPacingGuide.guide_type == validate_pacing_guide_type(guide_type))
+        stmt = stmt.where(
+            TeacherAssistPacingGuide.guide_type == validate_pacing_guide_type(guide_type)
+        )
     if catalog_school_id is not None:
         stmt = stmt.where(TeacherAssistPacingGuide.catalog_school_id == catalog_school_id)
     stmt = stmt.options(selectinload(TeacherAssistPacingGuide.periods))
@@ -268,7 +272,10 @@ def update_pacing_guide_period(
 ) -> TeacherAssistPacingGuidePeriod:
     row = db.scalars(
         select(TeacherAssistPacingGuidePeriod)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id)
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id,
+        )
         .where(
             TeacherAssistPacingGuidePeriod.id == period_id,
             TeacherAssistPacingGuide.tenant_id == tenant_id,
@@ -290,7 +297,10 @@ def update_pacing_guide_period(
 def delete_pacing_guide_period(db: Session, *, tenant_id: uuid.UUID, period_id: uuid.UUID) -> None:
     row = db.scalars(
         select(TeacherAssistPacingGuidePeriod)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id)
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id,
+        )
         .where(
             TeacherAssistPacingGuidePeriod.id == period_id,
             TeacherAssistPacingGuide.tenant_id == tenant_id,
@@ -303,9 +313,15 @@ def delete_pacing_guide_period(db: Session, *, tenant_id: uuid.UUID, period_id: 
 
 
 def reorder_pacing_guide_periods(
-    db: Session, *, tenant_id: uuid.UUID, pacing_guide_id: uuid.UUID, ordered_period_ids: list[uuid.UUID]
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    pacing_guide_id: uuid.UUID,
+    ordered_period_ids: list[uuid.UUID],
 ) -> list[TeacherAssistPacingGuidePeriod]:
-    guide = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id)
+    guide = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=pacing_guide_id
+    )
     period_by_id = {period.id: period for period in guide.periods}
     if set(period_by_id.keys()) != set(ordered_period_ids):
         raise ValueError("Period reorder payload must include all guide periods exactly once")
@@ -328,7 +344,10 @@ def add_pacing_guide_objective(
 ) -> TeacherAssistPacingGuideObjective:
     period = db.scalars(
         select(TeacherAssistPacingGuidePeriod)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id)
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id,
+        )
         .where(
             TeacherAssistPacingGuidePeriod.id == period_id,
             TeacherAssistPacingGuide.tenant_id == tenant_id,
@@ -363,7 +382,10 @@ def add_pacing_guide_resource(
         raise ValueError("A catalog resource or teacher resource is required")
     period = db.scalars(
         select(TeacherAssistPacingGuidePeriod)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id)
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id,
+        )
         .where(
             TeacherAssistPacingGuidePeriod.id == period_id,
             TeacherAssistPacingGuide.tenant_id == tenant_id,
@@ -402,9 +424,15 @@ def _copy_guide_tree(
         select(TeacherAssistPacingGuide)
         .where(TeacherAssistPacingGuide.id == source.id)
         .options(
-            selectinload(TeacherAssistPacingGuide.periods).selectinload(TeacherAssistPacingGuidePeriod.objectives),
-            selectinload(TeacherAssistPacingGuide.periods).selectinload(TeacherAssistPacingGuidePeriod.resources),
-            selectinload(TeacherAssistPacingGuide.periods).selectinload(TeacherAssistPacingGuidePeriod.days),
+            selectinload(TeacherAssistPacingGuide.periods).selectinload(
+                TeacherAssistPacingGuidePeriod.objectives
+            ),
+            selectinload(TeacherAssistPacingGuide.periods).selectinload(
+                TeacherAssistPacingGuidePeriod.resources
+            ),
+            selectinload(TeacherAssistPacingGuide.periods).selectinload(
+                TeacherAssistPacingGuidePeriod.days
+            ),
         )
     ).one()
     for period in sorted(source_detail.periods, key=lambda row: row.sequence_number):
@@ -460,7 +488,9 @@ def copy_pacing_guide(
     school_year_id: uuid.UUID | None,
     copy_materials: bool = False,
 ) -> TeacherAssistPacingGuide:
-    source = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=source_guide_id)
+    source = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=source_guide_id
+    )
     normalized_type = validate_pacing_guide_type(target_guide_type)
     next_school_year_id = school_year_id or source.school_year_id
     target = create_catalog_pacing_guide(
@@ -482,7 +512,9 @@ def copy_pacing_guide(
     target.metadata_json = source.metadata_json
     period_id_map, day_id_map = _copy_guide_tree(db, source=source, target=target)
     if copy_materials:
-        from oziebot_api.services.teacher_assist_v2.supporting_materials import copy_pacing_guide_supporting_materials
+        from oziebot_api.services.teacher_assist_v2.supporting_materials import (
+            copy_pacing_guide_supporting_materials,
+        )
 
         copy_pacing_guide_supporting_materials(
             db,
@@ -507,8 +539,12 @@ class PacingGuideRolloverService:
         target_school_year_id: uuid.UUID,
         guide_ids: list[uuid.UUID] | None = None,
     ) -> list[TeacherAssistPacingGuide]:
-        source_year = get_school_year_or_404(db, tenant_id=tenant_id, school_year_id=source_school_year_id)
-        target_year = get_school_year_or_404(db, tenant_id=tenant_id, school_year_id=target_school_year_id)
+        source_year = get_school_year_or_404(
+            db, tenant_id=tenant_id, school_year_id=source_school_year_id
+        )
+        target_year = get_school_year_or_404(
+            db, tenant_id=tenant_id, school_year_id=target_school_year_id
+        )
         stmt = select(TeacherAssistPacingGuide).where(
             TeacherAssistPacingGuide.tenant_id == tenant_id,
             TeacherAssistPacingGuide.school_year_id == source_year.id,

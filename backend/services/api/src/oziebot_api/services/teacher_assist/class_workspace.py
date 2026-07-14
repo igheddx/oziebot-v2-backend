@@ -101,7 +101,9 @@ def get_teacher_assist_class_workspace(
         "tabs": {
             "overview": {
                 "pending_reviews": sum(
-                    1 for item in class_items if item.get("section_key") in {"extractions", "grading"}
+                    1
+                    for item in class_items
+                    if item.get("section_key") in {"extractions", "grading"}
                 ),
                 "recent_assignments": [
                     {

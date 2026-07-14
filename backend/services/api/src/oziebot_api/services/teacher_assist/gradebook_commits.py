@@ -7,7 +7,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
+from oziebot_api.models.teacher_assist_assignment_grade_record import (
+    TeacherAssistAssignmentGradeRecord,
+)
 from oziebot_api.models.teacher_assist_assignment_gradebook_audit_event import (
     TeacherAssistAssignmentGradebookAuditEvent,
 )
@@ -23,7 +25,9 @@ from oziebot_api.services.teacher_assist.constants import (
     validate_assignment_gradebook_commit_type,
 )
 from oziebot_api.services.teacher_assist.grading_reviews import get_grading_review_or_404
-from oziebot_api.services.teacher_assist.instructional_plan_validator import contains_pii_like_content
+from oziebot_api.services.teacher_assist.instructional_plan_validator import (
+    contains_pii_like_content,
+)
 
 
 def _normalize_string(value: str | None) -> str | None:
@@ -48,7 +52,9 @@ def _validate_grade_payload(
     if require_score_or_feedback and committed_score is None and not normalized_feedback:
         raise ValueError("Grade commits require a committed score or committed feedback")
     if contains_pii_like_content({"committed_feedback": normalized_feedback}):
-        raise ValueError("Grade commit content cannot include student-identifying or PII-like content")
+        raise ValueError(
+            "Grade commit content cannot include student-identifying or PII-like content"
+        )
     return committed_score, max_score, normalized_feedback
 
 
@@ -186,7 +192,9 @@ def list_gradebook_audit_events(
     )
     if assignment_id is not None:
         get_assignment_or_404(db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id)
-        query = query.where(TeacherAssistAssignmentGradebookAuditEvent.assignment_id == assignment_id)
+        query = query.where(
+            TeacherAssistAssignmentGradebookAuditEvent.assignment_id == assignment_id
+        )
     if grade_record_id is not None:
         get_grade_record_or_404(
             db,
@@ -194,9 +202,13 @@ def list_gradebook_audit_events(
             user_id=user_id,
             grade_record_id=grade_record_id,
         )
-        query = query.where(TeacherAssistAssignmentGradebookAuditEvent.grade_record_id == grade_record_id)
+        query = query.where(
+            TeacherAssistAssignmentGradebookAuditEvent.grade_record_id == grade_record_id
+        )
     return db.scalars(
-        query.order_by(TeacherAssistAssignmentGradebookAuditEvent.created_at.desc()).limit(max(1, min(limit, 250)))
+        query.order_by(TeacherAssistAssignmentGradebookAuditEvent.created_at.desc()).limit(
+            max(1, min(limit, 250))
+        )
     ).all()
 
 
@@ -207,7 +219,9 @@ def build_assignment_gradebook_export_view(
     user_id: uuid.UUID,
     assignment_id: uuid.UUID,
 ) -> dict[str, Any]:
-    assignment = get_assignment_or_404(db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id)
+    assignment = get_assignment_or_404(
+        db, tenant_id=tenant_id, user_id=user_id, assignment_id=assignment_id
+    )
     records = list_assignment_grade_records(
         db,
         tenant_id=tenant_id,
@@ -230,7 +244,9 @@ def build_assignment_gradebook_export_view(
         "class_id": str(assignment.class_id),
         "subject_id": str(assignment.subject_id),
         "school_year_id": str(assignment.school_year_id),
-        "grading_period_id": str(assignment.grading_period_id) if assignment.grading_period_id else None,
+        "grading_period_id": str(assignment.grading_period_id)
+        if assignment.grading_period_id
+        else None,
         "generated_at": datetime.now(UTC),
         "record_count": len(records),
         "active_record_count": sum(1 for row in records if row.record_status == "active"),
@@ -293,7 +309,9 @@ def commit_grade_from_grading_review(
         )
     ).one_or_none()
     if existing is not None:
-        raise ValueError("An active grade record already exists for this assignment and student number")
+        raise ValueError(
+            "An active grade record already exists for this assignment and student number"
+        )
 
     committed_score = review.teacher_confirmed_score
     max_score = review.max_score

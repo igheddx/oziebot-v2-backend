@@ -44,12 +44,19 @@ def validate_pilot_seed_data(db: Session) -> dict[str, object]:
                     EducationSchool.name.ilike("%Mason%"),
                 )
             ).first()
-            add("Mason Elementary", mason is not None, "Mason Elementary school record", 1 if mason else 0)
+            add(
+                "Mason Elementary",
+                mason is not None,
+                "Mason Elementary school record",
+                1 if mason else 0,
+            )
 
     objective_count = int(db.scalar(select(func.count()).select_from(EducationObjective)) or 0)
     add("Objectives", objective_count > 0, "Catalog objectives present", objective_count)
 
-    resource_count = int(db.scalar(select(func.count()).select_from(EducationCurriculumResource)) or 0)
+    resource_count = int(
+        db.scalar(select(func.count()).select_from(EducationCurriculumResource)) or 0
+    )
     add("Curriculum resources", resource_count > 0, "Catalog resources present", resource_count)
 
     try:
@@ -78,8 +85,18 @@ def validate_pilot_seed_data(db: Session) -> dict[str, object]:
             )
             or 0
         )
-        add("Pacing guides (seed tenant)", guide_count > 0, "Teacher pacing guides for seed actor", guide_count)
-        add("Instructional weeks (seed tenant)", week_count > 0, "Instructional weeks for seed actor", week_count)
+        add(
+            "Pacing guides (seed tenant)",
+            guide_count > 0,
+            "Teacher pacing guides for seed actor",
+            guide_count,
+        )
+        add(
+            "Instructional weeks (seed tenant)",
+            week_count > 0,
+            "Instructional weeks for seed actor",
+            week_count,
+        )
         add(
             "Copilot sessions (seed tenant)",
             copilot_count >= 0,

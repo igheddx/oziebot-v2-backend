@@ -128,7 +128,9 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index(op.f("ix_assignment_print_pages_qr_token"), table_name="assignment_print_pages")
     op.drop_index(op.f("ix_assignment_print_pages_packet_id"), table_name="assignment_print_pages")
-    op.drop_index(op.f("ix_assignment_print_pages_assignment_id"), table_name="assignment_print_pages")
+    op.drop_index(
+        op.f("ix_assignment_print_pages_assignment_id"), table_name="assignment_print_pages"
+    )
     op.drop_table("assignment_print_pages")
 
     op.drop_index(

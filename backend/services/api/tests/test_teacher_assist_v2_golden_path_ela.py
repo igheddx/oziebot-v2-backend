@@ -12,7 +12,9 @@ from oziebot_api.models.education_catalog import (
     EducationSubject,
 )
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
-from oziebot_api.models.teacher_assist_pacing_guide_objective import TeacherAssistPacingGuideObjective
+from oziebot_api.models.teacher_assist_pacing_guide_objective import (
+    TeacherAssistPacingGuideObjective,
+)
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
 from oziebot_api.models.teacher_assist_pacing_guide_supporting_material import (
     TeacherAssistPacingGuideSupportingMaterial,
@@ -31,7 +33,9 @@ from oziebot_api.scripts.seed_v2_pacing_supporting_materials import (
     GOLDEN_PATH_ELA_NOTE_TITLE,
 )
 from oziebot_api.services.teacher_assist.access_seed import _get_user_by_email, _primary_membership
-from oziebot_api.services.teacher_assist_v2.supporting_materials import get_pacing_guide_planning_context
+from oziebot_api.services.teacher_assist_v2.supporting_materials import (
+    get_pacing_guide_planning_context,
+)
 from tests.test_teacher_assist_v2_supporting_materials import _make_root_admin
 
 
@@ -99,15 +103,19 @@ def test_golden_path_ela_seed_alignment(db_session, client):
     assert guide is not None
 
     week1 = db_session.scalar(
-        select(TeacherAssistPacingGuidePeriod).where(
+        select(TeacherAssistPacingGuidePeriod)
+        .where(
             TeacherAssistPacingGuidePeriod.pacing_guide_id == guide.id,
             TeacherAssistPacingGuidePeriod.period_type == "WEEK",
-        ).order_by(TeacherAssistPacingGuidePeriod.sequence_number.asc())
+        )
+        .order_by(TeacherAssistPacingGuidePeriod.sequence_number.asc())
     )
     assert week1 is not None
     assert week1.title == GOLDEN_PATH_ELA_WEEK1_TITLE
     assert "Monday: Introduce inference and evidence." in (week1.description or "")
-    assert "Friday: Assessment / exit ticket on inference and evidence." in (week1.description or "")
+    assert "Friday: Assessment / exit ticket on inference and evidence." in (
+        week1.description or ""
+    )
 
     mapped = db_session.scalars(
         select(TeacherAssistPacingGuideObjective).where(

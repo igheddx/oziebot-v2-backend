@@ -75,7 +75,9 @@ class TeacherAssistLessonReflection(Base):
     tenant: Mapped["Tenant"] = relationship("Tenant")
     owner_user: Mapped["User"] = relationship("User", foreign_keys=[owner_user_id])
     school_year: Mapped["TeacherAssistSchoolYear"] = relationship("TeacherAssistSchoolYear")
-    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship("TeacherAssistGradingPeriod")
+    grading_period: Mapped["TeacherAssistGradingPeriod | None"] = relationship(
+        "TeacherAssistGradingPeriod"
+    )
     teacher_class: Mapped["TeacherAssistClass"] = relationship("TeacherAssistClass")
     subject: Mapped["TeacherAssistSubject"] = relationship("TeacherAssistSubject")
     weekly_plan: Mapped["TeacherAssistWeeklyPlan | None"] = relationship("TeacherAssistWeeklyPlan")
@@ -96,7 +98,9 @@ from typing import TYPE_CHECKING  # noqa: E402
 if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_class import TeacherAssistClass
     from oziebot_api.models.teacher_assist_grading_period import TeacherAssistGradingPeriod
-    from oziebot_api.models.teacher_assist_lesson_reflection_version import TeacherAssistLessonReflectionVersion
+    from oziebot_api.models.teacher_assist_lesson_reflection_version import (
+        TeacherAssistLessonReflectionVersion,
+    )
     from oziebot_api.models.teacher_assist_school_year import TeacherAssistSchoolYear
     from oziebot_api.models.teacher_assist_subject import TeacherAssistSubject
     from oziebot_api.models.teacher_assist_weekly_plan import TeacherAssistWeeklyPlan

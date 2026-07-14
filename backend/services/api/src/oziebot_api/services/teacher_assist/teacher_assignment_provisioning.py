@@ -150,21 +150,22 @@ def list_teacher_assignment_rows(
     district_ids = {row.district_id for row in assignments}
     school_ids = {row.school_id for row in assignments}
 
-    users = {
-        row.id: row
-        for row in db.scalars(select(User).where(User.id.in_(user_ids))).all()
-    }
+    users = {row.id: row for row in db.scalars(select(User).where(User.id.in_(user_ids))).all()}
     states = {
         row.id: row
         for row in db.scalars(select(EducationState).where(EducationState.id.in_(state_ids))).all()
     }
     districts = {
         row.id: row
-        for row in db.scalars(select(EducationDistrict).where(EducationDistrict.id.in_(district_ids))).all()
+        for row in db.scalars(
+            select(EducationDistrict).where(EducationDistrict.id.in_(district_ids))
+        ).all()
     }
     schools = {
         row.id: row
-        for row in db.scalars(select(EducationSchool).where(EducationSchool.id.in_(school_ids))).all()
+        for row in db.scalars(
+            select(EducationSchool).where(EducationSchool.id.in_(school_ids))
+        ).all()
     }
 
     return [
@@ -173,7 +174,9 @@ def list_teacher_assignment_rows(
             user_email=users.get(row.user_id).email if users.get(row.user_id) else None,
             user_full_name=users.get(row.user_id).full_name if users.get(row.user_id) else None,
             state_name=states.get(row.state_id).name if states.get(row.state_id) else None,
-            district_name=districts.get(row.district_id).name if districts.get(row.district_id) else None,
+            district_name=districts.get(row.district_id).name
+            if districts.get(row.district_id)
+            else None,
             school_name=schools.get(row.school_id).name if schools.get(row.school_id) else None,
         )
         for row in assignments
@@ -290,7 +293,9 @@ def provision_teacher_school_assignment(
     )
 
 
-def _apply_teacher_account_flags(db: Session, *, user: User, temporary_password: str | None) -> None:
+def _apply_teacher_account_flags(
+    db: Session, *, user: User, temporary_password: str | None
+) -> None:
     if user.teacher_assist_role != "root_admin" and not user.is_root_admin:
         user.teacher_assist_role = "teacher"
     if temporary_password:

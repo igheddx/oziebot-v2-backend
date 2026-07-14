@@ -76,7 +76,9 @@ def validate_instructional_plan_output(
     )
     missing = [key for key in required_top_level if key not in content_json]
     if missing:
-        raise ValueError("Instructional plan output is missing required fields: " + ", ".join(missing))
+        raise ValueError(
+            "Instructional plan output is missing required fields: " + ", ".join(missing)
+        )
 
     planning_scope = str(content_json.get("planning_scope") or "").strip()
     if planning_scope not in PLANNING_SCOPES:
@@ -148,7 +150,9 @@ def validate_instructional_plan_section_output(
 
     if section_key == "weekly_segments" and section_path is not None:
         if not isinstance(section_content, dict) or not section_content:
-            raise ValueError("A targeted weekly segment regeneration must return one non-empty object")
+            raise ValueError(
+                "A targeted weekly segment regeneration must return one non-empty object"
+            )
         return section_content
 
     if section_key in {

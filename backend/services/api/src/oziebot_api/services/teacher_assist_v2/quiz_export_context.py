@@ -7,7 +7,11 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
-from oziebot_api.models.education_catalog import EducationGrade, EducationSchoolYear, EducationSubject
+from oziebot_api.models.education_catalog import (
+    EducationGrade,
+    EducationSchoolYear,
+    EducationSubject,
+)
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
 from oziebot_api.models.teacher_assist_v2_instructional_package import (
     TeacherAssistV2InstructionalPackage,
@@ -59,7 +63,9 @@ def build_quiz_export_context(
         "grade_name": grade_name,
         "subject_id": str(artifact.subject_id) if artifact.subject_id else None,
         "subject_name": subject_name,
-        "objective_ids": list(assignment_row.education_objective_ids_json) if assignment_row else [],
+        "objective_ids": list(assignment_row.education_objective_ids_json)
+        if assignment_row
+        else [],
         "objective_mapping": content.get("objective_mapping"),
     }
 
@@ -74,6 +80,10 @@ def refresh_quiz_artifact_exports(
 ) -> None:
     if artifact.artifact_type != "quiz":
         return
-    from oziebot_api.services.teacher_assist_v2.assessment_student_exports import refresh_assessment_student_exports
+    from oziebot_api.services.teacher_assist_v2.assessment_student_exports import (
+        refresh_assessment_student_exports,
+    )
 
-    refresh_assessment_student_exports(db, settings=settings, package=package, artifact=artifact, assignment=assignment)
+    refresh_assessment_student_exports(
+        db, settings=settings, package=package, artifact=artifact, assignment=assignment
+    )

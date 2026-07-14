@@ -15,7 +15,9 @@ from tests.test_teacher_assist_v2_submission_intake import (
 from tests.test_teacher_assist_v2_planning import _ready_teacher_token
 
 
-def test_assignment_detail_enables_class_report_when_existing_submissions_are_confirmed(client, db_session):
+def test_assignment_detail_enables_class_report_when_existing_submissions_are_confirmed(
+    client, db_session
+):
     token = _ready_teacher_token(client, db_session)
     headers = {"Authorization": f"Bearer {token}"}
     _generate_week1_package(client, headers)
@@ -28,7 +30,9 @@ def test_assignment_detail_enables_class_report_when_existing_submissions_are_co
     )
     assert accept.status_code == 201, accept.text
 
-    detail = client.get(f"/v1/teacher-assist-v2/teacher/assignments/{assignment_id}", headers=headers)
+    detail = client.get(
+        f"/v1/teacher-assist-v2/teacher/assignments/{assignment_id}", headers=headers
+    )
     assert detail.status_code == 200, detail.text
     payload = detail.json()
     assert payload["rubric_score_report_available"] is True
@@ -65,7 +69,9 @@ def test_assignment_detail_enables_class_report_when_roster_is_fully_resolved(cl
     )
     assert accept.status_code == 201, accept.text
 
-    detail = client.get(f"/v1/teacher-assist-v2/teacher/assignments/{assignment_id}", headers=headers)
+    detail = client.get(
+        f"/v1/teacher-assist-v2/teacher/assignments/{assignment_id}", headers=headers
+    )
     assert detail.status_code == 200, detail.text
     payload = detail.json()
     assert payload["status"] == "COMPLETED"

@@ -43,14 +43,20 @@ def list_pilot_feedback(
     status: str | None = None,
     limit: int = 50,
 ) -> list[TeacherAssistPilotFeedback]:
-    query = select(TeacherAssistPilotFeedback).where(TeacherAssistPilotFeedback.tenant_id == tenant_id)
+    query = select(TeacherAssistPilotFeedback).where(
+        TeacherAssistPilotFeedback.tenant_id == tenant_id
+    )
     if user_id is not None:
         query = query.where(TeacherAssistPilotFeedback.user_id == user_id)
     if status:
-        query = query.where(TeacherAssistPilotFeedback.status == validate_pilot_feedback_status(status))
+        query = query.where(
+            TeacherAssistPilotFeedback.status == validate_pilot_feedback_status(status)
+        )
     return list(
         db.scalars(
-            query.order_by(TeacherAssistPilotFeedback.created_at.desc()).limit(max(1, min(limit, 200)))
+            query.order_by(TeacherAssistPilotFeedback.created_at.desc()).limit(
+                max(1, min(limit, 200))
+            )
         ).all()
     )
 

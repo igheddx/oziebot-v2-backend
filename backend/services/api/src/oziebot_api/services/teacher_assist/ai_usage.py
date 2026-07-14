@@ -82,6 +82,7 @@ def get_package_ai_cost_by_feature(db: Session, *, package_id: uuid.UUID) -> dic
     that JSON path so we only count events produced during this package's generation.
     """
     from sqlalchemy import text as _text
+
     rows = db.execute(
         _text(
             "SELECT feature, estimated_cost_cents "
@@ -106,7 +107,9 @@ def get_teacher_assist_ai_usage_summary(db: Session, *, hours: int = 24) -> dict
     total_output_tokens = sum(int(row.output_tokens or 0) for row in rows)
     by_feature: dict[str, int] = {}
     for row in rows:
-        by_feature[row.feature] = by_feature.get(row.feature, 0) + int(row.estimated_cost_cents or 0)
+        by_feature[row.feature] = by_feature.get(row.feature, 0) + int(
+            row.estimated_cost_cents or 0
+        )
     return {
         "window_hours": hours,
         "event_count": len(rows),

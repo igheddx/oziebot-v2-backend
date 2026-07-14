@@ -100,7 +100,10 @@ def build_slides_preview(
         {
             "key": "title",
             "title": plan_title,
-            "bullets": ["TeacherAssist export preview", f"Artifact type: {artifact_type.replace('_', ' ')}"],
+            "bullets": [
+                "TeacherAssist export preview",
+                f"Artifact type: {artifact_type.replace('_', ' ')}",
+            ],
         },
         {
             "key": "standards_objectives",
@@ -202,7 +205,9 @@ def build_quiz_preview(
             {
                 "question_type": "short_answer",
                 "question_text": "Explain one vocabulary term from this week.",
-                "answer_key": vocabulary[0] if vocabulary else "Teacher-reviewed vocabulary response.",
+                "answer_key": vocabulary[0]
+                if vocabulary
+                else "Teacher-reviewed vocabulary response.",
                 "standards": standards[:1],
                 "difficulty": "medium",
             },

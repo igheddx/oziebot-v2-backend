@@ -57,7 +57,9 @@ class TeacherAssistMasteryAuditEvent(Base):
 
     tenant: Mapped["Tenant"] = relationship("Tenant")
     owner_user: Mapped["User"] = relationship("User")
-    mastery_matrix: Mapped["TeacherAssistMasteryMatrix"] = relationship("TeacherAssistMasteryMatrix")
+    mastery_matrix: Mapped["TeacherAssistMasteryMatrix"] = relationship(
+        "TeacherAssistMasteryMatrix"
+    )
 
 
 from typing import TYPE_CHECKING  # noqa: E402

@@ -18,7 +18,9 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.config import Settings
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
-from oziebot_api.models.teacher_assist_v2_instructional_package import TeacherAssistV2InstructionalPackage
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackage,
+)
 from oziebot_api.models.teacher_assist_v2_recovery_artifact import TeacherAssistV2RecoveryArtifact
 from oziebot_api.models.teacher_assist_v2_recovery_queue import TeacherAssistV2RecoveryQueue
 from oziebot_api.models.user import User
@@ -28,7 +30,9 @@ from oziebot_api.services.teacher_assist.ai_usage import (
     record_teacher_assist_ai_usage,
 )
 from oziebot_api.services.teacher_assist.openai_json_client import execute_openai_json_completion
-from oziebot_api.services.teacher_assist.prompt_contracts import V2_INSTRUCTIONAL_PACKAGE_GENERATION_FEATURE
+from oziebot_api.services.teacher_assist.prompt_contracts import (
+    V2_INSTRUCTIONAL_PACKAGE_GENERATION_FEATURE,
+)
 from oziebot_api.services.teacher_assist.provider_config import get_teacher_assist_provider_model
 from oziebot_api.services.teacher_assist.runtime_settings import resolve_teacher_assist_settings
 from oziebot_api.services.teacher_assist_v2.instructional_package_ai import _provider_api_params
@@ -56,6 +60,7 @@ _ARTIFACT_META: dict[str, tuple[str, bool]] = {
 
 
 # ── Instructional Integrity Check ─────────────────────────────────────────────
+
 
 def _run_integrity_check(
     *,
@@ -108,6 +113,7 @@ def _run_integrity_check(
 
 # ── Plan data extraction ──────────────────────────────────────────────────────
 
+
 def _extract_recovery_context_from_plan(
     package: TeacherAssistV2InstructionalPackage,
     *,
@@ -146,9 +152,7 @@ def _extract_recovery_context_from_plan(
 
     # PRIMARY: reteach_if_needed from daily progression
     reteach_hints = [
-        day["reteach_if_needed"]
-        for day in daily_progression
-        if day.get("reteach_if_needed")
+        day["reteach_if_needed"] for day in daily_progression if day.get("reteach_if_needed")
     ]
     plan_reteach_hint = reteach_hints[0] if reteach_hints else None
 
@@ -198,7 +202,9 @@ def _resolve_kdg_fields(kdg: list[dict], objective_code: str | None) -> dict[str
     for entry in kdg:
         if entry.get("objective_code") == objective_code:
             deps = entry.get("dependencies") or []
-            activation_strategies = [d["activation_strategy"] for d in deps if d.get("activation_strategy")]
+            activation_strategies = [
+                d["activation_strategy"] for d in deps if d.get("activation_strategy")
+            ]
             gap_consequences = [d["gap_consequence"] for d in deps if d.get("gap_consequence")]
             return {
                 "activation_strategy": activation_strategies[0] if activation_strategies else None,
@@ -208,6 +214,7 @@ def _resolve_kdg_fields(kdg: list[dict], objective_code: str | None) -> dict[str
 
 
 # ── Deterministic content builder ─────────────────────────────────────────────
+
 
 def _build_deterministic_content(
     artifact_type: str,
@@ -228,8 +235,10 @@ def _build_deterministic_content(
     Every field draws from the plan in this priority:
     reteach_if_needed → KDG activation_strategy → observable_mastery_evidence
     """
-    primary = reteach or activation or (
-        f"Address: {misconception}" if misconception else f"Reteach {objective_code}"
+    primary = (
+        reteach
+        or activation
+        or (f"Address: {misconception}" if misconception else f"Reteach {objective_code}")
     )
     goal = mastery_evidence or objective_code
 
@@ -240,7 +249,9 @@ def _build_deterministic_content(
             "teacher_instruction": (
                 f"Cold-call 3–4 students. Listen for whether students can {goal}."
             ),
-            "student_prompt": activation or reteach or f"Quick review: What do you remember about {objective_code}?",
+            "student_prompt": activation
+            or reteach
+            or f"Quick review: What do you remember about {objective_code}?",
             "discussion_follow_up": (
                 f"Turn and talk: {misconception or 'Share what you know with a partner.'}"
             ),
@@ -257,7 +268,8 @@ def _build_deterministic_content(
             "title": f"Mini Lesson — {objective_code}",
             "duration_minutes": 12,
             "teacher_hook": (
-                builds_from or f"Yesterday we worked on {objective_code}. Today we look at it from a different angle."
+                builds_from
+                or f"Yesterday we worked on {objective_code}. Today we look at it from a different angle."
             ),
             "teacher_instruction": primary,
             "student_practice_prompt": goal,
@@ -281,9 +293,11 @@ def _build_deterministic_content(
             "group_size": f"Up to {min(students_count, 8)} students",
             "teacher_guide": {
                 "opening": f"Pull this group during independent practice. Start with: '{primary}'",
-                "instruction": reteach or f"Reteach {objective_code} using a different approach from the whole-class lesson.",
+                "instruction": reteach
+                or f"Reteach {objective_code} using a different approach from the whole-class lesson.",
                 "practice_activity": goal,
-                "scaffold_notes": scaffold or "Provide graphic organizers or sentence frames as needed.",
+                "scaffold_notes": scaffold
+                or "Provide graphic organizers or sentence frames as needed.",
                 "closing_check": exit_ticket_stem or f"Can each student {goal}?",
             },
             "student_materials": {
@@ -458,6 +472,7 @@ def _build_deterministic_content(
 
 # ── AI enrichment prompt ──────────────────────────────────────────────────────
 
+
 def _build_recovery_ai_prompt(
     artifact_type: str,
     *,
@@ -522,6 +537,7 @@ def _build_recovery_ai_prompt(
 
 # ── Serializer ────────────────────────────────────────────────────────────────
 
+
 def _serialize_artifact(artifact: TeacherAssistV2RecoveryArtifact) -> dict[str, Any]:
     return {
         "id": str(artifact.id),
@@ -541,6 +557,7 @@ def _serialize_artifact(artifact: TeacherAssistV2RecoveryArtifact) -> dict[str, 
 
 
 # ── Main public functions ─────────────────────────────────────────────────────
+
 
 def generate_recovery_artifact(
     db: Session,
@@ -610,8 +627,7 @@ def generate_recovery_artifact(
     )
     if not integrity_result["passed"]:
         raise ValueError(
-            "Instructional Integrity Check failed: "
-            + "; ".join(integrity_result["issues"])
+            "Instructional Integrity Check failed: " + "; ".join(integrity_result["issues"])
         )
 
     # ── Priority 2: Build deterministic content ────────────────────────────────
@@ -632,7 +648,9 @@ def generate_recovery_artifact(
         students_count=students_count,
     )
 
-    display_name, _ = _ARTIFACT_META.get(artifact_type, (artifact_type.replace("_", " ").title(), False))
+    display_name, _ = _ARTIFACT_META.get(
+        artifact_type, (artifact_type.replace("_", " ").title(), False)
+    )
     title = f"{display_name} — {queue_item.objective_code or 'Recovery'}"
 
     # ── Priority 3: AI enrichment ──────────────────────────────────────────────
@@ -687,6 +705,7 @@ def generate_recovery_artifact(
                 model_used = result.model
         except Exception:
             import logging
+
             logging.getLogger(__name__).exception(
                 "Recovery AI enrichment failed for %s — using deterministic content", artifact_type
             )

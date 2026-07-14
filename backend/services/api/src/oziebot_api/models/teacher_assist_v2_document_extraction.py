@@ -42,7 +42,10 @@ class TeacherAssistV2DocumentExtraction(Base):
         index=True,
     )
     pacing_guide_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("pacing_guides.id", ondelete="SET NULL"), nullable=True, index=True
+        Uuid(as_uuid=True),
+        ForeignKey("pacing_guides.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     package_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
@@ -57,7 +60,9 @@ class TeacherAssistV2DocumentExtraction(Base):
         index=True,
     )
     platform_school_year_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("education_school_years.id", ondelete="SET NULL"), nullable=True
+        Uuid(as_uuid=True),
+        ForeignKey("education_school_years.id", ondelete="SET NULL"),
+        nullable=True,
     )
     catalog_state_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("education_states.id", ondelete="SET NULL"), nullable=True

@@ -78,7 +78,9 @@ def reuse_prior_instructional_week(
         for row in source.objectives:
             if not row.is_active:
                 continue
-            from oziebot_api.services.teacher_assist.instructional_weeks import upsert_instructional_week_objective
+            from oziebot_api.services.teacher_assist.instructional_weeks import (
+                upsert_instructional_week_objective,
+            )
 
             upsert_instructional_week_objective(
                 db,
@@ -109,7 +111,10 @@ def reuse_prior_instructional_week(
                 copy_objectives=False,
                 copy_resources=copy_resources,
                 copy_notes=True,
-                copy_artifacts=copy_assignments or copy_assessments or copy_lessons or copy_newsletters,
+                copy_artifacts=copy_assignments
+                or copy_assessments
+                or copy_lessons
+                or copy_newsletters,
             )
             copied["artifacts_duplicated"] = True
 

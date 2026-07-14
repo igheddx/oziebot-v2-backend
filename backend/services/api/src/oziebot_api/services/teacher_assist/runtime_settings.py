@@ -30,7 +30,9 @@ def resolve_teacher_assist_settings(db: Session | None, settings: Settings) -> S
     value = row.value or {}
     updates: dict[str, Any] = {}
     if value.get("ai_provider"):
-        updates["teacher_assist_ai_provider"] = validate_teacher_assist_ai_provider(str(value["ai_provider"]))
+        updates["teacher_assist_ai_provider"] = validate_teacher_assist_ai_provider(
+            str(value["ai_provider"])
+        )
     if "real_provider_enabled" in value:
         updates["teacher_assist_real_provider_enabled"] = bool(value["real_provider_enabled"])
     model = value.get("real_provider_model")
@@ -60,18 +62,28 @@ def save_teacher_assist_ai_admin_config(
     normalized_model = (real_provider_model or "").strip() or None
 
     if normalized_provider in ("openai", "gemini") and real_provider_enabled:
-        if normalized_provider == "openai" and not (env_settings.teacher_assist_openai_api_key or "").strip():
+        if (
+            normalized_provider == "openai"
+            and not (env_settings.teacher_assist_openai_api_key or "").strip()
+        ):
             raise ValueError(
                 "TEACHER_ASSIST_OPENAI_API_KEY must be configured on the server before enabling OpenAI."
             )
-        if normalized_provider == "gemini" and not (env_settings.teacher_assist_gemini_api_key or "").strip():
+        if (
+            normalized_provider == "gemini"
+            and not (env_settings.teacher_assist_gemini_api_key or "").strip()
+        ):
             raise ValueError(
                 "TEACHER_ASSIST_GEMINI_API_KEY must be configured on the server before enabling Gemini."
             )
-        resolved_model = normalized_model or (env_settings.teacher_assist_real_provider_model or "").strip()
+        resolved_model = (
+            normalized_model or (env_settings.teacher_assist_real_provider_model or "").strip()
+        )
         if not resolved_model:
             raise ValueError(f"A model name is required when {normalized_provider} is enabled.")
-        from oziebot_api.services.teacher_assist.provider_config import get_teacher_assist_allowed_models
+        from oziebot_api.services.teacher_assist.provider_config import (
+            get_teacher_assist_allowed_models,
+        )
 
         allowed = get_teacher_assist_allowed_models(env_settings)
         if resolved_model not in allowed:
@@ -80,13 +92,17 @@ def save_teacher_assist_ai_admin_config(
         resolved_limit = daily_cost_limit_cents
         if resolved_limit is None:
             persisted = get_persisted_teacher_assist_ai_row(db)
-            persisted_limit = (persisted.value or {}).get("daily_cost_limit_cents") if persisted else None
+            persisted_limit = (
+                (persisted.value or {}).get("daily_cost_limit_cents") if persisted else None
+            )
             if persisted_limit is not None:
                 resolved_limit = int(persisted_limit)
             else:
                 resolved_limit = env_settings.teacher_assist_ai_daily_cost_limit_cents
         if int(resolved_limit or 0) <= 0:
-            raise ValueError(f"Daily cost limit must be set before enabling real {normalized_provider} mode.")
+            raise ValueError(
+                f"Daily cost limit must be set before enabling real {normalized_provider} mode."
+            )
 
     resolved_daily_limit = (
         daily_cost_limit_cents

@@ -122,14 +122,18 @@ def test_v2_ai_test_connection_without_key(client, db_session):
     token = _make_root_admin(db_session, client, "v2-ai-test-root@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
-    response = client.post("/v1/teacher-assist-v2/admin/ai-provider-config/test-connection", headers=headers)
+    response = client.post(
+        "/v1/teacher-assist-v2/admin/ai-provider-config/test-connection", headers=headers
+    )
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["success"] is False
 
 
 def test_resolve_teacher_assist_settings_overlays_platform_settings(db_session):
-    env_settings = Settings(teacher_assist_ai_provider="mock", teacher_assist_real_provider_enabled=False)
+    env_settings = Settings(
+        teacher_assist_ai_provider="mock", teacher_assist_real_provider_enabled=False
+    )
     user_id = uuid.uuid4()
     save_teacher_assist_ai_admin_config(
         db_session,

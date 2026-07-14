@@ -8,14 +8,23 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_v2_assignment import TeacherAssistV2Assignment
-from oziebot_api.models.teacher_assist_v2_instructional_package import TeacherAssistV2InstructionalPackageArtifact
-from oziebot_api.services.teacher_assist_v2.grading_constants import DEFAULT_RUBRIC_SECTIONS, GRADING_DRAFT_MAX_SCORE
+from oziebot_api.models.teacher_assist_v2_instructional_package import (
+    TeacherAssistV2InstructionalPackageArtifact,
+)
+from oziebot_api.services.teacher_assist_v2.grading_constants import (
+    DEFAULT_RUBRIC_SECTIONS,
+    GRADING_DRAFT_MAX_SCORE,
+)
 
 RUBRIC_LINKED_ASSESSMENT_TYPES = frozenset({"writing_response", "assignment"})
 
 
 def _default_grading_sections(*, section_max: float | None = None) -> list[dict[str, Any]]:
-    max_value = section_max if section_max is not None else GRADING_DRAFT_MAX_SCORE / len(DEFAULT_RUBRIC_SECTIONS)
+    max_value = (
+        section_max
+        if section_max is not None
+        else GRADING_DRAFT_MAX_SCORE / len(DEFAULT_RUBRIC_SECTIONS)
+    )
     return [
         {
             "name": name,
@@ -55,7 +64,9 @@ def grading_template_from_package_rubric(rubric_content: dict[str, Any] | None) 
         for row in criteria
         if isinstance(row, dict)
     ]
-    total_points = float(rubric_content.get("total_points") or sum(row["max_score"] for row in sections))
+    total_points = float(
+        rubric_content.get("total_points") or sum(row["max_score"] for row in sections)
+    )
     return {
         "title": rubric_content.get("title") or "Assignment Rubric",
         "total_points": total_points,
@@ -69,7 +80,9 @@ def totals_from_grading_rubric(rubric_json: dict[str, Any] | None) -> tuple[floa
     if not isinstance(sections, list) or not sections:
         return 0.0, 0.0
     score = round(sum(float(row.get("score") or 0) for row in sections if isinstance(row, dict)), 2)
-    max_score = round(sum(float(row.get("max_score") or 0) for row in sections if isinstance(row, dict)), 2)
+    max_score = round(
+        sum(float(row.get("max_score") or 0) for row in sections if isinstance(row, dict)), 2
+    )
     return score, max_score
 
 
@@ -121,27 +134,37 @@ def resolve_linked_rubric_content(
         (
             row
             for row in artifacts
-            if row.assignment_id == assignment.id and row.artifact_type in RUBRIC_LINKED_ASSESSMENT_TYPES
+            if row.assignment_id == assignment.id
+            and row.artifact_type in RUBRIC_LINKED_ASSESSMENT_TYPES
         ),
         None,
     )
     if assessment_artifact is not None:
         assessment_content = (
-            assessment_artifact.content_json if isinstance(assessment_artifact.content_json, dict) else {}
+            assessment_artifact.content_json
+            if isinstance(assessment_artifact.content_json, dict)
+            else {}
         )
         assessment_metadata = (
-            assessment_artifact.metadata_json if isinstance(assessment_artifact.metadata_json, dict) else {}
+            assessment_artifact.metadata_json
+            if isinstance(assessment_artifact.metadata_json, dict)
+            else {}
         )
         linked_id = assessment_content.get("linked_rubric_artifact_id") or assessment_metadata.get(
             "linked_rubric_artifact_id"
         )
         if linked_id:
-            rubric_artifact = next((row for row in artifacts if str(row.id) == str(linked_id)), None)
+            rubric_artifact = next(
+                (row for row in artifacts if str(row.id) == str(linked_id)), None
+            )
             if rubric_artifact is not None and isinstance(rubric_artifact.content_json, dict):
                 return rubric_artifact.content_json
 
     for artifact in artifacts:
-        if artifact.artifact_type != "rubric" or artifact.subject_id != assignment.catalog_subject_id:
+        if (
+            artifact.artifact_type != "rubric"
+            or artifact.subject_id != assignment.catalog_subject_id
+        ):
             continue
         metadata = artifact.metadata_json if isinstance(artifact.metadata_json, dict) else {}
         linked_assessment_id = metadata.get("linked_assessment_artifact_id") or metadata.get(
@@ -149,7 +172,9 @@ def resolve_linked_rubric_content(
         )
         if not linked_assessment_id:
             continue
-        linked_assessment = next((row for row in artifacts if str(row.id) == str(linked_assessment_id)), None)
+        linked_assessment = next(
+            (row for row in artifacts if str(row.id) == str(linked_assessment_id)), None
+        )
         if linked_assessment is not None and linked_assessment.assignment_id == assignment.id:
             content = artifact.content_json if isinstance(artifact.content_json, dict) else None
             if content:
@@ -166,7 +191,8 @@ def resolve_assignment_rubric_content(
         return None
     artifacts = db.scalars(
         select(TeacherAssistV2InstructionalPackageArtifact).where(
-            TeacherAssistV2InstructionalPackageArtifact.package_id == assignment.instructional_package_id
+            TeacherAssistV2InstructionalPackageArtifact.package_id
+            == assignment.instructional_package_id
         )
     ).all()
     return resolve_linked_rubric_content(artifacts, assignment=assignment)

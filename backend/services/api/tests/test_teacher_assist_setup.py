@@ -24,7 +24,9 @@ def _register_user(client, *, email: str, tenant_name: str) -> str:
     return response.json()["access_token"]
 
 
-def _grant_teacher_assist_access(db_session: Session, *, email: str, status: str = "active") -> None:
+def _grant_teacher_assist_access(
+    db_session: Session, *, email: str, status: str = "active"
+) -> None:
     user = db_session.scalar(select(User).where(User.email == email))
     assert user is not None
     membership = db_session.scalar(
@@ -57,8 +59,12 @@ def _grant_teacher_assist_access(db_session: Session, *, email: str, status: str
 
 
 def test_teacher_assist_requires_product_access(client):
-    token = _register_user(client, email="teacher-no-access@example.com", tenant_name="No Access Tenant")
-    response = client.get("/v1/teacher-assist/profile", headers={"Authorization": f"Bearer {token}"})
+    token = _register_user(
+        client, email="teacher-no-access@example.com", tenant_name="No Access Tenant"
+    )
+    response = client.get(
+        "/v1/teacher-assist/profile", headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 403
     assert response.json()["detail"] == "TeacherAssist is not enabled for this user"
 
@@ -240,12 +246,16 @@ def test_class_student_count_validation_and_subject_standard_creation(client, db
     assert classes.status_code == 200, classes.text
     assert classes.json()[0]["subject_ids"] == [subject_payload["id"]]
 
-    standards = client.get("/v1/teacher-assist/standards", headers={"Authorization": f"Bearer {token}"})
+    standards = client.get(
+        "/v1/teacher-assist/standards", headers={"Authorization": f"Bearer {token}"}
+    )
     assert standards.status_code == 200, standards.text
     assert standards.json()[0]["code"] == "5.3H"
 
 
-def test_teacher_assist_tenant_isolation_for_school_years_and_standards(client, db_session: Session):
+def test_teacher_assist_tenant_isolation_for_school_years_and_standards(
+    client, db_session: Session
+):
     first_email = "teacher-a@example.com"
     second_email = "teacher-b@example.com"
     first_token = _register_user(client, email=first_email, tenant_name="Tenant A")
@@ -385,7 +395,9 @@ def test_standard_requires_subject_and_supports_update_and_import(client, db_ses
     assert updated.json()["code"] == "5.ELA.1"
     assert updated.json()["subject_id"] == ela_subject["id"]
 
-    other_token = _register_user(client, email="standards-other@example.com", tenant_name="Other Standards Tenant")
+    other_token = _register_user(
+        client, email="standards-other@example.com", tenant_name="Other Standards Tenant"
+    )
     _grant_teacher_assist_access(db_session, email="standards-other@example.com")
     forbidden = client.put(
         f"/v1/teacher-assist/standards/{standard_payload['id']}",
@@ -437,7 +449,9 @@ def test_standard_requires_subject_and_supports_update_and_import(client, db_ses
     assert commit.status_code == 200, commit.text
     assert commit.json()["created_count"] == 1
 
-    standards = client.get("/v1/teacher-assist/standards", headers={"Authorization": f"Bearer {token}"})
+    standards = client.get(
+        "/v1/teacher-assist/standards", headers={"Authorization": f"Bearer {token}"}
+    )
     assert standards.status_code == 200, standards.text
     codes = {row["code"] for row in standards.json()}
     assert "5.MATH.2" in codes

@@ -11,7 +11,9 @@ from oziebot_api.config import get_settings
 from oziebot_api.deps import DbSession
 from oziebot_api.deps.auth import CurrentUser
 from oziebot_api.services.teacher_assist.teacher_context_engine import build_teacher_context
-from oziebot_api.services.teacher_assist.teacher_copilot_intents import analyze_admin_copilot_question
+from oziebot_api.services.teacher_assist.teacher_copilot_intents import (
+    analyze_admin_copilot_question,
+)
 from oziebot_api.services.teacher_assist.teacher_copilot_service import (
     create_copilot_session,
     get_suggested_questions,
@@ -85,7 +87,9 @@ def read_copilot_sessions(user: CurrentUser, db: DbSession) -> list[dict]:
 
 
 @router.post("/sessions", status_code=201)
-def create_copilot_session_route(user: CurrentUser, db: DbSession, body: CopilotSessionCreateIn) -> dict:
+def create_copilot_session_route(
+    user: CurrentUser, db: DbSession, body: CopilotSessionCreateIn
+) -> dict:
     tenant_id = _tenant_id(db, user)
 
     def _create():
@@ -148,7 +152,9 @@ def post_session_message(
 @router.post("/admin/query")
 def post_admin_copilot_query(user: CurrentUser, db: DbSession, body: AdminCopilotQueryIn) -> dict:
     if not user.is_root_admin:
-        raise HTTPException(status_code=403, detail="Admin copilot is restricted to root administrators")
+        raise HTTPException(
+            status_code=403, detail="Admin copilot is restricted to root administrators"
+        )
     tenant_id = _tenant_id(db, user)
     settings = get_settings()
     context = build_teacher_context(db, settings=settings, tenant_id=tenant_id, user=user)

@@ -25,7 +25,9 @@ def _grant_product_access(
         select(TenantMembership).where(TenantMembership.user_id == user.id)
     )
     assert membership is not None
-    product = db_session.scalar(select(PlatformProduct).where(PlatformProduct.product_key == product_key))
+    product = db_session.scalar(
+        select(PlatformProduct).where(PlatformProduct.product_key == product_key)
+    )
     assert product is not None
     now = datetime.now(UTC)
     db_session.add(

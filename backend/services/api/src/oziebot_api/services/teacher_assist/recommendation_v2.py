@@ -100,7 +100,9 @@ def build_instructional_loop_recommendations(
                 "title": "Prepare reassessment checkpoint",
                 "description": "Schedule a short reassessment after reteach to measure improvement.",
                 "action_key": "prepare_reassessment",
-                "navigation_href": instructional_week_href(str(instructional_week_id), tab="assessments"),
+                "navigation_href": instructional_week_href(
+                    str(instructional_week_id), tab="assessments"
+                ),
                 "requires_teacher_review": True,
             }
         )

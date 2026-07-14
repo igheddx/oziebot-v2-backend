@@ -22,10 +22,22 @@ def recommend_outputs(
 
     # Writing — ELA subject or writing-related TEKS keywords
     _writing_kws = {
-        "write", "writing", "written", "compose", "draft",
-        "narrative", "expository", "opinion", "argumentative",
-        "informational", "literary", "revise", "edit", "paragraph",
-        "essay", "response",
+        "write",
+        "writing",
+        "written",
+        "compose",
+        "draft",
+        "narrative",
+        "expository",
+        "opinion",
+        "argumentative",
+        "informational",
+        "literary",
+        "revise",
+        "edit",
+        "paragraph",
+        "essay",
+        "response",
     }
     if "ELA" in subject_codes or _any_kw(all_text, _writing_kws):
         recommended.append("writing_response")
@@ -33,10 +45,24 @@ def recommend_outputs(
 
     # Assignment — reading, analysis, comprehension TEKS
     _analysis_kws = {
-        "analyze", "analysis", "explain", "compare", "comprehension",
-        "reading", "text", "passage", "evidence", "inference",
-        "summarize", "summary", "central idea", "main idea",
-        "theme", "author", "character", "plot",
+        "analyze",
+        "analysis",
+        "explain",
+        "compare",
+        "comprehension",
+        "reading",
+        "text",
+        "passage",
+        "evidence",
+        "inference",
+        "summarize",
+        "summary",
+        "central idea",
+        "main idea",
+        "theme",
+        "author",
+        "character",
+        "plot",
     }
     if _any_kw(all_text, _analysis_kws):
         recommended.append("assignment")
@@ -45,17 +71,35 @@ def recommend_outputs(
 
     # Quiz — knowledge, recall, vocabulary TEKS
     _recall_kws = {
-        "identify", "define", "describe", "recall", "vocabulary",
-        "fluency", "recognize", "name", "list", "classify",
-        "label", "match", "select", "choose",
+        "identify",
+        "define",
+        "describe",
+        "recall",
+        "vocabulary",
+        "fluency",
+        "recognize",
+        "name",
+        "list",
+        "classify",
+        "label",
+        "match",
+        "select",
+        "choose",
     }
     if _any_kw(all_text, _recall_kws):
         recommended.append("quiz")
 
     # Vocabulary list — ELA or vocabulary-heavy TEKS
     _vocab_kws = {
-        "vocabulary", "word", "term", "definition", "tier",
-        "academic language", "glossary", "meaning", "context clue",
+        "vocabulary",
+        "word",
+        "term",
+        "definition",
+        "tier",
+        "academic language",
+        "glossary",
+        "meaning",
+        "context clue",
     }
     if "ELA" in subject_codes or _any_kw(all_text, _vocab_kws):
         recommended.append("vocabulary_list")
@@ -69,8 +113,13 @@ def recommend_outputs(
 
     # Study guide — longer guides or TEKS-heavy content
     _complex_kws = {
-        "research", "inquiry", "multiple sources", "genre",
-        "structure", "literary device", "figurative language",
+        "research",
+        "inquiry",
+        "multiple sources",
+        "genre",
+        "structure",
+        "literary device",
+        "figurative language",
     }
     if total_guide_weeks >= 3 or _any_kw(all_text, _complex_kws):
         recommended.append("study_guide")

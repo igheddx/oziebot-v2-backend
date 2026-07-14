@@ -9,10 +9,16 @@ from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_pacing_guide import TeacherAssistPacingGuide
 from oziebot_api.models.teacher_assist_pacing_guide_period import TeacherAssistPacingGuidePeriod
-from oziebot_api.models.teacher_assist_pacing_guide_period_note import TeacherAssistPacingGuidePeriodNote
+from oziebot_api.models.teacher_assist_pacing_guide_period_note import (
+    TeacherAssistPacingGuidePeriodNote,
+)
 from oziebot_api.models.user import User
-from oziebot_api.services.teacher_assist.instructional_asset_reuse import InstructionalAssetReuseService
-from oziebot_api.services.teacher_assist.pacing_guide_foundation import get_catalog_pacing_guide_detail
+from oziebot_api.services.teacher_assist.instructional_asset_reuse import (
+    InstructionalAssetReuseService,
+)
+from oziebot_api.services.teacher_assist.pacing_guide_foundation import (
+    get_catalog_pacing_guide_detail,
+)
 from oziebot_api.services.teacher_assist.reuse_events import record_reuse_event
 from oziebot_api.services.teacher_assist.time_savings_constants import TIME_SAVINGS_MINUTES
 from oziebot_api.services.teacher_assist.week_context_service import WeekContextService
@@ -31,7 +37,10 @@ def generate_next_week_draft(
 ) -> dict[str, Any]:
     period = db.scalars(
         select(TeacherAssistPacingGuidePeriod)
-        .join(TeacherAssistPacingGuide, TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id)
+        .join(
+            TeacherAssistPacingGuide,
+            TeacherAssistPacingGuide.id == TeacherAssistPacingGuidePeriod.pacing_guide_id,
+        )
         .where(
             TeacherAssistPacingGuidePeriod.id == period_id,
             TeacherAssistPacingGuide.tenant_id == tenant_id,
@@ -40,7 +49,9 @@ def generate_next_week_draft(
     if period is None:
         raise LookupError("Pacing guide period not found")
 
-    detail = get_catalog_pacing_guide_detail(db, tenant_id=tenant_id, pacing_guide_id=period.pacing_guide_id)
+    detail = get_catalog_pacing_guide_detail(
+        db, tenant_id=tenant_id, pacing_guide_id=period.pacing_guide_id
+    )
     weeks = [row for row in detail.periods if row.period_type == "WEEK"]
     weeks.sort(key=lambda row: row.sequence_number)
     current_index = next((index for index, row in enumerate(weeks) if row.id == period.id), None)
@@ -50,23 +61,32 @@ def generate_next_week_draft(
         raise ValueError("No upcoming week exists in this pacing guide")
 
     next_week = weeks[current_index + 1]
-    current_context = WeekContextService.build(db, tenant_id=tenant_id, user=user, period_id=period_id)
+    current_context = WeekContextService.build(
+        db, tenant_id=tenant_id, user=user, period_id=period_id
+    )
     recommendations = InstructionalAssetReuseService.search(
         db, tenant_id=tenant_id, user=user, period_id=next_week.id, limit=5
     )
 
-    suggested_objectives = [row.get("objective_code") for row in current_context.objectives if row.get("objective_code")]
+    suggested_objectives = [
+        row.get("objective_code") for row in current_context.objectives if row.get("objective_code")
+    ]
     suggested_resources = current_context.resources[:]
     if next_week.objectives:
         suggested_objectives = [
-            getattr(getattr(row, "objective", None), "objective_id", None) for row in next_week.objectives
+            getattr(getattr(row, "objective", None), "objective_id", None)
+            for row in next_week.objectives
         ]
         suggested_objectives = [code for code in suggested_objectives if code]
     if next_week.resources:
         suggested_resources = [
             {
-                "catalog_resource_id": str(row.catalog_resource_id) if row.catalog_resource_id else None,
-                "resource_library_item_id": str(row.resource_library_item_id) if row.resource_library_item_id else None,
+                "catalog_resource_id": str(row.catalog_resource_id)
+                if row.catalog_resource_id
+                else None,
+                "resource_library_item_id": str(row.resource_library_item_id)
+                if row.resource_library_item_id
+                else None,
             }
             for row in next_week.resources
         ]

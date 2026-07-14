@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from oziebot_api.services.teacher_assist.instructional_plan_validator import contains_pii_like_content
+from oziebot_api.services.teacher_assist.instructional_plan_validator import (
+    contains_pii_like_content,
+)
 
 PREVIEW_TEXT_LIMIT = 280
 POTENTIAL_PII_RE = re.compile(

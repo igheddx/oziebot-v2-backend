@@ -9,7 +9,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from oziebot_api.models.teacher_assist_instructional_reflection import TeacherAssistInstructionalReflection
+from oziebot_api.models.teacher_assist_instructional_reflection import (
+    TeacherAssistInstructionalReflection,
+)
 from oziebot_api.services.teacher_assist.constants import validate_instructional_reflection_status
 
 
@@ -20,7 +22,9 @@ def _now() -> datetime:
 def serialize_instructional_reflection(row: TeacherAssistInstructionalReflection) -> dict[str, Any]:
     return {
         "id": str(row.id),
-        "instructional_week_id": str(row.instructional_week_id) if row.instructional_week_id else None,
+        "instructional_week_id": str(row.instructional_week_id)
+        if row.instructional_week_id
+        else None,
         "class_id": str(row.class_id) if row.class_id else None,
         "subject_id": str(row.subject_id) if row.subject_id else None,
         "what_worked": row.what_worked,
@@ -116,5 +120,9 @@ def list_instructional_reflections(
         TeacherAssistInstructionalReflection.owner_user_id == user_id,
     )
     if instructional_week_id is not None:
-        query = query.where(TeacherAssistInstructionalReflection.instructional_week_id == instructional_week_id)
-    return list(db.scalars(query.order_by(TeacherAssistInstructionalReflection.updated_at.desc())).all())
+        query = query.where(
+            TeacherAssistInstructionalReflection.instructional_week_id == instructional_week_id
+        )
+    return list(
+        db.scalars(query.order_by(TeacherAssistInstructionalReflection.updated_at.desc())).all()
+    )

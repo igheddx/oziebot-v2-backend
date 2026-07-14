@@ -9,7 +9,9 @@ from oziebot_api.services.teacher_assist_v2.pacing_plan_resolver import (
     resolve_pacing_day_plan,
     resolve_week_daily_topic,
 )
-from oziebot_api.services.teacher_assist_v2.deterministic_package_content import build_daily_lesson_plan
+from oziebot_api.services.teacher_assist_v2.deterministic_package_content import (
+    build_daily_lesson_plan,
+)
 
 
 def test_resolve_pacing_day_plan_by_label() -> None:
@@ -27,10 +29,14 @@ def test_resolve_pacing_day_plan_by_label() -> None:
 def test_flatten_pacing_materials_includes_all_levels() -> None:
     pacing_context = {
         "week_level_materials": [{"id": "1", "title": "Week reader", "material_kind": "file"}],
-        "catalog_resources": [{"id": "2", "title": "Charlotte's Web", "material_kind": "catalog_resource"}],
+        "catalog_resources": [
+            {"id": "2", "title": "Charlotte's Web", "material_kind": "catalog_resource"}
+        ],
         "days": [
             {
-                "attached_files": [{"id": "3", "title": "Tuesday worksheet", "material_kind": "file"}],
+                "attached_files": [
+                    {"id": "3", "title": "Tuesday worksheet", "material_kind": "file"}
+                ],
                 "reference_links": [],
                 "notes": [],
             }
@@ -55,7 +61,9 @@ def test_build_subject_lesson_block_uses_day_plan() -> None:
                     "teacher_notes": "Use partner talk before writing.",
                     "assessment_check": "Exit ticket with evidence sentence.",
                     "attached_files": [],
-                    "reference_links": [{"title": "Roblox vs Candyland", "url": "https://example.com"}],
+                    "reference_links": [
+                        {"title": "Roblox vs Candyland", "url": "https://example.com"}
+                    ],
                     "notes": [],
                 }
             ]
@@ -140,4 +148,7 @@ def test_build_daily_lesson_plan_includes_daily_topic() -> None:
     )
     assert content["daily_topic"] == "Main idea Monday"
     assert content["objective_mapping"]["daily_topic"] == "Main idea Monday"
-    assert content["objective_mapping"]["objective_text"] == "Students identify the main idea in a short passage."
+    assert (
+        content["objective_mapping"]["objective_text"]
+        == "Students identify the main idea in a short passage."
+    )

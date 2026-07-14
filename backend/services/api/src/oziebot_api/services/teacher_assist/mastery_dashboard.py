@@ -9,7 +9,9 @@ from oziebot_api.config import Settings
 from oziebot_api.services.teacher_assist.mastery_analytics_helpers import level_distribution
 from oziebot_api.services.teacher_assist.mastery_commit_service import list_mastery_evaluations
 from oziebot_api.services.teacher_assist.mastery_matrix import list_mastery_matrices
-from oziebot_api.services.teacher_assist.reteach_insights import build_mastery_matrix_reteach_insights
+from oziebot_api.services.teacher_assist.reteach_insights import (
+    build_mastery_matrix_reteach_insights,
+)
 
 
 def build_mastery_dashboard(
@@ -64,7 +66,9 @@ def build_mastery_dashboard(
         total_active_evaluations += len(evaluations)
         for row in evaluations:
             total_students.add(row.student_number)
-            aggregate_distribution[row.mastery_level] = aggregate_distribution.get(row.mastery_level, 0) + 1
+            aggregate_distribution[row.mastery_level] = (
+                aggregate_distribution.get(row.mastery_level, 0) + 1
+            )
 
         matrix_snapshots.append(
             {

@@ -9,7 +9,9 @@ from tests.test_education_catalog import _root_token
 from tests.test_pacing_guide_foundation import _catalog_scope, _school_year, _teacher_token
 
 
-def _add_week_period(client, root_token: str, guide_id: str, *, title: str, sequence_number: int) -> str:
+def _add_week_period(
+    client, root_token: str, guide_id: str, *, title: str, sequence_number: int
+) -> str:
     today = date.today()
     week_start = today - timedelta(days=today.weekday()) + timedelta(weeks=sequence_number - 1)
     week_end = week_start + timedelta(days=4)
@@ -36,7 +38,9 @@ def test_time_savings_reuse_duplicate_template_and_efficiency(client, db_session
     scope = _catalog_scope(client, root_token)
     school_year = _school_year(client, root_token)
     guide, period_id = _create_week_guide(client, root_token, scope, school_year)
-    next_period_id = _add_week_period(client, root_token, guide["id"], title="Next Week", sequence_number=2)
+    next_period_id = _add_week_period(
+        client, root_token, guide["id"], title="Next Week", sequence_number=2
+    )
 
     client.patch(
         "/v1/teacher-assist/pacing-guides/active-selection",
@@ -77,7 +81,12 @@ def test_time_savings_reuse_duplicate_template_and_efficiency(client, db_session
     template = client.post(
         f"/v1/teacher-assist/pacing-guide-periods/{period_id}/templates",
         headers={"Authorization": f"Bearer {teacher_token}"},
-        json={"name": "Week 1 Template", "artifact_type": "WEEK", "template_type": "TEACHER", "visibility": "PRIVATE"},
+        json={
+            "name": "Week 1 Template",
+            "artifact_type": "WEEK",
+            "template_type": "TEACHER",
+            "visibility": "PRIVATE",
+        },
     )
     assert template.status_code == 201, template.text
     template_id = template.json()["id"]
@@ -125,7 +134,12 @@ def test_time_savings_reuse_duplicate_template_and_efficiency(client, db_session
     planning_group = client.post(
         "/v1/teacher-assist/planning-groups",
         headers={"Authorization": f"Bearer {teacher_token}"},
-        json={"name": "5th Grade Science Team", "subject": "Science", "grade_level": "5", "visibility": "TEAM"},
+        json={
+            "name": "5th Grade Science Team",
+            "subject": "Science",
+            "grade_level": "5",
+            "visibility": "TEAM",
+        },
     )
     assert planning_group.status_code == 201, planning_group.text
     group_id = planning_group.json()["id"]

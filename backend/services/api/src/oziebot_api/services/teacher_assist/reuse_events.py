@@ -7,7 +7,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.teacher_assist_time_savings import TeacherAssistReuseEvent
-from oziebot_api.services.teacher_assist.time_savings_constants import REUSE_EVENT_TYPES, TIME_SAVINGS_MINUTES
+from oziebot_api.services.teacher_assist.time_savings_constants import (
+    REUSE_EVENT_TYPES,
+    TIME_SAVINGS_MINUTES,
+)
 
 
 def _now() -> datetime:

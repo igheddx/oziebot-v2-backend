@@ -65,7 +65,9 @@ from typing import TYPE_CHECKING  # noqa: E402
 
 if TYPE_CHECKING:
     from oziebot_api.models.teacher_assist_assignment import TeacherAssistAssignment
-    from oziebot_api.models.teacher_assist_assignment_grade_record import TeacherAssistAssignmentGradeRecord
+    from oziebot_api.models.teacher_assist_assignment_grade_record import (
+        TeacherAssistAssignmentGradeRecord,
+    )
     from oziebot_api.models.teacher_assist_assignment_gradebook_commit import (
         TeacherAssistAssignmentGradebookCommit,
     )

@@ -19,17 +19,30 @@ if TYPE_CHECKING:
 # Segments ordered as they appear in a lesson. "flexible" segments can be trimmed;
 # "skippable" segments can be dropped entirely if the class runs far behind.
 _TIMING_TEMPLATE: list[dict[str, Any]] = [
-    {"name": "Hook",                "minutes": 5,  "flexible": True,  "trim_to": 3,  "skippable": False},
-    {"name": "Learning Target",     "minutes": 2,  "flexible": False, "trim_to": None,"skippable": False},
-    {"name": "Teacher Modeling",    "minutes": 12, "flexible": True,  "trim_to": 8,  "skippable": False},
-    {"name": "Guided Practice",     "minutes": 15, "flexible": True,  "trim_to": 10, "skippable": False},
-    {"name": "Independent Practice","minutes": 10, "flexible": True,  "trim_to": 7,  "skippable": True},
-    {"name": "Discussion",          "minutes": 5,  "flexible": True,  "trim_to": 3,  "skippable": True},
-    {"name": "Exit Ticket",         "minutes": 3,  "flexible": False, "trim_to": None,"skippable": False},
+    {"name": "Hook", "minutes": 5, "flexible": True, "trim_to": 3, "skippable": False},
+    {
+        "name": "Learning Target",
+        "minutes": 2,
+        "flexible": False,
+        "trim_to": None,
+        "skippable": False,
+    },
+    {"name": "Teacher Modeling", "minutes": 12, "flexible": True, "trim_to": 8, "skippable": False},
+    {"name": "Guided Practice", "minutes": 15, "flexible": True, "trim_to": 10, "skippable": False},
+    {
+        "name": "Independent Practice",
+        "minutes": 10,
+        "flexible": True,
+        "trim_to": 7,
+        "skippable": True,
+    },
+    {"name": "Discussion", "minutes": 5, "flexible": True, "trim_to": 3, "skippable": True},
+    {"name": "Exit Ticket", "minutes": 3, "flexible": False, "trim_to": None, "skippable": False},
 ]
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _weekday(day_label: str | None) -> str:
     """'W1-Monday' → 'Monday'; 'Monday' → 'Monday'."""
@@ -44,7 +57,7 @@ def _week_num(day_label: str | None) -> int:
         return 0
     if day_label.startswith("W") and "-" in day_label:
         try:
-            return int(day_label[1: day_label.index("-")])
+            return int(day_label[1 : day_label.index("-")])
         except ValueError:
             pass
     return 0
@@ -53,7 +66,7 @@ def _week_num(day_label: str | None) -> int:
 def _gap_consequences(knowledge_graph: list[dict[str, Any]]) -> list[str]:
     out: list[str] = []
     for obj in knowledge_graph:
-        for dep in (obj.get("dependencies") or []):
+        for dep in obj.get("dependencies") or []:
             gap = (dep.get("gap_consequence") or "").strip()
             if gap:
                 out.append(gap)
@@ -63,7 +76,7 @@ def _gap_consequences(knowledge_graph: list[dict[str, Any]]) -> list[str]:
 def _activation_strategies(knowledge_graph: list[dict[str, Any]]) -> list[str]:
     out: list[str] = []
     for obj in knowledge_graph:
-        for dep in (obj.get("dependencies") or []):
+        for dep in obj.get("dependencies") or []:
             strat = (dep.get("activation_strategy") or "").strip()
             if strat:
                 out.append(strat)
@@ -204,7 +217,9 @@ def _build_before_class(
             if (subj.get("subject_name") or "").lower() == (subject_name or "").lower():
                 matched = [str(m) for m in (subj.get("materials") or []) if m]
                 break
-        raw_materials = matched or ([str(m) for m in ((subjects[0].get("materials") or []) if subjects else []) if m])
+        raw_materials = matched or (
+            [str(m) for m in ((subjects[0].get("materials") or []) if subjects else []) if m]
+        )
 
     tasks: list[str] = []
 
@@ -217,7 +232,9 @@ def _build_before_class(
         m_lower = m.lower()
         if "anchor chart" in m_lower:
             tasks.append(f"Post anchor chart: {m}")
-        elif any(w in m_lower for w in ("ticket", "worksheet", "handout", "slip", "printout", "print")):
+        elif any(
+            w in m_lower for w in ("ticket", "worksheet", "handout", "slip", "printout", "print")
+        ):
             tasks.append(f"Print and distribute: {m}")
         elif any(w in m_lower for w in ("text", "book", "passage", "article", "page", "p.")):
             tasks.append(f"Bookmark and have ready: {m}")
@@ -225,7 +242,9 @@ def _build_before_class(
             tasks.append(f"Have ready: {m}")
 
     if has_student_deck:
-        tasks.append("Open the student lesson deck on your device and confirm the slides load before class.")
+        tasks.append(
+            "Open the student lesson deck on your device and confirm the slides load before class."
+        )
 
     return {"preparation_tasks": tasks}
 
@@ -257,6 +276,7 @@ def _build_classroom_support(
 
 # ── Per-day-subject assembly ─────────────────────────────────────────────────
 
+
 def _assemble_day_subject(
     day_entry: dict[str, Any],
     subject_name: str,
@@ -280,7 +300,8 @@ def _assemble_day_subject(
 
     exit_ticket = (
         (day_entry.get("exit_ticket") or "")
-        or (week_design.get("instructional_contracts") or {}).get("exit_ticket_stem") or ""
+        or (week_design.get("instructional_contracts") or {}).get("exit_ticket_stem")
+        or ""
     ).strip()
 
     reteach = (day_entry.get("reteach_if_needed") or "").strip()
@@ -298,7 +319,11 @@ def _assemble_day_subject(
 
     reflection_prompts = [
         "Which student misconception appeared most often during practice?",
-        (f"Did students meet today's learning target: '{student_goal}'?" if student_goal else "Did students meet today's learning target?"),
+        (
+            f"Did students meet today's learning target: '{student_goal}'?"
+            if student_goal
+            else "Did students meet today's learning target?"
+        ),
         "What would you adjust in tomorrow's lesson based on today's exit ticket results?",
         "Which students need a follow-up conversation before the next lesson?",
     ]
@@ -342,6 +367,7 @@ def _assemble_day_subject(
 
 
 # ── Main entry point ─────────────────────────────────────────────────────────
+
 
 def assemble_teaching_brief(
     package: "TeacherAssistV2InstructionalPackage",
@@ -388,7 +414,7 @@ def assemble_teaching_brief(
 
     for week_entry in weeks_plan:
         week_num: int = int(week_entry.get("week") or 0)
-        for subject_entry in (week_entry.get("subjects") or []):
+        for subject_entry in week_entry.get("subjects") or []:
             subject_name: str = (subject_entry.get("subject") or "").strip()
             design: dict[str, Any] = subject_entry.get("instructional_design") or {}
             daily_progression: list[dict[str, Any]] = design.get("daily_progression") or []

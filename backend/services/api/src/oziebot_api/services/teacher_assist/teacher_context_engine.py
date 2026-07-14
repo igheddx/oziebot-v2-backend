@@ -11,14 +11,27 @@ from oziebot_api.config import Settings
 from oziebot_api.models.user import User
 from oziebot_api.services.teacher_assist.assignment_coverage import build_assignment_coverage_view
 from oziebot_api.services.teacher_assist.current_week_resolver import build_current_week_payload
-from oziebot_api.services.teacher_assist.instructional_reflections import list_instructional_reflections, serialize_instructional_reflection
-from oziebot_api.services.teacher_assist.instructional_weeks import find_instructional_week_for_period
+from oziebot_api.services.teacher_assist.instructional_reflections import (
+    list_instructional_reflections,
+    serialize_instructional_reflection,
+)
+from oziebot_api.services.teacher_assist.instructional_weeks import (
+    find_instructional_week_for_period,
+)
 from oziebot_api.services.teacher_assist.mastery_dashboard_v2 import build_mastery_dashboard_v2
 from oziebot_api.services.teacher_assist.objective_performance import ObjectivePerformanceService
-from oziebot_api.services.teacher_assist.recommendation_v2 import build_instructional_loop_recommendations
-from oziebot_api.services.teacher_assist.reteach_plans import list_reteach_plans, serialize_reteach_plan
+from oziebot_api.services.teacher_assist.recommendation_v2 import (
+    build_instructional_loop_recommendations,
+)
+from oziebot_api.services.teacher_assist.reteach_plans import (
+    list_reteach_plans,
+    serialize_reteach_plan,
+)
 from oziebot_api.services.teacher_assist.reteach_workspace import build_reteach_workspace
-from oziebot_api.services.teacher_assist.student_support_groups import list_support_groups, serialize_support_group
+from oziebot_api.services.teacher_assist.student_support_groups import (
+    list_support_groups,
+    serialize_support_group,
+)
 from oziebot_api.services.teacher_assist.user_preferences import get_user_preferences_or_create
 from oziebot_api.services.teacher_assist.recommendation_service import build_week_recommendations
 
@@ -105,9 +118,11 @@ def build_teacher_context(
     )
     resource_reuse = []
     if period_id is not None:
-        resource_reuse = build_week_recommendations(
-            db, tenant_id=tenant_id, user=user, period_id=period_id
-        ).get("recommended_for_this_week", {}).get("top_reusable", [])
+        resource_reuse = (
+            build_week_recommendations(db, tenant_id=tenant_id, user=user, period_id=period_id)
+            .get("recommended_for_this_week", {})
+            .get("top_reusable", [])
+        )
 
     packets = {
         "current_week": {

@@ -15,8 +15,12 @@ from oziebot_api.services.teacher_assist_v2.grading_rubric import (
     resolve_final_grade_values,
     totals_from_grading_rubric,
 )
-from oziebot_api.services.teacher_assist_v2.rubric_score_exports import render_class_rubric_score_report_docx
-from oziebot_api.services.teacher_assist_v2.submission_workflow import pending_submission_student_numbers
+from oziebot_api.services.teacher_assist_v2.rubric_score_exports import (
+    render_class_rubric_score_report_docx,
+)
+from oziebot_api.services.teacher_assist_v2.submission_workflow import (
+    pending_submission_student_numbers,
+)
 
 
 def test_build_rubric_for_written_assignment_uses_success_criteria() -> None:
@@ -38,7 +42,11 @@ def test_build_rubric_for_written_assignment_uses_success_criteria() -> None:
 
 def test_grading_template_and_totals_from_package_rubric() -> None:
     rubric = build_rubric_for_writing_response(
-        writing_content={"title": "Writing", "prompt": "Explain the main idea.", "instructions": []},
+        writing_content={
+            "title": "Writing",
+            "prompt": "Explain the main idea.",
+            "instructions": [],
+        },
         subject_name="ELA",
         package_title="Week 1",
         objective_code="5.6A",
@@ -87,7 +95,12 @@ def test_render_class_rubric_score_report_docx_has_student_pages() -> None:
                 "teacher_comment": "Strong evidence.",
                 "sections": [
                     {"name": "Claim", "score": 4, "max_score": 5, "feedback": "Clear claim"},
-                    {"name": "Evidence", "score": 4, "max_score": 5, "feedback": "Add one more quote"},
+                    {
+                        "name": "Evidence",
+                        "score": 4,
+                        "max_score": 5,
+                        "feedback": "Add one more quote",
+                    },
                 ],
             },
             {

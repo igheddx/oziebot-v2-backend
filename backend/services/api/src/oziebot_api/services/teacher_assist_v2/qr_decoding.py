@@ -67,10 +67,14 @@ def _decode_qr_strings_from_grayscale(gray, *, first_only: bool = False) -> list
     decoded: list[str] = []
     scales = (4, 8) if max(gray.shape[:2]) <= 250 else (1, 2, 4)
     for scale in scales:
-        scaled = gray if scale == 1 else cv2.resize(
-            gray,
-            (gray.shape[1] * scale, gray.shape[0] * scale),
-            interpolation=cv2.INTER_NEAREST,
+        scaled = (
+            gray
+            if scale == 1
+            else cv2.resize(
+                gray,
+                (gray.shape[1] * scale, gray.shape[0] * scale),
+                interpolation=cv2.INTER_NEAREST,
+            )
         )
         candidates = [scaled]
         _, otsu = cv2.threshold(scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -164,7 +168,8 @@ def decode_qr_contents_from_file(
     filename = (original_filename or "").lower()
     is_pdf = normalized_mime == "application/pdf" or filename.endswith(".pdf")
     is_image = normalized_mime.startswith("image/") or any(
-        filename.endswith(suffix) for suffix in (".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp")
+        filename.endswith(suffix)
+        for suffix in (".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp")
     )
 
     raw_contents: list[str] = []
