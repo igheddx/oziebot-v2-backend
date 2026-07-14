@@ -31,6 +31,21 @@ def _field_errors(**errors: str) -> ValueError:
     return ValueError({key: value for key, value in errors.items() if value})
 
 
+def _validate_weeks(weeks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not weeks:
+        raise ValueError("At least one weeks entry is required.")
+    for week in weeks:
+        title = week.get("title") or "Unknown"
+        daily_plans = week.get("daily_plans") or []
+        if not daily_plans:
+            raise ValueError(f"{title}: at least one daily_plans entry is required.")
+        for plan in daily_plans:
+            day_label = plan.get("day_label") or "Unknown"
+            if not (plan.get("daily_topic") or "").strip():
+                raise ValueError(f"{day_label}: daily_topic is required.")
+    return weeks
+
+
 def _validate_objectives_for_guide(
     db: Session,
     *,
