@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from oziebot_api.models.education_catalog import (
@@ -89,22 +90,28 @@ def create_v2_objective(
         subject_id=subject_id,
         school_year_id=school_year_id,
     )
-    return create_objective(
-        db,
-        state_id=state_id,
-        district_id=district_id,
-        school_id=school_id,
-        grade_id=grade.id,
-        subject_id=subject.id,
-        school_year_id=school_year_id,
-        grade_level=grade.grade_code,
-        subject_code=subject.subject_code,
-        objective_type=objective_type,
-        objective_id=objective_id,
-        description=description,
-        coverage_type="required" if is_required else "optional",
-        active=active,
-    )
+    try:
+        return create_objective(
+            db,
+            state_id=state_id,
+            district_id=district_id,
+            school_id=school_id,
+            grade_id=grade.id,
+            subject_id=subject.id,
+            school_year_id=school_year_id,
+            grade_level=grade.grade_code,
+            subject_code=subject.subject_code,
+            objective_type=objective_type,
+            objective_id=objective_id,
+            description=description,
+            coverage_type="required" if is_required else "optional",
+            active=active,
+        )
+    except IntegrityError as exc:
+        db.rollback()
+        raise ValueError(
+            f"A {objective_type} objective with code '{objective_id}' already exists for this state and grade."
+        ) from exc
 
 
 def update_v2_objective(
