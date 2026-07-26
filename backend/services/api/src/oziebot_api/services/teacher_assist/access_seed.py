@@ -123,15 +123,6 @@ def _ensure_user_and_membership(
             now=now,
         )
         created_user = True
-    elif password is None:
-        # Existing user being (re-)provisioned by an admin: issue a fresh temp password
-        # so the admin always has credentials to hand to the teacher.
-        temporary_password = secrets.token_urlsafe(12)
-        user.password_hash = hash_password(temporary_password)
-        user.must_change_password = True
-        user.updated_at = now
-        temporary_password_generated = True
-        db.flush()
     membership = _primary_membership(db, user_id=user.id)
     created_tenant = False
     if membership is None:

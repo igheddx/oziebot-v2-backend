@@ -197,6 +197,14 @@ def test_instructional_week_create_workspace_snapshot_and_next_week(client, db_s
     assert next_week.json()["next_period_id"] == next_period_id
     assert next_week.json()["instructional_week_id"]
 
+    # Home endpoint requires an active guide to surface the current instructional week.
+    active = client.patch(
+        "/v1/teacher-assist/pacing-guides/active-selection",
+        headers={"Authorization": f"Bearer {teacher_token}"},
+        json={"active_pacing_guide_id": guide["id"]},
+    )
+    assert active.status_code == 200, active.text
+
     home = client.get(
         "/v1/teacher-assist/home", headers={"Authorization": f"Bearer {teacher_token}"}
     )

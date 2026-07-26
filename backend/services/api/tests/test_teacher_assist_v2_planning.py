@@ -104,7 +104,7 @@ def test_v2_teacher_planning_form_and_generate(client, db_session):
 
     context = client.get("/v1/teacher-assist-v2/context", headers=headers)
     assert context.status_code == 200, context.text
-    assert context.json()["landing_route"] == "/teacher-assist-v2/planning"
+    assert context.json()["landing_route"] == "/teacher-assist-v2/today"
 
     form = client.get("/v1/teacher-assist-v2/teacher/planning/form", headers=headers)
     assert form.status_code == 200, form.text

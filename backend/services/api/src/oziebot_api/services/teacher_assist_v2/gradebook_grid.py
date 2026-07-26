@@ -167,6 +167,16 @@ def _primary_objective_id(assignment: TeacherAssistV2Assignment) -> uuid.UUID | 
     return None
 
 
+def _all_objective_ids(assignment: TeacherAssistV2Assignment) -> list[uuid.UUID]:
+    ids: list[uuid.UUID] = []
+    for raw in assignment.education_objective_ids_json or []:
+        try:
+            ids.append(uuid.UUID(str(raw)))
+        except ValueError:
+            continue
+    return ids
+
+
 def _assignment_cell(*, record: TeacherAssistV2GradebookRecord | None) -> dict[str, Any]:
     if record is None:
         return {
@@ -274,44 +284,45 @@ def build_subject_gradebook_grid(
         for record in records:
             records_by_key[(record.assignment_id, record.student_number)] = record
 
-    objective_ids = {_primary_objective_id(row) for row in assignments}
-    objective_ids.discard(None)
+    all_objective_ids: set[uuid.UUID] = set()
+    for row in assignments:
+        all_objective_ids.update(_all_objective_ids(row))
     objectives = (
         {
             row.id: row
             for row in db.scalars(
-                select(EducationObjective).where(EducationObjective.id.in_(objective_ids))
+                select(EducationObjective).where(EducationObjective.id.in_(all_objective_ids))
             ).all()
         }
-        if objective_ids
+        if all_objective_ids
         else {}
     )
 
+    # An assignment appears under every TEKS it is linked to so that each standard
+    # has its own mastery column even when a single assignment covers multiple TEKS.
     grouped: dict[uuid.UUID, dict[str, Any]] = {}
     for assignment in assignments:
-        objective_id = _primary_objective_id(assignment)
-        if objective_id is None:
-            continue
-        objective = objectives.get(objective_id)
-        group = grouped.setdefault(
-            objective_id,
-            {
-                "objective_id": str(objective_id),
-                "objective_code": objective.objective_id if objective else str(objective_id),
-                "objective_description": objective.description if objective else None,
-                "assignments": [],
-            },
-        )
-        group["assignments"].append(
-            {
-                "assignment_id": str(assignment.id),
-                "title": assignment.title,
-                "week_number": assignment.week_number,
-                "assignment_type": assignment.assignment_type,
-                "creation_origin": assignment.creation_origin,
-                "column_key": f"assignment:{assignment.id}",
-            }
-        )
+        for objective_id in _all_objective_ids(assignment):
+            objective = objectives.get(objective_id)
+            group = grouped.setdefault(
+                objective_id,
+                {
+                    "objective_id": str(objective_id),
+                    "objective_code": objective.objective_id if objective else str(objective_id),
+                    "objective_description": objective.description if objective else None,
+                    "assignments": [],
+                },
+            )
+            group["assignments"].append(
+                {
+                    "assignment_id": str(assignment.id),
+                    "title": assignment.title,
+                    "week_number": assignment.week_number,
+                    "assignment_type": assignment.assignment_type,
+                    "creation_origin": assignment.creation_origin,
+                    "column_key": f"assignment:{assignment.id}:{objective_id}",
+                }
+            )
 
     teks_groups = sorted(
         grouped.values(),

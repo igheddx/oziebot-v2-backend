@@ -76,7 +76,7 @@ def test_build_subject_lesson_block_uses_day_plan() -> None:
         fallback_objective_text="Fallback objective",
     )
     assert block["objective"] == "Students compare ideas across texts."
-    assert "Compare texts" in block["mini_lesson"]
+    assert "Two short passages and a Venn diagram" in block["mini_lesson"]
     assert "Roblox vs Candyland" in " ".join(block["materials"])
     assert block["assessment"] == "Exit ticket with evidence sentence."
 

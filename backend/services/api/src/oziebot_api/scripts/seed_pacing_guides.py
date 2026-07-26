@@ -582,7 +582,6 @@ def _align_golden_path_ela_week1(
         notes="Golden path Week 1 ELA objective.",
     )
     counts["objectives"] += 1
-    counts["guides"] += 1
     return counts
 
 
